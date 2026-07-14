@@ -99,7 +99,12 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw 'Unable to read existing GitHub releases.'
     }
-    $existingReleases = @(($releaseListJson -join '') | ConvertFrom-Json)
+    $releaseListText = ($releaseListJson -join '').Trim()
+    $existingReleases = if ($releaseListText -eq '[]') {
+        @()
+    } else {
+        @($releaseListText | ConvertFrom-Json)
+    }
     $hasExistingRelease = $existingReleases.Count -gt 0
 
     if ($hasExistingRelease) {
