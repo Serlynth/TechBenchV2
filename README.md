@@ -1,6 +1,6 @@
 # TechBench
 
-Current application version: `1.0.0`.
+Current application version: `1.0.1`.
 
 Installed builds check the public binary-only GitHub release feed for stable updates.
 When a new version is available, TechBench shows a Windows alert and can download it with visible progress,
