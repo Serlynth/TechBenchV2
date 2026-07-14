@@ -1,0 +1,2390 @@
+<Window x:Class="TechBench.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:conv="clr-namespace:TechBench.Converters"
+        mc:Ignorable="d"
+        Title="{Binding WindowTitle}"
+        Icon="Assets/csri-techbench-icon.ico"
+        Height="900"
+        Width="1420"
+        MinHeight="720"
+        MinWidth="1120"
+        Background="{DynamicResource WindowBackgroundBrush}">
+    <Window.InputBindings>
+        <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveEntryCommand}" />
+        <KeyBinding Key="Enter" Modifiers="Control" Command="{Binding SaveAndNewCommand}" />
+        <KeyBinding Key="F5" Command="{Binding RefreshAllCommand}" />
+    </Window.InputBindings>
+    <Window.Resources>
+        <conv:SectionVisibilityConverter x:Key="SectionVisibilityConverter" />
+        <conv:InverseBooleanToVisibilityConverter x:Key="InverseBooleanToVisibilityConverter" />
+        <conv:StringToVisibilityConverter x:Key="StringToVisibilityConverter" />
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+
+        <Style x:Key="FieldLabelStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="1,0,0,7" />
+        </Style>
+
+        <Style x:Key="SectionHeadingStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="FontSize" Value="20" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,16" />
+        </Style>
+
+        <Style x:Key="MutedTextStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+
+        <Style x:Key="TableHeaderTextStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="TextWrapping" Value="NoWrap" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+
+        <Style x:Key="TableCellTextStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
+            <Setter Property="TextWrapping" Value="NoWrap" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+
+        <Style x:Key="DetailValueStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+
+        <DataTemplate x:Key="ClientOptionTemplate">
+            <TextBlock Text="{Binding DisplayName}"
+                       Foreground="{DynamicResource ComboBoxTextBrush}"
+                       TextTrimming="CharacterEllipsis" />
+        </DataTemplate>
+
+        <DataTemplate x:Key="EditorClientOptionTemplate">
+            <TextBlock Text="{Binding DisplayName}"
+                       Foreground="{DynamicResource ComboBoxTextBrush}"
+                       TextTrimming="CharacterEllipsis" />
+        </DataTemplate>
+
+        <Style x:Key="EditorClientComboBoxItemStyle"
+               TargetType="{x:Type ComboBoxItem}"
+               BasedOn="{StaticResource {x:Type ComboBoxItem}}">
+            <EventSetter Event="PreviewMouseLeftButtonUp" Handler="EditorClientComboBoxItem_PreviewMouseLeftButtonUp" />
+        </Style>
+
+        <DataTemplate x:Key="TicketSelectorItemTemplate">
+            <TextBlock Text="{Binding DisplayName}"
+                       TextTrimming="CharacterEllipsis" />
+        </DataTemplate>
+
+        <DataTemplate x:Key="TicketStatusOptionTemplate">
+            <TextBlock Text="{Binding DisplayName}"
+                       Foreground="{DynamicResource ComboBoxTextBrush}"
+                       TextTrimming="CharacterEllipsis" />
+        </DataTemplate>
+
+        <Style x:Key="TicketSelectorListStyle" TargetType="{x:Type ListBox}">
+            <Setter Property="Background" Value="{DynamicResource ComboBoxBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Height" Value="74" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+        </Style>
+
+        <Style x:Key="TicketSelectorItemStyle" TargetType="{x:Type ListBoxItem}">
+            <Setter Property="Foreground" Value="{DynamicResource ComboBoxTextBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ComboBoxBackgroundBrush}" />
+            <Setter Property="Padding" Value="9,6" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ListBoxItem}">
+                        <Border x:Name="ItemBorder"
+                                Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource ComboBoxHighlightBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource ComboBoxHighlightTextBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource ComboBoxHighlightBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource ComboBoxHighlightTextBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="EditorActionButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="MinWidth" Value="118" />
+            <Setter Property="Margin" Value="0,0,8,8" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="EditorPrimaryActionButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource PrimaryButtonStyle}">
+            <Setter Property="MinWidth" Value="132" />
+            <Setter Property="Margin" Value="0,0,8,8" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="EditorDangerActionButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource DangerButtonStyle}">
+            <Setter Property="MinWidth" Value="94" />
+            <Setter Property="Margin" Value="0,0,8,8" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="EditorContextMenuStyle" TargetType="{x:Type ContextMenu}">
+            <Setter Property="Background" Value="{DynamicResource PanelAltBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="5" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ContextMenu}">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="7"
+                                Padding="{TemplateBinding Padding}">
+                            <ScrollViewer CanContentScroll="True"
+                                          VerticalScrollBarVisibility="Auto">
+                                <ItemsPresenter />
+                            </ScrollViewer>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="EditorContextMenuItemStyle" TargetType="{x:Type MenuItem}">
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="MinWidth" Value="190" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type MenuItem}">
+                        <Border x:Name="MenuItemBorder"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter ContentSource="Header"
+                                              RecognizesAccessKey="True"
+                                              TextElement.Foreground="{TemplateBinding Foreground}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="MenuItemBorder" Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="EntryCardButtonStyle" TargetType="{x:Type Button}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0,0,0,10" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SelectableEntryCardStyle" TargetType="{x:Type Border}" BasedOn="{StaticResource CardStyle}">
+            <Setter Property="Padding" Value="14,11" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource PanelAltBackgroundBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                    <Setter Property="BorderThickness" Value="2" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="SidebarGroupLabelStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Margin" Value="16,17,0,6" />
+        </Style>
+
+        <Style x:Key="SidebarChildButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarButtonStyle}">
+            <Setter Property="Padding" Value="16,10" />
+        </Style>
+
+        <Style x:Key="NavTodayStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Today"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+        <Style x:Key="NavWeekStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="This Week"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+        <Style x:Key="NavHistoryStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="History"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+        <Style x:Key="NavSearchStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Search"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+        <Style x:Key="NavQueueStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Posting Queue"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+        <Style x:Key="NavClientsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Client List"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+        <Style x:Key="NavTicketsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Ticket List"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+        <Style x:Key="NavPostingHistoryStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Posting History"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+        <Style x:Key="NavSettingsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Settings"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+
+        <Style x:Key="BadgeTextStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="#101820" />
+        </Style>
+
+        <DataTemplate x:Key="EntryCardTemplate">
+            <Border Style="{StaticResource SelectableEntryCardStyle}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="122" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Margin="0,0,14,0">
+                        <TextBlock Text="{Binding TimeRange}"
+                                   FontWeight="SemiBold"
+                                   FontSize="14"
+                                   Visibility="{Binding HasTimeRange, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <TextBlock Text="{Binding DurationLabel}" Style="{StaticResource MutedTextStyle}" Margin="0,4,0,0" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0"
+                                       Text="{Binding ClientDisplay}"
+                                       FontWeight="SemiBold"
+                                       FontSize="15"
+                                       TextTrimming="CharacterEllipsis"
+                                       TextWrapping="NoWrap" />
+                            <TextBlock Grid.Column="2"
+                                       Text="{Binding PostingStatusLabel}"
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                       FontSize="12"
+                                       TextAlignment="Right"
+                                       VerticalAlignment="Top"
+                                       MaxWidth="125"
+                                       TextWrapping="Wrap" />
+                        </Grid>
+                        <TextBlock Text="{Binding TicketDisplay}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   Margin="0,3,0,8" />
+                        <TextBlock Text="{Binding DisplayPreview}"
+                                   Foreground="{DynamicResource PrimaryTextBrush}"
+                                   Margin="0,0,0,10" />
+                        <WrapPanel>
+                            <Border>
+                                <Border.Style>
+                                    <Style TargetType="{x:Type Border}" BasedOn="{StaticResource BadgeStyle}">
+                                        <Setter Property="Background" Value="{DynamicResource NeutralBadgeBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Billable}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource BillableBadgeBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock Text="{Binding BillableLabel}" Style="{StaticResource BadgeTextStyle}" />
+                            </Border>
+                            <Border>
+                                <Border.Style>
+                                    <Style TargetType="{x:Type Border}" BasedOn="{StaticResource BadgeStyle}">
+                                        <Setter Property="Background" Value="{DynamicResource WarningBrush}" />
+                                        <Setter Property="Visibility" Value="{Binding ShowSageBadge, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SagePosted}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource SuccessBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock Text="{Binding SageBadge}" Style="{StaticResource BadgeTextStyle}" />
+                            </Border>
+                            <Border Style="{StaticResource BadgeStyle}"
+                                    Background="{DynamicResource NoTicketBadgeBrush}"
+                                    Visibility="{Binding HasTicket, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                <TextBlock Text="No Ticket" Style="{StaticResource BadgeTextStyle}" />
+                            </Border>
+                            <Border>
+                                <Border.Style>
+                                    <Style TargetType="{x:Type Border}" BasedOn="{StaticResource BadgeStyle}">
+                                        <Setter Property="Background" Value="{DynamicResource WarningBrush}" />
+                                        <Setter Property="Visibility" Value="{Binding ShowWhdBadge, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding WhdPosted}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource SuccessBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock Text="{Binding WhdBadge}" Style="{StaticResource BadgeTextStyle}" />
+                            </Border>
+                            <Border Style="{StaticResource BadgeStyle}"
+                                    Background="{DynamicResource WarningBrush}"
+                                    Visibility="{Binding ModifiedAfterPosting, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <TextBlock Text="Modified After Posting" Style="{StaticResource BadgeTextStyle}" />
+                            </Border>
+                            <Border Style="{StaticResource BadgeStyle}"
+                                    Background="{DynamicResource NeutralBadgeBrush}"
+                                    Visibility="{Binding HasTags, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <TextBlock Text="{Binding Tags}"
+                                           Style="{StaticResource BadgeTextStyle}"
+                                           MaxWidth="190"
+                                           TextTrimming="CharacterEllipsis" />
+                            </Border>
+                            <Border Visibility="{Binding HasFollowUp, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <Border.Style>
+                                    <Style TargetType="{x:Type Border}" BasedOn="{StaticResource BadgeStyle}">
+                                        <Setter Property="Background" Value="{DynamicResource WarningBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsFollowUpOverdue}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource DangerBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock Text="{Binding FollowUpBadge}" Style="{StaticResource BadgeTextStyle}" />
+                            </Border>
+                        </WrapPanel>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="236" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" Background="{DynamicResource SidebarBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Padding="16,20,16,16">
+            <DockPanel LastChildFill="True">
+                <StackPanel DockPanel.Dock="Top">
+                    <Grid Height="84" Margin="0,0,0,20">
+                        <Image Source="Assets/csri-techbench-logo.png"
+                               Stretch="Uniform"
+                               HorizontalAlignment="Stretch"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
+                    </Grid>
+
+                    <TextBlock Text="WORKLOG" Style="{StaticResource SidebarGroupLabelStyle}" />
+                    <Button Content="Today" Command="{Binding NavigateCommand}" CommandParameter="Today" Style="{StaticResource NavTodayStyle}" />
+                    <Button Content="This Week" Command="{Binding NavigateCommand}" CommandParameter="This Week" Style="{StaticResource NavWeekStyle}" />
+                    <Button Content="History" Command="{Binding NavigateCommand}" CommandParameter="History" Style="{StaticResource NavHistoryStyle}" />
+                    <Button Content="Search" Command="{Binding NavigateCommand}" CommandParameter="Search" Style="{StaticResource NavSearchStyle}" />
+                    <Button Content="Posting Queue" Command="{Binding NavigateCommand}" CommandParameter="Posting Queue" Style="{StaticResource NavQueueStyle}" />
+
+                    <TextBlock Text="DIRECTORY" Style="{StaticResource SidebarGroupLabelStyle}" />
+                    <Button Content="Clients" Command="{Binding NavigateCommand}" CommandParameter="Client List" Style="{StaticResource NavClientsStyle}" />
+                    <Button Content="Tickets" Command="{Binding NavigateCommand}" CommandParameter="Ticket List" Style="{StaticResource NavTicketsStyle}" />
+
+                    <TextBlock Text="SYSTEM" Style="{StaticResource SidebarGroupLabelStyle}" />
+                    <Button Content="Posting History" Command="{Binding NavigateCommand}" CommandParameter="Posting History" Style="{StaticResource NavPostingHistoryStyle}" />
+                    <Button Content="Settings" Command="{Binding NavigateCommand}" CommandParameter="Settings" Style="{StaticResource NavSettingsStyle}" />
+                </StackPanel>
+
+                <StackPanel DockPanel.Dock="Bottom">
+                    <Border Background="{DynamicResource ControlBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12" Margin="0,12,0,0">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,7"><Ellipse Width="7" Height="7" Fill="{DynamicResource SuccessBrush}" Margin="0,0,8,0"/><TextBlock Text="LOCAL WORKSPACE" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource SecondaryTextBrush}"/></StackPanel>
+                            <TextBlock Text="{Binding StatusMessage}"
+                                       Foreground="{DynamicResource MutedTextBrush}"
+                                       FontSize="11"
+                                       TextTrimming="CharacterEllipsis"
+                                       ToolTip="{Binding StatusMessage}" />
+                        </StackPanel>
+                    </Border>
+                    <TextBlock Text="{Binding DatabasePath}"
+                               Foreground="{DynamicResource MutedTextBrush}"
+                               FontSize="9"
+                               ToolTip="{Binding DatabasePath}"
+                               TextTrimming="CharacterEllipsis"
+                               Margin="5,9,5,0" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Column="1" Background="{DynamicResource WindowBackgroundBrush}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="88" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="26,0" Background="#0B111A">
+                <Grid>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="C S R I   /   S E R V I C E  O P E R A T I O N S" Foreground="{DynamicResource AccentHoverBrush}" FontSize="9" FontWeight="Bold" Margin="1,0,0,6" />
+                        <TextBlock Text="{Binding CurrentSection}" FontSize="25" FontWeight="SemiBold" />
+                    </StackPanel>
+                    <Border HorizontalAlignment="Right" VerticalAlignment="Center" Background="{DynamicResource PanelBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="18" Padding="13,7">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="7" Height="7" Margin="0,0,8,0">
+                                <Ellipse.Style>
+                                    <Style TargetType="{x:Type Ellipse}">
+                                        <Setter Property="Fill" Value="{DynamicResource SuccessBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Editor.IsDirty}" Value="True">
+                                                <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsEntryOperationRunning}" Value="True">
+                                                <Setter Property="Fill" Value="{DynamicResource AccentHoverBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Text="{Binding WorkspaceStateLabel}" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="1" Margin="24">
+                <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Today}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Style="{StaticResource CardStyle}" Margin="0,0,0,14">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="20" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Content="New Entry"
+                                        Command="{Binding NewEntryCommand}"
+                                        Click="NewEntryButton_Click"
+                                        Style="{StaticResource PrimaryButtonStyle}" />
+                            </StackPanel>
+                            <WrapPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" Margin="0,0,20,0">
+                                    <TextBlock Text="Billable " Foreground="{DynamicResource MutedTextBrush}" />
+                                    <TextBlock Text="{Binding TotalBillableLabel}" FontWeight="SemiBold" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,20,0">
+                                    <TextBlock Text="Non-billable " Foreground="{DynamicResource MutedTextBrush}" />
+                                    <TextBlock Text="{Binding TotalNonBillableLabel}" FontWeight="SemiBold" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,20,0">
+                                    <TextBlock Text="WHD pending " Foreground="{DynamicResource MutedTextBrush}" />
+                                    <TextBlock Text="{Binding WhdPendingCount}" FontWeight="SemiBold" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Sage pending " Foreground="{DynamicResource MutedTextBrush}" />
+                                    <TextBlock Text="{Binding SagePendingCount}" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </WrapPanel>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="1"
+                            Style="{StaticResource CardStyle}"
+                            Margin="0,0,0,14"
+                            Visibility="{Binding HasCloseoutIssues, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="190" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,14,0">
+                                <TextBlock Text="Daily Closeout"
+                                           FontSize="16"
+                                           FontWeight="SemiBold"
+                                           Margin="0,0,0,4" />
+                                <TextBlock Text="Items requiring attention"
+                                           Style="{StaticResource MutedTextStyle}"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ItemsControl Grid.Column="1" ItemsSource="{Binding DailyCloseoutItems}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Command="{Binding DataContext.SelectCloseoutIssueCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"
+                                                Padding="0"
+                                                Margin="0,0,10,10"
+                                                MinWidth="150"
+                                                HorizontalContentAlignment="Stretch">
+                                            <Button.Style>
+                                                <Style TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+                                                    <Setter Property="Background" Value="{DynamicResource PanelAltBackgroundBrush}" />
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding HasIssue}" Value="True">
+                                                            <Setter Property="BorderBrush" Value="{DynamicResource WarningBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Button.Style>
+                                            <Border Padding="12,10">
+                                                <StackPanel>
+                                                    <DockPanel LastChildFill="True">
+                                                        <TextBlock Text="{Binding Label}"
+                                                                   Foreground="{DynamicResource PrimaryTextBrush}"
+                                                                   FontWeight="SemiBold"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock DockPanel.Dock="Right"
+                                                                   Text="{Binding Value}"
+                                                                   Foreground="{DynamicResource PrimaryTextBrush}"
+                                                                   FontWeight="SemiBold"
+                                                                   Margin="10,0,0,0" />
+                                                    </DockPanel>
+                                                    <TextBlock Text="{Binding Detail}"
+                                                               Style="{StaticResource MutedTextStyle}"
+                                                               TextWrapping="Wrap"
+                                                               Margin="0,4,0,0" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Grid>
+                    </Border>
+
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.05*" />
+                            <ColumnDefinition Width="14" />
+                            <ColumnDefinition Width="0.95*" MinWidth="420" />
+                        </Grid.ColumnDefinitions>
+
+                        <ListBox Grid.Column="0"
+                                 ItemsSource="{Binding Entries}"
+                                 SelectedItem="{Binding SelectedEntry}"
+                                 ItemTemplate="{StaticResource EntryCardTemplate}"
+                                 Style="{StaticResource ListBoxChromeLessStyle}"
+                                 ItemContainerStyle="{StaticResource ListBoxItemCardStyle}" />
+
+                        <StackPanel Grid.Column="0"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Visibility="{Binding HasTodayEntries, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                            <TextBlock Text="No entries for this day"
+                                       FontSize="16"
+                                       FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" />
+                            <Button Content="New Entry"
+                                    Command="{Binding NewEntryCommand}"
+                                    Click="NewEntryButton_Click"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    HorizontalAlignment="Center"
+                                    Margin="0,12,0,0" />
+                        </StackPanel>
+
+                        <GridSplitter Grid.Column="1"
+                                      Width="6"
+                                      HorizontalAlignment="Center"
+                                      Background="{DynamicResource BorderBrush}" />
+
+                        <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <Grid Grid.Row="0" Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding EditorTitle}" FontSize="18" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding EditorSubtitle}"
+                                                   Style="{StaticResource MutedTextStyle}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   TextWrapping="NoWrap"
+                                                   Margin="0,3,0,0" />
+                                    </StackPanel>
+                                    <WrapPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0">
+                                        <Border>
+                                            <Border.Style>
+                                                <Style TargetType="{x:Type Border}" BasedOn="{StaticResource BadgeStyle}">
+                                                    <Setter Property="Background" Value="{DynamicResource SuccessBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Editor.IsDirty}" Value="True">
+                                                            <Setter Property="Background" Value="{DynamicResource WarningBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <TextBlock Text="{Binding EditorSaveStatus}" Style="{StaticResource BadgeTextStyle}" />
+                                        </Border>
+                                        <Border Style="{StaticResource BadgeStyle}"
+                                                Background="{DynamicResource NeutralBadgeBrush}"
+                                                Visibility="{Binding IsEditorLocked, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock Text="Posted / locked" Style="{StaticResource BadgeTextStyle}" />
+                                        </Border>
+                                    </WrapPanel>
+                                </Grid>
+
+                                <Border Grid.Row="1"
+                                        Background="{DynamicResource AccentSoftBrush}"
+                                        BorderBrush="{DynamicResource AccentBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Padding="10,8"
+                                        Margin="0,0,0,12"
+                                        Visibility="{Binding IsEntryOperationRunning, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <DockPanel>
+                                        <ProgressBar DockPanel.Dock="Left"
+                                                     IsIndeterminate="True"
+                                                     Width="72"
+                                                     Height="5"
+                                                     Margin="0,0,12,0"
+                                                     VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding EntryOperationText}"
+                                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   TextWrapping="NoWrap" />
+                                    </DockPanel>
+                                </Border>
+
+                                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                                    <StackPanel Margin="0,0,6,0">
+                                        <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                BorderBrush="{DynamicResource WarningBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="8"
+                                                Padding="12,10"
+                                                Margin="0,0,0,12"
+                                                Visibility="{Binding IsEditorLocked, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="This entry has already been posted."
+                                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                                           VerticalAlignment="Center" />
+                                                <Button Grid.Column="1"
+                                                        Content="Edit Anyway"
+                                                        Command="{Binding UnlockPostedEntryCommand}"
+                                                        MinHeight="32"
+                                                        Padding="12,5"
+                                                        Margin="12,0,0,0" />
+                                            </Grid>
+                                        </Border>
+
+                                        <Grid Margin="0,0,0,12" IsEnabled="{Binding IsEditorEditable}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="12" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <StackPanel Grid.Column="0">
+                                                <TextBlock Text="Client" Style="{StaticResource FieldLabelStyle}" />
+                                                <ComboBox x:Name="EditorClientComboBox"
+                                                          ItemsSource="{Binding EditorClients}"
+                                                          SelectedItem="{Binding Editor.SelectedClient}"
+                                                          Text="{Binding EditorClientFilterText, UpdateSourceTrigger=PropertyChanged}"
+                                                          IsDropDownOpen="{Binding IsEditorClientDropDownOpen}"
+                                                          ItemTemplate="{StaticResource EditorClientOptionTemplate}"
+                                                          ItemContainerStyle="{StaticResource EditorClientComboBoxItemStyle}"
+                                                          MaxDropDownHeight="260">
+                                                    <ComboBox.Style>
+                                                        <Style TargetType="{x:Type ComboBox}" BasedOn="{StaticResource SearchableComboBoxStyle}">
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding Editor.UseManualClient}" Value="True">
+                                                                    <Setter Property="IsEnabled" Value="False" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </ComboBox.Style>
+                                                </ComboBox>
+                                                <CheckBox Content="Use custom client"
+                                                          IsChecked="{Binding Editor.UseManualClient}"
+                                                          Margin="1,7,0,0" />
+                                                <StackPanel Margin="0,6,0,0"
+                                                            Visibility="{Binding Editor.UseManualClient, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <TextBlock Text="Custom client / contact" Style="{StaticResource FieldLabelStyle}" />
+                                                    <TextBox Text="{Binding Editor.ManualClientName, UpdateSourceTrigger=PropertyChanged}" />
+                                                </StackPanel>
+                                            </StackPanel>
+
+                                            <StackPanel Grid.Column="2">
+                                                <TextBlock Text="Ticket" Style="{StaticResource FieldLabelStyle}" />
+                                                <ComboBox ItemsSource="{Binding TicketsForEditor}"
+                                                          SelectedItem="{Binding Editor.SelectedTicket}"
+                                                          ItemTemplate="{StaticResource TicketSelectorItemTemplate}"
+                                                          MaxDropDownHeight="280" />
+                                                <StackPanel Margin="0,8,0,0"
+                                                            Visibility="{Binding Editor.HasNoTicket, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                                    <TextBlock Text="{Binding Editor.SelectedTicket.Status, StringFormat=Current status: {0}}"
+                                                               Style="{StaticResource MutedTextStyle}"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               TextWrapping="NoWrap"
+                                                               Margin="1,0,0,5" />
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="8" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <ComboBox ItemsSource="{Binding TicketStatusOptions}"
+                                                                  SelectedItem="{Binding SelectedTicketStatus}"
+                                                                  ItemTemplate="{StaticResource TicketStatusOptionTemplate}" />
+                                                        <Button Grid.Column="2"
+                                                                Content="Apply"
+                                                                Command="{Binding ChangeTicketStatusCommand}"
+                                                                CommandParameter="{Binding Editor.SelectedTicket}"
+                                                                MinWidth="70"
+                                                                Padding="10,7" />
+                                                    </Grid>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Work note" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding Editor.NoteCountLabel}"
+                                                       Style="{StaticResource MutedTextStyle}"
+                                                       Margin="12,0,1,7" />
+                                        </Grid>
+                                        <TextBox Text="{Binding Editor.Note, UpdateSourceTrigger=PropertyChanged}"
+                                                 AcceptsReturn="True"
+                                                 TextWrapping="Wrap"
+                                                 VerticalScrollBarVisibility="Auto"
+                                                 SpellCheck.IsEnabled="True"
+                                                 UndoLimit="200"
+                                                 MinHeight="240"
+                                                 IsEnabled="{Binding IsEditorEditable}" />
+
+                                        <Grid IsEnabled="{Binding IsEditorEditable}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="12" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+
+                                            <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,12,0,0">
+                                                <TextBlock Text="Work date" Style="{StaticResource FieldLabelStyle}" />
+                                                <DatePicker SelectedDate="{Binding Editor.WorkDate}" SelectedDateFormat="Short" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,32,0,0">
+                                                <CheckBox Content="Billable" IsChecked="{Binding Editor.Billable}" />
+                                            </StackPanel>
+
+                                            <StackPanel Grid.Row="1" Grid.ColumnSpan="3" Margin="0,12,0,0">
+                                                <TextBlock Text="Time" Style="{StaticResource FieldLabelStyle}" />
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="10" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="10" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="10" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel Grid.Column="0">
+                                                        <TextBlock Text="Start" Style="{StaticResource MutedTextStyle}" Margin="1,0,0,5" />
+                                                        <TextBox Text="{Binding Editor.StartTimeText, UpdateSourceTrigger=PropertyChanged}" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="2">
+                                                        <TextBlock Text="End" Style="{StaticResource MutedTextStyle}" Margin="1,0,0,5" />
+                                                        <TextBox Text="{Binding Editor.EndTimeText, UpdateSourceTrigger=PropertyChanged}" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="4">
+                                                        <TextBlock Text="Hours" Style="{StaticResource MutedTextStyle}" Margin="1,0,0,5" />
+                                                        <TextBox Text="{Binding Editor.DurationHoursText, UpdateSourceTrigger=PropertyChanged}"
+                                                                 IsReadOnly="{Binding Editor.IsDurationCalculated}"
+                                                                 ToolTip="Calculated automatically when both times are entered." />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="6">
+                                                        <TextBlock Text="Minutes" Style="{StaticResource MutedTextStyle}" Margin="1,0,0,5" />
+                                                        <TextBox Text="{Binding Editor.DurationMinutePartText, UpdateSourceTrigger=PropertyChanged}"
+                                                                 IsReadOnly="{Binding Editor.IsDurationCalculated}"
+                                                                 ToolTip="Enter a value from 0 to 59." />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <StackPanel Margin="0,12,0,0">
+                                            <WrapPanel>
+                                                <Border Style="{StaticResource BadgeStyle}"
+                                                        Background="{DynamicResource NoTicketBadgeBrush}"
+                                                        Visibility="{Binding Editor.HasNoTicket, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <TextBlock Text="{Binding Editor.TicketWarningText}" Style="{StaticResource BadgeTextStyle}" />
+                                                </Border>
+                                                <Border Style="{StaticResource BadgeStyle}"
+                                                        Background="{DynamicResource WarningBrush}"
+                                                        Visibility="{Binding Editor.ModifiedAfterPosting, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <TextBlock Text="Modified After Posting" Style="{StaticResource BadgeTextStyle}" />
+                                                </Border>
+                                            </WrapPanel>
+                                            <TextBlock Text="{Binding Editor.LastError}"
+                                                       Foreground="{DynamicResource DangerBrush}"
+                                                       Visibility="{Binding Editor.LastError, Converter={StaticResource StringToVisibilityConverter}}"
+                                                       Margin="0,4,0,0" />
+                                            <TextBlock Text="{Binding Editor.PostingSuccessMessage}"
+                                                       Foreground="{DynamicResource SuccessBrush}"
+                                                       FontWeight="SemiBold"
+                                                       Visibility="{Binding Editor.HasPostingSuccess, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                       Margin="0,4,0,0" />
+                                        </StackPanel>
+
+                                        <Grid Margin="0,12,0,0" IsEnabled="{Binding IsEditorEditable}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="12" />
+                                                <ColumnDefinition Width="180" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0">
+                                                <TextBlock Text="Tags" Style="{StaticResource FieldLabelStyle}" />
+                                                <TextBox Text="{Binding Editor.Tags, UpdateSourceTrigger=PropertyChanged}"
+                                                         ToolTip="Comma-separated tags" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2">
+                                                <TextBlock Text="Follow-up" Style="{StaticResource FieldLabelStyle}" />
+                                                <ComboBox ItemsSource="{Binding FollowUpOptions}"
+                                                          DisplayMemberPath="DisplayName"
+                                                          SelectedValuePath="Value"
+                                                          SelectedValue="{Binding Editor.FollowUpState}" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Expander Header="{Binding Editor.InternalNoteHeader}"
+                                                  Margin="0,10,0,0"
+                                                  IsEnabled="{Binding IsEditorEditable}">
+                                            <TextBox Text="{Binding Editor.InternalNote, UpdateSourceTrigger=PropertyChanged}"
+                                                     AcceptsReturn="True"
+                                                     TextWrapping="Wrap"
+                                                     VerticalScrollBarVisibility="Auto"
+                                                     SpellCheck.IsEnabled="True"
+                                                     UndoLimit="100"
+                                                     MinHeight="100"
+                                                     Margin="0,8,0,0" />
+                                        </Expander>
+
+                                        <Expander Header="{Binding RecentClientNotesHeader}"
+                                                  Margin="0,10,0,0"
+                                                  Visibility="{Binding HasRecentClientEntries, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <ItemsControl ItemsSource="{Binding RecentClientEntries}" Margin="0,7,0,0">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid Margin="0,0,0,8">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="82" />
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Text="{Binding WorkDate, StringFormat={}{0:M/d/yyyy}}"
+                                                                       Style="{StaticResource MutedTextStyle}" />
+                                                            <TextBlock Grid.Column="1"
+                                                                       Text="{Binding NotePreview}"
+                                                                       TextTrimming="CharacterEllipsis"
+                                                                       Margin="8,0" />
+                                                            <Button Grid.Column="2"
+                                                                    Content="Insert"
+                                                                    Command="{Binding DataContext.InsertRecentNoteCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}"
+                                                                    Padding="9,4"
+                                                                    MinHeight="28" />
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </Expander>
+                                    </StackPanel>
+                                </ScrollViewer>
+
+                                <Border Grid.Row="3"
+                                        Background="{DynamicResource PanelAltBackgroundBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Padding="10,8"
+                                        Margin="0,12,0,0"
+                                        Visibility="{Binding HasUndoDelete, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding UndoDeleteLabel}"
+                                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   TextWrapping="NoWrap" />
+                                        <Button Grid.Column="1"
+                                                Content="Undo"
+                                                Command="{Binding UndoDeleteCommand}"
+                                                MinHeight="32"
+                                                Padding="12,5"
+                                                Margin="12,0,0,0" />
+                                    </Grid>
+                                </Border>
+
+                                <Grid Grid.Row="4" Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding StatusMessage}"
+                                               Foreground="{DynamicResource MutedTextBrush}"
+                                               FontSize="11"
+                                               VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"
+                                               TextWrapping="NoWrap"
+                                               ToolTip="{Binding StatusMessage}"
+                                               Margin="0,0,12,0" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <Button Content="Open WHD"
+                                                Command="{Binding OpenWhdTicketCommand}"
+                                                CommandParameter="{Binding Editor.SelectedTicket}"
+                                                Style="{StaticResource EditorActionButtonStyle}"
+                                                Visibility="{Binding ShowOpenWhdAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <Button Content="{Binding SaveEntryButtonText}"
+                                                Command="{Binding SaveEntryCommand}"
+                                                Style="{StaticResource EditorActionButtonStyle}" />
+                                        <Button Content="Save &amp; New"
+                                                Command="{Binding SaveAndNewCommand}"
+                                                Style="{StaticResource EditorPrimaryActionButtonStyle}"
+                                                ToolTip="Save locally and start the next note (Ctrl+Enter)" />
+                                        <Button Content="{Binding CompleteEntryButtonText}"
+                                                Command="{Binding CompleteEntryCommand}"
+                                                Style="{StaticResource EditorActionButtonStyle}" />
+                                        <Button Content="More"
+                                                Click="MoreActionsButton_Click"
+                                                Style="{StaticResource EditorActionButtonStyle}"
+                                                MinWidth="76">
+                                            <Button.ContextMenu>
+                                                <ContextMenu Style="{StaticResource EditorContextMenuStyle}"
+                                                             Placement="Top"
+                                                             DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                    <MenuItem Header="Post to WHD"
+                                                              Command="{Binding PostWhdCommand}"
+                                                              Style="{StaticResource EditorContextMenuItemStyle}" />
+                                                    <MenuItem Header="Create Sage Ticket"
+                                                              Command="{Binding PostSageCommand}"
+                                                              Style="{StaticResource EditorContextMenuItemStyle}" />
+                                                    <MenuItem Header="Check Sage Save"
+                                                              Command="{Binding VerifySageSaveCommand}"
+                                                              Style="{StaticResource EditorContextMenuItemStyle}" />
+                                                    <MenuItem Header="Mark WHD Posted"
+                                                              Command="{Binding MarkWhdPostedCommand}"
+                                                              Style="{StaticResource EditorContextMenuItemStyle}" />
+                                                    <MenuItem Header="Duplicate Entry"
+                                                              Command="{Binding DuplicateEntryCommand}"
+                                                              Style="{StaticResource EditorContextMenuItemStyle}" />
+                                                    <MenuItem Header="Delete Entry"
+                                                              Command="{Binding DeleteEntryCommand}"
+                                                              Foreground="{DynamicResource DangerBrush}"
+                                                              Style="{StaticResource EditorContextMenuItemStyle}" />
+                                                </ContextMenu>
+                                            </Button.ContextMenu>
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Grid>
+
+                <ScrollViewer Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=This Week}"
+                              VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="20" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                    <DatePicker SelectedDate="{Binding SelectedDate}"
+                                                SelectedDateFormat="Short"
+                                                Width="140"
+                                                Margin="0,0,10,0" />
+                                    <Button Content="Export Week" Command="{Binding ExportWeeklyCsvCommand}" />
+                                </StackPanel>
+                                <WrapPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,20,0">
+                                        <TextBlock Text="Week total " Foreground="{DynamicResource MutedTextBrush}" />
+                                        <TextBlock Text="{Binding WeekTotalLabel}" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,20,0">
+                                        <TextBlock Text="Billable " Foreground="{DynamicResource MutedTextBrush}" />
+                                        <TextBlock Text="{Binding WeekBillableLabel}" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Non-billable " Foreground="{DynamicResource MutedTextBrush}" />
+                                        <TextBlock Text="{Binding WeekNonBillableLabel}" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </WrapPanel>
+                            </Grid>
+                        </Border>
+
+                        <ItemsControl ItemsSource="{Binding WeekGroups}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
+                                        <StackPanel>
+                                            <Grid Margin="0,0,0,12">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding Header}"
+                                                           FontSize="18"
+                                                           FontWeight="SemiBold"
+                                                           VerticalAlignment="Center"
+                                                           TextWrapping="NoWrap"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <WrapPanel Grid.Column="1"
+                                                           HorizontalAlignment="Right"
+                                                           VerticalAlignment="Center"
+                                                           Margin="24,0,0,0"
+                                                           ItemHeight="20">
+                                                    <StackPanel Orientation="Horizontal" Margin="0,0,18,0">
+                                                        <TextBlock Text="Total " Foreground="{DynamicResource MutedTextBrush}" />
+                                                        <TextBlock Text="{Binding TotalLabel}" FontWeight="SemiBold" />
+                                                    </StackPanel>
+                                                    <StackPanel Orientation="Horizontal" Margin="0,0,18,0">
+                                                        <TextBlock Text="Billable " Foreground="{DynamicResource MutedTextBrush}" />
+                                                        <TextBlock Text="{Binding BillableLabel}" FontWeight="SemiBold" />
+                                                    </StackPanel>
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock Text="Non-billable " Foreground="{DynamicResource MutedTextBrush}" />
+                                                        <TextBlock Text="{Binding NonBillableLabel}" FontWeight="SemiBold" />
+                                                    </StackPanel>
+                                                </WrapPanel>
+                                            </Grid>
+                                            <ItemsControl ItemsSource="{Binding DayGroups}"
+                                                          Visibility="{Binding HasDayGroups, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                                BorderBrush="{DynamicResource BorderBrush}"
+                                                                BorderThickness="1"
+                                                                CornerRadius="4"
+                                                                Padding="12"
+                                                                Margin="0,0,0,10">
+                                                            <StackPanel>
+                                                                <Grid Margin="0,0,0,10">
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="*" />
+                                                                        <ColumnDefinition Width="Auto" />
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <TextBlock Grid.Column="0"
+                                                                               Text="{Binding Header}"
+                                                                               FontSize="15"
+                                                                               FontWeight="SemiBold"
+                                                                               TextWrapping="NoWrap"
+                                                                               TextTrimming="CharacterEllipsis" />
+                                                                    <WrapPanel Grid.Column="1"
+                                                                               HorizontalAlignment="Right"
+                                                                               Margin="20,0,0,0">
+                                                                        <StackPanel Orientation="Horizontal" Margin="0,0,14,0">
+                                                                            <TextBlock Text="Total " Foreground="{DynamicResource MutedTextBrush}" />
+                                                                            <TextBlock Text="{Binding TotalLabel}" FontWeight="SemiBold" />
+                                                                        </StackPanel>
+                                                                        <StackPanel Orientation="Horizontal" Margin="0,0,14,0">
+                                                                            <TextBlock Text="Billable " Foreground="{DynamicResource MutedTextBrush}" />
+                                                                            <TextBlock Text="{Binding BillableLabel}" FontWeight="SemiBold" />
+                                                                        </StackPanel>
+                                                                        <StackPanel Orientation="Horizontal">
+                                                                            <TextBlock Text="Non-billable " Foreground="{DynamicResource MutedTextBrush}" />
+                                                                            <TextBlock Text="{Binding NonBillableLabel}" FontWeight="SemiBold" />
+                                                                        </StackPanel>
+                                                                    </WrapPanel>
+                                                                </Grid>
+
+                                                                <ItemsControl ItemsSource="{Binding Entries}">
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate>
+                                                                            <Button Command="{Binding DataContext.EditEntryCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                    CommandParameter="{Binding}"
+                                                                                    Style="{StaticResource EntryCardButtonStyle}"
+                                                                                    ToolTip="Open this entry in the editor">
+                                                                                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource EntryCardTemplate}" />
+                                                                            </Button>
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+
+                                            <ItemsControl ItemsSource="{Binding Entries}"
+                                                          Visibility="{Binding HasDayGroups, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Button Command="{Binding DataContext.EditEntryCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}"
+                                                                Style="{StaticResource EntryCardButtonStyle}"
+                                                                ToolTip="Open this entry in the editor">
+                                                            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource EntryCardTemplate}" />
+                                                        </Button>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <ScrollViewer Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=History}"
+                              VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
+                            <DockPanel LastChildFill="True">
+                                <WrapPanel DockPanel.Dock="Left" VerticalAlignment="Bottom" ItemHeight="62">
+                                    <StackPanel Width="150" Margin="0,0,12,0">
+                                        <TextBlock Text="Range" Style="{StaticResource FieldLabelStyle}" />
+                                        <ComboBox ItemsSource="{Binding HistoryRangeOptions}"
+                                                  SelectedItem="{Binding HistoryRangePreset}" />
+                                    </StackPanel>
+                                    <StackPanel Width="120" Margin="0,0,12,0">
+                                        <TextBlock Text="Group by" Style="{StaticResource FieldLabelStyle}" />
+                                        <ComboBox ItemsSource="{Binding HistoryGroupOptions}"
+                                                  SelectedItem="{Binding HistoryGroupBy}" />
+                                    </StackPanel>
+                                    <StackPanel Width="230" Margin="0,0,12,0">
+                                        <TextBlock Text="View" Style="{StaticResource FieldLabelStyle}" />
+                                        <StackPanel Orientation="Horizontal">
+                                            <RadioButton Content="Grouped"
+                                                         IsChecked="{Binding IsHistoryGroupedView}"
+                                                         GroupName="HistoryViewMode"
+                                                         Margin="0,4,16,0" />
+                                            <RadioButton Content="Inline timeline"
+                                                         IsChecked="{Binding IsHistoryInlineTimelineView}"
+                                                         GroupName="HistoryViewMode"
+                                                         Margin="0,4,0,0" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <StackPanel Width="132" Margin="0,0,12,0">
+                                        <TextBlock Text="Start date" Style="{StaticResource FieldLabelStyle}" />
+                                        <DatePicker SelectedDate="{Binding HistoryStartDate}"
+                                                    SelectedDateFormat="Short" />
+                                    </StackPanel>
+                                    <StackPanel Width="132" Margin="0,0,12,0">
+                                        <TextBlock Text="End date" Style="{StaticResource FieldLabelStyle}" />
+                                        <DatePicker SelectedDate="{Binding HistoryEndDate}"
+                                                    SelectedDateFormat="Short" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,23,0,0">
+                                        <Button Content="Refresh"
+                                                Command="{Binding RefreshHistoryCommand}"
+                                                Style="{StaticResource PrimaryButtonStyle}"
+                                                MinWidth="88"
+                                                Margin="0,0,8,0" />
+                                        <Button Content="Export CSV"
+                                                Command="{Binding ExportHistoryCsvCommand}"
+                                                MinWidth="96" />
+                                    </StackPanel>
+                                </WrapPanel>
+
+                                <WrapPanel DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,18,0">
+                                        <TextBlock Text="{Binding HistoryEntryCountLabel}" Foreground="{DynamicResource MutedTextBrush}" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,18,0">
+                                        <TextBlock Text="Total " Foreground="{DynamicResource MutedTextBrush}" />
+                                        <TextBlock Text="{Binding HistoryTotalLabel}" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,18,0">
+                                        <TextBlock Text="Billable " Foreground="{DynamicResource MutedTextBrush}" />
+                                        <TextBlock Text="{Binding HistoryBillableLabel}" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,18,0">
+                                        <TextBlock Text="Non-billable " Foreground="{DynamicResource MutedTextBrush}" />
+                                        <TextBlock Text="{Binding HistoryNonBillableLabel}" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,18,0">
+                                        <TextBlock Text="WHD pending " Foreground="{DynamicResource MutedTextBrush}" />
+                                        <TextBlock Text="{Binding HistoryWhdPendingLabel}" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Sage pending " Foreground="{DynamicResource MutedTextBrush}" />
+                                        <TextBlock Text="{Binding HistorySagePendingLabel}" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </WrapPanel>
+                            </DockPanel>
+                        </Border>
+
+                        <ItemsControl ItemsSource="{Binding HistoryGroups}"
+                                      Visibility="{Binding HistoryViewMode, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Grouped}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
+                                        <StackPanel>
+                                            <Grid Margin="0,0,0,12">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <StackPanel Grid.Column="0">
+                                                    <TextBlock Text="{Binding Header}"
+                                                               FontSize="18"
+                                                               FontWeight="SemiBold"
+                                                               VerticalAlignment="Center"
+                                                               TextWrapping="NoWrap"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding DateRangeLabel}"
+                                                               Foreground="{DynamicResource MutedTextBrush}"
+                                                               Margin="0,3,0,0" />
+                                                </StackPanel>
+
+                                                <StackPanel Grid.Column="1"
+                                                            HorizontalAlignment="Right"
+                                                            Margin="24,0,0,0">
+                                                    <TextBlock Text="{Binding Summary}"
+                                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                                               TextAlignment="Right"
+                                                               TextWrapping="Wrap" />
+                                                    <TextBlock Text="{Binding PostingSummary}"
+                                                               Foreground="{DynamicResource MutedTextBrush}"
+                                                               TextAlignment="Right"
+                                                               Margin="0,4,0,0" />
+                                                </StackPanel>
+                                            </Grid>
+
+                                            <ItemsControl ItemsSource="{Binding DayGroups}"
+                                                          Visibility="{Binding HasDayGroups, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                                BorderBrush="{DynamicResource BorderBrush}"
+                                                                BorderThickness="1"
+                                                                CornerRadius="4"
+                                                                Padding="12"
+                                                                Margin="0,0,0,10">
+                                                            <StackPanel>
+                                                                <Grid Margin="0,0,0,10">
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="*" />
+                                                                        <ColumnDefinition Width="Auto" />
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <TextBlock Grid.Column="0"
+                                                                               Text="{Binding Header}"
+                                                                               FontSize="15"
+                                                                               FontWeight="SemiBold"
+                                                                               TextWrapping="NoWrap"
+                                                                               TextTrimming="CharacterEllipsis" />
+                                                                    <WrapPanel Grid.Column="1"
+                                                                               HorizontalAlignment="Right"
+                                                                               Margin="20,0,0,0">
+                                                                        <StackPanel Orientation="Horizontal" Margin="0,0,14,0">
+                                                                            <TextBlock Text="Total " Foreground="{DynamicResource MutedTextBrush}" />
+                                                                            <TextBlock Text="{Binding TotalLabel}" FontWeight="SemiBold" />
+                                                                        </StackPanel>
+                                                                        <StackPanel Orientation="Horizontal" Margin="0,0,14,0">
+                                                                            <TextBlock Text="Billable " Foreground="{DynamicResource MutedTextBrush}" />
+                                                                            <TextBlock Text="{Binding BillableLabel}" FontWeight="SemiBold" />
+                                                                        </StackPanel>
+                                                                        <StackPanel Orientation="Horizontal">
+                                                                            <TextBlock Text="Non-billable " Foreground="{DynamicResource MutedTextBrush}" />
+                                                                            <TextBlock Text="{Binding NonBillableLabel}" FontWeight="SemiBold" />
+                                                                        </StackPanel>
+                                                                    </WrapPanel>
+                                                                </Grid>
+
+                                                                <ItemsControl ItemsSource="{Binding Entries}">
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate>
+                                                                            <Button Command="{Binding DataContext.EditEntryCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                    CommandParameter="{Binding}"
+                                                                                    Style="{StaticResource EntryCardButtonStyle}"
+                                                                                    ToolTip="Open this entry in the editor">
+                                                                                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource EntryCardTemplate}" />
+                                                                            </Button>
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+
+                                            <ItemsControl ItemsSource="{Binding Entries}"
+                                                          Visibility="{Binding HasDayGroups, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Button Command="{Binding DataContext.EditEntryCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}"
+                                                                Style="{StaticResource EntryCardButtonStyle}"
+                                                                ToolTip="Open this entry in the editor">
+                                                            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource EntryCardTemplate}" />
+                                                        </Button>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <ItemsControl ItemsSource="{Binding HistoryTimelineEntries}"
+                                      Visibility="{Binding HistoryViewMode, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Inline}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Command="{Binding DataContext.EditEntryCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}"
+                                            Style="{StaticResource EntryCardButtonStyle}"
+                                            ToolTip="Open this entry in the editor">
+                                        <ContentControl Content="{Binding}" ContentTemplate="{StaticResource EntryCardTemplate}" />
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Client List}">
+                    <Border Style="{StaticResource CardStyle}">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Top">
+                                <TextBlock Text="Client List" Style="{StaticResource SectionHeadingStyle}" />
+                                <TextBlock Text="Search clients" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding ClientSearchText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,12" />
+
+                                <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="0,0,0,1"
+                                        Padding="10,8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="1.7*" />
+                                            <ColumnDefinition Width="90" />
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="1.2*" />
+                                            <ColumnDefinition Width="1.1*" />
+                                            <ColumnDefinition Width="1.6*" />
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="150" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="Client name" Style="{StaticResource TableHeaderTextStyle}" />
+                                        <TextBlock Grid.Column="1" Text="Source" Style="{StaticResource TableHeaderTextStyle}" />
+                                        <TextBlock Grid.Column="2" Text="WHD ID" Style="{StaticResource TableHeaderTextStyle}" />
+                                        <TextBlock Grid.Column="3" Text="WHD location" Style="{StaticResource TableHeaderTextStyle}" />
+                                        <TextBlock Grid.Column="4" Text="WHD contact" Style="{StaticResource TableHeaderTextStyle}" />
+                                        <TextBlock Grid.Column="5" Text="Sage customer" Style="{StaticResource TableHeaderTextStyle}" />
+                                        <TextBlock Grid.Column="6" Text="Match" Style="{StaticResource TableHeaderTextStyle}" />
+                                        <TextBlock Grid.Column="7" Text="Last synced" Style="{StaticResource TableHeaderTextStyle}" />
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+
+                            <ListBox ItemsSource="{Binding ManagedClients}"
+                                     Style="{StaticResource ListBoxChromeLessStyle}">
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="{x:Type ListBoxItem}">
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="{DynamicResource BorderBrush}"
+                                                BorderThickness="0,0,0,1"
+                                                Padding="10,9">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="1.7*" />
+                                                    <ColumnDefinition Width="90" />
+                                                    <ColumnDefinition Width="120" />
+                                                    <ColumnDefinition Width="1.2*" />
+                                                    <ColumnDefinition Width="1.1*" />
+                                                    <ColumnDefinition Width="1.6*" />
+                                                    <ColumnDefinition Width="120" />
+                                                    <ColumnDefinition Width="150" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="{Binding Name}" Style="{StaticResource DetailValueStyle}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Grid.Column="1" Text="{Binding SourceLabel}" Style="{StaticResource TableCellTextStyle}" />
+                                                <TextBlock Grid.Column="2" Text="{Binding ExternalIdLabel}" Style="{StaticResource TableCellTextStyle}" />
+                                                <TextBlock Grid.Column="3" Text="{Binding WhdLocationLabel}" Style="{StaticResource TableCellTextStyle}" />
+                                                <TextBlock Grid.Column="4" Text="{Binding WhdContactLabel}" Style="{StaticResource TableCellTextStyle}" />
+                                                <TextBlock Grid.Column="5" Text="{Binding SageCustomerLabel}" Style="{StaticResource TableCellTextStyle}" />
+                                                <TextBlock Grid.Column="6" Text="{Binding MatchStatusLabel}" Style="{StaticResource TableCellTextStyle}" />
+                                                <TextBlock Grid.Column="7" Text="{Binding LastSyncedLabel}" Style="{StaticResource TableCellTextStyle}" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                    </Border>
+                </Grid>
+
+                <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Ticket List}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1*" />
+                        <ColumnDefinition Width="14" />
+                        <ColumnDefinition Width="1*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Style="{StaticResource CardStyle}">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Top">
+                                <TextBlock Text="Tickets" Style="{StaticResource SectionHeadingStyle}" />
+                                <TextBlock Text="Filter by client" Style="{StaticResource FieldLabelStyle}" />
+                                <ComboBox ItemsSource="{Binding Clients}"
+                                          SelectedItem="{Binding TicketClientFilter}"
+                                          ItemTemplate="{StaticResource ClientOptionTemplate}"
+                                          Margin="0,0,0,12" />
+                            </StackPanel>
+                            <ListBox ItemsSource="{Binding Tickets}"
+                                     SelectedItem="{Binding SelectedTicket}"
+                                     Style="{StaticResource ListBoxChromeLessStyle}"
+                                     ItemContainerStyle="{StaticResource ListBoxItemCardStyle}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource CardStyle}">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding TicketNumber}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding Subject}" Foreground="{DynamicResource SecondaryTextBrush}" />
+                                                <TextBlock Text="{Binding Status}" Style="{StaticResource MutedTextStyle}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                    </Border>
+
+                    <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                        <StackPanel>
+                            <TextBlock Text="Ticket Status" Style="{StaticResource SectionHeadingStyle}" />
+                            <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Padding="12"
+                                    Margin="0,0,0,18">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="14" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="Ticket" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBlock Text="{Binding SelectedTicket.TicketNumber}"
+                                                       Style="{StaticResource DetailValueStyle}"
+                                                       TextWrapping="NoWrap"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="Current status" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBlock Text="{Binding SelectedTicket.Status}"
+                                                       Style="{StaticResource DetailValueStyle}"
+                                                       TextWrapping="NoWrap"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBlock Text="Subject" Style="{StaticResource FieldLabelStyle}" />
+                                    <TextBlock Text="{Binding SelectedTicket.Subject}"
+                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                               Margin="0,0,0,12" />
+                                    <TextBlock Text="New status" Style="{StaticResource FieldLabelStyle}" />
+                                    <ComboBox ItemsSource="{Binding TicketStatusOptions}"
+                                              SelectedItem="{Binding SelectedTicketStatus}"
+                                              ItemTemplate="{StaticResource TicketStatusOptionTemplate}"
+                                              Margin="0,0,0,12" />
+                                    <Button Content="Save Ticket Status"
+                                            Command="{Binding ChangeTicketStatusCommand}"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Margin="0,0,0,8" />
+                                    <Button Content="Open in WHD"
+                                            Command="{Binding OpenWhdTicketCommand}"
+                                            CommandParameter="{Binding SelectedTicket}" />
+                                </StackPanel>
+                            </Border>
+
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Search}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Style="{StaticResource CardStyle}" Margin="0,0,0,14">
+                        <WrapPanel VerticalAlignment="Bottom" ItemHeight="62">
+                            <StackPanel Width="220" Margin="0,0,12,0">
+                                <TextBlock Text="Keyword" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding SearchKeyword, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                            <StackPanel Width="210" Margin="0,0,12,0">
+                                <TextBlock Text="Client" Style="{StaticResource FieldLabelStyle}" />
+                                <ComboBox ItemsSource="{Binding Clients}" SelectedItem="{Binding SearchClient}" ItemTemplate="{StaticResource ClientOptionTemplate}" />
+                            </StackPanel>
+                            <StackPanel Width="160" Margin="0,0,12,0">
+                                <TextBlock Text="Ticket" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding SearchTicketText, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                            <StackPanel Width="135" Margin="0,0,12,0">
+                                <TextBlock Text="Start date" Style="{StaticResource FieldLabelStyle}" />
+                                <DatePicker SelectedDate="{Binding SearchStartDate}"
+                                            SelectedDateFormat="Short" />
+                            </StackPanel>
+                            <StackPanel Width="160" Margin="0,0,12,0">
+                                <TextBlock Text="Status" Style="{StaticResource FieldLabelStyle}" />
+                                <ComboBox ItemsSource="{Binding StatusFilterOptions}" SelectedItem="{Binding SearchStatusFilter}" />
+                            </StackPanel>
+                            <StackPanel Width="150" Margin="0,0,12,0">
+                                <TextBlock Text="Tags" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding SearchTags, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                            <StackPanel Width="150" Margin="0,0,12,0">
+                                <TextBlock Text="Follow-up" Style="{StaticResource FieldLabelStyle}" />
+                                <ComboBox ItemsSource="{Binding SearchFollowUpOptions}"
+                                          SelectedItem="{Binding SearchFollowUpOption}"
+                                          DisplayMemberPath="DisplayName" />
+                            </StackPanel>
+                            <StackPanel Width="135" Margin="0,0,12,0">
+                                <TextBlock Text="End date" Style="{StaticResource FieldLabelStyle}" />
+                                <DatePicker SelectedDate="{Binding SearchEndDate}"
+                                            SelectedDateFormat="Short" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,23,0,0">
+                                <CheckBox Content="Open follow-ups"
+                                          IsChecked="{Binding SearchOpenFollowUpsOnly}"
+                                          VerticalAlignment="Center"
+                                          Margin="0,0,12,0" />
+                                <Button Content="Search" Command="{Binding RunSearchCommand}" Style="{StaticResource PrimaryButtonStyle}" Margin="0,0,8,0" />
+                                <Button Content="Clear" Command="{Binding ClearSearchCommand}" />
+                            </StackPanel>
+                        </WrapPanel>
+                    </Border>
+
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.1*" />
+                            <ColumnDefinition Width="14" />
+                            <ColumnDefinition Width="0.9*" MinWidth="420" />
+                        </Grid.ColumnDefinitions>
+
+                        <ListBox Grid.Column="0"
+                                 ItemsSource="{Binding SearchResults}"
+                                 SelectedItem="{Binding SelectedEntry}"
+                                 ItemTemplate="{StaticResource EntryCardTemplate}"
+                                 Style="{StaticResource ListBoxChromeLessStyle}"
+                                 ItemContainerStyle="{StaticResource ListBoxItemCardStyle}" />
+
+                        <GridSplitter Grid.Column="1"
+                                      Width="6"
+                                      HorizontalAlignment="Center"
+                                      Background="{DynamicResource BorderBrush}" />
+
+                        <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,14">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="14" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="Entry Details"
+                                                       FontSize="18"
+                                                       FontWeight="SemiBold"
+                                                       Margin="0,0,0,4" />
+                                            <TextBlock Text="{Binding SelectedEntry.ClientDisplay}"
+                                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                                       FontWeight="SemiBold"
+                                                       TextWrapping="NoWrap"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding SelectedEntry.TicketDisplay}"
+                                                       Foreground="{DynamicResource MutedTextBrush}"
+                                                       Margin="0,3,0,0"
+                                                       TextWrapping="NoWrap"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Top">
+                                            <Button Content="Open WHD"
+                                                    Command="{Binding OpenWhdTicketCommand}"
+                                                    CommandParameter="{Binding SelectedEntry}"
+                                                    MinWidth="104"
+                                                    Margin="0,0,8,0" />
+                                            <Button Content="Open in Editor"
+                                                    Command="{Binding EditEntryCommand}"
+                                                    CommandParameter="{Binding SelectedEntry}"
+                                                    MinWidth="130" />
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="12">
+                                        <UniformGrid Columns="2">
+                                            <StackPanel Margin="0,0,18,12">
+                                                <TextBlock Text="Date" Style="{StaticResource FieldLabelStyle}" />
+                                                <TextBlock Text="{Binding SelectedEntry.WorkDate, StringFormat={}{0:M/d/yyyy}}" Style="{StaticResource DetailValueStyle}" />
+                                            </StackPanel>
+                                            <StackPanel Margin="0,0,0,12">
+                                                <TextBlock Text="Status" Style="{StaticResource FieldLabelStyle}" />
+                                                <TextBlock Text="{Binding SelectedEntry.PostingStatusLabel}" Style="{StaticResource DetailValueStyle}" />
+                                            </StackPanel>
+
+                                            <StackPanel Margin="0,0,18,12">
+                                                <TextBlock Text="Duration" Style="{StaticResource FieldLabelStyle}" />
+                                                <TextBlock Text="{Binding SelectedEntry.DurationLabel}" Style="{StaticResource DetailValueStyle}" />
+                                            </StackPanel>
+                                            <StackPanel Margin="0,0,0,12">
+                                                <TextBlock Text="Time" Style="{StaticResource FieldLabelStyle}" />
+                                                <TextBlock Text="{Binding SelectedEntry.TimeRange}" Style="{StaticResource DetailValueStyle}" />
+                                            </StackPanel>
+
+                                            <StackPanel Margin="0,0,18,12">
+                                                <TextBlock Text="Billing" Style="{StaticResource FieldLabelStyle}" />
+                                                <TextBlock Text="{Binding SelectedEntry.BillableLabel}" Style="{StaticResource DetailValueStyle}" />
+                                            </StackPanel>
+                                            <StackPanel Margin="0,0,0,12">
+                                                <TextBlock Text="Ticket subject" Style="{StaticResource FieldLabelStyle}" />
+                                                <TextBlock Text="{Binding SelectedEntry.TicketSubject}" Style="{StaticResource DetailValueStyle}" />
+                                            </StackPanel>
+
+                                            <StackPanel Margin="0,0,18,12"
+                                                        Visibility="{Binding SelectedEntry.ShowWhdBadge, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <TextBlock Text="WHD" Style="{StaticResource FieldLabelStyle}" />
+                                                <TextBlock Text="{Binding SelectedEntry.WhdBadge}" Style="{StaticResource DetailValueStyle}" />
+                                            </StackPanel>
+                                            <StackPanel Margin="0,0,0,12">
+                                                <TextBlock Text="Sage" Style="{StaticResource FieldLabelStyle}" />
+                                                <TextBlock Text="{Binding SelectedEntry.SageBadge}" Style="{StaticResource DetailValueStyle}" />
+                                            </StackPanel>
+
+                                            <StackPanel Margin="0,0,18,0">
+                                                <TextBlock Text="Created" Style="{StaticResource FieldLabelStyle}" />
+                                                <TextBlock Text="{Binding SelectedEntry.CreatedAt, StringFormat={}{0:g}}" />
+                                            </StackPanel>
+                                            <StackPanel>
+                                                <TextBlock Text="Updated" Style="{StaticResource FieldLabelStyle}" />
+                                                <TextBlock Text="{Binding SelectedEntry.UpdatedAt, StringFormat={}{0:g}}" />
+                                            </StackPanel>
+                                        </UniformGrid>
+                                    </Border>
+
+                                    <TextBlock Text="{Binding SelectedEntry.LastError}"
+                                               Foreground="{DynamicResource DangerBrush}"
+                                               Visibility="{Binding SelectedEntry.LastError, Converter={StaticResource StringToVisibilityConverter}}"
+                                               Margin="0,12,0,0" />
+
+                                    <TextBlock Text="Work note" Style="{StaticResource FieldLabelStyle}" Margin="0,12,0,0" />
+                                    <Border Background="{DynamicResource ControlBackgroundBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="10"
+                                            MinHeight="170">
+                                        <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="280">
+                                            <TextBlock Text="{Binding SelectedEntry.Note}"
+                                                       TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource PrimaryTextBrush}" />
+                                        </ScrollViewer>
+                                    </Border>
+
+                                    <StackPanel Visibility="{Binding SelectedEntry.InternalNote, Converter={StaticResource StringToVisibilityConverter}}"
+                                                Margin="0,12,0,0">
+                                        <TextBlock Text="Internal note" Style="{StaticResource FieldLabelStyle}" />
+                                        <Border Background="{DynamicResource ControlBackgroundBrush}"
+                                                BorderBrush="{DynamicResource BorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="4"
+                                                Padding="10"
+                                                MinHeight="90">
+                                            <TextBlock Text="{Binding SelectedEntry.InternalNote}"
+                                                       TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource PrimaryTextBrush}" />
+                                        </Border>
+                                    </StackPanel>
+
+                                </StackPanel>
+                            </Border>
+                        </ScrollViewer>
+                    </Grid>
+                </Grid>
+
+                <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Posting Queue}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Style="{StaticResource CardStyle}" Margin="0,0,0,14">
+                        <DockPanel LastChildFill="True">
+                            <WrapPanel DockPanel.Dock="Left" VerticalAlignment="Center">
+                                <Button Content="Select All"
+                                        Command="{Binding SelectAllPostingQueueCommand}"
+                                        MinWidth="96"
+                                        Margin="0,0,8,0" />
+                                <Button Content="Clear"
+                                        Command="{Binding ClearPostingQueueSelectionCommand}"
+                                        MinWidth="80"
+                                        Margin="0,0,8,0" />
+                                <Button Content="Select Failed"
+                                        Command="{Binding SelectFailedPostingQueueCommand}"
+                                        MinWidth="104"
+                                        Margin="0,0,14,0" />
+                                <Button Content="Post Selected WHD"
+                                        Command="{Binding BatchPostWhdCommand}"
+                                        Style="{StaticResource PrimaryButtonStyle}"
+                                        MinWidth="142"
+                                        Margin="0,0,8,0" />
+                                <Button Content="Create Selected Sage"
+                                        Command="{Binding BatchPostSageCommand}"
+                                        MinWidth="154" />
+                            </WrapPanel>
+                            <TextBlock Text="{Binding PostingQueue.Count, StringFormat={}{0} pending}"
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                       HorizontalAlignment="Right"
+                                       VerticalAlignment="Center" />
+                        </DockPanel>
+                    </Border>
+
+                    <ListBox Grid.Row="1"
+                             ItemsSource="{Binding PostingQueue}"
+                             Style="{StaticResource ListBoxChromeLessStyle}"
+                             ItemContainerStyle="{StaticResource ListBoxItemCardStyle}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource CardStyle}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <CheckBox Grid.Column="0"
+                                                  IsChecked="{Binding IsSelectedForBatch, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  VerticalAlignment="Center"
+                                                  Margin="0,0,12,0" />
+                                        <ContentControl Grid.Column="1" Content="{Binding}" ContentTemplate="{StaticResource EntryCardTemplate}" />
+                                        <StackPanel Grid.Column="2" Width="116" Margin="14,0,0,0" VerticalAlignment="Center">
+                                            <Button Content="Open WHD"
+                                                    Command="{Binding DataContext.OpenWhdTicketCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}"
+                                                    Margin="0,0,0,8"
+                                                    Visibility="{Binding HasTicket, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                            <Button Content="Post WHD"
+                                                    Command="{Binding DataContext.PostWhdCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}"
+                                                    Margin="0,0,0,8"
+                                                    Visibility="{Binding HasTicket, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                            <Button Content="Create Sage"
+                                                    Command="{Binding DataContext.PostSageCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <StackPanel Grid.Row="1"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Visibility="{Binding HasPostingQueueEntries, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                        <TextBlock Text="Posting queue is clear"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" />
+                        <TextBlock Text="No WHD or Sage work is waiting."
+                                   Style="{StaticResource MutedTextStyle}"
+                                   HorizontalAlignment="Center"
+                                   Margin="0,5,0,0" />
+                    </StackPanel>
+                </Grid>
+
+                <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Posting History}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Style="{StaticResource CardStyle}" Margin="0,0,0,14">
+                        <DockPanel LastChildFill="True">
+                            <WrapPanel DockPanel.Dock="Left" VerticalAlignment="Bottom" ItemHeight="62">
+                                <StackPanel Width="260" Margin="0,0,12,0">
+                                    <TextBlock Text="Keyword" Style="{StaticResource FieldLabelStyle}" />
+                                    <TextBox Text="{Binding PostingLogKeyword, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                <StackPanel Width="120" Margin="0,0,12,0">
+                                    <TextBlock Text="Destination" Style="{StaticResource FieldLabelStyle}" />
+                                    <ComboBox ItemsSource="{Binding PostingLogDestinationOptions}" SelectedItem="{Binding PostingLogDestinationFilter}" />
+                                </StackPanel>
+                                <StackPanel Width="120" Margin="0,0,12,0">
+                                    <TextBlock Text="Result" Style="{StaticResource FieldLabelStyle}" />
+                                    <ComboBox ItemsSource="{Binding PostingLogResultOptions}" SelectedItem="{Binding PostingLogResultFilter}" />
+                                </StackPanel>
+                                <StackPanel Width="135" Margin="0,0,12,0">
+                                    <TextBlock Text="Start date" Style="{StaticResource FieldLabelStyle}" />
+                                    <DatePicker SelectedDate="{Binding PostingLogStartDate}"
+                                                SelectedDateFormat="Short" />
+                                </StackPanel>
+                                <StackPanel Width="135" Margin="0,0,12,0">
+                                    <TextBlock Text="End date" Style="{StaticResource FieldLabelStyle}" />
+                                    <DatePicker SelectedDate="{Binding PostingLogEndDate}"
+                                                SelectedDateFormat="Short" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,23,0,0">
+                                    <Button Content="Refresh"
+                                            Command="{Binding RefreshPostingLogsCommand}"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Margin="0,0,8,0" />
+                                    <Button Content="Clear"
+                                            Command="{Binding ClearPostingLogFiltersCommand}" />
+                                </StackPanel>
+                            </WrapPanel>
+
+                            <TextBlock Text="{Binding PostingLogs.Count, StringFormat={}{0} log rows}"
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                       HorizontalAlignment="Right"
+                                       VerticalAlignment="Center" />
+                        </DockPanel>
+                    </Border>
+
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="0.9*" MinWidth="430" />
+                            <ColumnDefinition Width="14" />
+                            <ColumnDefinition Width="1.1*" MinWidth="500" />
+                        </Grid.ColumnDefinitions>
+
+                        <ListBox Grid.Column="0"
+                                 ItemsSource="{Binding PostingLogs}"
+                                 SelectedItem="{Binding SelectedPostingLog}"
+                                 Style="{StaticResource ListBoxChromeLessStyle}"
+                                 ItemContainerStyle="{StaticResource ListBoxItemCardStyle}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Style="{StaticResource SelectableEntryCardStyle}">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <StackPanel Grid.Column="0">
+                                                <WrapPanel Margin="0,0,0,8">
+                                                    <Border Style="{StaticResource BadgeStyle}" Background="{DynamicResource NeutralBadgeBrush}">
+                                                        <TextBlock Text="{Binding Destination}" Style="{StaticResource BadgeTextStyle}" />
+                                                    </Border>
+                                                    <Border Style="{StaticResource BadgeStyle}"
+                                                            Background="{DynamicResource SuccessBrush}"
+                                                            Visibility="{Binding Success, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                        <TextBlock Text="Success" Style="{StaticResource BadgeTextStyle}" />
+                                                    </Border>
+                                                    <Border Style="{StaticResource BadgeStyle}"
+                                                            Background="{DynamicResource DangerBrush}"
+                                                            Visibility="{Binding Success, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                                        <TextBlock Text="Failed" Style="{StaticResource BadgeTextStyle}" />
+                                                    </Border>
+                                                </WrapPanel>
+                                                <TextBlock Text="{Binding MessagePreview}"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                                           TextWrapping="Wrap"
+                                                           Margin="0,0,0,7" />
+                                                <TextBlock Text="{Binding PayloadPreview}"
+                                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                                           TextWrapping="Wrap"
+                                                           MaxHeight="42" />
+                                            </StackPanel>
+
+                                            <StackPanel Grid.Column="1" Margin="16,0,0,0" Width="132">
+                                                <TextBlock Text="{Binding CreatedLabel}"
+                                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                                           TextAlignment="Right"
+                                                           TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding EntryLabel}"
+                                                           Foreground="{DynamicResource MutedTextBrush}"
+                                                           TextAlignment="Right"
+                                                           Margin="0,7,0,0" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
+                        <GridSplitter Grid.Column="1"
+                                      Width="6"
+                                      HorizontalAlignment="Center"
+                                      Background="{DynamicResource BorderBrush}" />
+
+                        <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,14">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="14" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="Posting Detail"
+                                                       FontSize="18"
+                                                       FontWeight="SemiBold"
+                                                       Margin="0,0,0,4" />
+                                            <TextBlock Text="{Binding SelectedPostingLog.CreatedLabel}"
+                                                       Foreground="{DynamicResource SecondaryTextBrush}" />
+                                        </StackPanel>
+                                        <Button Grid.Column="2"
+                                                Content="Open Entry"
+                                                Command="{Binding OpenPostingLogEntryCommand}"
+                                                CommandParameter="{Binding SelectedPostingLog}"
+                                                MinWidth="118"
+                                                VerticalAlignment="Top" />
+                                    </Grid>
+
+                                    <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="12">
+                                        <UniformGrid Columns="2">
+                                            <StackPanel Margin="0,0,18,12">
+                                                <TextBlock Text="Entry" Style="{StaticResource FieldLabelStyle}" />
+                                                <TextBlock Text="{Binding SelectedPostingLog.EntryLabel}" Style="{StaticResource DetailValueStyle}" />
+                                            </StackPanel>
+                                            <StackPanel Margin="0,0,0,12">
+                                                <TextBlock Text="Result" Style="{StaticResource FieldLabelStyle}" />
+                                                <TextBlock Text="{Binding SelectedPostingLog.ResultLabel}" Style="{StaticResource DetailValueStyle}" />
+                                            </StackPanel>
+                                            <StackPanel Margin="0,0,18,0">
+                                                <TextBlock Text="Destination" Style="{StaticResource FieldLabelStyle}" />
+                                                <TextBlock Text="{Binding SelectedPostingLog.Destination}" Style="{StaticResource DetailValueStyle}" />
+                                            </StackPanel>
+                                            <StackPanel>
+                                                <TextBlock Text="Log ID" Style="{StaticResource FieldLabelStyle}" />
+                                                <TextBlock Text="{Binding SelectedPostingLog.Id}" Style="{StaticResource DetailValueStyle}" />
+                                            </StackPanel>
+                                            <StackPanel Margin="0,12,18,0">
+                                                <TextBlock Text="External reference" Style="{StaticResource FieldLabelStyle}" />
+                                                <TextBlock Text="{Binding SelectedPostingLog.ExternalReferenceLabel}" Style="{StaticResource DetailValueStyle}" />
+                                            </StackPanel>
+                                        </UniformGrid>
+                                    </Border>
+
+                                    <TextBlock Text="Message" Style="{StaticResource FieldLabelStyle}" Margin="0,14,0,6" />
+                                    <Border Background="{DynamicResource ControlBackgroundBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="10"
+                                            MinHeight="92">
+                                        <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="170">
+                                            <TextBlock Text="{Binding SelectedPostingLog.Message}"
+                                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                                       TextWrapping="Wrap" />
+                                        </ScrollViewer>
+                                    </Border>
+
+                                    <TextBlock Text="Payload / request detail" Style="{StaticResource FieldLabelStyle}" Margin="0,14,0,6" />
+                                    <Border Background="{DynamicResource ControlBackgroundBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="10"
+                                            MinHeight="180">
+                                        <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="420">
+                                            <TextBlock Text="{Binding SelectedPostingLog.Payload}"
+                                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                                       FontFamily="Consolas"
+                                                       FontSize="12"
+                                                       TextWrapping="Wrap" />
+                                        </ScrollViewer>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+                        </ScrollViewer>
+                    </Grid>
+                </Grid>
+
+                <ScrollViewer Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Settings}"
+                              VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1*" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="1*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0" Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="Web Help Desk" Style="{StaticResource SectionHeadingStyle}" />
+                                    <CheckBox Content="Use mock posting"
+                                              IsChecked="{Binding WhdMockMode}"
+                                              Margin="0,0,0,12" />
+                                    <TextBlock Text="Base URL" Style="{StaticResource FieldLabelStyle}" />
+                                    <TextBox Text="{Binding WhdBaseUrl, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" />
+                                    <TextBlock Text="Authentication" Style="{StaticResource FieldLabelStyle}" />
+                                    <ComboBox ItemsSource="{Binding WhdAuthenticationModeOptions}"
+                                              SelectedItem="{Binding SelectedWhdAuthenticationMode}"
+                                              Margin="0,0,0,10" />
+                                    <TextBlock Text="API username" Style="{StaticResource FieldLabelStyle}" />
+                                    <TextBox Text="{Binding WhdUsername, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" />
+                                    <TextBlock Text="API key, password, or token" Style="{StaticResource FieldLabelStyle}" />
+                                    <PasswordBox x:Name="WhdApiTokenPasswordBox"
+                                                 PasswordChanged="WhdApiTokenPasswordBox_PasswordChanged"
+                                                 Margin="0,0,0,14" />
+                                    <WrapPanel>
+                                        <Button Content="Test Connection"
+                                                Command="{Binding TestWhdConnectionCommand}"
+                                                MinWidth="126"
+                                                Margin="0,0,8,0" />
+                                        <Button Content="Sync Tickets Now"
+                                                Command="{Binding SyncWhdTicketsCommand}"
+                                                MinWidth="136"
+                                                Margin="0,0,8,0" />
+                                        <Button Content="Manual WHD Clients"
+                                                Command="{Binding SyncWhdClientsCommand}"
+                                                MinWidth="142"
+                                                Margin="0,0,8,0" />
+                                        <Button Content="Sync Ticket Statuses"
+                                                Command="{Binding SyncWhdStatusesCommand}"
+                                                MinWidth="150" />
+                                    </WrapPanel>
+                                    <Border BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="0,1,0,0"
+                                            Margin="0,14,0,0"
+                                            Padding="0,14,0,0">
+                                        <StackPanel>
+                                            <CheckBox Content="Auto-sync assigned tickets"
+                                                      IsChecked="{Binding WhdAutoSyncEnabled}"
+                                                      Margin="0,0,0,10" />
+                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                <TextBlock Text="Every"
+                                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                                           VerticalAlignment="Center"
+                                                           Margin="0,0,8,0" />
+                                                <TextBox Text="{Binding WhdAutoSyncMinutesText, UpdateSourceTrigger=PropertyChanged}"
+                                                         Width="58"
+                                                         Margin="0,0,8,0" />
+                                                <TextBlock Text="minutes"
+                                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                                           VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding WhdAutoSyncStatusLabel}"
+                                                       Style="{StaticResource MutedTextStyle}"
+                                                       Margin="0,8,0,0"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="Sage 50 Time Tickets" Style="{StaticResource SectionHeadingStyle}" />
+                                    <CheckBox Content="Use mock posting"
+                                              IsChecked="{Binding SageMockMode}"
+                                              Margin="0,0,0,8" />
+                                    <CheckBox Content="Save and verify tickets automatically"
+                                              IsChecked="{Binding SageNativeAutoSave}"
+                                              Margin="0,0,0,12" />
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="12" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+
+                                        <StackPanel Grid.Row="0" Grid.Column="0">
+                                            <TextBlock Text="ODBC DSN" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBox Text="{Binding SageDsn, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="0" Grid.Column="2">
+                                            <TextBlock Text="ODBC username" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBox Text="{Binding SageUsername, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,10,0,0">
+                                            <TextBlock Text="ODBC password" Style="{StaticResource FieldLabelStyle}" />
+                                            <PasswordBox x:Name="SagePasswordBox"
+                                                         PasswordChanged="SagePasswordBox_PasswordChanged" />
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <WrapPanel Margin="0,12,0,14">
+                                        <Button Content="Test Sage ODBC"
+                                                Command="{Binding TestSageOdbcCommand}"
+                                                MinWidth="130"
+                                                Margin="0,0,8,8" />
+                                        <Button Content="Manual Sage Customers"
+                                                Command="{Binding SyncSageCustomersCommand}"
+                                                Style="{StaticResource PrimaryButtonStyle}"
+                                                MinWidth="178"
+                                                Margin="0,0,8,8" />
+                                    </WrapPanel>
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="12" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+
+                                        <StackPanel Grid.Row="0" Grid.Column="0">
+                                            <TextBlock Text="Employee ID" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBox Text="{Binding SageEmployeeId, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="0" Grid.Column="2">
+                                            <TextBlock Text="Activity Item ID" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBox Text="{Binding SageActivityItemId, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,10,0,0">
+                                            <TextBlock Text="Billing type" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBox Text="Activity Rate" IsReadOnly="True" IsTabStop="False" />
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="10"
+                                            Margin="0,14,0,14">
+                                        <StackPanel>
+                                            <TextBlock Text="Customer Mapping" FontWeight="SemiBold" Margin="0,0,0,8" />
+                                            <TextBlock Text="TechBench client" Style="{StaticResource FieldLabelStyle}" />
+                                            <ComboBox ItemsSource="{Binding Clients}"
+                                                      SelectedItem="{Binding SelectedSageMappingClient}"
+                                                      ItemTemplate="{StaticResource ClientOptionTemplate}"
+                                                      Margin="0,0,0,10" />
+                                            <TextBlock Text="Sage Customer ID for selected client" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBox Text="{Binding SageMappedCustomerId, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" />
+                                            <Button Content="Save Customer Mapping"
+                                                    Command="{Binding SaveSageCustomerMappingCommand}"
+                                                    HorizontalAlignment="Left" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Button Content="Check Sage Desktop" Command="{Binding TestSageConnectionCommand}" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <Border Style="{StaticResource CardStyle}" Margin="0,14,0,0">
+                            <StackPanel>
+                                <TextBlock Text="Application" Style="{StaticResource SectionHeadingStyle}" />
+                                <CheckBox Content="Light theme" IsChecked="{Binding IsLightTheme}" Margin="0,0,0,12" />
+                                <Button Content="Save Settings" Command="{Binding SaveSettingsCommand}" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Left" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource CardStyle}" Margin="0,14,0,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="250" />
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Note Templates" Style="{StaticResource SectionHeadingStyle}" />
+                                     <ListBox ItemsSource="{Binding NoteTemplates}"
+                                              SelectedItem="{Binding ManagedNoteTemplate}"
+                                              DisplayMemberPath="DisplayName"
+                                              Background="{DynamicResource ComboBoxBackgroundBrush}"
+                                              Foreground="{DynamicResource ComboBoxTextBrush}"
+                                              BorderBrush="{DynamicResource ComboBoxBorderBrush}"
+                                              ItemContainerStyle="{StaticResource TicketSelectorItemStyle}"
+                                              MinHeight="190"
+                                              MaxHeight="280" />
+                                    <Button Content="New Template"
+                                            Command="{Binding NewNoteTemplateCommand}"
+                                            HorizontalAlignment="Left"
+                                            Margin="0,10,0,0" />
+                                </StackPanel>
+                                <Grid Grid.Column="2">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid Grid.Row="0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="12" />
+                                            <ColumnDefinition Width="180" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="Name" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBox Text="{Binding TemplateName, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="Category" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBox Text="{Binding TemplateCategory, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBlock Grid.Row="1"
+                                               Text="Template text"
+                                               Style="{StaticResource FieldLabelStyle}"
+                                               Margin="1,12,0,7" />
+                                    <TextBox Grid.Row="2"
+                                             Text="{Binding TemplateText, UpdateSourceTrigger=PropertyChanged}"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             SpellCheck.IsEnabled="True"
+                                             MinHeight="120"
+                                             ToolTip="Placeholders: {client}, {ticket}, {date}, {duration}, {time}" />
+                                    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                                        <Button Content="Delete"
+                                                Command="{Binding DeleteNoteTemplateCommand}"
+                                                Style="{StaticResource DangerButtonStyle}"
+                                                Margin="0,0,8,0" />
+                                        <Button Content="Save Template"
+                                                Command="{Binding SaveNoteTemplateCommand}"
+                                                Style="{StaticResource PrimaryButtonStyle}" />
+                                    </StackPanel>
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <Border Style="{StaticResource CardStyle}" Margin="0,14,0,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Margin="0,0,24,0">
+                                    <TextBlock Text="Local Data Safety" Style="{StaticResource SectionHeadingStyle}" />
+                                    <TextBlock Text="{Binding DatabaseHealthLabel}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,0,0,6">
+                                        <TextBlock.Style>
+                                            <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource MutedTextStyle}">
+                                                <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsDatabaseHealthy}" Value="False">
+                                                        <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding LastDatabaseBackupLabel}"
+                                               Style="{StaticResource MutedTextStyle}"
+                                               Margin="0,0,0,6" />
+                                    <TextBlock Text="{Binding DatabaseBackupDirectory}"
+                                               Style="{StaticResource MutedTextStyle}"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding DatabaseBackupDirectory}" />
+                                </StackPanel>
+                                <WrapPanel Grid.Column="1"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Center">
+                                    <Button Content="Back Up Now"
+                                            Command="{Binding BackupDatabaseCommand}"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            MinWidth="112"
+                                            Margin="0,0,8,8" />
+                                    <Button Content="Check Integrity"
+                                            Command="{Binding CheckDatabaseHealthCommand}"
+                                            MinWidth="118"
+                                            Margin="0,0,8,8" />
+                                    <Button Content="Open Backups"
+                                            Command="{Binding OpenBackupFolderCommand}"
+                                            MinWidth="112"
+                                            Margin="0,0,0,8" />
+                                </WrapPanel>
+                            </Grid>
+                        </Border>
+
+                        <Border Style="{StaticResource CardStyle}" Margin="0,14,0,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Margin="0,0,24,0">
+                                    <TextBlock Text="Worklog Import" Style="{StaticResource SectionHeadingStyle}" />
+                                    <TextBlock Text="Google Sheets CSV"
+                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                               FontWeight="SemiBold" />
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Content="Import CSV"
+                                        Command="{Binding ImportGoogleSheetsCommand}"
+                                        Style="{StaticResource PrimaryButtonStyle}"
+                                        MinWidth="118"
+                                        VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>
