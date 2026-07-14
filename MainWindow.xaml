@@ -441,7 +441,6 @@
             <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="26,0" Background="#0B111A">
                 <Grid>
                     <StackPanel VerticalAlignment="Center">
-                        <TextBlock Text="C S R I   /   S E R V I C E  O P E R A T I O N S" Foreground="{DynamicResource AccentHoverBrush}" FontSize="9" FontWeight="Bold" Margin="1,0,0,6" />
                         <TextBlock Text="{Binding CurrentSection}" FontSize="25" FontWeight="SemiBold" />
                     </StackPanel>
                     <Border HorizontalAlignment="Right" VerticalAlignment="Center" Background="{DynamicResource PanelBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="18" Padding="13,7">
