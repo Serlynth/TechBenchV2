@@ -45,7 +45,7 @@ public sealed class TechBenchRepository
         BackfillClientMatchMetadata(connection);
         RemoveSeedDemoData(connection);
         Seed(connection);
-        ApplyLivePostingDefaultsMigration(connection);
+        ApplyMockModeRemovalMigration(connection);
         RebuildWorkEntrySearchIndex(connection);
     }
 
@@ -1977,17 +1977,15 @@ public sealed class TechBenchRepository
     private void Seed(SqliteConnection connection)
     {
         SeedTemplates(connection);
-        SeedSetting(connection, "Whd.MockMode", "false");
         SeedSetting(connection, "Whd.AutoSyncEnabled", "true");
         SeedSetting(connection, "Whd.AutoSyncMinutes", "5");
-        SeedSetting(connection, "Sage.MockMode", "false");
         SeedSetting(connection, "Theme", "Dark");
     }
 
-    private static void ApplyLivePostingDefaultsMigration(SqliteConnection connection)
+    private static void ApplyMockModeRemovalMigration(SqliteConnection connection)
     {
         using var checkCommand = connection.CreateCommand();
-        checkCommand.CommandText = "SELECT 1 FROM Settings WHERE Key = 'Posting.LiveDefaultsV1' LIMIT 1";
+        checkCommand.CommandText = "SELECT 1 FROM Settings WHERE Key = 'Posting.MockModesRemovedV2' LIMIT 1";
         if (checkCommand.ExecuteScalar() is not null)
         {
             return;
@@ -1997,8 +1995,7 @@ public sealed class TechBenchRepository
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            UPDATE Settings
-            SET Value = 'false'
+            DELETE FROM Settings
             WHERE Key IN ('Whd.MockMode', 'Sage.MockMode');
 
             UPDATE WorkEntries
@@ -2061,7 +2058,7 @@ public sealed class TechBenchRepository
                 END;
 
             INSERT INTO Settings (Key, Value)
-            VALUES ('Posting.LiveDefaultsV1', 'true');
+            VALUES ('Posting.MockModesRemovedV2', 'true');
             """;
         command.ExecuteNonQuery();
         transaction.Commit();

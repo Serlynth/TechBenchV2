@@ -79,7 +79,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private string _whdUsername = string.Empty;
     private string _whdApiToken = string.Empty;
     private string _selectedWhdAuthenticationMode = "Auto (detect once)";
-    private bool _whdMockMode;
     private bool _whdAutoSyncEnabled = true;
     private string _whdAutoSyncMinutesText = DefaultWhdAutoSyncMinutes.ToString();
     private bool _isWhdAutoSyncRunning;
@@ -95,7 +94,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private string _sageUsername = string.Empty;
     private string _sagePassword = string.Empty;
     private string _sageCompanyPath = string.Empty;
-    private bool _sageMockMode;
     private bool _sageNativeAutoSave;
     private bool _isLightTheme;
     private bool _isEntryOperationRunning;
@@ -161,7 +159,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         PostSageCommand = new AsyncRelayCommand(PostSageAsync, CanPostEntry);
         VerifySageSaveCommand = new AsyncRelayCommand(VerifySageSaveAsync, CanVerifySageSave);
         BatchPostWhdCommand = new AsyncRelayCommand(BatchPostWhdAsync);
-        BatchPostSageCommand = new AsyncRelayCommand(BatchPostSageAsync);
         MarkWhdPostedCommand = new RelayCommand(parameter => MarkPosted(parameter, "WHD"), CanResolveSavedEntry);
         OpenWhdTicketCommand = new RelayCommand(OpenWhdTicket, CanOpenWhdTicket);
         SelectCloseoutIssueCommand = new RelayCommand(SelectCloseoutIssue, parameter => parameter is CloseoutItem { HasIssue: true });
@@ -294,7 +291,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public AsyncRelayCommand PostSageCommand { get; }
     public AsyncRelayCommand VerifySageSaveCommand { get; }
     public AsyncRelayCommand BatchPostWhdCommand { get; }
-    public AsyncRelayCommand BatchPostSageCommand { get; }
     public RelayCommand MarkWhdPostedCommand { get; }
     public RelayCommand OpenWhdTicketCommand { get; }
     public RelayCommand SelectCloseoutIssueCommand { get; }
@@ -770,12 +766,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         set => SetProperty(ref _selectedWhdAuthenticationMode, value);
     }
 
-    public bool WhdMockMode
-    {
-        get => _whdMockMode;
-        set => SetProperty(ref _whdMockMode, value);
-    }
-
     public bool WhdAutoSyncEnabled
     {
         get => _whdAutoSyncEnabled;
@@ -875,12 +865,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         get => _sageCompanyPath;
         set => SetProperty(ref _sageCompanyPath, value);
-    }
-
-    public bool SageMockMode
-    {
-        get => _sageMockMode;
-        set => SetProperty(ref _sageMockMode, value);
     }
 
     public bool SageNativeAutoSave
@@ -1979,29 +1963,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         await PostEntriesBatchAsync(entries, _whdPoster, "WHD");
     }
 
-    private async Task BatchPostSageAsync(object? parameter)
-    {
-        if (!SageMockMode)
-        {
-            _dialogService.Error(
-                "Create Sage tickets",
-                "Native Sage posting currently creates one ticket at a time. Use Create Sage Ticket on each queue entry.");
-            return;
-        }
-
-        var entries = GetSelectedPostingQueueEntriesForPosting()
-            .Where(static entry => entry.NeedsSagePosting)
-            .ToList();
-
-        if (entries.Count == 0)
-        {
-            _dialogService.Error("Create Sage tickets", "Select one or more queue entries that are still Sage pending.");
-            return;
-        }
-
-        await PostEntriesBatchAsync(entries, _sagePoster, "Sage");
-    }
-
     private async Task PostEntriesBatchAsync(IReadOnlyList<WorkEntry> entries, IWorkEntryPoster poster, string destination)
     {
         var successCount = 0;
@@ -2398,7 +2359,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var hasDrafts = _repository.GetWorkEntries(new WorkEntryQuery { PendingSageOnly = true })
             .Any(HasSageDraft);
         if (!_isSagePostingRunning
-            && !SageMockMode
             && !string.IsNullOrWhiteSpace(SageDsn)
             && hasDrafts)
         {
@@ -2754,7 +2714,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         WhdApiToken = LoadCredentialWithLegacyMigration(settings, "Whd.ApiToken");
         SelectedWhdAuthenticationMode = ToWhdAuthenticationModeLabel(
             settings.GetValueOrDefault("Whd.AuthenticationMode", WhdAuthenticationMode.Auto.ToString()));
-        WhdMockMode = settings.GetValueOrDefault("Whd.MockMode", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
         WhdAutoSyncEnabled = settings.GetValueOrDefault("Whd.AutoSyncEnabled", "true").Equals("true", StringComparison.OrdinalIgnoreCase);
         WhdAutoSyncMinutesText = settings.GetValueOrDefault("Whd.AutoSyncMinutes", DefaultWhdAutoSyncMinutes.ToString());
         SageEmployeeId = settings.GetValueOrDefault("Sage.EmployeeId", string.Empty);
@@ -2763,7 +2722,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         SageUsername = settings.GetValueOrDefault("Sage.Username", string.Empty);
         SagePassword = LoadCredentialWithLegacyMigration(settings, "Sage.Password");
         SageCompanyPath = settings.GetValueOrDefault("Sage.CompanyPath", string.Empty);
-        SageMockMode = settings.GetValueOrDefault("Sage.MockMode", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
         SageNativeAutoSave = settings.GetValueOrDefault("Sage.NativeAutoSave", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
         IsLightTheme = settings.GetValueOrDefault("Theme", "Dark").Equals("Light", StringComparison.OrdinalIgnoreCase);
         ThemeService.Apply(IsLightTheme ? AppTheme.Light : AppTheme.Dark);
@@ -3003,7 +2961,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _repository.SaveSetting("Whd.Username", WhdUsername.Trim());
         _credentialStore.SetSecret("Whd.ApiToken", WhdApiToken);
         _repository.DeleteSetting("Whd.ApiToken");
-        _repository.SaveSetting("Whd.MockMode", WhdMockMode.ToString());
         _repository.SaveSetting("Whd.AuthenticationMode", ParseWhdAuthenticationMode(SelectedWhdAuthenticationMode).ToString());
         _repository.SaveSetting("Whd.AutoSyncEnabled", WhdAutoSyncEnabled.ToString());
         _repository.SaveSetting("Whd.AutoSyncMinutes", ResolveWhdAutoSyncIntervalMinutes().ToString());
@@ -3167,7 +3124,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _credentialStore.SetSecret("Sage.Password", SagePassword);
         _repository.DeleteSetting("Sage.Password");
         _repository.SaveSetting("Sage.CompanyPath", SageCompanyPath.Trim());
-        _repository.SaveSetting("Sage.MockMode", SageMockMode.ToString());
         ConfigureSageVerificationTimer();
     }
 
@@ -3178,10 +3134,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             ["Whd.BaseUrl"] = WhdBaseUrl.Trim(),
             ["Whd.Username"] = WhdUsername.Trim(),
             ["Whd.ApiToken"] = WhdApiToken,
-            ["Whd.MockMode"] = WhdMockMode.ToString(),
             ["Whd.AuthenticationMode"] = ParseWhdAuthenticationMode(SelectedWhdAuthenticationMode).ToString(),
             ["Sage.Password"] = SagePassword,
-            ["Sage.MockMode"] = SageMockMode.ToString(),
             ["Sage.EmployeeId"] = SageEmployeeId.Trim(),
             ["Sage.ActivityItemId"] = SageActivityItemId.Trim(),
             ["Sage.NativeAutoSave"] = SageNativeAutoSave.ToString()

@@ -88,7 +88,7 @@ Settings also provides manual backup, integrity-check, and open-backup-folder co
 - Start/stop timer mode that fills start, end, and duration fields
 - Search by keyword, client, date range, ticket text, and posting status
 - CSV export for daily and weekly worklogs
-- Mock posting plus live WHD and native Sage Time Ticket posting
+- Live WHD and native Sage Time Ticket posting
 - WHD TechNote ID verification plus read-only Sage ODBC save tracking
 - Posting timestamps, Sage external references, status tracking, last-error storage, and posting payload logs
 - Durable posting-attempt records and single-instance protection against duplicate external writes
@@ -119,8 +119,6 @@ WHD connections require HTTPS. Choose an explicit authentication mode in Setting
 
 Sage opens its native Time Tickets window, enters and validates one ticket, and lets Sage assign the ticket number. When automatic saving is enabled, TechBench submits Sage's Save command, then verifies the committed row through read-only ODBC. ODBC runs in a short-lived hidden worker mode of the same x86 `TechBench.exe`; a hung Sage driver is terminated at the timeout and cannot leave TechBench stuck in an "already running" state. If Sage's ticket-number label was unavailable, TechBench accepts only one uniquely matching saved ticket using its date, duration, Activity Rate billing type, and work note. Ambiguous matches remain pending. `Check Sage Save` performs the same read-only ODBC verification and does not manipulate the open Sage form.
 
-Mock modes are off by default and never mark an entry externally posted.
-
 Editing an entry that has already been posted prompts for confirmation. After saving a posted entry, the UI marks it as modified after posting.
 
 ## Restore A Backup
@@ -140,7 +138,7 @@ C:\Users\skoog\OneDrive\Documents\Coding\TechBench-NoteFirst-Rollback-20260714-1
 
 - `Models` - client sync metadata, ticket, work entry, templates, posting status, query, and log models
 - `Data` - SQLite connection factory, schema creation, client sync metadata migration, seed data, and repository methods
-- `Providers` - client/ticket provider interfaces plus mock and live WHD/Sage posters
+- `Providers` - client/ticket provider interfaces plus live WHD and Sage posters
 - `Services` - dialog, CSV export, durable posting coordination, isolated Sage ODBC work, Sage desktop automation, and theme services
 - `ViewModels` - MVVM state, commands, editor state, weekly grouping, timer, search, settings, and posting orchestration
 - `Converters` - WPF visibility converters

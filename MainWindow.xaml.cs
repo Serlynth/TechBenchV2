@@ -36,14 +36,8 @@ public partial class MainWindow : Window
             repository,
             new LocalClientProvider(repository),
             new LocalTicketProvider(repository),
-            new ModeAwareWorkEntryPoster(
-                "Whd.MockMode",
-                new MockWhdPoster(),
-                new WhdRestPoster(whdRestClient)),
-            new ModeAwareWorkEntryPoster(
-                "Sage.MockMode",
-                new MockSagePoster(),
-                new SageNativeUiPoster(new SageNativeUiAutomation(), sageOdbcClient)),
+            new WhdRestPoster(whdRestClient),
+            new SageNativeUiPoster(new SageNativeUiAutomation(), sageOdbcClient),
             whdRestClient,
             sageOdbcClient,
             new AppDialogService(),

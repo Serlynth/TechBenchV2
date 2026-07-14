@@ -155,7 +155,7 @@ public sealed class TechBenchRepositoryTests
     }
 
     [Fact]
-    public void MigratesSavedMockDefaultsAndMockOnlyPostingStateToLivePending()
+    public void RemovesLegacyMockSettingsAndRestoresMockOnlyPostingStateToLivePending()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"TechBenchTests-{Guid.NewGuid():N}");
         var databasePath = Path.Combine(directory, "techbench.db");
@@ -191,8 +191,9 @@ public sealed class TechBenchRepositoryTests
                 connection.Open();
                 using var command = connection.CreateCommand();
                 command.CommandText = """
-                    DELETE FROM Settings WHERE Key = 'Posting.LiveDefaultsV1';
-                    UPDATE Settings SET Value = 'true' WHERE Key IN ('Whd.MockMode', 'Sage.MockMode');
+                    DELETE FROM Settings WHERE Key = 'Posting.MockModesRemovedV2';
+                    INSERT INTO Settings (Key, Value) VALUES ('Whd.MockMode', 'true');
+                    INSERT INTO Settings (Key, Value) VALUES ('Sage.MockMode', 'true');
                     """;
                 command.ExecuteNonQuery();
             }
@@ -205,8 +206,8 @@ public sealed class TechBenchRepositoryTests
             Assert.False(loaded.WhdPosted);
             Assert.Null(loaded.WhdPostedAt);
             Assert.Equal(PostingStatus.Ready, loaded.PostingStatus);
-            Assert.Equal("false", settings["Whd.MockMode"]);
-            Assert.Equal("false", settings["Sage.MockMode"]);
+            Assert.DoesNotContain("Whd.MockMode", settings.Keys);
+            Assert.DoesNotContain("Sage.MockMode", settings.Keys);
         }
         finally
         {

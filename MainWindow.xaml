@@ -1930,9 +1930,6 @@
                                         Style="{StaticResource PrimaryButtonStyle}"
                                         MinWidth="142"
                                         Margin="0,0,8,0" />
-                                <Button Content="Create Selected Sage"
-                                        Command="{Binding BatchPostSageCommand}"
-                                        MinWidth="154" />
                             </WrapPanel>
                             <TextBlock Text="{Binding PostingQueue.Count, StringFormat={}{0} pending}"
                                        Foreground="{DynamicResource SecondaryTextBrush}"
@@ -2204,6 +2201,39 @@
                 <ScrollViewer Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Settings}"
                               VerticalScrollBarVisibility="Auto">
                     <StackPanel>
+                        <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
+                            <StackPanel>
+                                <TextBlock Text="Application" Style="{StaticResource SectionHeadingStyle}" />
+                                <TextBlock Text="{Binding Updates.CurrentVersionLabel}"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           FontWeight="SemiBold"
+                                           Margin="0,0,0,4" />
+                                <TextBlock Text="{Binding Updates.StatusText}"
+                                           Style="{StaticResource MutedTextStyle}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,10" />
+                                <ProgressBar Height="8"
+                                             Width="260"
+                                             HorizontalAlignment="Left"
+                                             Minimum="0"
+                                             Maximum="100"
+                                             Value="{Binding Updates.DownloadProgress, Mode=OneWay}"
+                                             Margin="0,0,0,12"
+                                             Visibility="{Binding Updates.IsProgressVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <CheckBox Content="Light theme" IsChecked="{Binding IsLightTheme}" Margin="0,0,0,12" />
+                                <WrapPanel>
+                                    <Button Content="Save Settings"
+                                            Command="{Binding SaveSettingsCommand}"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Margin="0,0,8,8" />
+                                    <Button Content="Check for Updates"
+                                            Command="{Binding Updates.CheckForUpdatesCommand}"
+                                            MinWidth="140"
+                                            Margin="0,0,0,8" />
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="1*" />
@@ -2214,9 +2244,6 @@
                             <Border Grid.Column="0" Style="{StaticResource CardStyle}">
                                 <StackPanel>
                                     <TextBlock Text="Web Help Desk" Style="{StaticResource SectionHeadingStyle}" />
-                                    <CheckBox Content="Use mock posting"
-                                              IsChecked="{Binding WhdMockMode}"
-                                              Margin="0,0,0,12" />
                                     <TextBlock Text="Base URL" Style="{StaticResource FieldLabelStyle}" />
                                     <TextBox Text="{Binding WhdBaseUrl, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" />
                                     <TextBlock Text="Authentication" Style="{StaticResource FieldLabelStyle}" />
@@ -2278,9 +2305,6 @@
                             <Border Grid.Column="2" Style="{StaticResource CardStyle}">
                                 <StackPanel>
                                     <TextBlock Text="Sage 50 Time Tickets" Style="{StaticResource SectionHeadingStyle}" />
-                                    <CheckBox Content="Use mock posting"
-                                              IsChecked="{Binding SageMockMode}"
-                                              Margin="0,0,0,8" />
                                     <CheckBox Content="Save and verify tickets automatically"
                                               IsChecked="{Binding SageNativeAutoSave}"
                                               Margin="0,0,0,12" />
@@ -2374,39 +2398,6 @@
                                 </StackPanel>
                             </Border>
                         </Grid>
-
-                        <Border Style="{StaticResource CardStyle}" Margin="0,14,0,0">
-                            <StackPanel>
-                                <TextBlock Text="Application" Style="{StaticResource SectionHeadingStyle}" />
-                                <CheckBox Content="Light theme" IsChecked="{Binding IsLightTheme}" Margin="0,0,0,12" />
-                                <TextBlock Text="{Binding Updates.CurrentVersionLabel}"
-                                           Foreground="{DynamicResource SecondaryTextBrush}"
-                                           FontWeight="SemiBold"
-                                           Margin="0,0,0,4" />
-                                <TextBlock Text="{Binding Updates.StatusText}"
-                                           Style="{StaticResource MutedTextStyle}"
-                                           TextWrapping="Wrap"
-                                           Margin="0,0,0,10" />
-                                <ProgressBar Height="8"
-                                             Width="260"
-                                             HorizontalAlignment="Left"
-                                             Minimum="0"
-                                             Maximum="100"
-                                             Value="{Binding Updates.DownloadProgress, Mode=OneWay}"
-                                             Margin="0,0,0,12"
-                                             Visibility="{Binding Updates.IsProgressVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                <WrapPanel>
-                                    <Button Content="Save Settings"
-                                            Command="{Binding SaveSettingsCommand}"
-                                            Style="{StaticResource PrimaryButtonStyle}"
-                                            Margin="0,0,8,8" />
-                                    <Button Content="Check for Updates"
-                                            Command="{Binding Updates.CheckForUpdatesCommand}"
-                                            MinWidth="140"
-                                            Margin="0,0,0,8" />
-                                </WrapPanel>
-                            </StackPanel>
-                        </Border>
 
                         <Border Style="{StaticResource CardStyle}" Margin="0,14,0,0">
                             <Grid>
