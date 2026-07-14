@@ -43,13 +43,30 @@ public sealed class WindowsNotificationService : IUserNotificationService, IDisp
                 text = $"{text}{Environment.NewLine}+ {tickets.Count - 3} more";
             }
 
-            _notifyIcon.BalloonTipTitle = title;
-            _notifyIcon.BalloonTipText = Truncate(text, 240);
-            _notifyIcon.ShowBalloonTip(8000);
+            ShowBalloon(title, text);
         }
         catch (InvalidOperationException)
         {
             // Notifications are helpful, but they should never interrupt sync.
+        }
+    }
+
+    public void ShowUpdateAvailable(string version)
+    {
+        if (_disposed || string.IsNullOrWhiteSpace(version))
+        {
+            return;
+        }
+
+        try
+        {
+            ShowBalloon(
+                $"TechBench {version} is available",
+                "Open TechBench to download and install the update.");
+        }
+        catch (InvalidOperationException)
+        {
+            // Update checks must remain non-disruptive when Windows cannot show a balloon.
         }
     }
 
@@ -72,6 +89,13 @@ public sealed class WindowsNotificationService : IUserNotificationService, IDisp
         return string.IsNullOrWhiteSpace(executablePath)
             ? null
             : Icon.ExtractAssociatedIcon(executablePath);
+    }
+
+    private void ShowBalloon(string title, string text)
+    {
+        _notifyIcon.BalloonTipTitle = title;
+        _notifyIcon.BalloonTipText = Truncate(text, 240);
+        _notifyIcon.ShowBalloonTip(8000);
     }
 
     private static string Truncate(string value, int maxLength)

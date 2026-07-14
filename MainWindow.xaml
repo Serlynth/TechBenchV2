@@ -434,6 +434,7 @@
         <Grid Grid.Column="1" Background="{DynamicResource WindowBackgroundBrush}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="88" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
@@ -466,7 +467,68 @@
                 </Grid>
             </Border>
 
-            <Grid Grid.Row="1" Margin="24">
+            <Border Grid.Row="1"
+                    BorderThickness="0,0,0,1"
+                    Padding="24,12"
+                    Visibility="{Binding Updates.IsBannerVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Border.Style>
+                    <Style TargetType="{x:Type Border}">
+                        <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+                        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Updates.IsUpdateCompletion}" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource PanelAltBackgroundBrush}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,0,24,0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Updates.BannerTitle}"
+                                   FontWeight="SemiBold"
+                                   FontSize="14" />
+                        <TextBlock Text="{Binding Updates.BannerDetail}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="12"
+                                   Margin="0,3,0,0" />
+                        <Grid Margin="0,9,0,0"
+                              Visibility="{Binding Updates.IsProgressVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="220" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ProgressBar Grid.Column="0"
+                                         Height="8"
+                                         Minimum="0"
+                                         Maximum="100"
+                                         Value="{Binding Updates.DownloadProgress, Mode=OneWay}" />
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding Updates.DownloadProgressLabel}"
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                       FontSize="11"
+                                       Margin="10,-4,0,0" />
+                        </Grid>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button Content="Update now"
+                                Command="{Binding Updates.InstallUpdateCommand}"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                MinWidth="108"
+                                Margin="0,0,8,0"
+                                Visibility="{Binding Updates.IsUpdateActionVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <Button Content="{Binding Updates.DismissButtonText}"
+                                Command="{Binding Updates.DismissBannerCommand}"
+                                MinWidth="72" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="2" Margin="24">
                 <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Today}">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -2239,7 +2301,32 @@
                             <StackPanel>
                                 <TextBlock Text="Application" Style="{StaticResource SectionHeadingStyle}" />
                                 <CheckBox Content="Light theme" IsChecked="{Binding IsLightTheme}" Margin="0,0,0,12" />
-                                <Button Content="Save Settings" Command="{Binding SaveSettingsCommand}" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Left" />
+                                <TextBlock Text="{Binding Updates.CurrentVersionLabel}"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           FontWeight="SemiBold"
+                                           Margin="0,0,0,4" />
+                                <TextBlock Text="{Binding Updates.StatusText}"
+                                           Style="{StaticResource MutedTextStyle}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,10" />
+                                <ProgressBar Height="8"
+                                             Width="260"
+                                             HorizontalAlignment="Left"
+                                             Minimum="0"
+                                             Maximum="100"
+                                             Value="{Binding Updates.DownloadProgress, Mode=OneWay}"
+                                             Margin="0,0,0,12"
+                                             Visibility="{Binding Updates.IsProgressVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <WrapPanel>
+                                    <Button Content="Save Settings"
+                                            Command="{Binding SaveSettingsCommand}"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Margin="0,0,8,8" />
+                                    <Button Content="Check for Updates"
+                                            Command="{Binding Updates.CheckForUpdatesCommand}"
+                                            MinWidth="140"
+                                            Margin="0,0,0,8" />
+                                </WrapPanel>
                             </StackPanel>
                         </Border>
 

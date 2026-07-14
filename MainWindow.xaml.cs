@@ -49,9 +49,17 @@ public partial class MainWindow : Window
             new MessageBoxDialogService(),
             _notificationService,
             new WindowsCredentialStore(),
-            databaseBackupService);
+            databaseBackupService,
+            new VelopackAppUpdateService(),
+            () => System.Windows.Application.Current.Shutdown());
 
         DataContext = viewModel;
+        if (!string.IsNullOrWhiteSpace(App.UpdateCompletionVersion))
+        {
+            viewModel.Updates.MarkUpdateCompleted(App.UpdateCompletionVersion);
+        }
+
+        viewModel.Updates.StartAutomaticChecks();
         WhdApiTokenPasswordBox.Password = viewModel.WhdApiToken;
         SagePasswordBox.Password = viewModel.SagePassword;
     }

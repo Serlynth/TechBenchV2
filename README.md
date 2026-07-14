@@ -1,5 +1,12 @@
 # TechBench
 
+Current application version: `1.0.0`.
+
+Installed builds check the public binary-only GitHub release feed for stable updates.
+When a new version is available, TechBench shows a Windows alert and can download it with visible progress,
+create a verified database backup, install it, and restart automatically. See
+[`docs/UPDATES.md`](docs/UPDATES.md) for installation and publishing details.
+
 TechBench is a standalone Windows desktop worklog and ticket-notes application for small IT service workflows. It stores data locally in SQLite, opens to the daily worklog, and posts work notes to SolarWinds Web Help Desk and native Time Tickets to Sage 50.
 
 ## Requirements

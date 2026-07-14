@@ -5,4 +5,6 @@ namespace TechBench.Services;
 public interface IUserNotificationService
 {
     void ShowNewWhdTickets(IReadOnlyList<WhdSyncedTicket> tickets);
+
+    void ShowUpdateAvailable(string version);
 }

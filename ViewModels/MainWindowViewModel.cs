@@ -120,7 +120,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         IUserDialogService dialogService,
         IUserNotificationService notificationService,
         ICredentialStore credentialStore,
-        DatabaseBackupService databaseBackupService)
+        DatabaseBackupService databaseBackupService,
+        IAppUpdateService appUpdateService,
+        Action shutdownApplication)
     {
         _repository = repository;
         _clientProvider = clientProvider;
@@ -133,6 +135,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _notificationService = notificationService;
         _credentialStore = credentialStore;
         _databaseBackupService = databaseBackupService;
+        Updates = new AppUpdateViewModel(
+            appUpdateService,
+            () => _databaseBackupService.CreateBackup("Pre-update database backup"),
+            PersistEditorDraftBeforeExit,
+            shutdownApplication,
+            () => !IsEntryOperationRunning,
+            _notificationService.ShowUpdateAvailable);
 
         NavigateCommand = new RelayCommand(parameter => Navigate(parameter?.ToString() ?? "Today"));
         EditEntryCommand = new RelayCommand(EditEntry, parameter => parameter is WorkEntry { Id: > 0 });
@@ -244,6 +253,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     public WorkEntryEditorViewModel Editor { get; } = new();
+    public AppUpdateViewModel Updates { get; }
     public ObservableCollection<Client> Clients { get; } = new();
     public ObservableCollection<Client> EditorClients { get; } = new();
     public ObservableCollection<Client> ManagedClients { get; } = new();
@@ -370,6 +380,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 BackupDatabaseCommand.RaiseCanExecuteChanged();
                 CheckDatabaseHealthCommand.RaiseCanExecuteChanged();
                 ImportGoogleSheetsCommand.RaiseCanExecuteChanged();
+                Updates.RefreshCommandStates();
             }
         }
     }
@@ -3632,6 +3643,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         DisposeNoteFeatures();
+        Updates.Dispose();
         _whdAutoSyncTimer.Stop();
         _whdAutoSyncTimer.Tick -= HandleWhdAutoSyncTimerTick;
         _sageVerificationTimer.Stop();
