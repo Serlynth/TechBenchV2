@@ -42,6 +42,46 @@
             <Setter Property="FontSize" Value="12" />
         </Style>
 
+        <Style x:Key="HeaderUpdateButtonStyle"
+               TargetType="{x:Type Button}"
+               BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+            <Setter Property="Background" Value="#102D25" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="11,5" />
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="FontSize" Value="9" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border x:Name="UpdateBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="16"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="UpdateBorder" Property="Background" Value="#194638" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="UpdateBorder" Property="Opacity" Value="0.76" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="UpdateBorder" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="TableHeaderTextStyle" TargetType="{x:Type TextBlock}">
             <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
             <Setter Property="FontWeight" Value="SemiBold" />
@@ -440,29 +480,68 @@
 
             <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="26,0" Background="#0B111A">
                 <Grid>
-                    <StackPanel VerticalAlignment="Center">
-                        <TextBlock Text="{Binding CurrentSection}" FontSize="25" FontWeight="SemiBold" />
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,20,0">
+                        <TextBlock Text="{Binding CurrentSection}"
+                                   FontSize="25"
+                                   FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis" />
                     </StackPanel>
-                    <Border HorizontalAlignment="Right" VerticalAlignment="Center" Background="{DynamicResource PanelBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="18" Padding="13,7">
-                        <StackPanel Orientation="Horizontal">
-                            <Ellipse Width="7" Height="7" Margin="0,0,8,0">
-                                <Ellipse.Style>
-                                    <Style TargetType="{x:Type Ellipse}">
-                                        <Setter Property="Fill" Value="{DynamicResource SuccessBrush}" />
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding Editor.IsDirty}" Value="True">
-                                                <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding IsEntryOperationRunning}" Value="True">
-                                                <Setter Property="Fill" Value="{DynamicResource AccentHoverBrush}" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </Ellipse.Style>
-                            </Ellipse>
-                            <TextBlock Text="{Binding WorkspaceStateLabel}" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource SecondaryTextBrush}" />
-                        </StackPanel>
-                    </Border>
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center">
+                        <Button Command="{Binding Updates.ShowUpdateBannerCommand}"
+                                Style="{StaticResource HeaderUpdateButtonStyle}"
+                                ToolTip="{Binding Updates.BannerTitle}"
+                                AutomationProperties.Name="{Binding Updates.BannerTitle}"
+                                Margin="0,0,10,0"
+                                Visibility="{Binding Updates.HasAvailableUpdate, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#x2193;"
+                                           FontFamily="Segoe UI Symbol"
+                                           FontSize="14"
+                                           FontWeight="Bold"
+                                           Foreground="{DynamicResource SuccessBrush}"
+                                           Margin="0,-2,7,0" />
+                                <TextBlock Text="{Binding Updates.HeaderUpdateLabel}"
+                                           Foreground="{DynamicResource SuccessBrush}"
+                                           FontSize="9"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Border Background="{DynamicResource PanelBackgroundBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="18"
+                                Padding="13,7">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Width="7" Height="7" Margin="0,0,8,0">
+                                    <Ellipse.Style>
+                                        <Style TargetType="{x:Type Ellipse}">
+                                            <Setter Property="Fill" Value="{DynamicResource SuccessBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Editor.IsDirty}" Value="True">
+                                                    <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsEntryOperationRunning}" Value="True">
+                                                    <Setter Property="Fill" Value="{DynamicResource AccentHoverBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Ellipse.Style>
+                                </Ellipse>
+                                <TextBlock Text="{Binding WorkspaceStateLabel}"
+                                           FontSize="9"
+                                           FontWeight="Bold"
+                                           Foreground="{DynamicResource SecondaryTextBrush}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
                 </Grid>
             </Border>
 

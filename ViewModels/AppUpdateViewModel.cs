@@ -6,7 +6,7 @@ namespace TechBench.ViewModels;
 public sealed class AppUpdateViewModel : ObservableObject, IDisposable
 {
     private static readonly TimeSpan InitialCheckDelay = TimeSpan.FromSeconds(8);
-    private static readonly TimeSpan AutomaticCheckInterval = TimeSpan.FromHours(6);
+    internal static readonly TimeSpan AutomaticCheckInterval = TimeSpan.FromHours(1);
 
     private readonly IAppUpdateService _updateService;
     private readonly Func<DatabaseBackupResult> _createPreUpdateBackup;
@@ -51,6 +51,9 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         DismissBannerCommand = new RelayCommand(
             _ => DismissBanner(),
             _ => !IsDownloading && IsBannerVisible);
+        ShowUpdateBannerCommand = new RelayCommand(
+            _ => ShowUpdateBanner(),
+            _ => HasAvailableUpdate);
 
         _automaticCheckTimer.Interval = InitialCheckDelay;
         _automaticCheckTimer.Tick += HandleAutomaticCheckTimerTick;
@@ -59,6 +62,7 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
     public AsyncRelayCommand CheckForUpdatesCommand { get; }
     public AsyncRelayCommand InstallUpdateCommand { get; }
     public RelayCommand DismissBannerCommand { get; }
+    public RelayCommand ShowUpdateBannerCommand { get; }
 
     public string CurrentVersionLabel => $"Version {_updateService.CurrentVersion}";
     public bool IsInstalled => _updateService.IsInstalled;
@@ -75,6 +79,11 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
     public int DownloadProgress => _downloadProgress;
     public string DownloadProgressLabel => $"{DownloadProgress}%";
     public string DismissButtonText => IsUpdateCompletion ? "Dismiss" : "Later";
+    public string HeaderUpdateLabel => IsDownloading
+        ? $"DOWNLOADING {DownloadProgress}%"
+        : _availableUpdate is null
+            ? string.Empty
+            : $"UPDATE {_availableUpdate.Version}";
 
     public string StatusText
     {
@@ -150,9 +159,13 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         try
         {
             var update = await _updateService.CheckForUpdatesAsync();
+            var previousVersion = _availableUpdate?.Version;
             _availableUpdate = update;
             _completedVersion = null;
-            _isBannerDismissed = false;
+            _isBannerDismissed = update is not null
+                && !userInitiated
+                && string.Equals(previousVersion, update.Version, StringComparison.OrdinalIgnoreCase)
+                && _isBannerDismissed;
             StatusText = update is null
                 ? $"TechBench {_updateService.CurrentVersion} is up to date."
                 : $"Version {update.Version} is ready to download.";
@@ -222,6 +235,17 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         RaiseDisplayProperties();
     }
 
+    private void ShowUpdateBanner()
+    {
+        if (!HasAvailableUpdate)
+        {
+            return;
+        }
+
+        _isBannerDismissed = false;
+        RaiseDisplayProperties();
+    }
+
     private void NotifyUpdateAvailableOnce(AppUpdateRelease? update)
     {
         if (update is null
@@ -257,6 +281,7 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsDownloading));
         OnPropertyChanged(nameof(IsProgressVisible));
         OnPropertyChanged(nameof(BannerDetail));
+        OnPropertyChanged(nameof(HeaderUpdateLabel));
         RaiseCommandStates();
     }
 
@@ -272,6 +297,7 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(DownloadProgress));
         OnPropertyChanged(nameof(DownloadProgressLabel));
         OnPropertyChanged(nameof(BannerDetail));
+        OnPropertyChanged(nameof(HeaderUpdateLabel));
     }
 
     private void RaiseDisplayProperties()
@@ -284,6 +310,7 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(BannerTitle));
         OnPropertyChanged(nameof(BannerDetail));
         OnPropertyChanged(nameof(DismissButtonText));
+        OnPropertyChanged(nameof(HeaderUpdateLabel));
         RaiseCommandStates();
     }
 
@@ -292,6 +319,7 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         CheckForUpdatesCommand.RaiseCanExecuteChanged();
         InstallUpdateCommand.RaiseCanExecuteChanged();
         DismissBannerCommand.RaiseCanExecuteChanged();
+        ShowUpdateBannerCommand.RaiseCanExecuteChanged();
         OnPropertyChanged(nameof(CanInstallUpdate));
     }
 }

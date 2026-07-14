@@ -20,7 +20,45 @@ public sealed class AppUpdateViewModelTests
         Assert.True(viewModel.IsBannerVisible);
         Assert.Equal("TechBench 1.1.0 is available", viewModel.BannerTitle);
         Assert.Equal("Later", viewModel.DismissButtonText);
+        Assert.Equal("UPDATE 1.1.0", viewModel.HeaderUpdateLabel);
         Assert.Equal("Version 1.1.0 is ready to download.", viewModel.StatusText);
+    }
+
+    [Fact]
+    public async Task HeaderUpdateAlert_ReopensDismissedBanner()
+    {
+        var service = new FakeAppUpdateService
+        {
+            AvailableUpdate = new AppUpdateRelease("1.1.0", "Release notes")
+        };
+        using var viewModel = CreateViewModel(service);
+
+        await viewModel.CheckForUpdatesAsync(userInitiated: false);
+        viewModel.DismissBannerCommand.Execute(null);
+
+        Assert.False(viewModel.IsBannerVisible);
+        Assert.True(viewModel.HasAvailableUpdate);
+
+        viewModel.ShowUpdateBannerCommand.Execute(null);
+
+        Assert.True(viewModel.IsBannerVisible);
+    }
+
+    [Fact]
+    public async Task HourlyCheck_DoesNotReopenDismissedBannerForSameVersion()
+    {
+        var service = new FakeAppUpdateService
+        {
+            AvailableUpdate = new AppUpdateRelease("1.1.0", "Release notes")
+        };
+        using var viewModel = CreateViewModel(service);
+
+        await viewModel.CheckForUpdatesAsync(userInitiated: false);
+        viewModel.DismissBannerCommand.Execute(null);
+        await viewModel.CheckForUpdatesAsync(userInitiated: false);
+
+        Assert.False(viewModel.IsBannerVisible);
+        Assert.Equal(TimeSpan.FromHours(1), AppUpdateViewModel.AutomaticCheckInterval);
     }
 
     [Fact]
