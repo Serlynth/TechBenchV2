@@ -322,6 +322,40 @@ public sealed class TechBenchRepositoryTests
     }
 
     [Fact]
+    public void WorkEntryQueryCanExcludeCurrentEntryAndLimitRecentResults()
+    {
+        WithRepository((repository, _) =>
+        {
+            var client = new Client { Name = "Northwind" };
+            repository.SaveClient(client);
+            var entries = Enumerable.Range(1, 7)
+                .Select(index => new WorkEntry
+                {
+                    WorkDate = new DateTime(2026, 7, index),
+                    ClientId = client.Id,
+                    DurationMinutes = 15,
+                    Note = $"Work note {index}"
+                })
+                .ToList();
+            foreach (var entry in entries)
+            {
+                repository.SaveWorkEntry(entry);
+            }
+
+            var results = repository.GetWorkEntries(new WorkEntryQuery
+            {
+                ClientId = client.Id,
+                ExcludeId = entries[^1].Id,
+                MaxResults = 5
+            });
+
+            Assert.Equal(5, results.Count);
+            Assert.DoesNotContain(results, entry => entry.Id == entries[^1].Id);
+            Assert.Equal(entries[^2].Id, results[0].Id);
+        });
+    }
+
+    [Fact]
     public void EditorDraftAndClientAliasesRoundTrip()
     {
         WithRepository((repository, _) =>
@@ -332,8 +366,17 @@ public sealed class TechBenchRepositoryTests
                 CustomerName = "CSRI"
             });
             var client = Assert.Single(repository.GetClients(), candidate => candidate.Id == clientId);
+            var committedEntry = new WorkEntry
+            {
+                WorkDate = new DateTime(2026, 7, 14),
+                ClientId = client.Id,
+                DurationMinutes = 45,
+                Note = "Committed note"
+            };
+            repository.SaveWorkEntry(committedEntry);
             var draft = new EditorDraft
             {
+                WorkEntryId = committedEntry.Id,
                 WorkDate = new DateTime(2026, 7, 14),
                 ClientId = client.Id,
                 DurationMinutesText = "45",
@@ -348,6 +391,7 @@ public sealed class TechBenchRepositoryTests
             Assert.NotNull(loaded);
             Assert.Equal("Recovered note", loaded.Note);
             Assert.Equal(FollowUpState.FollowUp, loaded.FollowUpState);
+            Assert.Equal("Committed note", repository.GetWorkEntry(committedEntry.Id)?.Note);
             Assert.Equal(client.Id, repository.GetClientAliases()["SHORT NAME"]);
 
             repository.ClearEditorDraft();

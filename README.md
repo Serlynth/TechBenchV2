@@ -74,7 +74,7 @@ Settings also provides manual backup, integrity-check, and open-backup-folder co
 ## Current Features
 
 - Note-first Today workspace with a full-size plain-text editor
-- Continuous local autosave after a short pause, plus crash/close recovery for incomplete drafts
+- Recovery-only draft backup after a short pause, plus crash/close recovery without changing the committed note
 - Work-note spell checking, undo, word/character counts, in-note find, timestamp and structured-note helpers
 - Tags, follow-up/waiting states, overdue badges for existing dated follow-ups, and closeout reminders
 - Fast full-text search across work notes, internal notes, clients, tickets, and tags, with a safe SQLite fallback
@@ -97,7 +97,7 @@ Settings also provides manual backup, integrity-check, and open-backup-folder co
 
 ## Note Workflow
 
-The main editor autosaves a valid entry after a short pause; incomplete work is stored separately as a recoverable draft. Local autosave never posts to WHD or Sage. Use **Save** for an immediate local save, **New Entry** to begin the next note, and the **Post** menu to explicitly choose WHD or Sage.
+The main editor stores a small recovery draft after a short pause, but it does not create or update the committed work entry. The editor remains visibly unsaved until you use **Save**. **New Entry** begins the next note, and the **Post** menu explicitly chooses WHD or Sage.
 
 Use comma-separated tags for projects, locations, or work types. A note marked **Follow-up** or **Waiting** appears on its entry card and in Daily Closeout until it is marked **Completed** or **None**. Search can combine text, client, ticket, date, posting status, tags, and follow-up state.
 

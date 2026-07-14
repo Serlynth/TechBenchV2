@@ -1474,10 +1474,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void LoadEntryIntoEditor(WorkEntry entry)
     {
-        var clients = _repository.GetClients(includeInactive: true);
-        var tickets = entry.ClientId.HasValue
-            ? _repository.GetTickets(entry.ClientId.Value, includeClosed: true)
-            : Array.Empty<Ticket>();
+        IReadOnlyList<Client> clients = entry.ClientId is int clientId
+            && _repository.GetClient(clientId) is { } client
+                ? [client]
+                : [];
+        IReadOnlyList<Ticket> tickets = entry.TicketId is int ticketId
+            && _repository.GetTicket(ticketId) is { } ticket
+                ? [ticket]
+                : [];
         _isSynchronizingEditorReferences = true;
         try
         {
@@ -1490,7 +1494,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _isPostedEditorUnlocked = false;
         RaiseEditorStateProperties();
         SyncEditorClientFilterText(Editor.SelectedClient?.DisplayName ?? string.Empty);
-        RefreshEditorClientOptions();
         RefreshEditorTickets(entry.TicketId);
         Editor.MarkClean();
         EditorSaveStatus = $"Saved {DateTime.Now:h:mm tt}";
@@ -1528,7 +1531,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _isSynchronizingEditorReferences = false;
         }
         SyncEditorClientFilterText(string.Empty);
-        RefreshEditorClientOptions();
         RefreshEditorTickets();
         Editor.MarkClean();
         EditorSaveStatus = "Saved";
@@ -3182,7 +3184,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             && e.PropertyName == nameof(WorkEntryEditorViewModel.SelectedClient))
         {
             SyncEditorClientFilterText(Editor.SelectedClient?.DisplayName ?? string.Empty);
-            RefreshEditorClientOptions();
             RefreshEditorTickets();
         }
 

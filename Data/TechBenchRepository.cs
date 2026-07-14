@@ -817,6 +817,12 @@ public sealed class TechBenchRepository
             command.Parameters.AddWithValue("$clientId", query.ClientId.Value);
         }
 
+        if (query.ExcludeId.HasValue)
+        {
+            sql.Append(" AND w.Id <> $excludeId");
+            command.Parameters.AddWithValue("$excludeId", query.ExcludeId.Value);
+        }
+
         if (!string.IsNullOrWhiteSpace(query.TicketText))
         {
             sql.Append(" AND (w.TicketNumberText LIKE $ticket OR t.TicketNumber LIKE $ticket)");
@@ -882,6 +888,12 @@ public sealed class TechBenchRepository
         }
 
         sql.Append(" ORDER BY w.WorkDate DESC, w.StartTime DESC, w.Id DESC");
+        if (query.MaxResults is > 0)
+        {
+            sql.Append(" LIMIT $maxResults");
+            command.Parameters.AddWithValue("$maxResults", query.MaxResults.Value);
+        }
+
         command.CommandText = sql.ToString();
 
         using var reader = command.ExecuteReader();

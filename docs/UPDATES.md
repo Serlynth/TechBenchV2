@@ -9,7 +9,7 @@ TechBench uses Velopack and the public binary-only repository at
 - Each available version triggers one Windows notification per app session and remains visible in an in-app banner until dismissed.
 - Settings includes the installed version, update status, and a manual **Check for Updates** command.
 - An available update appears as a full-width in-app banner.
-- **Update now** reports download progress, autosaves the current draft, creates and verifies a SQLite backup, launches the updater, closes TechBench, installs the update, and reopens the app.
+- **Update now** reports download progress, backs up the current recovery draft, creates and verifies a SQLite backup, launches the updater, closes TechBench, installs the update, and reopens the app.
 - If backup verification fails, installation does not begin.
 
 ## First installation

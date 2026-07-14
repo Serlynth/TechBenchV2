@@ -9,11 +9,11 @@ namespace TechBench.ViewModels;
 
 public sealed partial class MainWindowViewModel
 {
-    private readonly DispatcherTimer _editorAutoSaveTimer = new()
+    private readonly DispatcherTimer _editorDraftTimer = new()
     {
         Interval = TimeSpan.FromMilliseconds(1200)
     };
-    private bool _isHandlingEditorAutoSave;
+    private bool _isPersistingEditorDraft;
     private bool _isRestoringEditorDraft;
     private DateTime? _lastEditorSaveAt;
     private string _editorSaveStatus = "Saved";
@@ -133,18 +133,22 @@ public sealed partial class MainWindowViewModel
         }
 
         SearchFollowUpOption = SearchFollowUpOptions[0];
-        _editorAutoSaveTimer.Tick += HandleEditorAutoSaveTimerTick;
+        _editorDraftTimer.Tick += HandleEditorDraftTimerTick;
     }
 
     private void HandleNoteEditorPropertyChanged(PropertyChangedEventArgs e)
     {
+        if (_isSynchronizingEditorReferences || _isRestoringEditorDraft)
+        {
+            return;
+        }
+
         if (e.PropertyName == nameof(WorkEntryEditorViewModel.SelectedClient))
         {
             RefreshRecentClientEntries();
         }
 
-        if (_isRestoringEditorDraft
-            || _isHandlingEditorAutoSave
+        if (_isPersistingEditorDraft
             || !WorkEntryEditorViewModel.IsEditableProperty(e.PropertyName)
             || !Editor.IsDirty)
         {
@@ -152,63 +156,40 @@ public sealed partial class MainWindowViewModel
         }
 
         EditorSaveStatus = "Unsaved";
-        _editorAutoSaveTimer.Stop();
-        _editorAutoSaveTimer.Start();
+        _editorDraftTimer.Stop();
+        _editorDraftTimer.Start();
     }
 
-    private void HandleEditorAutoSaveTimerTick(object? sender, EventArgs e)
+    private void HandleEditorDraftTimerTick(object? sender, EventArgs e)
     {
-        _editorAutoSaveTimer.Stop();
-        AutoSaveEditor();
+        _editorDraftTimer.Stop();
+        PersistEditorRecoveryDraft();
     }
 
-    private void AutoSaveEditor()
+    private void PersistEditorRecoveryDraft()
     {
-        if (_isHandlingEditorAutoSave || IsEntryOperationRunning || IsEditorLocked || !Editor.IsDirty)
+        if (_isPersistingEditorDraft || IsEntryOperationRunning || IsEditorLocked || !Editor.IsDirty)
         {
             return;
         }
 
-        _isHandlingEditorAutoSave = true;
-        EditorSaveStatus = "Saving";
+        _isPersistingEditorDraft = true;
+        EditorSaveStatus = "Backing up draft";
         try
         {
-            _repository.SaveEditorDraft(Editor.BuildDraft());
-            _lastEditorSaveAt = DateTime.Now;
-
-            var shouldCreateEntry = Editor.Id > 0 || !string.IsNullOrWhiteSpace(Editor.Note);
-            if (shouldCreateEntry && Editor.TryBuildEntry(out var entry, out _))
-            {
-                entry.LastError = null;
-                TechBenchRepository.UpdatePostingStatus(entry);
-                var id = _repository.SaveWorkEntry(entry);
-                Editor.RunWithoutDirtyTracking(() => Editor.Id = id);
-                var savedEntry = _repository.GetWorkEntry(id);
-                if (savedEntry is not null)
-                {
-                    _selectedEntry = savedEntry;
-                    OnPropertyChanged(nameof(SelectedEntry));
-                }
-
-                Editor.MarkClean();
-                _repository.ClearEditorDraft();
-                RefreshCurrentSectionData();
-                EditorSaveStatus = $"Saved {_lastEditorSaveAt.Value:h:mm tt}";
-                StatusMessage = $"Autosaved work entry #{id} locally.";
-            }
-            else
-            {
-                EditorSaveStatus = $"Draft saved {_lastEditorSaveAt.Value:h:mm tt}";
-            }
+            var draft = Editor.BuildDraft();
+            _repository.SaveEditorDraft(draft);
+            _lastEditorSaveAt = draft.UpdatedAt;
+            EditorSaveStatus = $"Unsaved - recovery copy {_lastEditorSaveAt.Value:h:mm tt}";
         }
         catch (Exception ex)
         {
-            EditorSaveStatus = "Autosave failed";
+            EditorSaveStatus = "Unsaved - recovery failed";
             StatusMessage = $"The editor draft could not be saved: {ex.Message}";
         }
         finally
         {
-            _isHandlingEditorAutoSave = false;
+            _isPersistingEditorDraft = false;
             OnPropertyChanged(nameof(WorkspaceStateLabel));
         }
     }
@@ -227,10 +208,14 @@ public sealed partial class MainWindowViewModel
             draft.WorkEntryId = 0;
         }
 
-        var clients = _repository.GetClients(includeInactive: true);
-        var tickets = draft.ClientId.HasValue
-            ? _repository.GetTickets(draft.ClientId.Value, includeClosed: true)
-            : Array.Empty<Ticket>();
+        IReadOnlyList<Client> clients = draft.ClientId is int clientId
+            && _repository.GetClient(clientId) is { } client
+                ? [client]
+                : [];
+        IReadOnlyList<Ticket> tickets = draft.TicketId is int ticketId
+            && _repository.GetTicket(ticketId) is { } ticket
+                ? [ticket]
+                : [];
         _isRestoringEditorDraft = true;
         _isSynchronizingEditorReferences = true;
         try
@@ -251,18 +236,17 @@ public sealed partial class MainWindowViewModel
         }
 
         SyncEditorClientFilterText(Editor.SelectedClient?.DisplayName ?? string.Empty);
-        RefreshEditorClientOptions();
         RefreshEditorTickets(draft.TicketId);
         RefreshRecentClientEntries();
         _lastEditorSaveAt = draft.UpdatedAt;
-        EditorSaveStatus = $"Draft recovered {draft.UpdatedAt:h:mm tt}";
+        EditorSaveStatus = $"Unsaved - recovered {draft.UpdatedAt:h:mm tt}";
         StatusMessage = "Recovered the last autosaved editor draft.";
         RaiseEditorStateProperties();
     }
 
     private void ClearPersistedEditorDraft()
     {
-        _editorAutoSaveTimer.Stop();
+        _editorDraftTimer.Stop();
         _repository.ClearEditorDraft();
         _lastEditorSaveAt = DateTime.Now;
         EditorSaveStatus = $"Saved {_lastEditorSaveAt.Value:h:mm tt}";
@@ -270,7 +254,7 @@ public sealed partial class MainWindowViewModel
 
     private void PersistEditorDraftBeforeExit()
     {
-        _editorAutoSaveTimer.Stop();
+        _editorDraftTimer.Stop();
         if (!Editor.IsDirty)
         {
             return;
@@ -294,9 +278,12 @@ public sealed partial class MainWindowViewModel
             return;
         }
 
-        foreach (var entry in _repository.GetWorkEntries(new WorkEntryQuery { ClientId = client.Id })
-                     .Where(entry => entry.Id != Editor.Id)
-                     .Take(5))
+        foreach (var entry in _repository.GetWorkEntries(new WorkEntryQuery
+                 {
+                     ClientId = client.Id,
+                     ExcludeId = Editor.Id > 0 ? Editor.Id : null,
+                     MaxResults = 5
+                 }))
         {
             RecentClientEntries.Add(entry);
         }
@@ -398,8 +385,8 @@ public sealed partial class MainWindowViewModel
     private void DisposeNoteFeatures()
     {
         PersistEditorDraftBeforeExit();
-        _editorAutoSaveTimer.Stop();
-        _editorAutoSaveTimer.Tick -= HandleEditorAutoSaveTimerTick;
+        _editorDraftTimer.Stop();
+        _editorDraftTimer.Tick -= HandleEditorDraftTimerTick;
     }
 
     private void ImportGoogleSheetsCsv()
