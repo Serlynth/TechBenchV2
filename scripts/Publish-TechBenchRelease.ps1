@@ -106,6 +106,9 @@ try {
         @($releaseListText | ConvertFrom-Json)
     }
     $hasExistingRelease = $existingReleases.Count -gt 0
+    if ($Publish -and $existingReleases.tagName -contains "v$Version") {
+        throw "GitHub release v$Version already exists. Versions are immutable; choose a new version."
+    }
 
     if ($hasExistingRelease) {
         Invoke-Checked $dotnet @(
@@ -168,10 +171,6 @@ try {
     Copy-Item -LiteralPath $setup.FullName -Destination $distSetupPath -Force
 
     if ($Publish) {
-        if ($existingReleases.tagName -contains "v$Version") {
-            throw "GitHub release v$Version already exists. Versions are immutable; choose a new version."
-        }
-
         $token = (gh auth token).Trim()
         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
             throw 'GitHub CLI is not authenticated.'
