@@ -97,11 +97,11 @@ Settings also provides manual backup, integrity-check, and open-backup-folder co
 
 ## Note Workflow
 
-The main editor autosaves a valid entry after a short pause; incomplete work is stored separately as a recoverable draft. Local autosave never posts to WHD or Sage. External posting remains an explicit action through **Save & Post** or the destination-specific commands.
+The main editor autosaves a valid entry after a short pause; incomplete work is stored separately as a recoverable draft. Local autosave never posts to WHD or Sage. Use **Save** for an immediate local save, **New Entry** to begin the next note, and the **Post** menu to explicitly choose WHD or Sage.
 
 Use comma-separated tags for projects, locations, or work types. A note marked **Follow-up** or **Waiting** appears on its entry card and in Daily Closeout until it is marked **Completed** or **None**. Search can combine text, client, ticket, date, posting status, tags, and follow-up state.
 
-`Ctrl+Enter` saves the current entry and starts a new note. `Ctrl+N` starts a new entry through the existing unsaved-change safeguards.
+`Ctrl+N` starts a new entry through the existing unsaved-change safeguards.
 
 ## Google Sheets Import
 

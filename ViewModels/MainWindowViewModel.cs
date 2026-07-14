@@ -145,7 +145,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         EditEntryCommand = new RelayCommand(EditEntry, parameter => parameter is WorkEntry { Id: > 0 });
         NewEntryCommand = new RelayCommand(_ => NewEntry());
         SaveEntryCommand = new RelayCommand(_ => SaveEntry(), _ => CanSaveEditor());
-        CompleteEntryCommand = new AsyncRelayCommand(CompleteEntryAsync, _ => CanCompleteEditor());
         DeleteEntryCommand = new RelayCommand(_ => DeleteEntry(), _ => CanDeleteEditorEntry());
         DuplicateEntryCommand = new RelayCommand(_ => DuplicateEntry(), _ => Editor.Id > 0);
         UndoDeleteCommand = new RelayCommand(_ => UndoDelete(), _ => _lastDeletedEntry is not null);
@@ -155,8 +154,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ExportWeeklyCsvCommand = new RelayCommand(_ => ExportWeeklyCsv());
         RefreshHistoryCommand = new RelayCommand(_ => RefreshHistory());
         ExportHistoryCsvCommand = new RelayCommand(_ => ExportHistoryCsv());
-        PostWhdCommand = new AsyncRelayCommand(PostWhdAsync, CanPostEntry);
-        PostSageCommand = new AsyncRelayCommand(PostSageAsync, CanPostEntry);
+        PostWhdCommand = new AsyncRelayCommand(PostWhdAsync, CanPostWhdEntry);
+        PostSageCommand = new AsyncRelayCommand(PostSageAsync, CanPostSageEntry);
         VerifySageSaveCommand = new AsyncRelayCommand(VerifySageSaveAsync, CanVerifySageSave);
         BatchPostWhdCommand = new AsyncRelayCommand(BatchPostWhdAsync);
         MarkWhdPostedCommand = new RelayCommand(parameter => MarkPosted(parameter, "WHD"), CanResolveSavedEntry);
@@ -277,7 +276,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public RelayCommand EditEntryCommand { get; }
     public RelayCommand NewEntryCommand { get; }
     public RelayCommand SaveEntryCommand { get; }
-    public AsyncRelayCommand CompleteEntryCommand { get; }
     public RelayCommand DeleteEntryCommand { get; }
     public RelayCommand DuplicateEntryCommand { get; }
     public RelayCommand UndoDeleteCommand { get; }
@@ -337,12 +335,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         get => _isDatabaseHealthy;
         private set => SetProperty(ref _isDatabaseHealthy, value);
     }
-    public string SaveEntryButtonText => Editor.Id > 0 ? "Update Entry" : "Save New Entry";
-    public bool HasPendingEditorDestination => (!Editor.HasNoTicket && !Editor.WhdPosted)
-        || (Editor.Billable && !Editor.SagePosted);
-    public string CompleteEntryButtonText => IsEditorLocked
-        ? "Post Pending"
-        : HasPendingEditorDestination ? "Save & Post" : "Save Entry";
     public string EditorTitle => Editor.Id > 0 ? $"Entry #{Editor.Id}" : "New Entry";
     public string EditorSubtitle => Editor.SelectedClient?.DisplayName
         ?? (Editor.UseManualClient && !string.IsNullOrWhiteSpace(Editor.ManualClientName)
@@ -1767,55 +1759,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         StatusMessage = successMessage;
     }
 
-    private async Task CompleteEntryAsync(object? parameter)
-    {
-        if (IsEntryOperationRunning)
-        {
-            return;
-        }
-
-        IsEntryOperationRunning = true;
-        EntryOperationText = "Saving the work entry...";
-        try
-        {
-            var entry = IsEditorLocked && !Editor.IsDirty
-                ? ResolveEntry(parameter)
-                : SaveEditor();
-            if (entry is null)
-            {
-                return;
-            }
-
-            var postedAnything = false;
-            if (entry.HasTicket && !entry.WhdPosted)
-            {
-                EntryOperationText = "Posting the work note to WHD...";
-                await PostWhdAsync(entry);
-                postedAnything = true;
-                entry = _repository.GetWorkEntry(entry.Id) ?? entry;
-            }
-
-            if (entry.Billable && !entry.SagePosted)
-            {
-                EntryOperationText = "Creating and verifying the Sage ticket...";
-                await PostSageAsync(entry);
-                postedAnything = true;
-            }
-
-            if (!postedAnything)
-            {
-                StatusMessage = entry.HasTicket || entry.Billable
-                    ? "Entry saved; all applicable destinations were already posted."
-                    : "Entry saved. No posting destination applies.";
-            }
-        }
-        finally
-        {
-            EntryOperationText = string.Empty;
-            IsEntryOperationRunning = false;
-        }
-    }
-
     private async Task PostWhdAsync(object? parameter)
     {
         var ownsOperationState = !IsEntryOperationRunning;
@@ -2176,19 +2119,35 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         StatusMessage = $"Marked {destination} posted";
     }
 
-    private bool CanPostEntry(object? parameter)
+    private bool CanPostWhdEntry(object? parameter)
     {
-        return parameter is WorkEntry { Id: > 0 }
-            || Editor.Id > 0
-            || (Editor.HasClientReference && IsEditorEditable);
+        if (IsEntryOperationRunning)
+        {
+            return false;
+        }
+
+        return parameter is WorkEntry entry
+            ? entry is { Id: > 0, HasTicket: true, WhdPosted: false }
+            : (Editor.Id > 0 || (Editor.HasClientReference && IsEditorEditable))
+              && !Editor.HasNoTicket
+              && !Editor.WhdPosted;
+    }
+
+    private bool CanPostSageEntry(object? parameter)
+    {
+        if (IsEntryOperationRunning)
+        {
+            return false;
+        }
+
+        return parameter is WorkEntry entry
+            ? entry is { Id: > 0, Billable: true, SagePosted: false }
+            : (Editor.Id > 0 || (Editor.HasClientReference && IsEditorEditable))
+              && Editor.Billable
+              && !Editor.SagePosted;
     }
 
     private bool CanSaveEditor() => Editor.HasClientReference && IsEditorEditable;
-
-    private bool CanCompleteEditor() => !IsEntryOperationRunning
-        && (IsEditorLocked
-            ? Editor.Id > 0 && HasPendingEditorDestination
-            : Editor.HasClientReference);
 
     private bool CanResolveSavedEntry(object? parameter) => parameter is WorkEntry { Id: > 0 } || Editor.Id > 0;
 
@@ -3237,8 +3196,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         if (e.PropertyName == nameof(WorkEntryEditorViewModel.Id))
         {
-            OnPropertyChanged(nameof(SaveEntryButtonText));
-            OnPropertyChanged(nameof(CompleteEntryButtonText));
             OnPropertyChanged(nameof(EditorTitle));
         }
 
@@ -3252,15 +3209,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         if (e.PropertyName == nameof(WorkEntryEditorViewModel.SelectedTicket))
         {
             OnPropertyChanged(nameof(ShowOpenWhdAction));
-        }
-
-        if (e.PropertyName is nameof(WorkEntryEditorViewModel.SelectedTicket)
-            or nameof(WorkEntryEditorViewModel.Billable)
-            or nameof(WorkEntryEditorViewModel.WhdPosted)
-            or nameof(WorkEntryEditorViewModel.SagePosted))
-        {
-            OnPropertyChanged(nameof(HasPendingEditorDestination));
-            OnPropertyChanged(nameof(CompleteEntryButtonText));
         }
 
         if (e.PropertyName == nameof(WorkEntryEditorViewModel.IsDirty))
@@ -3293,11 +3241,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private void RaiseEditorWorkflowCommandStates()
     {
         SaveEntryCommand.RaiseCanExecuteChanged();
-        CompleteEntryCommand.RaiseCanExecuteChanged();
         DeleteEntryCommand.RaiseCanExecuteChanged();
         DuplicateEntryCommand.RaiseCanExecuteChanged();
         UnlockPostedEntryCommand.RaiseCanExecuteChanged();
-        SaveAndNewCommand.RaiseCanExecuteChanged();
         InsertRecentNoteCommand.RaiseCanExecuteChanged();
     }
 
@@ -3308,8 +3254,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsEditorLocked));
         OnPropertyChanged(nameof(IsEditorEditable));
         OnPropertyChanged(nameof(ShowOpenWhdAction));
-        OnPropertyChanged(nameof(HasPendingEditorDestination));
-        OnPropertyChanged(nameof(CompleteEntryButtonText));
         OnPropertyChanged(nameof(WorkspaceStateLabel));
         RaiseEditorWorkflowCommandStates();
     }

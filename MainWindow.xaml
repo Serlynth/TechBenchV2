@@ -14,7 +14,6 @@
         Background="{DynamicResource WindowBackgroundBrush}">
     <Window.InputBindings>
         <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveEntryCommand}" />
-        <KeyBinding Key="Enter" Modifiers="Control" Command="{Binding SaveAndNewCommand}" />
         <KeyBinding Key="F5" Command="{Binding RefreshAllCommand}" />
     </Window.InputBindings>
     <Window.Resources>
@@ -1126,20 +1125,15 @@
                                                 CommandParameter="{Binding Editor.SelectedTicket}"
                                                 Style="{StaticResource EditorActionButtonStyle}"
                                                 Visibility="{Binding ShowOpenWhdAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                        <Button Content="{Binding SaveEntryButtonText}"
+                                        <Button Content="Save"
                                                 Command="{Binding SaveEntryCommand}"
-                                                Style="{StaticResource EditorActionButtonStyle}" />
-                                        <Button Content="Save &amp; New"
-                                                Command="{Binding SaveAndNewCommand}"
-                                                Style="{StaticResource EditorPrimaryActionButtonStyle}"
-                                                ToolTip="Save locally and start the next note (Ctrl+Enter)" />
-                                        <Button Content="{Binding CompleteEntryButtonText}"
-                                                Command="{Binding CompleteEntryCommand}"
-                                                Style="{StaticResource EditorActionButtonStyle}" />
-                                        <Button Content="More"
-                                                Click="MoreActionsButton_Click"
                                                 Style="{StaticResource EditorActionButtonStyle}"
-                                                MinWidth="76">
+                                                ToolTip="Save locally and keep this note open (Ctrl+S)" />
+                                        <Button Content="Post"
+                                                Click="PostActionsButton_Click"
+                                                Style="{StaticResource EditorActionButtonStyle}"
+                                                MinWidth="76"
+                                                ToolTip="Save locally, then choose where to post">
                                             <Button.ContextMenu>
                                                 <ContextMenu Style="{StaticResource EditorContextMenuStyle}"
                                                              Placement="Top"
@@ -1150,12 +1144,24 @@
                                                     <MenuItem Header="Create Sage Ticket"
                                                               Command="{Binding PostSageCommand}"
                                                               Style="{StaticResource EditorContextMenuItemStyle}" />
+                                                </ContextMenu>
+                                            </Button.ContextMenu>
+                                        </Button>
+                                        <Button Content="More"
+                                                Click="MoreActionsButton_Click"
+                                                Style="{StaticResource EditorActionButtonStyle}"
+                                                MinWidth="76">
+                                            <Button.ContextMenu>
+                                                <ContextMenu Style="{StaticResource EditorContextMenuStyle}"
+                                                             Placement="Top"
+                                                             DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                                     <MenuItem Header="Check Sage Save"
                                                               Command="{Binding VerifySageSaveCommand}"
                                                               Style="{StaticResource EditorContextMenuItemStyle}" />
-                                                    <MenuItem Header="Mark WHD Posted"
+                                                    <MenuItem Header="Mark WHD Posted (Manual)"
                                                               Command="{Binding MarkWhdPostedCommand}"
                                                               Style="{StaticResource EditorContextMenuItemStyle}" />
+                                                    <Separator />
                                                     <MenuItem Header="Duplicate Entry"
                                                               Command="{Binding DuplicateEntryCommand}"
                                                               Style="{StaticResource EditorContextMenuItemStyle}" />

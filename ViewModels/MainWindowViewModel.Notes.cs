@@ -29,7 +29,6 @@ public sealed partial class MainWindowViewModel
     public ObservableCollection<FollowUpOption> FollowUpOptions { get; } = new();
     public ObservableCollection<FollowUpOption> SearchFollowUpOptions { get; } = new();
 
-    public RelayCommand SaveAndNewCommand { get; private set; } = null!;
     public RelayCommand InsertRecentNoteCommand { get; private set; } = null!;
     public RelayCommand ImportGoogleSheetsCommand { get; private set; } = null!;
     public RelayCommand NewNoteTemplateCommand { get; private set; } = null!;
@@ -117,7 +116,6 @@ public sealed partial class MainWindowViewModel
 
     private void InitializeNoteFeatures()
     {
-        SaveAndNewCommand = new RelayCommand(_ => SaveAndStartNew(), _ => CanSaveEditor());
         InsertRecentNoteCommand = new RelayCommand(InsertRecentNote, parameter => parameter is WorkEntry && IsEditorEditable);
         ImportGoogleSheetsCommand = new RelayCommand(_ => ImportGoogleSheetsCsv(), _ => !IsEntryOperationRunning);
         NewNoteTemplateCommand = new RelayCommand(_ => StartNewNoteTemplate());
@@ -285,18 +283,6 @@ public sealed partial class MainWindowViewModel
         catch
         {
         }
-    }
-
-    private void SaveAndStartNew()
-    {
-        var saved = SaveEditor();
-        if (saved is null)
-        {
-            return;
-        }
-
-        NewEntry();
-        StatusMessage = $"Saved work entry #{saved.Id}. New note ready.";
     }
 
     private void RefreshRecentClientEntries()

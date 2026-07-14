@@ -109,7 +109,8 @@ public sealed class DatabaseBackupService
             using (var destination = new SqliteConnection(new SqliteConnectionStringBuilder
             {
                 DataSource = backupPath,
-                Mode = SqliteOpenMode.ReadWriteCreate
+                Mode = SqliteOpenMode.ReadWriteCreate,
+                Pooling = false
             }.ToString()))
             {
                 source.Open();
@@ -193,7 +194,8 @@ public sealed class DatabaseBackupService
             using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
             {
                 DataSource = databasePath,
-                Mode = SqliteOpenMode.ReadOnly
+                Mode = SqliteOpenMode.ReadOnly,
+                Pooling = false
             }.ToString());
             connection.Open();
             using var command = connection.CreateCommand();

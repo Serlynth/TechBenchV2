@@ -124,13 +124,21 @@ public partial class MainWindow : Window
 
     private void MoreActionsButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not System.Windows.Controls.Button { ContextMenu: { } contextMenu } button)
-        {
-            return;
-        }
+        OpenButtonContextMenu(sender);
+    }
 
-        contextMenu.PlacementTarget = button;
-        contextMenu.IsOpen = true;
+    private void PostActionsButton_Click(object sender, RoutedEventArgs e)
+    {
+        OpenButtonContextMenu(sender);
+    }
+
+    private static void OpenButtonContextMenu(object sender)
+    {
+        if (sender is System.Windows.Controls.Button { ContextMenu: { } contextMenu } button)
+        {
+            contextMenu.PlacementTarget = button;
+            contextMenu.IsOpen = true;
+        }
     }
 
     protected override void OnPreviewKeyDown(System.Windows.Input.KeyEventArgs e)
