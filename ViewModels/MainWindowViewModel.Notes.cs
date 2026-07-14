@@ -208,14 +208,10 @@ public sealed partial class MainWindowViewModel
             draft.WorkEntryId = 0;
         }
 
-        IReadOnlyList<Client> clients = draft.ClientId is int clientId
-            && _repository.GetClient(clientId) is { } client
-                ? [client]
-                : [];
-        IReadOnlyList<Ticket> tickets = draft.TicketId is int ticketId
-            && _repository.GetTicket(ticketId) is { } ticket
-                ? [ticket]
-                : [];
+        var client = ResolveEditorClient(draft.ClientId);
+        IReadOnlyList<Client> clients = client is null ? [] : [client];
+        var ticket = ResolveEditorTicket(draft.TicketId);
+        IReadOnlyList<Ticket> tickets = ticket is null ? [] : [ticket];
         _isRestoringEditorDraft = true;
         _isSynchronizingEditorReferences = true;
         try

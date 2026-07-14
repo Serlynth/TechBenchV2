@@ -110,6 +110,11 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.IsEditorClientDropDownOpen = true;
+        }
+
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
         {
             if (editableTextBox.IsKeyboardFocused

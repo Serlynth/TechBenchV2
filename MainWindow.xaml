@@ -858,6 +858,7 @@
                                                           ItemsSource="{Binding EditorClients}"
                                                           SelectedItem="{Binding Editor.SelectedClient}"
                                                           Text="{Binding EditorClientFilterText, UpdateSourceTrigger=PropertyChanged}"
+                                                          TextSearch.TextPath="DisplayName"
                                                           IsDropDownOpen="{Binding IsEditorClientDropDownOpen}"
                                                           ItemTemplate="{StaticResource EditorClientOptionTemplate}"
                                                           ItemContainerStyle="{StaticResource EditorClientComboBoxItemStyle}"

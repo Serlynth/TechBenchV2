@@ -29,4 +29,6 @@ public sealed class Client
     public string MatchStatusLabel => string.IsNullOrWhiteSpace(MatchStatus) ? "Unmatched" : MatchStatus;
     public string ActiveStatus => IsActive ? "Active" : "Inactive";
     public string LastSyncedLabel => LastSyncedAt.HasValue ? LastSyncedAt.Value.ToString("g") : "-";
+
+    public override string ToString() => DisplayName;
 }

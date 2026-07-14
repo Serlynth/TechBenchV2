@@ -51,6 +51,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private string _editorClientFilterText = string.Empty;
     private bool _isEditorClientDropDownOpen;
     private bool _isSyncingEditorClientFilterText;
+    private int? _editorTicketOptionsClientId;
     private DateTime? _historyStartDate = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
     private DateTime? _historyEndDate = DateTime.Today;
     private string _historyRangePreset = "This Month";
@@ -602,10 +603,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _editorClientFilterText, value))
             {
-                RefreshEditorClientOptions();
                 if (!_isSyncingEditorClientFilterText)
                 {
-                    IsEditorClientDropDownOpen = true;
+                    RefreshEditorClientOptions();
                 }
             }
         }
@@ -993,49 +993,114 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             clients.Insert(0, selectedClient);
         }
 
-        EditorClients.Clear();
-        foreach (var client in clients)
+        var wasSynchronizing = _isSynchronizingEditorReferences;
+        _isSynchronizingEditorReferences = true;
+        try
         {
-            EditorClients.Add(client);
+            Editor.RunWithoutDirtyTracking(() =>
+            {
+                if (selectedClient is null)
+                {
+                    EditorClients.Clear();
+                }
+                else
+                {
+                    for (var index = EditorClients.Count - 1; index >= 0; index--)
+                    {
+                        if (!ReferenceEquals(EditorClients[index], selectedClient))
+                        {
+                            EditorClients.RemoveAt(index);
+                        }
+                    }
+
+                    if (!EditorClients.Contains(selectedClient))
+                    {
+                        EditorClients.Insert(0, selectedClient);
+                    }
+                }
+
+                foreach (var client in clients.Where(candidate => selectedClient is null || candidate.Id != selectedClient.Id))
+                {
+                    EditorClients.Add(client);
+                }
+
+                if (selectedClient is not null && !ReferenceEquals(Editor.SelectedClient, selectedClient))
+                {
+                    Editor.SelectedClient = selectedClient;
+                }
+            });
+        }
+        finally
+        {
+            _isSynchronizingEditorReferences = wasSynchronizing;
         }
     }
 
     private void RefreshEditorTickets(int? preferredTicketId = null)
     {
         var selectedTicketId = preferredTicketId ?? (Editor.SelectedTicket is { Id: > 0 } ? Editor.SelectedTicket.Id : null);
-        TicketsForEditor.Clear();
-        var noTicket = CreateNoTicketOption(Editor.SelectedClient?.Id ?? 0);
-        TicketsForEditor.Add(noTicket);
-
-        if (Editor.SelectedClient is null)
+        var selectedClient = Editor.SelectedClient;
+        var wasSynchronizing = _isSynchronizingEditorReferences;
+        _isSynchronizingEditorReferences = true;
+        try
         {
-            Editor.SelectedTicket = noTicket;
-            return;
+            Editor.RunWithoutDirtyTracking(() =>
+            {
+                if (selectedClient is null)
+                {
+                    var noClientTicket = CreateNoTicketOption(0);
+                    TicketsForEditor.Clear();
+                    TicketsForEditor.Add(noClientTicket);
+                    _editorTicketOptionsClientId = null;
+                    Editor.SelectedTicket = noClientTicket;
+                    return;
+                }
+
+                if (_editorTicketOptionsClientId != selectedClient.Id || TicketsForEditor.Count == 0)
+                {
+                    TicketsForEditor.Clear();
+                    TicketsForEditor.Add(CreateNoTicketOption(selectedClient.Id));
+                    foreach (var ticket in _ticketProvider.SearchTicketsAsync(selectedClient.Id, null).GetAwaiter().GetResult())
+                    {
+                        TicketsForEditor.Add(ticket);
+                    }
+
+                    _editorTicketOptionsClientId = selectedClient.Id;
+                }
+
+                var noTicket = TicketsForEditor.First(ticket => ticket.Id <= 0);
+                var selectedTicket = selectedTicketId.HasValue
+                    ? TicketsForEditor.FirstOrDefault(ticket => ticket.Id == selectedTicketId.Value)
+                    : noTicket;
+
+                if (selectedTicket is null
+                    && selectedTicketId.HasValue
+                    && _repository.GetTicket(selectedTicketId.Value) is { } savedTicket
+                    && savedTicket.ClientId == selectedClient.Id)
+                {
+                    TicketsForEditor.Add(savedTicket);
+                    selectedTicket = savedTicket;
+                }
+
+                Editor.SelectedTicket = selectedTicket ?? noTicket;
+            });
+        }
+        finally
+        {
+            _isSynchronizingEditorReferences = wasSynchronizing;
         }
 
-        foreach (var ticket in _ticketProvider.SearchTicketsAsync(Editor.SelectedClient.Id, null).GetAwaiter().GetResult())
+        if (!wasSynchronizing)
         {
-            TicketsForEditor.Add(ticket);
+            SelectedTicketStatus = ResolveTicketStatusOption(Editor.SelectedTicket);
+            TryAutoMatchSageCustomerForTicket(Editor.SelectedTicket);
+            ChangeTicketStatusCommand.RaiseCanExecuteChanged();
         }
-
-        var selectedTicket = selectedTicketId.HasValue
-            ? TicketsForEditor.FirstOrDefault(ticket => ticket.Id == selectedTicketId.Value)
-            : noTicket;
-
-        if (selectedTicket is null
-            && selectedTicketId.HasValue
-            && _repository.GetTicket(selectedTicketId.Value) is { } savedTicket
-            && savedTicket.ClientId == Editor.SelectedClient.Id)
-        {
-            TicketsForEditor.Add(savedTicket);
-            selectedTicket = savedTicket;
-        }
-
-        Editor.SelectedTicket = selectedTicket ?? noTicket;
     }
 
     private void RefreshTicketList()
     {
+        _editorTicketOptionsClientId = null;
         var selectedTicketId = SelectedTicket?.Id;
         Tickets.Clear();
         foreach (var ticket in _repository.GetTickets(TicketClientFilter?.Id))
@@ -1480,14 +1545,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void LoadEntryIntoEditor(WorkEntry entry)
     {
-        IReadOnlyList<Client> clients = entry.ClientId is int clientId
-            && _repository.GetClient(clientId) is { } client
-                ? [client]
-                : [];
-        IReadOnlyList<Ticket> tickets = entry.TicketId is int ticketId
-            && _repository.GetTicket(ticketId) is { } ticket
-                ? [ticket]
-                : [];
+        var client = ResolveEditorClient(entry.ClientId);
+        IReadOnlyList<Client> clients = client is null ? [] : [client];
+        var ticket = ResolveEditorTicket(entry.TicketId);
+        IReadOnlyList<Ticket> tickets = ticket is null ? [] : [ticket];
         _isSynchronizingEditorReferences = true;
         try
         {
@@ -1502,7 +1563,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         SyncEditorClientFilterText(Editor.SelectedClient?.DisplayName ?? string.Empty);
         RefreshEditorTickets(entry.TicketId);
         Editor.MarkClean();
-        EditorSaveStatus = $"Saved {DateTime.Now:h:mm tt}";
+        EditorSaveStatus = $"Saved {entry.UpdatedAt:h:mm tt}";
         RefreshRecentClientEntries();
     }
 
@@ -1537,6 +1598,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _isSynchronizingEditorReferences = false;
         }
         SyncEditorClientFilterText(string.Empty);
+        RefreshEditorClientOptions();
         RefreshEditorTickets();
         Editor.MarkClean();
         EditorSaveStatus = "Saved";
@@ -3295,6 +3357,35 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             _isSyncingEditorClientFilterText = false;
         }
+    }
+
+    private Client? ResolveEditorClient(int? clientId)
+    {
+        if (!clientId.HasValue)
+        {
+            return null;
+        }
+
+        var client = EditorClients.FirstOrDefault(candidate => candidate.Id == clientId.Value)
+            ?? Clients.FirstOrDefault(candidate => candidate.Id == clientId.Value)
+            ?? _repository.GetClient(clientId.Value);
+        if (client is not null && EditorClients.All(candidate => candidate.Id != client.Id))
+        {
+            EditorClients.Insert(0, client);
+        }
+
+        return client;
+    }
+
+    private Ticket? ResolveEditorTicket(int? ticketId)
+    {
+        if (!ticketId.HasValue)
+        {
+            return null;
+        }
+
+        return TicketsForEditor.FirstOrDefault(candidate => candidate.Id == ticketId.Value)
+            ?? _repository.GetTicket(ticketId.Value);
     }
 
     private static PostingStatus? ParseStatusFilter(string status)

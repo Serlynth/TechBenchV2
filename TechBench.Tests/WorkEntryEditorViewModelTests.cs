@@ -142,6 +142,7 @@ public sealed class WorkEntryEditorViewModelTests
 
         Assert.Same(client, editor.SelectedClient);
         Assert.Same(ticket, editor.SelectedTicket);
+        Assert.Equal("Northwind", editor.SelectedClient?.ToString());
         Assert.False(editor.IsDirty);
     }
 
