@@ -95,12 +95,12 @@ try {
 
     $repositoryUri = [Uri]$RepositoryUrl
     $repositorySlug = $repositoryUri.AbsolutePath.Trim('/')
-    $releaseListJson = gh release list --repo $repositorySlug --limit 1 --json tagName
+    $releaseListJson = gh release list --repo $repositorySlug --limit 100 --json tagName
     if ($LASTEXITCODE -ne 0) {
         throw 'Unable to read existing GitHub releases.'
     }
-    $hasExistingRelease = -not [string]::IsNullOrWhiteSpace(($releaseListJson -join '')) -and
-        (($releaseListJson -join '').Trim() -ne '[]')
+    $existingReleases = @(($releaseListJson -join '') | ConvertFrom-Json)
+    $hasExistingRelease = $existingReleases.Count -gt 0
 
     if ($hasExistingRelease) {
         Invoke-Checked $dotnet @(
@@ -163,8 +163,7 @@ try {
     Copy-Item -LiteralPath $setup.FullName -Destination $distSetupPath -Force
 
     if ($Publish) {
-        gh release view "v$Version" --repo $repositorySlug *> $null
-        if ($LASTEXITCODE -eq 0) {
+        if ($existingReleases.tagName -contains "v$Version") {
             throw "GitHub release v$Version already exists. Versions are immutable; choose a new version."
         }
 
