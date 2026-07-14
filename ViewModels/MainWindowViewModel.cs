@@ -335,7 +335,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         get => _isDatabaseHealthy;
         private set => SetProperty(ref _isDatabaseHealthy, value);
     }
-    public string EditorTitle => Editor.Id > 0 ? $"Entry #{Editor.Id}" : "New Entry";
+    public string EditorTitle => Editor.Id > 0 ? "Edit Entry" : "New Entry";
     public string EditorSubtitle => Editor.SelectedClient?.DisplayName
         ?? (Editor.UseManualClient && !string.IsNullOrWhiteSpace(Editor.ManualClientName)
             ? Editor.ManualClientName
@@ -467,7 +467,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
 
             LoadEntryIntoEditor(value);
-            StatusMessage = $"Editing entry #{value.Id}. Use New Entry to start a separate note.";
+            StatusMessage = $"Editing {value.ClientDisplay}. Use New Entry to start a separate note.";
             RaiseEntryCommandStates();
             OpenWhdTicketCommand.RaiseCanExecuteChanged();
         }
@@ -1018,14 +1018,20 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             TicketsForEditor.Add(ticket);
         }
 
-        Editor.SelectedTicket = selectedTicketId.HasValue
+        var selectedTicket = selectedTicketId.HasValue
             ? TicketsForEditor.FirstOrDefault(ticket => ticket.Id == selectedTicketId.Value)
             : noTicket;
 
-        if (Editor.SelectedTicket is null)
+        if (selectedTicket is null
+            && selectedTicketId.HasValue
+            && _repository.GetTicket(selectedTicketId.Value) is { } savedTicket
+            && savedTicket.ClientId == Editor.SelectedClient.Id)
         {
-            Editor.SelectedTicket = noTicket;
+            TicketsForEditor.Add(savedTicket);
+            selectedTicket = savedTicket;
         }
+
+        Editor.SelectedTicket = selectedTicket ?? noTicket;
     }
 
     private void RefreshTicketList()
@@ -1322,12 +1328,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var entry = _repository.GetWorkEntry(log.WorkEntryId);
         if (entry is null)
         {
-            StatusMessage = $"Entry #{log.WorkEntryId} no longer exists.";
+            StatusMessage = "That work entry no longer exists.";
             return;
         }
 
         EditEntry(entry);
-        StatusMessage = $"Opened entry #{entry.Id} from posting history.";
+        StatusMessage = $"Opened {entry.ClientDisplay} from posting history.";
     }
 
     private void UpdateTotals()
@@ -1454,7 +1460,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         SelectedEntry = entry;
-        StatusMessage = $"Selected entry #{entry.Id}: {item.Label}.";
+        StatusMessage = $"Selected {entry.ClientDisplay}: {item.Label}.";
     }
 
     private WorkEntry? FindFirstPossibleDuplicateEntry()
@@ -1550,7 +1556,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         CurrentSection = "Today";
         SelectedDate = DateTime.Today;
         SelectedEntry = Entries.FirstOrDefault(candidate => candidate.Id == savedEntry.Id) ?? savedEntry;
-        StatusMessage = $"Editing entry #{savedEntry.Id} from worklog history.";
+        StatusMessage = $"Editing {savedEntry.ClientDisplay} from worklog history.";
     }
 
     private void SaveEntry()
@@ -1590,7 +1596,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             LoadEntryIntoEditor(savedEntry);
         }
 
-        StatusMessage = $"Saved work entry #{id}";
+        StatusMessage = savedEntry is null
+            ? "Saved work entry."
+            : $"Saved work entry for {savedEntry.ClientDisplay}.";
         return savedEntry;
     }
 
@@ -1648,7 +1656,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(SelectedDate));
         RefreshAll();
         SelectedEntry = Entries.FirstOrDefault(entry => entry.Id == id) ?? _repository.GetWorkEntry(id);
-        StatusMessage = $"Restored entry #{id}.";
+        StatusMessage = $"Restored entry for {restored.ClientDisplay}.";
     }
 
     private void UnlockPostedEntry()
@@ -1703,7 +1711,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var id = _repository.SaveWorkEntry(copy);
         RefreshAll();
         SelectedEntry = Entries.FirstOrDefault(entry => entry.Id == id);
-        StatusMessage = $"Duplicated entry #{source.Id}";
+        StatusMessage = $"Duplicated entry for {source.ClientDisplay}.";
     }
 
     private void ExportDailyCsv()
@@ -1916,7 +1924,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         for (var index = 0; index < entries.Count; index++)
         {
             var entry = _repository.GetWorkEntry(entries[index].Id) ?? entries[index];
-            StatusMessage = $"{destination} batch {index + 1}/{entries.Count}: entry #{entry.Id}";
+            StatusMessage = $"{destination} batch {index + 1}/{entries.Count}: {entry.ClientDisplay} ({entry.TicketDisplay})";
             var success = await PostEntryAsync(entry, poster, destination, refreshAfter: false, confirmAlreadyPosted: false);
             if (success)
             {
@@ -1942,7 +1950,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         await using var postingLease = await _postingCoordinator.TryAcquireAsync(entry.Id, destination);
         if (postingLease is null)
         {
-            StatusMessage = $"A {destination} post for entry #{entry.Id} is already running.";
+            StatusMessage = $"A {destination} post for {entry.ClientDisplay} ({entry.TicketDisplay}) is already running.";
             return false;
         }
 
@@ -1985,7 +1993,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             var retry = _dialogService.Confirm(
                 $"Unconfirmed {destination} attempt",
-                $"A previous {destination} attempt for entry #{entry.Id} ended without a confirmed result. "
+                $"A previous {destination} attempt for {entry.ClientDisplay} ({entry.TicketDisplay}) ended without a confirmed result. "
                 + "Retrying may create a duplicate. Verify the destination first, or continue only if you intend to retry. Continue?");
             if (!retry)
             {
@@ -2006,7 +2014,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             CreatePostingPayloadHash(entry, client, ticket, destination));
         if (!attemptStart.Started || attemptStart.Attempt is null)
         {
-            StatusMessage = $"A {destination} attempt for entry #{entry.Id} is already active or awaiting reconciliation.";
+            StatusMessage = $"A {destination} attempt for {entry.ClientDisplay} ({entry.TicketDisplay}) is already active or awaiting reconciliation.";
             return false;
         }
 

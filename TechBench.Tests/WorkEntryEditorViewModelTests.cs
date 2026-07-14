@@ -117,6 +117,35 @@ public sealed class WorkEntryEditorViewModelTests
     }
 
     [Fact]
+    public void LoadingExistingEntryRestoresClientAndTicketSelections()
+    {
+        var client = new Client { Id = 42, Name = "Northwind" };
+        var ticket = new Ticket
+        {
+            Id = 73,
+            ClientId = client.Id,
+            TicketNumber = "WHD-73",
+            Subject = "Workstation setup"
+        };
+        var entry = new WorkEntry
+        {
+            Id = 9,
+            WorkDate = new DateTime(2026, 7, 14),
+            ClientId = client.Id,
+            TicketId = ticket.Id,
+            DurationMinutes = 30,
+            Note = "Configured the workstation."
+        };
+        var editor = new WorkEntryEditorViewModel();
+
+        editor.LoadFrom(entry, [client], [ticket]);
+
+        Assert.Same(client, editor.SelectedClient);
+        Assert.Same(ticket, editor.SelectedTicket);
+        Assert.False(editor.IsDirty);
+    }
+
+    [Fact]
     public void DraftRoundTripPreservesNoteMetadata()
     {
         var client = new Client { Id = 9, Name = "CSRI" };
