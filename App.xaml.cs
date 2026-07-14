@@ -44,11 +44,9 @@ public partial class App : System.Windows.Application
         {
             _singleInstanceMutex.Dispose();
             _singleInstanceMutex = null;
-            System.Windows.MessageBox.Show(
-                "TechBench is already running. Use the existing window so the same entry cannot be posted twice.",
+            AppDialogWindow.Info(
                 "TechBench",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                "TechBench is already running. Use the existing window so the same entry cannot be posted twice.");
             Shutdown();
             return;
         }

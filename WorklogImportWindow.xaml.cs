@@ -18,12 +18,10 @@ public partial class WorklogImportWindow : Window
         ViewModel.RefreshSummary();
         if (ViewModel.SelectedCount <= 0)
         {
-            System.Windows.MessageBox.Show(
-                this,
-                "Select at least one valid row to import.",
+            AppDialogWindow.Info(
                 "Import Worklog",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                "Select at least one valid row to import.",
+                this);
             return;
         }
 

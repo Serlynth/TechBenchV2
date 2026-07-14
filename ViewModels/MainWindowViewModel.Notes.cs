@@ -381,7 +381,11 @@ public sealed partial class MainWindowViewModel
     private void DeleteManagedNoteTemplate()
     {
         if (ManagedNoteTemplate is not { Id: > 0 } template
-            || !_dialogService.Confirm("Delete template", $"Delete the note template '{template.Name}'?"))
+            || !_dialogService.Confirm(
+                "Delete template",
+                $"Delete the note template '{template.Name}'?",
+                "Delete",
+                "Cancel"))
         {
             return;
         }

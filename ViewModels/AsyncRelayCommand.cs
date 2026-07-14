@@ -36,11 +36,10 @@ public sealed class AsyncRelayCommand : ICommand
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show(
-                $"TechBench hit an error while running that action:\n\n{ex.Message}",
+            AppDialogWindow.Error(
                 "TechBench",
-                System.Windows.MessageBoxButton.OK,
-                System.Windows.MessageBoxImage.Error);
+                $"TechBench hit an error while running that action:\n\n{ex.Message}",
+                owner: null);
         }
         finally
         {

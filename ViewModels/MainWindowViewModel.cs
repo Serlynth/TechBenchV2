@@ -453,7 +453,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 var discard = _dialogService.Confirm(
                     "Unsaved changes",
-                    "Discard the unsaved changes in the current entry?");
+                    "Discard the unsaved changes in the current entry?",
+                    "Discard",
+                    "Keep editing");
                 if (!discard)
                 {
                     OnPropertyChanged();
@@ -1525,7 +1527,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             var discard = _dialogService.Confirm(
                 "Unsaved changes",
-                "Discard the unsaved changes and start a new entry?");
+                "Discard the unsaved changes and start a new entry?",
+                "Discard",
+                "Keep editing");
             if (!discard)
             {
                 return;
@@ -1626,7 +1630,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var confirmed = _dialogService.Confirm("Delete entry", "Delete this work entry? You can undo this until another entry is deleted.");
+        var confirmed = _dialogService.Confirm(
+            "Delete entry",
+            "Delete this work entry? You can undo this until another entry is deleted.",
+            "Delete",
+            "Cancel");
         if (!confirmed)
         {
             return;

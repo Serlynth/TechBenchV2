@@ -46,7 +46,7 @@ public partial class MainWindow : Window
                 new SageNativeUiPoster(new SageNativeUiAutomation(), sageOdbcClient)),
             whdRestClient,
             sageOdbcClient,
-            new MessageBoxDialogService(),
+            new AppDialogService(),
             _notificationService,
             new WindowsCredentialStore(),
             databaseBackupService,
