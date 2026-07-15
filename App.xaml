@@ -385,17 +385,18 @@
                                 <Grid Margin="{TemplateBinding Padding}">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <Ellipse x:Name="NavDot" Width="5" Height="5" Fill="{DynamicResource SidebarMutedTextBrush}" VerticalAlignment="Center" />
-                                    <ContentPresenter Grid.Column="1"
-                                                      HorizontalAlignment="Left"
-                                                      VerticalAlignment="Center"
-                                                      RecognizesAccessKey="True"
-                                                      TextElement.Foreground="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}" />
+                                    <TextBlock x:Name="NavLabel"
+                                               Grid.Column="1"
+                                               Text="{TemplateBinding Content}"
+                                               Foreground="{DynamicResource SidebarTextBrush}"
+                                               HorizontalAlignment="Left"
+                                               VerticalAlignment="Center" />
                                 </Grid>
                             </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="NavBackground" Property="Background" Value="{DynamicResource SidebarHoverBrush}" /><Setter TargetName="NavDot" Property="Fill" Value="{DynamicResource AccentHoverBrush}" /></Trigger>
-                            <Trigger Property="Tag" Value="Active"><Setter TargetName="NavBackground" Property="Background" Value="{DynamicResource SidebarActiveBrush}" /><Setter TargetName="ActiveBar" Property="Visibility" Value="Visible" /><Setter TargetName="NavDot" Property="Fill" Value="{DynamicResource AccentBrush}" /><Setter Property="Foreground" Value="#FFFFFF" /></Trigger>
+                            <Trigger Property="Tag" Value="Active"><Setter TargetName="NavBackground" Property="Background" Value="{DynamicResource SidebarActiveBrush}" /><Setter TargetName="ActiveBar" Property="Visibility" Value="Visible" /><Setter TargetName="NavDot" Property="Fill" Value="{DynamicResource AccentBrush}" /><Setter TargetName="NavLabel" Property="Foreground" Value="#FFFFFF" /></Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
