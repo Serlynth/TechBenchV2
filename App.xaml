@@ -385,7 +385,11 @@
                                 <Grid Margin="{TemplateBinding Padding}">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <Ellipse x:Name="NavDot" Width="5" Height="5" Fill="{DynamicResource SidebarMutedTextBrush}" VerticalAlignment="Center" />
-                                    <ContentPresenter Grid.Column="1" HorizontalAlignment="Left" VerticalAlignment="Center" RecognizesAccessKey="True" TextElement.Foreground="{TemplateBinding Foreground}" />
+                                    <ContentPresenter Grid.Column="1"
+                                                      HorizontalAlignment="Left"
+                                                      VerticalAlignment="Center"
+                                                      RecognizesAccessKey="True"
+                                                      TextElement.Foreground="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}" />
                                 </Grid>
                             </Grid>
                         </Border>
