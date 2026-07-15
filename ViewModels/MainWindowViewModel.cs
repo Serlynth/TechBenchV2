@@ -343,6 +343,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             : "Select a client to begin");
     public bool IsEditorLocked => Editor.HasPostedDestination && !_isPostedEditorUnlocked;
     public bool IsEditorEditable => !IsEditorLocked && !IsEntryOperationRunning;
+    public bool IsEditorReadOnly => !IsEditorEditable;
     public bool ShowOpenWhdAction => Editor.SelectedTicket is { Id: > 0 };
     public bool HasTodayEntries => Entries.Count > 0;
     public bool HasPostingQueueEntries => PostingQueue.Count > 0;
@@ -364,6 +365,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _isEntryOperationRunning, value))
             {
                 OnPropertyChanged(nameof(IsEditorEditable));
+                OnPropertyChanged(nameof(IsEditorReadOnly));
                 OnPropertyChanged(nameof(WorkspaceStateLabel));
                 RaiseEditorWorkflowCommandStates();
                 BackupDatabaseCommand.RaiseCanExecuteChanged();
@@ -3352,6 +3354,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(EditorSubtitle));
         OnPropertyChanged(nameof(IsEditorLocked));
         OnPropertyChanged(nameof(IsEditorEditable));
+        OnPropertyChanged(nameof(IsEditorReadOnly));
         OnPropertyChanged(nameof(ShowOpenWhdAction));
         OnPropertyChanged(nameof(WorkspaceStateLabel));
         RaiseEditorWorkflowCommandStates();

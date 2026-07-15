@@ -934,7 +934,7 @@
                                                  SpellCheck.IsEnabled="True"
                                                  UndoLimit="200"
                                                  MinHeight="240"
-                                                 IsEnabled="{Binding IsEditorEditable}" />
+                                                 IsReadOnly="{Binding IsEditorReadOnly}" />
 
                                         <Grid IsEnabled="{Binding IsEditorEditable}">
                                             <Grid.ColumnDefinitions>
