@@ -155,6 +155,114 @@ public sealed class TechBenchRepositoryTests
     }
 
     [Fact]
+    public void FindsTheLatestSuccessfulWhdLogWithAnExactTechNoteId()
+    {
+        WithRepository((repository, _) =>
+        {
+            var entry = new WorkEntry
+            {
+                WorkDate = new DateTime(2026, 7, 15),
+                ManualClientName = "Test Client",
+                DurationMinutes = 15,
+                Note = "Current note"
+            };
+            repository.SaveWorkEntry(entry);
+            repository.AddPostingLog(new PostingLog
+            {
+                WorkEntryId = entry.Id,
+                Destination = "WHD",
+                Payload = "{\"noteText\":\"Old note\"}",
+                Success = true,
+                Message = "Posted",
+                ExternalReference = "WHD-TECHNOTE-100"
+            });
+            repository.AddPostingLog(new PostingLog
+            {
+                WorkEntryId = entry.Id,
+                Destination = "WHD",
+                Payload = "{\"noteText\":\"Manual marker\"}",
+                Success = true,
+                Message = "Marked manually"
+            });
+            repository.AddPostingLog(new PostingLog
+            {
+                WorkEntryId = entry.Id,
+                Destination = "WHD",
+                Payload = "{\"noteText\":\"Current note\"}",
+                Success = true,
+                Message = "Synchronized",
+                ExternalReference = "WHD-TECHNOTE-101"
+            });
+            repository.AddPostingLog(new PostingLog
+            {
+                WorkEntryId = entry.Id,
+                Destination = "WHD",
+                Payload = "failed",
+                Success = false,
+                Message = "Failed",
+                ExternalReference = "WHD-TECHNOTE-102"
+            });
+
+            var log = repository.GetLatestVerifiedWhdPostingLog(entry.Id);
+
+            Assert.NotNull(log);
+            Assert.Equal("WHD-TECHNOTE-101", log.ExternalReference);
+            Assert.Contains("Current note", log.Payload);
+        });
+    }
+
+    [Fact]
+    public void SagePostedEntryCannotBeChangedOrDeletedAtTheRepositoryBoundary()
+    {
+        WithRepository((repository, _) =>
+        {
+            var entry = new WorkEntry
+            {
+                WorkDate = new DateTime(2026, 7, 15),
+                ManualClientName = "Locked Client",
+                DurationMinutes = 15,
+                Note = "Final billed note"
+            };
+            repository.SaveWorkEntry(entry);
+            entry.SagePosted = true;
+            entry.SagePostedAt = DateTime.Now;
+            TechBenchRepository.UpdatePostingStatus(entry);
+            repository.SaveWorkEntry(entry);
+
+            entry.Note = "Changed after billing";
+
+            Assert.Throws<InvalidOperationException>(() => repository.SaveWorkEntry(entry));
+            Assert.Throws<InvalidOperationException>(() => repository.DeleteWorkEntry(entry.Id));
+            Assert.Equal("Final billed note", repository.GetWorkEntry(entry.Id)?.Note);
+        });
+    }
+
+    [Fact]
+    public void WhdPostedEntryCanBeChangedButCannotLoseItsTrackingThroughDeletion()
+    {
+        WithRepository((repository, _) =>
+        {
+            var entry = new WorkEntry
+            {
+                WorkDate = new DateTime(2026, 7, 15),
+                ManualClientName = "WHD Client",
+                TicketNumberText = "123",
+                DurationMinutes = 15,
+                Note = "Original note",
+                WhdPosted = true,
+                WhdPostedAt = DateTime.Now
+            };
+            repository.SaveWorkEntry(entry);
+
+            entry.Note = "Edited before Sage";
+            repository.SaveWorkEntry(entry);
+
+            Assert.Equal("Edited before Sage", repository.GetWorkEntry(entry.Id)?.Note);
+            Assert.Throws<InvalidOperationException>(() => repository.DeleteWorkEntry(entry.Id));
+        });
+    }
+
+    [Fact]
     public void RemovesLegacyMockSettingsAndRestoresMockOnlyPostingStateToLivePending()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"TechBenchTests-{Guid.NewGuid():N}");
@@ -281,6 +389,33 @@ public sealed class TechBenchRepositoryTests
             Assert.Contains(pending, entry => entry.Id == sagePending.Id);
             Assert.DoesNotContain(pending, entry => entry.Id == noDestination.Id);
             Assert.Equal(sagePending.Id, repository.GetWorkEntry(sagePending.Id)?.Id);
+        });
+    }
+
+    [Fact]
+    public void PendingQueueIncludesEditedWhdNotesBeforeSage()
+    {
+        WithRepository((repository, _) =>
+        {
+            var entry = new WorkEntry
+            {
+                WorkDate = new DateTime(2026, 7, 15),
+                ManualClientName = "Internal client",
+                TicketNumberText = "123",
+                Billable = false,
+                DurationMinutes = 15,
+                Note = "Edited note",
+                WhdPosted = true,
+                WhdPostedAt = DateTime.Now.AddMinutes(-5)
+            };
+            repository.SaveWorkEntry(entry);
+
+            Assert.Contains(
+                repository.GetWorkEntries(new WorkEntryQuery { PendingWhdOnly = true }),
+                candidate => candidate.Id == entry.Id);
+            Assert.Contains(
+                repository.GetWorkEntries(new WorkEntryQuery { PendingAnyOnly = true }),
+                candidate => candidate.Id == entry.Id);
         });
     }
 

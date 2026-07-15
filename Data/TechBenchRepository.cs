@@ -884,7 +884,13 @@ public sealed class TechBenchRepository
 
         if (query.PendingWhdOnly)
         {
-            sql.Append(" AND w.WhdPosted = 0 AND (w.TicketId IS NOT NULL OR w.TicketNumberText IS NOT NULL)");
+            sql.Append("""
+                 AND w.SagePosted = 0
+                 AND (w.TicketId IS NOT NULL OR NULLIF(TRIM(w.TicketNumberText), '') IS NOT NULL)
+                 AND (w.WhdPosted = 0
+                      OR w.WhdPostedAt IS NULL
+                      OR julianday(w.UpdatedAt) > julianday(w.WhdPostedAt) + (1.0 / 86400.0))
+                """);
         }
 
         if (query.PendingSageOnly)
@@ -894,7 +900,14 @@ public sealed class TechBenchRepository
 
         if (query.PendingAnyOnly)
         {
-            sql.Append(" AND ((w.WhdPosted = 0 AND (w.TicketId IS NOT NULL OR NULLIF(TRIM(w.TicketNumberText), '') IS NOT NULL)) OR (w.SagePosted = 0 AND w.Billable = 1))");
+            sql.Append("""
+                 AND ((w.SagePosted = 0
+                       AND (w.TicketId IS NOT NULL OR NULLIF(TRIM(w.TicketNumberText), '') IS NOT NULL)
+                       AND (w.WhdPosted = 0
+                            OR w.WhdPostedAt IS NULL
+                            OR julianday(w.UpdatedAt) > julianday(w.WhdPostedAt) + (1.0 / 86400.0)))
+                      OR (w.SagePosted = 0 AND w.Billable = 1))
+                """);
         }
 
         sql.Append(" ORDER BY w.WorkDate DESC, w.StartTime DESC, w.Id DESC");
@@ -1015,6 +1028,16 @@ public sealed class TechBenchRepository
         using var connection = _connectionFactory.CreateConnection();
         connection.Open();
         using var transaction = connection.BeginTransaction();
+        if (IsSagePosted(connection, transaction, id))
+        {
+            throw new InvalidOperationException("Entries posted to Sage are permanently locked and cannot be deleted.");
+        }
+
+        if (IsWhdPosted(connection, transaction, id))
+        {
+            throw new InvalidOperationException("Entries synchronized to WHD cannot be deleted because their exact TechNote tracking must be preserved.");
+        }
+
         if (_fullTextSearchAvailable)
         {
             using var searchCommand = connection.CreateCommand();
@@ -1513,6 +1536,26 @@ public sealed class TechBenchRepository
         command.ExecuteNonQuery();
     }
 
+    public PostingLog? GetLatestVerifiedWhdPostingLog(int workEntryId)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id, WorkEntryId, Destination, Payload, Success, Message, ExternalReference, CreatedAt
+            FROM PostingLogs
+            WHERE WorkEntryId = $workEntryId
+              AND Destination = 'WHD'
+              AND Success = 1
+              AND ExternalReference LIKE 'WHD-TECHNOTE-%'
+            ORDER BY Id DESC
+            LIMIT 1
+            """;
+        command.Parameters.AddWithValue("$workEntryId", workEntryId);
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? ReadPostingLog(reader) : null;
+    }
+
     public PostingAttemptStartResult TryBeginPostingAttempt(
         int workEntryId,
         string destination,
@@ -1739,17 +1782,7 @@ public sealed class TechBenchRepository
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
-            logs.Add(new PostingLog
-            {
-                Id = reader.GetInt32(0),
-                WorkEntryId = reader.GetInt32(1),
-                Destination = reader.GetString(2),
-                Payload = reader.GetString(3),
-                Success = reader.GetInt32(4) == 1,
-                Message = reader.GetString(5),
-                ExternalReference = reader.IsDBNull(6) ? null : reader.GetString(6),
-                CreatedAt = FromDbDateTime(reader, 7) ?? DateTime.MinValue
-            });
+            logs.Add(ReadPostingLog(reader));
         }
 
         return logs;
@@ -3370,6 +3403,11 @@ public sealed class TechBenchRepository
 
     private int SaveWorkEntry(SqliteConnection connection, SqliteTransaction transaction, WorkEntry entry)
     {
+        if (entry.Id > 0 && IsSagePosted(connection, transaction, entry.Id))
+        {
+            throw new InvalidOperationException("Entries posted to Sage are permanently locked and cannot be changed.");
+        }
+
         var now = DateTime.Now;
         entry.UpdatedAt = now;
         entry.Tags = WorkEntryTags.Normalize(entry.Tags);
@@ -3431,6 +3469,46 @@ public sealed class TechBenchRepository
         UpdateWorkEntrySearchIndex(connection, transaction, id);
         return id;
     }
+
+    private static bool IsSagePosted(SqliteConnection connection, SqliteTransaction transaction, int workEntryId)
+    {
+        if (workEntryId <= 0)
+        {
+            return false;
+        }
+
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT SagePosted FROM WorkEntries WHERE Id = $id LIMIT 1";
+        command.Parameters.AddWithValue("$id", workEntryId);
+        return command.ExecuteScalar() is long value && value == 1;
+    }
+
+    private static bool IsWhdPosted(SqliteConnection connection, SqliteTransaction transaction, int workEntryId)
+    {
+        if (workEntryId <= 0)
+        {
+            return false;
+        }
+
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT WhdPosted FROM WorkEntries WHERE Id = $id LIMIT 1";
+        command.Parameters.AddWithValue("$id", workEntryId);
+        return command.ExecuteScalar() is long value && value == 1;
+    }
+
+    private static PostingLog ReadPostingLog(SqliteDataReader reader) => new()
+    {
+        Id = reader.GetInt32(0),
+        WorkEntryId = reader.GetInt32(1),
+        Destination = reader.GetString(2),
+        Payload = reader.GetString(3),
+        Success = reader.GetInt32(4) == 1,
+        Message = reader.GetString(5),
+        ExternalReference = reader.IsDBNull(6) ? null : reader.GetString(6),
+        CreatedAt = FromDbDateTime(reader, 7) ?? DateTime.MinValue
+    };
 
     private void UpdateWorkEntrySearchIndex(SqliteConnection connection, SqliteTransaction transaction, int id)
     {

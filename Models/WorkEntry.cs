@@ -81,9 +81,18 @@ public sealed class WorkEntry
     public string FollowUpBadge => FollowUpDueDate.HasValue && HasFollowUp
         ? $"{FollowUpLabel} {FollowUpDueDate.Value:M/d}"
         : FollowUpLabel;
-    public bool NeedsWhdPosting => HasTicket && !WhdPosted;
+    public bool HasWhdSyncConflict => LastError?.StartsWith("WHD sync conflict:", StringComparison.OrdinalIgnoreCase) == true;
+    public bool NeedsWhdPosting => HasTicket
+        && !SagePosted
+        && (!WhdPosted || !WhdPostedAt.HasValue || ModifiedAfterPosting || HasWhdSyncConflict);
     public bool ShowWhdBadge => HasTicket || WhdPosted;
-    public string WhdBadge => WhdPosted ? "WHD posted" : "WHD pending";
+    public string WhdBadge => !WhdPosted
+        ? "WHD pending"
+        : HasWhdSyncConflict
+            ? "WHD conflict"
+            : NeedsWhdPosting
+                ? "WHD sync pending"
+                : "WHD synced";
     public bool NeedsSagePosting => Billable && !SagePosted;
     public bool ShowSageBadge => Billable || SagePosted;
     public string SageBadge => SagePosted

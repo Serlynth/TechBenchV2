@@ -99,7 +99,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private bool _isLightTheme;
     private bool _isEntryOperationRunning;
     private string _entryOperationText = string.Empty;
-    private bool _isPostedEditorUnlocked;
     private bool _isSynchronizingEditorReferences;
     private bool _isRefreshingTodayEntries;
     private bool _hasCloseoutIssues;
@@ -145,22 +144,22 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         NavigateCommand = new RelayCommand(parameter => Navigate(parameter?.ToString() ?? "Today"));
         EditEntryCommand = new RelayCommand(EditEntry, parameter => parameter is WorkEntry { Id: > 0 });
         NewEntryCommand = new RelayCommand(_ => NewEntry());
-        SaveEntryCommand = new RelayCommand(_ => SaveEntry(), _ => CanSaveEditor());
+        SaveEntryCommand = new AsyncRelayCommand(SaveEntryAsync, _ => CanSaveEditor());
         DeleteEntryCommand = new RelayCommand(_ => DeleteEntry(), _ => CanDeleteEditorEntry());
         DuplicateEntryCommand = new RelayCommand(_ => DuplicateEntry(), _ => Editor.Id > 0);
         UndoDeleteCommand = new RelayCommand(_ => UndoDelete(), _ => _lastDeletedEntry is not null);
-        UnlockPostedEntryCommand = new RelayCommand(_ => UnlockPostedEntry(), _ => IsEditorLocked);
         RefreshAllCommand = new RelayCommand(_ => RefreshAll());
         ExportDailyCsvCommand = new RelayCommand(_ => ExportDailyCsv());
         ExportWeeklyCsvCommand = new RelayCommand(_ => ExportWeeklyCsv());
         RefreshHistoryCommand = new RelayCommand(_ => RefreshHistory());
         ExportHistoryCsvCommand = new RelayCommand(_ => ExportHistoryCsv());
         PostWhdCommand = new AsyncRelayCommand(PostWhdAsync, CanPostWhdEntry);
+        SyncWhdNoteCommand = new AsyncRelayCommand(SyncWhdNoteAsync, CanSyncWhdNote);
         PostSageCommand = new AsyncRelayCommand(PostSageAsync, CanPostSageEntry);
         VerifySageSaveCommand = new AsyncRelayCommand(VerifySageSaveAsync, CanVerifySageSave);
         LinkSageTicketCommand = new AsyncRelayCommand(LinkSageTicketAsync, CanLinkSageTicket);
-        BatchPostWhdCommand = new AsyncRelayCommand(BatchPostWhdAsync);
-        MarkWhdPostedCommand = new RelayCommand(parameter => MarkPosted(parameter, "WHD"), CanResolveSavedEntry);
+        BatchPostWhdCommand = new AsyncRelayCommand(BatchPostWhdAsync, _ => !IsEntryOperationRunning);
+        MarkWhdPostedCommand = new RelayCommand(parameter => MarkPosted(parameter, "WHD"), CanMarkWhdPosted);
         OpenWhdTicketCommand = new RelayCommand(OpenWhdTicket, CanOpenWhdTicket);
         SelectCloseoutIssueCommand = new RelayCommand(SelectCloseoutIssue, parameter => parameter is CloseoutItem { HasIssue: true });
         SelectAllPostingQueueCommand = new RelayCommand(_ => SetPostingQueueSelection(true));
@@ -278,17 +277,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public RelayCommand NavigateCommand { get; }
     public RelayCommand EditEntryCommand { get; }
     public RelayCommand NewEntryCommand { get; }
-    public RelayCommand SaveEntryCommand { get; }
+    public AsyncRelayCommand SaveEntryCommand { get; }
     public RelayCommand DeleteEntryCommand { get; }
     public RelayCommand DuplicateEntryCommand { get; }
     public RelayCommand UndoDeleteCommand { get; }
-    public RelayCommand UnlockPostedEntryCommand { get; }
     public RelayCommand RefreshAllCommand { get; }
     public RelayCommand ExportDailyCsvCommand { get; }
     public RelayCommand ExportWeeklyCsvCommand { get; }
     public RelayCommand RefreshHistoryCommand { get; }
     public RelayCommand ExportHistoryCsvCommand { get; }
     public AsyncRelayCommand PostWhdCommand { get; }
+    public AsyncRelayCommand SyncWhdNoteCommand { get; }
     public AsyncRelayCommand PostSageCommand { get; }
     public AsyncRelayCommand VerifySageSaveCommand { get; }
     public AsyncRelayCommand LinkSageTicketCommand { get; }
@@ -344,9 +343,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ?? (Editor.UseManualClient && !string.IsNullOrWhiteSpace(Editor.ManualClientName)
             ? Editor.ManualClientName
             : "Select a client to begin");
-    public bool IsEditorLocked => Editor.HasPostedDestination && !_isPostedEditorUnlocked;
+    public bool IsEditorLocked => Editor.SagePosted;
     public bool IsEditorEditable => !IsEditorLocked && !IsEntryOperationRunning;
     public bool IsEditorReadOnly => !IsEditorEditable;
+    public string WhdPostActionLabel => Editor.WhdPosted ? "Update WHD Note" : "Post to WHD";
     public bool ShowOpenWhdAction => Editor.SelectedTicket is { Id: > 0 }
         || (Editor.UseOtherWhdTicket && IsValidWhdTicketNumber(Editor.ManualTicketNumber));
     public bool HasTodayEntries => Entries.Count > 0;
@@ -371,7 +371,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(IsEditorEditable));
                 OnPropertyChanged(nameof(IsEditorReadOnly));
                 OnPropertyChanged(nameof(WorkspaceStateLabel));
-                RaiseEditorWorkflowCommandStates();
+                RaiseEntryCommandStates();
                 BackupDatabaseCommand.RaiseCanExecuteChanged();
                 CheckDatabaseHealthCommand.RaiseCanExecuteChanged();
                 ImportGoogleSheetsCommand.RaiseCanExecuteChanged();
@@ -1586,7 +1586,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             _isSynchronizingEditorReferences = false;
         }
-        _isPostedEditorUnlocked = false;
         RaiseEditorStateProperties();
         SyncEditorClientFilterText(Editor.SelectedClient?.DisplayName ?? string.Empty);
         RefreshEditorTickets(entry.TicketId);
@@ -1617,7 +1616,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(SelectedEntry));
         ResetNoteLinkEditorState();
         SelectedDate = DateTime.Today;
-        _isPostedEditorUnlocked = false;
         _isSynchronizingEditorReferences = true;
         try
         {
@@ -1651,16 +1649,32 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         StatusMessage = $"Editing {savedEntry.ClientDisplay} from worklog history.";
     }
 
-    private void SaveEntry()
+    private async Task SaveEntryAsync(object? parameter)
     {
-        _ = SaveEditor();
+        var savedEntry = SaveEditor();
+        if (savedEntry is not { WhdPosted: true, SagePosted: false })
+        {
+            return;
+        }
+
+        IsEntryOperationRunning = true;
+        EntryOperationText = "Synchronizing the work note with WHD...";
+        try
+        {
+            await SynchronizeWhdEntryAsync(savedEntry, WhdSyncIntent.PushLocal, allowConflictPrompt: true);
+        }
+        finally
+        {
+            EntryOperationText = string.Empty;
+            IsEntryOperationRunning = false;
+        }
     }
 
     private WorkEntry? SaveEditor()
     {
         if (IsEditorLocked)
         {
-            StatusMessage = "Unlock this posted entry before changing it.";
+            StatusMessage = "Entries posted to Sage are permanently locked.";
             return null;
         }
 
@@ -1718,7 +1732,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var entry = _repository.GetWorkEntry(Editor.Id);
         if (entry is null || entry.WhdPosted || entry.SagePosted)
         {
-            StatusMessage = "Posted entries cannot be deleted.";
+            StatusMessage = entry?.SagePosted == true
+                ? "Entries posted to Sage are permanently locked and cannot be deleted."
+                : "Entries synchronized to WHD cannot be deleted because their exact TechNote tracking must be preserved.";
             return;
         }
 
@@ -1773,26 +1789,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         RefreshAll();
         SelectedEntry = Entries.FirstOrDefault(entry => entry.Id == id) ?? _repository.GetWorkEntry(id);
         StatusMessage = $"Restored entry for {restored.ClientDisplay}.";
-    }
-
-    private void UnlockPostedEntry()
-    {
-        if (!IsEditorLocked)
-        {
-            return;
-        }
-
-        var confirmed = _dialogService.Confirm(
-            "Edit posted entry",
-            "Changes in TechBench will not update records already posted to WHD or Sage. Unlock this entry anyway?");
-        if (!confirmed)
-        {
-            return;
-        }
-
-        _isPostedEditorUnlocked = true;
-        RaiseEditorStateProperties();
-        StatusMessage = "Posted entry unlocked for local editing.";
     }
 
     private void DuplicateEntry()
@@ -1953,6 +1949,54 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (entry.HasTicket)
+        {
+            if (!entry.WhdPosted)
+            {
+                StatusMessage = "Post and verify the WHD note before creating the Sage ticket.";
+                _dialogService.Error(
+                    "Create Sage ticket",
+                    "This entry has a WHD ticket, so its work note must be posted and verified in WHD before Sage can lock it.");
+                if (ownsOperationState)
+                {
+                    EntryOperationText = string.Empty;
+                    IsEntryOperationRunning = false;
+                }
+                return;
+            }
+
+            EntryOperationText = "Verifying the exact WHD note before Sage...";
+            if (!await SynchronizeWhdEntryAsync(entry, WhdSyncIntent.PushLocal, allowConflictPrompt: true, refreshAfter: false))
+            {
+                var currentEntry = _repository.GetWorkEntry(entry.Id);
+                if (currentEntry?.SagePosted == true)
+                {
+                    StatusMessage = string.IsNullOrWhiteSpace(currentEntry.SageTicketNumber)
+                        ? "The Sage ticket is already saved and this entry is locked."
+                        : $"Sage ticket #{currentEntry.SageTicketNumber} is already saved and this entry is locked.";
+                    if (ownsOperationState)
+                    {
+                        EntryOperationText = string.Empty;
+                        IsEntryOperationRunning = false;
+                    }
+                    return;
+                }
+
+                _dialogService.Error(
+                    "Create Sage ticket",
+                    "TechBench did not start Sage because the exact WHD TechNote could not be synchronized and verified. Resolve the WHD sync message first.");
+                if (ownsOperationState)
+                {
+                    EntryOperationText = string.Empty;
+                    IsEntryOperationRunning = false;
+                }
+                return;
+            }
+
+            entry = _repository.GetWorkEntry(entry.Id) ?? entry;
+            EntryOperationText = "Creating and verifying the Sage ticket...";
+        }
+
         _sageVerificationTimer.Stop();
         try
         {
@@ -2011,25 +2055,35 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task BatchPostWhdAsync(object? parameter)
     {
-        var entries = GetSelectedPostingQueueEntriesForPosting()
-            .Where(static entry => entry.NeedsWhdPosting)
-            .ToList();
-
-        if (entries.Count == 0)
+        IsEntryOperationRunning = true;
+        EntryOperationText = "Synchronizing selected work notes with WHD...";
+        try
         {
-            _dialogService.Error("Batch post WHD", "Select one or more queue entries that are still WHD pending.");
-            return;
-        }
+            var entries = GetSelectedPostingQueueEntriesForPosting()
+                .Where(static entry => entry.NeedsWhdPosting)
+                .ToList();
 
-        var confirmed = _dialogService.Confirm(
-            "Batch post WHD",
-            $"Post {entries.Count} selected entr{(entries.Count == 1 ? "y" : "ies")} to Web Help Desk?");
-        if (!confirmed)
+            if (entries.Count == 0)
+            {
+                _dialogService.Error("Batch post WHD", "Select one or more queue entries that are still WHD pending.");
+                return;
+            }
+
+            var confirmed = _dialogService.Confirm(
+                "Batch post WHD",
+                $"Post {entries.Count} selected entr{(entries.Count == 1 ? "y" : "ies")} to Web Help Desk?");
+            if (!confirmed)
+            {
+                return;
+            }
+
+            await PostEntriesBatchAsync(entries, _whdPoster, "WHD");
+        }
+        finally
         {
-            return;
+            EntryOperationText = string.Empty;
+            IsEntryOperationRunning = false;
         }
-
-        await PostEntriesBatchAsync(entries, _whdPoster, "WHD");
     }
 
     private async Task PostEntriesBatchAsync(IReadOnlyList<WorkEntry> entries, IWorkEntryPoster poster, string destination)
@@ -2071,6 +2125,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         entry = _repository.GetWorkEntry(entry.Id) ?? entry;
+        if (destination == "WHD" && entry.WhdPosted)
+        {
+            return await SynchronizeWhdEntryCoreAsync(
+                entry,
+                WhdSyncIntent.PushLocal,
+                allowConflictPrompt: confirmAlreadyPosted,
+                refreshAfter: refreshAfter);
+        }
+
         var client = entry.ClientId.HasValue ? _repository.GetClient(entry.ClientId.Value) : null;
         if (client is null)
         {
@@ -2262,6 +2325,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (entry.SagePosted)
+        {
+            StatusMessage = "Entries posted to Sage are permanently locked.";
+            return;
+        }
+
         if (destination == "WHD")
         {
             entry.WhdPosted = true;
@@ -2297,10 +2366,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         return parameter is WorkEntry entry
-            ? entry is { Id: > 0, HasTicket: true, WhdPosted: false }
+            ? entry is { Id: > 0, HasTicket: true, SagePosted: false }
             : (Editor.Id > 0 || (Editor.HasClientReference && IsEditorEditable))
               && !Editor.HasNoTicket
-              && !Editor.WhdPosted;
+              && !Editor.SagePosted;
     }
 
     private bool CanPostSageEntry(object? parameter)
@@ -2319,7 +2388,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private bool CanSaveEditor() => Editor.HasClientReference && IsEditorEditable;
 
-    private bool CanResolveSavedEntry(object? parameter) => parameter is WorkEntry { Id: > 0 } || Editor.Id > 0;
+    private bool CanMarkWhdPosted(object? parameter)
+    {
+        return !IsEntryOperationRunning && (parameter is WorkEntry entry
+            ? entry is { Id: > 0, WhdPosted: false, SagePosted: false }
+            : Editor is { Id: > 0, WhdPosted: false, SagePosted: false });
+    }
 
     private bool CanDeleteEditorEntry() => Editor.Id > 0
         && !Editor.WhdPosted
@@ -2328,6 +2402,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private bool CanVerifySageSave(object? parameter)
     {
+        if (IsEntryOperationRunning)
+        {
+            return false;
+        }
+
         var entry = parameter as WorkEntry;
         if (entry is null && Editor.Id > 0)
         {
@@ -2340,6 +2419,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private bool CanLinkSageTicket(object? parameter)
     {
+        if (IsEntryOperationRunning)
+        {
+            return false;
+        }
+
         var entry = parameter as WorkEntry;
         if (entry is null && Editor.Id > 0)
         {
@@ -2351,9 +2435,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task VerifySageSaveAsync(object? parameter)
     {
-        if (_isSagePostingRunning)
+        if (IsEntryOperationRunning || _isSagePostingRunning)
         {
-            _dialogService.Info("Check Sage save", "Sage ticket creation is still running. Check the save after it finishes.");
+            _dialogService.Info("Check Sage save", "Another entry operation is still running. Check the save after it finishes.");
             return;
         }
 
@@ -2383,7 +2467,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task LinkSageTicketAsync(object? parameter)
     {
-        if (_isSagePostingRunning || _isSageVerificationRunning)
+        if (IsEntryOperationRunning || _isSagePostingRunning || _isSageVerificationRunning)
         {
             _dialogService.Info(
                 "Link Sage ticket",
@@ -2440,7 +2524,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async void HandleSageVerificationTimerTick(object? sender, EventArgs e)
     {
-        if (_isSageVerificationRunning || _isSagePostingRunning)
+        if (_isSageVerificationRunning || _isSagePostingRunning || IsEntryOperationRunning)
         {
             return;
         }
@@ -3492,7 +3576,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private void RaiseEntryCommandStates()
     {
         PostWhdCommand.RaiseCanExecuteChanged();
+        SyncWhdNoteCommand.RaiseCanExecuteChanged();
         PostSageCommand.RaiseCanExecuteChanged();
+        BatchPostWhdCommand.RaiseCanExecuteChanged();
         MarkWhdPostedCommand.RaiseCanExecuteChanged();
         VerifySageSaveCommand.RaiseCanExecuteChanged();
         LinkSageTicketCommand.RaiseCanExecuteChanged();
@@ -3505,7 +3591,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         SaveEntryCommand.RaiseCanExecuteChanged();
         DeleteEntryCommand.RaiseCanExecuteChanged();
         DuplicateEntryCommand.RaiseCanExecuteChanged();
-        UnlockPostedEntryCommand.RaiseCanExecuteChanged();
         InsertRecentNoteCommand.RaiseCanExecuteChanged();
         RaiseNoteLinkProperties();
     }
@@ -3517,6 +3602,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsEditorLocked));
         OnPropertyChanged(nameof(IsEditorEditable));
         OnPropertyChanged(nameof(IsEditorReadOnly));
+        OnPropertyChanged(nameof(WhdPostActionLabel));
         OnPropertyChanged(nameof(ShowOpenWhdAction));
         OnPropertyChanged(nameof(WorkspaceStateLabel));
         RaiseEditorWorkflowCommandStates();

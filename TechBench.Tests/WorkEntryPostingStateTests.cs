@@ -34,4 +34,41 @@ public sealed class WorkEntryPostingStateTests
 
         Assert.Equal(1, group.SagePendingCount);
     }
+
+    [Fact]
+    public void EditedWhdNoteNeedsSynchronizationUntilSageLocksIt()
+    {
+        var postedAt = DateTime.Now.AddMinutes(-5);
+        var entry = new WorkEntry
+        {
+            TicketNumberText = "123",
+            WhdPosted = true,
+            WhdPostedAt = postedAt,
+            UpdatedAt = postedAt.AddMinutes(1)
+        };
+
+        Assert.True(entry.NeedsWhdPosting);
+        Assert.Equal("WHD sync pending", entry.WhdBadge);
+
+        entry.SagePosted = true;
+        entry.SagePostedAt = DateTime.Now;
+
+        Assert.False(entry.NeedsWhdPosting);
+    }
+
+    [Fact]
+    public void WhdConflictHasADistinctBadge()
+    {
+        var entry = new WorkEntry
+        {
+            TicketNumberText = "123",
+            WhdPosted = true,
+            WhdPostedAt = DateTime.Now,
+            UpdatedAt = DateTime.Now,
+            LastError = "WHD sync conflict: Both versions changed."
+        };
+
+        Assert.True(entry.NeedsWhdPosting);
+        Assert.Equal("WHD conflict", entry.WhdBadge);
+    }
 }

@@ -793,7 +793,7 @@
                                         <Border Style="{StaticResource BadgeStyle}"
                                                 Background="{DynamicResource NeutralBadgeBrush}"
                                                 Visibility="{Binding IsEditorLocked, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <TextBlock Text="Posted / locked" Style="{StaticResource BadgeTextStyle}" />
+                                            <TextBlock Text="Sage posted / locked" Style="{StaticResource BadgeTextStyle}" />
                                         </Border>
                                     </WrapPanel>
                                 </Grid>
@@ -830,21 +830,9 @@
                                                 Padding="12,10"
                                                 Margin="0,0,0,12"
                                                 Visibility="{Binding IsEditorLocked, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <TextBlock Text="This entry has already been posted."
-                                                           Foreground="{DynamicResource SecondaryTextBrush}"
-                                                           VerticalAlignment="Center" />
-                                                <Button Grid.Column="1"
-                                                        Content="Edit Anyway"
-                                                        Command="{Binding UnlockPostedEntryCommand}"
-                                                        MinHeight="32"
-                                                        Padding="12,5"
-                                                        Margin="12,0,0,0" />
-                                            </Grid>
+                                            <TextBlock Text="This entry is permanently locked because it was posted to Sage."
+                                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                                       VerticalAlignment="Center" />
                                         </Border>
 
                                         <Grid Margin="0,0,0,12" IsEnabled="{Binding IsEditorEditable}">
@@ -1375,7 +1363,7 @@
                                                 <ContextMenu Style="{StaticResource EditorContextMenuStyle}"
                                                              Placement="Top"
                                                              DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                                    <MenuItem Header="Post to WHD"
+                                                    <MenuItem Header="{Binding WhdPostActionLabel}"
                                                               Command="{Binding PostWhdCommand}"
                                                               Style="{StaticResource EditorContextMenuItemStyle}" />
                                                     <MenuItem Header="Create Sage Ticket"
@@ -1397,6 +1385,9 @@
                                                               Style="{StaticResource EditorContextMenuItemStyle}" />
                                                     <MenuItem Header="Link Existing Sage Ticket..."
                                                               Command="{Binding LinkSageTicketCommand}"
+                                                              Style="{StaticResource EditorContextMenuItemStyle}" />
+                                                    <MenuItem Header="Sync WHD Note"
+                                                              Command="{Binding SyncWhdNoteCommand}"
                                                               Style="{StaticResource EditorContextMenuItemStyle}" />
                                                     <MenuItem Header="Mark WHD Posted (Manual)"
                                                               Command="{Binding MarkWhdPostedCommand}"

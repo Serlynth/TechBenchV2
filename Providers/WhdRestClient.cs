@@ -347,6 +347,182 @@ public sealed class WhdRestClient
         }
     }
 
+    public async Task<WhdTechNoteLookupResult> GetTechNoteAsync(
+        WhdConnectionSettings settings,
+        int ticketId,
+        int techNoteId,
+        CancellationToken cancellationToken = default)
+    {
+        var validationError = Validate(settings);
+        if (validationError is not null)
+        {
+            return WhdTechNoteLookupResult.Failed(validationError);
+        }
+
+        if (ticketId <= 0 || techNoteId <= 0)
+        {
+            return WhdTechNoteLookupResult.Failed("A valid WHD ticket and TechNote ID are required for synchronization.");
+        }
+
+        try
+        {
+            var auth = await ResolveAuthenticationAsync(settings, cancellationToken);
+            var pageSignatures = new HashSet<string>(StringComparer.Ordinal);
+            for (var page = 1; page <= 100; page++)
+            {
+                var requestUri = BuildRequestUri(settings.BaseUrl, "TicketNotes", auth, new Dictionary<string, string>
+                {
+                    ["jobTicketId"] = ticketId.ToString(CultureInfo.InvariantCulture),
+                    ["style"] = "long",
+                    ["limit"] = PageSize.ToString(CultureInfo.InvariantCulture),
+                    ["page"] = page.ToString(CultureInfo.InvariantCulture)
+                });
+
+                using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
+                var content = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var details = string.IsNullOrWhiteSpace(content) ? response.ReasonPhrase : content.Trim();
+                    return response.StatusCode switch
+                    {
+                        HttpStatusCode.Forbidden => WhdTechNoteLookupResult.Failed(
+                            $"Web Help Desk denied access to TechNote #{techNoteId}. The current technician may not have access to the ticket's tech group."),
+                        HttpStatusCode.NotFound => WhdTechNoteLookupResult.Failed(
+                            $"Web Help Desk ticket #{ticketId} or TechNote #{techNoteId} was not found."),
+                        _ => WhdTechNoteLookupResult.Failed(
+                            $"Web Help Desk could not read TechNote #{techNoteId}: HTTP {(int)response.StatusCode} {response.ReasonPhrase}. {details}")
+                    };
+                }
+
+                using var document = JsonDocument.Parse(content);
+                var records = EnumerateRecords(document.RootElement).ToArray();
+                foreach (var noteElement in records)
+                {
+                    if (ReadInt(noteElement, "id") != techNoteId)
+                    {
+                        continue;
+                    }
+
+                    return WhdTechNoteLookupResult.Succeeded(
+                        techNoteId,
+                        ReadString(noteElement, "noteText") ?? string.Empty,
+                        ReadDurationMinutes(noteElement));
+                }
+
+                if (records.Length < PageSize)
+                {
+                    break;
+                }
+
+                var signature = BuildPageSignature(records.Select(note => ReadString(note, "id") ?? string.Empty));
+                if (!pageSignatures.Add(signature))
+                {
+                    break;
+                }
+            }
+
+            return WhdTechNoteLookupResult.Failed(
+                $"Web Help Desk ticket #{ticketId} is available, but TechNote #{techNoteId} was not found.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
+        {
+            return WhdTechNoteLookupResult.Failed($"Web Help Desk could not read TechNote #{techNoteId}: {ex.Message}");
+        }
+    }
+
+    public async Task<PostingResult> UpdateTechNoteAsync(
+        WhdConnectionSettings settings,
+        int ticketId,
+        int techNoteId,
+        string noteText,
+        CancellationToken cancellationToken = default)
+    {
+        var validationError = Validate(settings);
+        if (validationError is not null)
+        {
+            return PostingResult.Failed(validationError);
+        }
+
+        if (ticketId <= 0 || techNoteId <= 0)
+        {
+            return PostingResult.Failed("A valid WHD ticket and TechNote ID are required for synchronization.");
+        }
+
+        if (string.IsNullOrWhiteSpace(noteText))
+        {
+            return PostingResult.Failed("Enter a work note before updating Web Help Desk.");
+        }
+
+        var payload = JsonSerializer.Serialize(
+            new { noteText = noteText.Trim() },
+            new JsonSerializerOptions { WriteIndented = true });
+        var updateStarted = false;
+
+        try
+        {
+            var auth = await ResolveAuthenticationAsync(settings, cancellationToken);
+            var requestUri = BuildRequestUri(settings.BaseUrl, $"TechNotes/{techNoteId}", auth, new Dictionary<string, string>());
+            using var request = new HttpRequestMessage(HttpMethod.Put, requestUri)
+            {
+                Content = new ByteArrayContent(Encoding.UTF8.GetBytes(payload))
+            };
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            updateStarted = true;
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            var content = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                var details = string.IsNullOrWhiteSpace(content) ? response.ReasonPhrase : content.Trim();
+                return PostingResult.Failed(
+                    $"Web Help Desk did not update TechNote #{techNoteId}: HTTP {(int)response.StatusCode} {response.ReasonPhrase}. {details}",
+                    payload);
+            }
+
+            WhdTechNoteLookupResult? verification = null;
+            foreach (var delay in new[]
+                     {
+                         TimeSpan.FromMilliseconds(150),
+                         TimeSpan.FromMilliseconds(500),
+                         TimeSpan.FromSeconds(1)
+                     })
+            {
+                await Task.Delay(delay, cancellationToken);
+                verification = await GetTechNoteAsync(settings, ticketId, techNoteId, cancellationToken);
+                if (verification.Success
+                    && NormalizeNote(verification.NoteText).Equals(NormalizeNote(noteText), StringComparison.Ordinal))
+                {
+                    return PostingResult.Succeeded(
+                        $"Updated and verified Web Help Desk TechNote #{techNoteId}.",
+                        payload,
+                        $"WHD-TECHNOTE-{techNoteId}");
+                }
+            }
+
+            var verificationMessage = verification?.Success == true
+                ? "WHD returned different note text during verification."
+                : verification?.Message ?? "WHD did not return the TechNote during verification.";
+            return PostingResult.Uncertain(
+                $"Web Help Desk accepted the update to TechNote #{techNoteId}, but TechBench could not verify it. {verificationMessage}",
+                payload,
+                $"WHD-TECHNOTE-{techNoteId}");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            return updateStarted
+                ? PostingResult.Uncertain(
+                    $"The update to Web Help Desk TechNote #{techNoteId} began but could not be verified: {ex.Message}",
+                    payload,
+                    $"WHD-TECHNOTE-{techNoteId}")
+                : PostingResult.Failed($"Web Help Desk TechNote update failed: {ex.Message}", payload);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UriFormatException)
+        {
+            return PostingResult.Failed($"Web Help Desk TechNote update failed: {ex.Message}", payload);
+        }
+    }
+
     public async Task<PostingResult> UpdateTicketStatusAsync(
         WhdConnectionSettings settings,
         int ticketId,

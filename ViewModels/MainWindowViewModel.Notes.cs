@@ -209,13 +209,13 @@ public sealed partial class MainWindowViewModel
         InsertRecentNoteCommand = new RelayCommand(InsertRecentNote, parameter => parameter is WorkEntry && IsEditorEditable);
         ToggleNoteLinkPickerCommand = new RelayCommand(
             _ => IsNoteLinkPickerOpen = !IsNoteLinkPickerOpen,
-            _ => Editor.Id > 0 && !IsEntryOperationRunning);
+            _ => Editor.Id > 0 && !IsEntryOperationRunning && !IsEditorLocked);
         LinkExistingNoteCommand = new RelayCommand(
             LinkExistingNote,
-            parameter => parameter is WorkEntry { Id: > 0 } && Editor.Id > 0 && !IsEntryOperationRunning);
+            parameter => parameter is WorkEntry { Id: > 0 } && Editor.Id > 0 && !IsEntryOperationRunning && !IsEditorLocked);
         RemoveNoteLinkCommand = new RelayCommand(
             RemoveNoteLink,
-            parameter => parameter is WorkEntryLink { Id: > 0 } && !IsEntryOperationRunning);
+            parameter => parameter is WorkEntryLink { Id: > 0 } && !IsEntryOperationRunning && !IsEditorLocked);
         OpenRelatedNoteCommand = new RelayCommand(
             OpenRelatedNote,
             parameter => parameter is WorkEntryLink or WorkEntry);
@@ -532,6 +532,7 @@ public sealed partial class MainWindowViewModel
     {
         if (parameter is not WorkEntry { Id: > 0 } candidate
             || Editor.Id <= 0
+            || IsEditorLocked
             || SelectedNoteLinkTypeOption is not { } linkType)
         {
             return;
@@ -547,7 +548,7 @@ public sealed partial class MainWindowViewModel
 
     private void RemoveNoteLink(object? parameter)
     {
-        if (parameter is not WorkEntryLink { Id: > 0 } link)
+        if (parameter is not WorkEntryLink { Id: > 0 } link || IsEditorLocked)
         {
             return;
         }
