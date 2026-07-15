@@ -2072,6 +2072,21 @@ public sealed class TechBenchRepository
             WHERE BuiltInKey IS NULL
               AND Url = 'https://login.barracuda.com/' COLLATE NOCASE;
 
+            UPDATE CommonLinks
+            SET BuiltInKey = 'eset-protect'
+            WHERE BuiltInKey IS NULL
+              AND Url = 'https://protect.eset.com/' COLLATE NOCASE;
+
+            UPDATE CommonLinks
+            SET BuiltInKey = 'godaddy-dns'
+            WHERE BuiltInKey IS NULL
+              AND Url = 'https://dcc.godaddy.com/control/portfolio' COLLATE NOCASE;
+
+            UPDATE CommonLinks
+            SET BuiltInKey = 'network-solutions-dns'
+            WHERE BuiltInKey IS NULL
+              AND Url = 'https://www.networksolutions.com/my-account/login' COLLATE NOCASE;
+
             CREATE UNIQUE INDEX IF NOT EXISTS UX_CommonLinks_Url
                 ON CommonLinks(Url COLLATE NOCASE);
             CREATE UNIQUE INDEX IF NOT EXISTS UX_CommonLinks_BuiltInKey
@@ -2460,7 +2475,10 @@ public sealed class TechBenchRepository
         {
             ("watchguard-cloud", "WatchGuard Cloud", "https://cloud.watchguard.com/", 0),
             ("microsoft-365-admin", "Microsoft 365 Admin Center", "https://admin.microsoft.com/", 1),
-            ("barracuda-cloud-control", "Barracuda Cloud Control", "https://login.barracuda.com/", 2)
+            ("barracuda-cloud-control", "Barracuda Cloud Control", "https://login.barracuda.com/", 2),
+            ("eset-protect", "ESET PROTECT Console", "https://protect.eset.com/", 3),
+            ("godaddy-dns", "GoDaddy", "https://dcc.godaddy.com/control/portfolio", 10),
+            ("network-solutions-dns", "Network Solutions", "https://www.networksolutions.com/my-account/login", 11)
         };
 
         using var transaction = connection.BeginTransaction();

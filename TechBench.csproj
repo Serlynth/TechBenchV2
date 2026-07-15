@@ -4,9 +4,9 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <StartupObject>TechBench.App</StartupObject>
-    <Version>1.2.5</Version>
-    <AssemblyVersion>1.2.5.0</AssemblyVersion>
-    <FileVersion>1.2.5.0</FileVersion>
+    <Version>1.2.6</Version>
+    <AssemblyVersion>1.2.6.0</AssemblyVersion>
+    <FileVersion>1.2.6.0</FileVersion>
     <Company>CSRI</Company>
     <Product>TechBench</Product>
     <Description>CSRI service worklog and posting workspace</Description>
@@ -39,9 +39,11 @@
 
   <ItemGroup>
     <None Remove="Assets\common-link-*.png" />
+    <None Remove="Assets\common-link-*.ico" />
     <None Remove="Assets\csri-techbench-logo.png" />
     <None Remove="Assets\csri-techbench-icon.ico" />
     <Resource Include="Assets\common-link-*.png" />
+    <Resource Include="Assets\common-link-*.ico" />
     <Resource Include="Assets\csri-techbench-logo.png" />
     <Resource Include="Assets\csri-techbench-icon.ico" />
   </ItemGroup>

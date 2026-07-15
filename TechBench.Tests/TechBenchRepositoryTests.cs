@@ -469,6 +469,27 @@ public sealed class TechBenchRepositoryTests
                     Assert.Equal("Barracuda Cloud Control", link.Name);
                     Assert.Equal("https://login.barracuda.com/", link.Url);
                     Assert.Equal("barracuda-cloud-control", link.BuiltInKey);
+                },
+                link =>
+                {
+                    Assert.Equal("ESET PROTECT Console", link.Name);
+                    Assert.Equal("https://protect.eset.com/", link.Url);
+                    Assert.Equal("eset-protect", link.BuiltInKey);
+                    Assert.Equal("Admin Portals", link.SectionName);
+                },
+                link =>
+                {
+                    Assert.Equal("GoDaddy", link.Name);
+                    Assert.Equal("https://dcc.godaddy.com/control/portfolio", link.Url);
+                    Assert.Equal("godaddy-dns", link.BuiltInKey);
+                    Assert.Equal("Hosted DNS", link.SectionName);
+                },
+                link =>
+                {
+                    Assert.Equal("Network Solutions", link.Name);
+                    Assert.Equal("https://www.networksolutions.com/my-account/login", link.Url);
+                    Assert.Equal("network-solutions-dns", link.BuiltInKey);
+                    Assert.Equal("Hosted DNS", link.SectionName);
                 });
 
             Assert.All(defaults, link => Assert.True(link.IsBuiltIn));
@@ -477,7 +498,7 @@ public sealed class TechBenchRepositoryTests
             var watchGuardUpdatedAt = defaults[0].UpdatedAt;
             repository.Initialize();
             var initializedLinks = repository.GetCommonLinks();
-            Assert.Equal(3, initializedLinks.Count(link => link.IsBuiltIn));
+            Assert.Equal(6, initializedLinks.Count(link => link.IsBuiltIn));
             Assert.Equal(
                 watchGuardUpdatedAt,
                 initializedLinks.Single(link => link.BuiltInKey == "watchguard-cloud").UpdatedAt);
@@ -492,6 +513,7 @@ public sealed class TechBenchRepositoryTests
             Assert.True(id > 0);
             Assert.Equal(id, custom.Id);
             Assert.Null(custom.BuiltInKey);
+            Assert.Equal("Custom Links", custom.SectionName);
 
             custom.Name = "Primary Firewall Portal";
             repository.SaveCommonLink(custom);
@@ -544,9 +566,12 @@ public sealed class TechBenchRepositoryTests
             repository.Initialize();
 
             var links = repository.GetCommonLinks();
-            Assert.Equal(4, links.Count);
-            Assert.Equal(3, links.Count(link => link.IsBuiltIn));
+            Assert.Equal(7, links.Count);
+            Assert.Equal(6, links.Count(link => link.IsBuiltIn));
             Assert.Equal("WatchGuard Cloud", links.Single(link => link.BuiltInKey == "watchguard-cloud").Name);
+            Assert.Equal("ESET PROTECT Console", links.Single(link => link.BuiltInKey == "eset-protect").Name);
+            Assert.Equal("GoDaddy", links.Single(link => link.BuiltInKey == "godaddy-dns").Name);
+            Assert.Equal("Network Solutions", links.Single(link => link.BuiltInKey == "network-solutions-dns").Name);
             Assert.False(links.Single(link => link.Name == "Custom Portal").IsBuiltIn);
         }
         finally

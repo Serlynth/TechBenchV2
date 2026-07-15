@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Windows.Data;
 using Microsoft.Data.Sqlite;
 using TechBench.Models;
 using TechBench.Services;
@@ -16,6 +18,7 @@ public sealed partial class MainWindowViewModel
     private string _commonLinkValidationMessage = string.Empty;
 
     public ObservableCollection<CommonLink> CommonLinks { get; } = new();
+    public ICollectionView CommonLinksView { get; private set; } = null!;
 
     public RelayCommand NewCommonLinkCommand { get; private set; } = null!;
     public RelayCommand EditCommonLinkCommand { get; private set; } = null!;
@@ -93,6 +96,16 @@ public sealed partial class MainWindowViewModel
 
     private void InitializeCommonLinks()
     {
+        CommonLinksView = CollectionViewSource.GetDefaultView(CommonLinks);
+        CommonLinksView.GroupDescriptions.Add(
+            new PropertyGroupDescription(nameof(CommonLink.SectionName)));
+        CommonLinksView.SortDescriptions.Add(
+            new SortDescription(nameof(CommonLink.SectionOrder), ListSortDirection.Ascending));
+        CommonLinksView.SortDescriptions.Add(
+            new SortDescription(nameof(CommonLink.SortOrder), ListSortDirection.Ascending));
+        CommonLinksView.SortDescriptions.Add(
+            new SortDescription(nameof(CommonLink.Name), ListSortDirection.Ascending));
+
         _microsoftAdminOpenInChromeIncognito = _repository
             .GetSetting(MicrosoftAdminIncognitoSettingKey, "false")
             .Equals("true", StringComparison.OrdinalIgnoreCase);
@@ -111,10 +124,13 @@ public sealed partial class MainWindowViewModel
 
     private void RefreshCommonLinks()
     {
-        CommonLinks.Clear();
-        foreach (var link in _repository.GetCommonLinks())
+        using (CommonLinksView.DeferRefresh())
         {
-            CommonLinks.Add(link);
+            CommonLinks.Clear();
+            foreach (var link in _repository.GetCommonLinks())
+            {
+                CommonLinks.Add(link);
+            }
         }
 
         OnPropertyChanged(nameof(HasCommonLinks));

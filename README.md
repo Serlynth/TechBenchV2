@@ -1,6 +1,6 @@
 # TechBench
 
-Current application version: `1.2.5`.
+Current application version: `1.2.6`.
 
 Installed builds check the public binary-only GitHub release feed for stable updates.
 When a new version is available, TechBench shows a Windows alert and can download it with visible progress,
@@ -79,7 +79,7 @@ Settings also provides manual backup, integrity-check, and open-backup-folder co
 - Tags, follow-up/waiting states, overdue badges for existing dated follow-ups, and closeout reminders
 - Fast full-text search across work notes, internal notes, clients, tickets, and tags, with a safe SQLite fallback
 - Recent notes for the selected client, available directly beside the editor
-- Branded Common Links workspace with protected WatchGuard Cloud, Microsoft 365 Admin Center, and Barracuda Cloud Control shortcuts, an optional Chrome Incognito launch for Microsoft 365 Admin, and editable custom links
+- Grouped, branded Common Links workspace with protected admin shortcuts for WatchGuard Cloud, Microsoft 365, Barracuda, and ESET PROTECT; a Hosted DNS section for GoDaddy and Network Solutions; an optional Chrome Incognito launch for Microsoft 365 Admin; and editable custom links
 - Google Sheets CSV migration with preview, client matching, reusable aliases, duration conversion, duplicate warnings, a verified pre-import backup, and one transactional commit
 - Daily worklog with entry cards, billable/non-billable totals, and pending WHD/Sage counts
 - Weekly grouped worklog

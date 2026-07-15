@@ -12,6 +12,16 @@ public sealed class CommonLink
 
     public bool IsBuiltIn => !string.IsNullOrWhiteSpace(BuiltInKey);
 
+    public string SectionName => IsHostedDns
+        ? "Hosted DNS"
+        : IsBuiltIn
+            ? "Admin Portals"
+            : "Custom Links";
+
+    public int SectionOrder => IsHostedDns ? 1 : IsBuiltIn ? 0 : 2;
+
+    private bool IsHostedDns => BuiltInKey is "godaddy-dns" or "network-solutions-dns";
+
     public string DisplayHost
     {
         get
