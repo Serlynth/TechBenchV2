@@ -2078,6 +2078,11 @@ public sealed class TechBenchRepository
               AND Url = 'https://protect.eset.com/' COLLATE NOCASE;
 
             UPDATE CommonLinks
+            SET BuiltInKey = 'email2phone'
+            WHERE BuiltInKey IS NULL
+              AND Url = 'https://user.email2phone.net/client/#/authentication/signin' COLLATE NOCASE;
+
+            UPDATE CommonLinks
             SET BuiltInKey = 'godaddy-dns'
             WHERE BuiltInKey IS NULL
               AND Url = 'https://dcc.godaddy.com/control/portfolio' COLLATE NOCASE;
@@ -2477,6 +2482,7 @@ public sealed class TechBenchRepository
             ("microsoft-365-admin", "Microsoft 365 Admin Center", "https://admin.microsoft.com/", 1),
             ("barracuda-cloud-control", "Barracuda Cloud Control", "https://login.barracuda.com/", 2),
             ("eset-protect", "ESET PROTECT Console", "https://protect.eset.com/", 3),
+            ("email2phone", "Email2Phone", "https://user.email2phone.net/client/#/authentication/signin", 4),
             ("godaddy-dns", "GoDaddy", "https://dcc.godaddy.com/control/portfolio", 10),
             ("network-solutions-dns", "Network Solutions", "https://www.networksolutions.com/my-account/login", 11)
         };

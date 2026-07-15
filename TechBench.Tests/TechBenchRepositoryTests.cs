@@ -479,6 +479,13 @@ public sealed class TechBenchRepositoryTests
                 },
                 link =>
                 {
+                    Assert.Equal("Email2Phone", link.Name);
+                    Assert.Equal("https://user.email2phone.net/client/#/authentication/signin", link.Url);
+                    Assert.Equal("email2phone", link.BuiltInKey);
+                    Assert.Equal("Admin Portals", link.SectionName);
+                },
+                link =>
+                {
                     Assert.Equal("GoDaddy", link.Name);
                     Assert.Equal("https://dcc.godaddy.com/control/portfolio", link.Url);
                     Assert.Equal("godaddy-dns", link.BuiltInKey);
@@ -498,7 +505,7 @@ public sealed class TechBenchRepositoryTests
             var watchGuardUpdatedAt = defaults[0].UpdatedAt;
             repository.Initialize();
             var initializedLinks = repository.GetCommonLinks();
-            Assert.Equal(6, initializedLinks.Count(link => link.IsBuiltIn));
+            Assert.Equal(7, initializedLinks.Count(link => link.IsBuiltIn));
             Assert.Equal(
                 watchGuardUpdatedAt,
                 initializedLinks.Single(link => link.BuiltInKey == "watchguard-cloud").UpdatedAt);
@@ -566,10 +573,11 @@ public sealed class TechBenchRepositoryTests
             repository.Initialize();
 
             var links = repository.GetCommonLinks();
-            Assert.Equal(7, links.Count);
-            Assert.Equal(6, links.Count(link => link.IsBuiltIn));
+            Assert.Equal(8, links.Count);
+            Assert.Equal(7, links.Count(link => link.IsBuiltIn));
             Assert.Equal("WatchGuard Cloud", links.Single(link => link.BuiltInKey == "watchguard-cloud").Name);
             Assert.Equal("ESET PROTECT Console", links.Single(link => link.BuiltInKey == "eset-protect").Name);
+            Assert.Equal("Email2Phone", links.Single(link => link.BuiltInKey == "email2phone").Name);
             Assert.Equal("GoDaddy", links.Single(link => link.BuiltInKey == "godaddy-dns").Name);
             Assert.Equal("Network Solutions", links.Single(link => link.BuiltInKey == "network-solutions-dns").Name);
             Assert.False(links.Single(link => link.Name == "Custom Portal").IsBuiltIn);

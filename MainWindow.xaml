@@ -2029,6 +2029,11 @@
                                                                         <DataTrigger Binding="{Binding BuiltInKey}" Value="eset-protect">
                                                                             <Setter Property="Source" Value="Assets/common-link-eset.png" />
                                                                         </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding BuiltInKey}" Value="email2phone">
+                                                                            <Setter Property="Source" Value="Assets/common-link-email2phone.png" />
+                                                                            <Setter Property="Width" Value="44" />
+                                                                            <Setter Property="Height" Value="30" />
+                                                                        </DataTrigger>
                                                                         <DataTrigger Binding="{Binding BuiltInKey}" Value="godaddy-dns">
                                                                             <Setter Property="Source" Value="Assets/common-link-godaddy.ico" />
                                                                             <Setter Property="Width" Value="30" />
