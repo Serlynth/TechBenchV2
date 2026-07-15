@@ -124,16 +124,20 @@ public sealed partial class MainWindowViewModel
 
     private void RefreshCommonLinks()
     {
-        using (CommonLinksView.DeferRefresh())
-        {
-            CommonLinks.Clear();
-            foreach (var link in _repository.GetCommonLinks())
-            {
-                CommonLinks.Add(link);
-            }
-        }
+        ReplaceCommonLinks(CommonLinks, _repository.GetCommonLinks());
 
         OnPropertyChanged(nameof(HasCommonLinks));
+    }
+
+    internal static void ReplaceCommonLinks(
+        ObservableCollection<CommonLink> target,
+        IEnumerable<CommonLink> refreshedLinks)
+    {
+        target.Clear();
+        foreach (var link in refreshedLinks)
+        {
+            target.Add(link);
+        }
     }
 
     private void StartNewCommonLink()
