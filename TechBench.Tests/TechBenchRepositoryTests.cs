@@ -445,7 +445,7 @@ public sealed class TechBenchRepositoryTests
     }
 
     [Fact]
-    public void CommonLinksSeedOnceAndSupportCreateUpdateAndDelete()
+    public void CommonLinksProtectBuiltInsAndSupportCustomLinkLifecycle()
     {
         WithRepository((repository, _) =>
         {
@@ -456,30 +456,42 @@ public sealed class TechBenchRepositoryTests
                 {
                     Assert.Equal("WatchGuard Cloud", link.Name);
                     Assert.Equal("https://cloud.watchguard.com/", link.Url);
+                    Assert.Equal("watchguard-cloud", link.BuiltInKey);
                 },
                 link =>
                 {
                     Assert.Equal("Microsoft 365 Admin Center", link.Name);
                     Assert.Equal("https://admin.microsoft.com/", link.Url);
+                    Assert.Equal("microsoft-365-admin", link.BuiltInKey);
                 },
                 link =>
                 {
                     Assert.Equal("Barracuda Cloud Control", link.Name);
                     Assert.Equal("https://login.barracuda.com/", link.Url);
+                    Assert.Equal("barracuda-cloud-control", link.BuiltInKey);
                 });
 
-            repository.DeleteCommonLink(defaults[0].Id);
+            Assert.All(defaults, link => Assert.True(link.IsBuiltIn));
+            Assert.Throws<InvalidOperationException>(() => repository.SaveCommonLink(defaults[0]));
+            Assert.Throws<InvalidOperationException>(() => repository.DeleteCommonLink(defaults[0].Id));
+            var watchGuardUpdatedAt = defaults[0].UpdatedAt;
             repository.Initialize();
-            Assert.DoesNotContain(repository.GetCommonLinks(), link => link.Name == "WatchGuard Cloud");
+            var initializedLinks = repository.GetCommonLinks();
+            Assert.Equal(3, initializedLinks.Count(link => link.IsBuiltIn));
+            Assert.Equal(
+                watchGuardUpdatedAt,
+                initializedLinks.Single(link => link.BuiltInKey == "watchguard-cloud").UpdatedAt);
 
             var custom = new CommonLink
             {
                 Name = "Firewall Portal",
-                Url = "https://firewall.example.com/"
+                Url = "https://firewall.example.com/",
+                BuiltInKey = "not-a-real-built-in"
             };
             var id = repository.SaveCommonLink(custom);
             Assert.True(id > 0);
             Assert.Equal(id, custom.Id);
+            Assert.Null(custom.BuiltInKey);
 
             custom.Name = "Primary Firewall Portal";
             repository.SaveCommonLink(custom);
@@ -490,6 +502,61 @@ public sealed class TechBenchRepositoryTests
             repository.DeleteCommonLink(id);
             Assert.DoesNotContain(repository.GetCommonLinks(), link => link.Id == id);
         });
+    }
+
+    [Fact]
+    public void MigratesExistingCommonLinksAndRestoresMissingBuiltIns()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"TechBenchTests-{Guid.NewGuid():N}");
+        var databasePath = Path.Combine(directory, "techbench.db");
+        try
+        {
+            var factory = new SqliteConnectionFactory(databasePath);
+            using (var connection = factory.CreateConnection())
+            {
+                connection.Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = """
+                    CREATE TABLE CommonLinks (
+                        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        Name TEXT NOT NULL,
+                        Url TEXT NOT NULL,
+                        SortOrder INTEGER NOT NULL DEFAULT 0,
+                        CreatedAt TEXT NOT NULL,
+                        UpdatedAt TEXT NOT NULL
+                    );
+                    CREATE TABLE Settings (
+                        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        Key TEXT NOT NULL UNIQUE,
+                        Value TEXT NOT NULL DEFAULT ''
+                    );
+                    INSERT INTO CommonLinks (Name, Url, SortOrder, CreatedAt, UpdatedAt)
+                    VALUES
+                        ('Old WatchGuard Name', 'https://cloud.watchguard.com/', 0, '2026-07-15', '2026-07-15'),
+                        ('Custom Portal', 'https://portal.example.com/', 4, '2026-07-15', '2026-07-15');
+                    INSERT INTO Settings (Key, Value)
+                    VALUES ('CommonLinks.DefaultsSeededV1', 'true');
+                    """;
+                command.ExecuteNonQuery();
+            }
+
+            var repository = new TechBenchRepository(factory);
+            repository.Initialize();
+
+            var links = repository.GetCommonLinks();
+            Assert.Equal(4, links.Count);
+            Assert.Equal(3, links.Count(link => link.IsBuiltIn));
+            Assert.Equal("WatchGuard Cloud", links.Single(link => link.BuiltInKey == "watchguard-cloud").Name);
+            Assert.False(links.Single(link => link.Name == "Custom Portal").IsBuiltIn);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
     }
 
     [Fact]

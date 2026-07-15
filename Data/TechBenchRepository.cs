@@ -1297,7 +1297,7 @@ public sealed class TechBenchRepository
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT Id, Name, Url, SortOrder, CreatedAt, UpdatedAt
+            SELECT Id, Name, Url, SortOrder, BuiltInKey, CreatedAt, UpdatedAt
             FROM CommonLinks
             ORDER BY SortOrder, Name COLLATE NOCASE, Id
             """;
@@ -1312,8 +1312,9 @@ public sealed class TechBenchRepository
                 Name = reader.GetString(1),
                 Url = reader.GetString(2),
                 SortOrder = reader.GetInt32(3),
-                CreatedAt = FromDbDateTime(reader, 4) ?? DateTime.MinValue,
-                UpdatedAt = FromDbDateTime(reader, 5) ?? DateTime.MinValue
+                BuiltInKey = reader.IsDBNull(4) ? null : reader.GetString(4),
+                CreatedAt = FromDbDateTime(reader, 5) ?? DateTime.MinValue,
+                UpdatedAt = FromDbDateTime(reader, 6) ?? DateTime.MinValue
             });
         }
 
@@ -1339,6 +1340,17 @@ public sealed class TechBenchRepository
 
         if (link.Id > 0)
         {
+            using (var builtInCommand = connection.CreateCommand())
+            {
+                builtInCommand.CommandText = "SELECT BuiltInKey FROM CommonLinks WHERE Id = $id";
+                builtInCommand.Parameters.AddWithValue("$id", link.Id);
+                if (builtInCommand.ExecuteScalar() is string builtInKey
+                    && !string.IsNullOrWhiteSpace(builtInKey))
+                {
+                    throw new InvalidOperationException("Built-in links cannot be changed.");
+                }
+            }
+
             using var updateCommand = connection.CreateCommand();
             updateCommand.CommandText = """
                 UPDATE CommonLinks
@@ -1358,6 +1370,7 @@ public sealed class TechBenchRepository
 
             link.Name = link.Name.Trim();
             link.Url = link.Url.Trim();
+            link.BuiltInKey = null;
             link.UpdatedAt = now;
             return link.Id;
         }
@@ -1380,6 +1393,7 @@ public sealed class TechBenchRepository
         link.Id = Convert.ToInt32(insertCommand.ExecuteScalar(), CultureInfo.InvariantCulture);
         link.Name = link.Name.Trim();
         link.Url = link.Url.Trim();
+        link.BuiltInKey = null;
         link.CreatedAt = now;
         link.UpdatedAt = now;
         return link.Id;
@@ -1389,6 +1403,17 @@ public sealed class TechBenchRepository
     {
         using var connection = _connectionFactory.CreateConnection();
         connection.Open();
+        using (var builtInCommand = connection.CreateCommand())
+        {
+            builtInCommand.CommandText = "SELECT BuiltInKey FROM CommonLinks WHERE Id = $id";
+            builtInCommand.Parameters.AddWithValue("$id", id);
+            if (builtInCommand.ExecuteScalar() is string builtInKey
+                && !string.IsNullOrWhiteSpace(builtInKey))
+            {
+                throw new InvalidOperationException("Built-in links cannot be removed.");
+            }
+        }
+
         using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM CommonLinks WHERE Id = $id";
         command.Parameters.AddWithValue("$id", id);
@@ -2021,16 +2046,41 @@ public sealed class TechBenchRepository
                 Name TEXT NOT NULL,
                 Url TEXT NOT NULL,
                 SortOrder INTEGER NOT NULL DEFAULT 0,
+                BuiltInKey TEXT NULL,
                 CreatedAt TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL
             );
+            """;
+        command.ExecuteNonQuery();
+
+        EnsureColumn(connection, "CommonLinks", "BuiltInKey", "TEXT NULL");
+
+        using var migrationCommand = connection.CreateCommand();
+        migrationCommand.CommandText = """
+            UPDATE CommonLinks
+            SET BuiltInKey = 'watchguard-cloud'
+            WHERE BuiltInKey IS NULL
+              AND Url = 'https://cloud.watchguard.com/' COLLATE NOCASE;
+
+            UPDATE CommonLinks
+            SET BuiltInKey = 'microsoft-365-admin'
+            WHERE BuiltInKey IS NULL
+              AND Url = 'https://admin.microsoft.com/' COLLATE NOCASE;
+
+            UPDATE CommonLinks
+            SET BuiltInKey = 'barracuda-cloud-control'
+            WHERE BuiltInKey IS NULL
+              AND Url = 'https://login.barracuda.com/' COLLATE NOCASE;
 
             CREATE UNIQUE INDEX IF NOT EXISTS UX_CommonLinks_Url
                 ON CommonLinks(Url COLLATE NOCASE);
+            CREATE UNIQUE INDEX IF NOT EXISTS UX_CommonLinks_BuiltInKey
+                ON CommonLinks(BuiltInKey)
+                WHERE BuiltInKey IS NOT NULL;
             CREATE INDEX IF NOT EXISTS IX_CommonLinks_SortOrder
                 ON CommonLinks(SortOrder, Name COLLATE NOCASE);
             """;
-        command.ExecuteNonQuery();
+        migrationCommand.ExecuteNonQuery();
     }
 
     private void RebuildWorkEntrySearchIndex(SqliteConnection connection)
@@ -2405,23 +2455,12 @@ public sealed class TechBenchRepository
 
     private static void SeedCommonLinks(SqliteConnection connection)
     {
-        const string seedKey = "CommonLinks.DefaultsSeededV1";
-        using (var checkCommand = connection.CreateCommand())
-        {
-            checkCommand.CommandText = "SELECT 1 FROM Settings WHERE Key = $key LIMIT 1";
-            checkCommand.Parameters.AddWithValue("$key", seedKey);
-            if (checkCommand.ExecuteScalar() is not null)
-            {
-                return;
-            }
-        }
-
         var now = ToDbDateTime(DateTime.Now);
         var defaults = new[]
         {
-            ("WatchGuard Cloud", "https://cloud.watchguard.com/", 0),
-            ("Microsoft 365 Admin Center", "https://admin.microsoft.com/", 1),
-            ("Barracuda Cloud Control", "https://login.barracuda.com/", 2)
+            ("watchguard-cloud", "WatchGuard Cloud", "https://cloud.watchguard.com/", 0),
+            ("microsoft-365-admin", "Microsoft 365 Admin Center", "https://admin.microsoft.com/", 1),
+            ("barracuda-cloud-control", "Barracuda Cloud Control", "https://login.barracuda.com/", 2)
         };
 
         using var transaction = connection.BeginTransaction();
@@ -2430,26 +2469,31 @@ public sealed class TechBenchRepository
             using var insertCommand = connection.CreateCommand();
             insertCommand.Transaction = transaction;
             insertCommand.CommandText = """
-                INSERT OR IGNORE INTO CommonLinks (Name, Url, SortOrder, CreatedAt, UpdatedAt)
-                VALUES ($name, $url, $sortOrder, $createdAt, $updatedAt)
+                INSERT OR IGNORE INTO CommonLinks
+                    (Name, Url, SortOrder, BuiltInKey, CreatedAt, UpdatedAt)
+                VALUES
+                    ($name, $url, $sortOrder, $builtInKey, $createdAt, $updatedAt);
+
+                UPDATE CommonLinks
+                SET Name = $name,
+                    Url = $url,
+                    SortOrder = $sortOrder,
+                    BuiltInKey = $builtInKey,
+                    UpdatedAt = $updatedAt
+                WHERE (BuiltInKey = $builtInKey OR Url = $url COLLATE NOCASE)
+                  AND (Name <> $name
+                       OR Url <> $url COLLATE NOCASE
+                       OR SortOrder <> $sortOrder
+                       OR BuiltInKey IS NULL)
                 """;
-            insertCommand.Parameters.AddWithValue("$name", link.Item1);
-            insertCommand.Parameters.AddWithValue("$url", link.Item2);
-            insertCommand.Parameters.AddWithValue("$sortOrder", link.Item3);
+            insertCommand.Parameters.AddWithValue("$builtInKey", link.Item1);
+            insertCommand.Parameters.AddWithValue("$name", link.Item2);
+            insertCommand.Parameters.AddWithValue("$url", link.Item3);
+            insertCommand.Parameters.AddWithValue("$sortOrder", link.Item4);
             insertCommand.Parameters.AddWithValue("$createdAt", now);
             insertCommand.Parameters.AddWithValue("$updatedAt", now);
             insertCommand.ExecuteNonQuery();
         }
-
-        using var markerCommand = connection.CreateCommand();
-        markerCommand.Transaction = transaction;
-        markerCommand.CommandText = """
-            INSERT INTO Settings (Key, Value)
-            VALUES ($key, 'true')
-            ON CONFLICT(Key) DO NOTHING
-            """;
-        markerCommand.Parameters.AddWithValue("$key", seedKey);
-        markerCommand.ExecuteNonQuery();
         transaction.Commit();
     }
 
@@ -3573,6 +3617,7 @@ public sealed class TechBenchRepository
             Name TEXT NOT NULL,
             Url TEXT NOT NULL,
             SortOrder INTEGER NOT NULL DEFAULT 0,
+            BuiltInKey TEXT NULL,
             CreatedAt TEXT NOT NULL,
             UpdatedAt TEXT NOT NULL
         );

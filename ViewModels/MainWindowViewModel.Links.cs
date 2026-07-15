@@ -76,10 +76,14 @@ public sealed partial class MainWindowViewModel
     private void InitializeCommonLinks()
     {
         NewCommonLinkCommand = new RelayCommand(_ => StartNewCommonLink());
-        EditCommonLinkCommand = new RelayCommand(EditCommonLink, parameter => parameter is CommonLink { Id: > 0 });
+        EditCommonLinkCommand = new RelayCommand(
+            EditCommonLink,
+            parameter => parameter is CommonLink { Id: > 0, IsBuiltIn: false });
         SaveCommonLinkCommand = new RelayCommand(_ => SaveCommonLink(), _ => CanSaveCommonLink());
         CancelCommonLinkCommand = new RelayCommand(_ => CloseCommonLinkEditor(), _ => IsCommonLinkEditorOpen);
-        DeleteCommonLinkCommand = new RelayCommand(DeleteCommonLink, parameter => parameter is CommonLink { Id: > 0 });
+        DeleteCommonLinkCommand = new RelayCommand(
+            DeleteCommonLink,
+            parameter => parameter is CommonLink { Id: > 0, IsBuiltIn: false });
         OpenCommonLinkCommand = new RelayCommand(OpenCommonLink, parameter => parameter is CommonLink { Id: > 0 });
         RefreshCommonLinks();
     }
@@ -107,7 +111,7 @@ public sealed partial class MainWindowViewModel
 
     private void EditCommonLink(object? parameter)
     {
-        if (parameter is not CommonLink { Id: > 0 } link)
+        if (parameter is not CommonLink { Id: > 0, IsBuiltIn: false } link)
         {
             return;
         }
@@ -172,7 +176,7 @@ public sealed partial class MainWindowViewModel
 
     private void DeleteCommonLink(object? parameter)
     {
-        if (parameter is not CommonLink { Id: > 0 } link)
+        if (parameter is not CommonLink { Id: > 0, IsBuiltIn: false } link)
         {
             return;
         }

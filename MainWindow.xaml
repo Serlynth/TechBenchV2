@@ -1932,7 +1932,7 @@
                                            VerticalAlignment="Center"
                                            Margin="0" />
                                 <Button Grid.Column="1"
-                                        Content="Add Link"
+                                        Content="Add Custom Link"
                                         Command="{Binding NewCommonLinkCommand}"
                                         Style="{StaticResource PrimaryButtonStyle}"
                                         Padding="12,7" />
@@ -1950,6 +1950,7 @@
                                 <ListBox.ItemContainerStyle>
                                     <Style TargetType="{x:Type ListBoxItem}">
                                         <Setter Property="Padding" Value="0" />
+                                        <Setter Property="Margin" Value="0" />
                                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                                         <Setter Property="IsTabStop" Value="False" />
                                     </Style>
@@ -1958,23 +1959,97 @@
                                     <DataTemplate>
                                         <Border BorderBrush="{DynamicResource BorderBrush}"
                                                 BorderThickness="0,0,0,1"
-                                                Padding="4,12">
+                                                Padding="8,14">
+                                            <Border.Style>
+                                                <Style TargetType="{x:Type Border}">
+                                                    <Setter Property="Background" Value="Transparent" />
+                                                    <Style.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter Property="Background" Value="{DynamicResource ControlAltBackgroundBrush}" />
+                                                        </Trigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="58" />
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <StackPanel VerticalAlignment="Center" Margin="0,0,14,0">
-                                                    <TextBlock Text="{Binding Name}"
-                                                               FontWeight="SemiBold"
-                                                               FontSize="14"
-                                                               TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock Text="{Binding Url}"
+
+                                                <Border Width="48"
+                                                        Height="48"
+                                                        HorizontalAlignment="Left"
+                                                        VerticalAlignment="Center"
+                                                        Background="#F7F9FC"
+                                                        BorderBrush="#D8E0EA"
+                                                        BorderThickness="1"
+                                                        CornerRadius="9">
+                                                    <Grid>
+                                                        <Image Stretch="Uniform"
+                                                               HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center"
+                                                               RenderOptions.BitmapScalingMode="HighQuality">
+                                                            <Image.Style>
+                                                                <Style TargetType="{x:Type Image}">
+                                                                    <Setter Property="Width" Value="36" />
+                                                                    <Setter Property="Height" Value="36" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding BuiltInKey}" Value="watchguard-cloud">
+                                                                            <Setter Property="Source" Value="Assets/common-link-watchguard.png" />
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding BuiltInKey}" Value="microsoft-365-admin">
+                                                                            <Setter Property="Source" Value="Assets/common-link-microsoft.png" />
+                                                                            <Setter Property="Width" Value="24" />
+                                                                            <Setter Property="Height" Value="24" />
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding BuiltInKey}" Value="barracuda-cloud-control">
+                                                                            <Setter Property="Source" Value="Assets/common-link-barracuda.png" />
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding IsBuiltIn}" Value="False">
+                                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Image.Style>
+                                                        </Image>
+                                                        <TextBlock Text="{Binding DisplayInitial}"
+                                                                   Foreground="{DynamicResource AccentBrush}"
+                                                                   FontSize="19"
+                                                                   FontWeight="Bold"
+                                                                   HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center"
+                                                                   Visibility="{Binding IsBuiltIn, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                                                    </Grid>
+                                                </Border>
+
+                                                <StackPanel Grid.Column="1"
+                                                            VerticalAlignment="Center"
+                                                            Margin="0,0,14,0">
+                                                    <DockPanel LastChildFill="True">
+                                                        <Border DockPanel.Dock="Right"
+                                                                Style="{StaticResource BadgeStyle}"
+                                                                Padding="7,3"
+                                                                Margin="8,0,0,0"
+                                                                Visibility="{Binding IsBuiltIn, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                            <TextBlock Text="BUILT IN"
+                                                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                                                       FontSize="9"
+                                                                       FontWeight="Bold" />
+                                                        </Border>
+                                                        <TextBlock Text="{Binding Name}"
+                                                                   FontWeight="SemiBold"
+                                                                   FontSize="14"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   VerticalAlignment="Center" />
+                                                    </DockPanel>
+                                                    <TextBlock Text="{Binding DisplayHost}"
                                                                Style="{StaticResource MutedTextStyle}"
                                                                TextTrimming="CharacterEllipsis"
                                                                Margin="0,3,0,0" />
                                                 </StackPanel>
-                                                <StackPanel Grid.Column="1"
+
+                                                <StackPanel Grid.Column="2"
                                                             Orientation="Horizontal"
                                                             VerticalAlignment="Center">
                                                     <Button Content="Open"
@@ -1984,18 +2059,21 @@
                                                             MinWidth="68"
                                                             Padding="10,6"
                                                             Margin="0,0,7,0" />
-                                                    <Button Content="Edit"
-                                                            Command="{Binding DataContext.EditCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                            CommandParameter="{Binding}"
-                                                            MinWidth="62"
-                                                            Padding="10,6"
-                                                            Margin="0,0,7,0" />
-                                                    <Button Content="Remove"
-                                                            Command="{Binding DataContext.DeleteCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                            CommandParameter="{Binding}"
-                                                            Style="{StaticResource DangerButtonStyle}"
-                                                            MinWidth="76"
-                                                            Padding="10,6" />
+                                                    <StackPanel Orientation="Horizontal"
+                                                                Visibility="{Binding IsBuiltIn, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                                        <Button Content="Edit"
+                                                                Command="{Binding DataContext.EditCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}"
+                                                                MinWidth="62"
+                                                                Padding="10,6"
+                                                                Margin="0,0,7,0" />
+                                                        <Button Content="Remove"
+                                                                Command="{Binding DataContext.DeleteCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}"
+                                                                Style="{StaticResource DangerButtonStyle}"
+                                                                MinWidth="76"
+                                                                Padding="10,6" />
+                                                    </StackPanel>
                                                 </StackPanel>
                                             </Grid>
                                         </Border>
