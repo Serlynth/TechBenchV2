@@ -158,6 +158,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         PostWhdCommand = new AsyncRelayCommand(PostWhdAsync, CanPostWhdEntry);
         PostSageCommand = new AsyncRelayCommand(PostSageAsync, CanPostSageEntry);
         VerifySageSaveCommand = new AsyncRelayCommand(VerifySageSaveAsync, CanVerifySageSave);
+        LinkSageTicketCommand = new AsyncRelayCommand(LinkSageTicketAsync, CanLinkSageTicket);
         BatchPostWhdCommand = new AsyncRelayCommand(BatchPostWhdAsync);
         MarkWhdPostedCommand = new RelayCommand(parameter => MarkPosted(parameter, "WHD"), CanResolveSavedEntry);
         OpenWhdTicketCommand = new RelayCommand(OpenWhdTicket, CanOpenWhdTicket);
@@ -290,6 +291,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public AsyncRelayCommand PostWhdCommand { get; }
     public AsyncRelayCommand PostSageCommand { get; }
     public AsyncRelayCommand VerifySageSaveCommand { get; }
+    public AsyncRelayCommand LinkSageTicketCommand { get; }
     public AsyncRelayCommand BatchPostWhdCommand { get; }
     public RelayCommand MarkWhdPostedCommand { get; }
     public RelayCommand OpenWhdTicketCommand { get; }
@@ -2275,6 +2277,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             && HasSageDraft(entry);
     }
 
+    private bool CanLinkSageTicket(object? parameter)
+    {
+        var entry = parameter as WorkEntry;
+        if (entry is null && Editor.Id > 0)
+        {
+            entry = _repository.GetWorkEntry(Editor.Id);
+        }
+
+        return entry is { Id: > 0, NeedsSagePosting: true };
+    }
+
     private async Task VerifySageSaveAsync(object? parameter)
     {
         if (_isSagePostingRunning)
@@ -2304,6 +2317,63 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 _dialogService.Info("Check Sage save", result.Message);
             }
+        }
+    }
+
+    private async Task LinkSageTicketAsync(object? parameter)
+    {
+        if (_isSagePostingRunning || _isSageVerificationRunning)
+        {
+            _dialogService.Info(
+                "Link Sage ticket",
+                "Another Sage operation is still running. Try again after it finishes.");
+            return;
+        }
+
+        var entry = ResolveEntry(parameter);
+        if (entry is not { Id: > 0, NeedsSagePosting: true })
+        {
+            _dialogService.Error("Link Sage ticket", "Select a saved entry that is still Sage pending.");
+            return;
+        }
+
+        var input = _dialogService.Prompt(
+            "Link existing Sage ticket",
+            "Enter the saved Sage Time Ticket number. The entry remains pending unless Sage confirms it.",
+            entry.SageTicketNumber ?? string.Empty,
+            "Verify and Link",
+            "Cancel");
+        if (input is null)
+        {
+            return;
+        }
+
+        if (!TryNormalizeManualSageTicketNumber(input, out var ticketNumber))
+        {
+            _dialogService.Error(
+                "Link Sage ticket",
+                "Enter the numeric Sage Time Ticket number, such as 147775.");
+            return;
+        }
+
+        var result = await VerifySageEntryAsync(
+            entry,
+            showFeedback: true,
+            requestedTicketNumber: ticketNumber);
+        StatusMessage = result.Message;
+        if (result.IsSaved)
+        {
+            _dialogService.Info(
+                "Sage ticket linked",
+                $"This entry is now linked to verified Sage ticket #{result.TicketNumber ?? ticketNumber}.");
+        }
+        else if (result.Message.StartsWith("Sage save verification could not run", StringComparison.Ordinal))
+        {
+            _dialogService.Error("Link Sage ticket", result.Message);
+        }
+        else
+        {
+            _dialogService.Info("Link Sage ticket", result.Message);
         }
     }
 
@@ -2339,7 +2409,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task<SageTimeTicketVerificationResult> VerifySageEntryAsync(
         WorkEntry entry,
-        bool showFeedback)
+        bool showFeedback,
+        string? requestedTicketNumber = null)
     {
         if (_isSageVerificationRunning || _isSagePostingRunning)
         {
@@ -2353,8 +2424,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             var dsn = settings.GetValueOrDefault("Sage.Dsn", string.Empty);
             var username = settings.GetValueOrDefault("Sage.Username", string.Empty);
             var password = settings.GetValueOrDefault("Sage.Password", string.Empty);
+            var ticketNumber = string.IsNullOrWhiteSpace(requestedTicketNumber)
+                ? entry.SageTicketNumber
+                : requestedTicketNumber;
             var request = new SageTimeTicketVerificationRequest(
-                entry.SageTicketNumber,
+                ticketNumber,
                 entry.WorkDate,
                 entry.DurationMinutes,
                 entry.Note);
@@ -2362,7 +2436,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
             if (result.IsSaved)
             {
-                entry.SageTicketNumber = result.TicketNumber ?? entry.SageTicketNumber;
+                entry.SageTicketNumber = result.TicketNumber ?? ticketNumber ?? entry.SageTicketNumber;
                 entry.SagePosted = true;
                 entry.SagePostedAt = DateTime.Now;
                 entry.LastError = null;
@@ -2395,10 +2469,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 {
                     WorkEntryId = entry.Id,
                     Destination = "Sage",
-                    Payload = BuildSageVerificationPayload(entry.SageTicketNumber),
+                    Payload = BuildSageVerificationPayload(ticketNumber),
                     Success = false,
                     Message = result.Message,
-                    ExternalReference = $"SAGE-{entry.SageTicketNumber}",
+                    ExternalReference = BuildSageExternalReference(ticketNumber),
                     CreatedAt = DateTime.Now
                 });
                 RefreshAll();
@@ -2416,6 +2490,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             _isSageVerificationRunning = false;
             VerifySageSaveCommand.RaiseCanExecuteChanged();
+            LinkSageTicketCommand.RaiseCanExecuteChanged();
         }
     }
 
@@ -2443,6 +2518,22 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         return string.IsNullOrWhiteSpace(ticketNumber)
             ? method
             : $"{method} for Sage ticket #{ticketNumber}";
+    }
+
+    private static string? BuildSageExternalReference(string? ticketNumber) =>
+        string.IsNullOrWhiteSpace(ticketNumber) ? null : $"SAGE-{ticketNumber.Trim()}";
+
+    internal static bool TryNormalizeManualSageTicketNumber(string? value, out string ticketNumber)
+    {
+        ticketNumber = value?.Trim() ?? string.Empty;
+        if (ticketNumber.StartsWith("SAGE-", StringComparison.OrdinalIgnoreCase))
+        {
+            ticketNumber = ticketNumber[5..].Trim();
+        }
+
+        ticketNumber = ticketNumber.TrimStart('#').Trim();
+        return ticketNumber.Length is > 0 and <= 20
+            && ticketNumber.All(char.IsDigit);
     }
 
     private bool HasSageDraft(WorkEntry entry) =>
@@ -3340,6 +3431,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         PostSageCommand.RaiseCanExecuteChanged();
         MarkWhdPostedCommand.RaiseCanExecuteChanged();
         VerifySageSaveCommand.RaiseCanExecuteChanged();
+        LinkSageTicketCommand.RaiseCanExecuteChanged();
         OpenWhdTicketCommand.RaiseCanExecuteChanged();
         RaiseEditorWorkflowCommandStates();
     }

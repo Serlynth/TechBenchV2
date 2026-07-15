@@ -7,6 +7,7 @@
         <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#101822" />
         <SolidColorBrush x:Key="PanelAltBackgroundBrush" Color="#162232" />
         <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#070B11" />
+        <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="#0B111A" />
         <SolidColorBrush x:Key="ControlBackgroundBrush" Color="#0C141F" />
         <SolidColorBrush x:Key="ControlAltBackgroundBrush" Color="#182536" />
         <SolidColorBrush x:Key="BorderBrush" Color="#223247" />
@@ -26,6 +27,9 @@
         <SolidColorBrush x:Key="NeutralBadgeBrush" Color="#A6B2C0" />
         <SolidColorBrush x:Key="NoTicketBadgeBrush" Color="#C4A7FF" />
         <SolidColorBrush x:Key="SidebarTextBrush" Color="#EEF4F7" />
+        <SolidColorBrush x:Key="SidebarMutedTextBrush" Color="#93A6BA" />
+        <SolidColorBrush x:Key="SuccessSoftBrush" Color="#102D25" />
+        <SolidColorBrush x:Key="SuccessSoftHoverBrush" Color="#194638" />
         <SolidColorBrush x:Key="ComboBoxBackgroundBrush" Color="#182535" />
         <SolidColorBrush x:Key="ComboBoxTextBrush" Color="#F4F8FC" />
         <SolidColorBrush x:Key="ComboBoxBorderBrush" Color="#2A4359" />
@@ -380,7 +384,7 @@
                                 <Border x:Name="ActiveBar" Width="3" Height="20" Background="{DynamicResource AccentBrush}" CornerRadius="2" HorizontalAlignment="Left" Visibility="Collapsed" />
                                 <Grid Margin="{TemplateBinding Padding}">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                    <Ellipse x:Name="NavDot" Width="5" Height="5" Fill="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" />
+                                    <Ellipse x:Name="NavDot" Width="5" Height="5" Fill="{DynamicResource SidebarMutedTextBrush}" VerticalAlignment="Center" />
                                     <ContentPresenter Grid.Column="1" HorizontalAlignment="Left" VerticalAlignment="Center" RecognizesAccessKey="True" TextElement.Foreground="{TemplateBinding Foreground}" />
                                 </Grid>
                             </Grid>

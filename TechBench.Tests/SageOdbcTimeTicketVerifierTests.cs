@@ -1,10 +1,31 @@
 using TechBench.Models;
 using TechBench.Services;
+using TechBench.ViewModels;
 
 namespace TechBench.Tests;
 
 public sealed class SageOdbcTimeTicketVerifierTests
 {
+    [Theory]
+    [InlineData("147775", "147775")]
+    [InlineData(" SAGE-147775 ", "147775")]
+    [InlineData("#147775", "147775")]
+    public void NormalizesManualSageTicketNumbers(string input, string expected)
+    {
+        Assert.True(MainWindowViewModel.TryNormalizeManualSageTicketNumber(input, out var ticketNumber));
+        Assert.Equal(expected, ticketNumber);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("SAGE-")]
+    [InlineData("147A75")]
+    [InlineData("https://example.com")]
+    public void RejectsInvalidManualSageTicketNumbers(string input)
+    {
+        Assert.False(MainWindowViewModel.TryNormalizeManualSageTicketNumber(input, out _));
+    }
+
     [Fact]
     public void SelectsOfficialSageTicketDatColumns()
     {

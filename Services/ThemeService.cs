@@ -25,12 +25,13 @@ public static class ThemeService
             SetBrush(resources, "PanelBackgroundBrush", "#FFFFFF");
             SetBrush(resources, "PanelAltBackgroundBrush", "#ECF1F5");
             SetBrush(resources, "SidebarBackgroundBrush", "#07101A");
+            SetBrush(resources, "HeaderBackgroundBrush", "#FFFFFF");
             SetBrush(resources, "ControlBackgroundBrush", "#FFFFFF");
             SetBrush(resources, "ControlAltBackgroundBrush", "#F2F5F8");
             SetBrush(resources, "BorderBrush", "#CDD6DF");
             SetBrush(resources, "PrimaryTextBrush", "#17212B");
             SetBrush(resources, "SecondaryTextBrush", "#52616F");
-            SetBrush(resources, "MutedTextBrush", "#748291");
+            SetBrush(resources, "MutedTextBrush", "#5F6F7E");
             SetBrush(resources, "AccentBrush", "#147CFF");
             SetBrush(resources, "AccentHoverBrush", "#0E66D8");
             SetBrush(resources, "AccentSoftBrush", "#DCEBFF");
@@ -39,11 +40,14 @@ public static class ThemeService
             SetBrush(resources, "SidebarActiveBrush", "#14243A");
             SetBrush(resources, "DangerBrush", "#C84646");
             SetBrush(resources, "WarningBrush", "#D89B25");
-            SetBrush(resources, "SuccessBrush", "#2F8F5B");
+            SetBrush(resources, "SuccessBrush", "#237348");
             SetBrush(resources, "BillableBadgeBrush", "#86B7FF");
             SetBrush(resources, "NeutralBadgeBrush", "#AAB4BE");
             SetBrush(resources, "NoTicketBadgeBrush", "#D2A3FF");
             SetBrush(resources, "SidebarTextBrush", "#F3F7FA");
+            SetBrush(resources, "SidebarMutedTextBrush", "#A9B9C9");
+            SetBrush(resources, "SuccessSoftBrush", "#DDF3E7");
+            SetBrush(resources, "SuccessSoftHoverBrush", "#C7E8D6");
             SetBrush(resources, "ComboBoxBackgroundBrush", "#F7F9FB");
             SetBrush(resources, "ComboBoxTextBrush", "#101820");
             SetBrush(resources, "ComboBoxBorderBrush", "#9AA8B3");
@@ -61,6 +65,7 @@ public static class ThemeService
             SetBrush(resources, "PanelBackgroundBrush", "#101822");
             SetBrush(resources, "PanelAltBackgroundBrush", "#162232");
             SetBrush(resources, "SidebarBackgroundBrush", "#070B11");
+            SetBrush(resources, "HeaderBackgroundBrush", "#0B111A");
             SetBrush(resources, "ControlBackgroundBrush", "#0C141F");
             SetBrush(resources, "ControlAltBackgroundBrush", "#182536");
             SetBrush(resources, "BorderBrush", "#223247");
@@ -80,6 +85,9 @@ public static class ThemeService
             SetBrush(resources, "NeutralBadgeBrush", "#A6B2C0");
             SetBrush(resources, "NoTicketBadgeBrush", "#C4A7FF");
             SetBrush(resources, "SidebarTextBrush", "#F4F8FC");
+            SetBrush(resources, "SidebarMutedTextBrush", "#93A6BA");
+            SetBrush(resources, "SuccessSoftBrush", "#102D25");
+            SetBrush(resources, "SuccessSoftHoverBrush", "#194638");
             SetBrush(resources, "ComboBoxBackgroundBrush", "#0C141F");
             SetBrush(resources, "ComboBoxTextBrush", "#F7FAFC");
             SetBrush(resources, "ComboBoxBorderBrush", "#223247");

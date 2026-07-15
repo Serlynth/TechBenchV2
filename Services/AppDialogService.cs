@@ -24,4 +24,19 @@ public sealed class AppDialogService : IUserDialogService
     {
         AppDialogWindow.Error(title, message);
     }
+
+    public string? Prompt(
+        string title,
+        string message,
+        string initialValue = "",
+        string confirmText = "OK",
+        string cancelText = "Cancel")
+    {
+        return AppDialogWindow.Prompt(
+            title,
+            message,
+            initialValue,
+            confirmText: confirmText,
+            cancelText: cancelText);
+    }
 }

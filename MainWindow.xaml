@@ -45,7 +45,7 @@
                TargetType="{x:Type Button}"
                BasedOn="{StaticResource {x:Type Button}}">
             <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
-            <Setter Property="Background" Value="#102D25" />
+            <Setter Property="Background" Value="{DynamicResource SuccessSoftBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Padding" Value="11,5" />
@@ -67,7 +67,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="UpdateBorder" Property="Background" Value="#194638" />
+                                <Setter TargetName="UpdateBorder" Property="Background" Value="{DynamicResource SuccessSoftHoverBrush}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="UpdateBorder" Property="Opacity" Value="0.76" />
@@ -267,7 +267,7 @@
         </Style>
 
         <Style x:Key="SidebarGroupLabelStyle" TargetType="{x:Type TextBlock}">
-            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource SidebarMutedTextBrush}" />
             <Setter Property="FontSize" Value="10" />
             <Setter Property="FontWeight" Value="Bold" />
             <Setter Property="Margin" Value="16,17,0,6" />
@@ -463,7 +463,7 @@
                         </StackPanel>
                     </Border>
                     <TextBlock Text="{Binding DatabasePath}"
-                               Foreground="{DynamicResource MutedTextBrush}"
+                               Foreground="{DynamicResource SidebarMutedTextBrush}"
                                FontSize="9"
                                ToolTip="{Binding DatabasePath}"
                                TextTrimming="CharacterEllipsis"
@@ -479,7 +479,7 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="26,0" Background="#0B111A">
+            <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="26,0" Background="{DynamicResource HeaderBackgroundBrush}">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -1366,6 +1366,9 @@
                                                              DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                                     <MenuItem Header="Check Sage Save"
                                                               Command="{Binding VerifySageSaveCommand}"
+                                                              Style="{StaticResource EditorContextMenuItemStyle}" />
+                                                    <MenuItem Header="Link Existing Sage Ticket..."
+                                                              Command="{Binding LinkSageTicketCommand}"
                                                               Style="{StaticResource EditorContextMenuItemStyle}" />
                                                     <MenuItem Header="Mark WHD Posted (Manual)"
                                                               Command="{Binding MarkWhdPostedCommand}"

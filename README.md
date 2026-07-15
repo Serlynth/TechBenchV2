@@ -1,6 +1,6 @@
 # TechBench
 
-Current application version: `1.2.1`.
+Current application version: `1.2.2`.
 
 Installed builds check the public binary-only GitHub release feed for stable updates.
 When a new version is available, TechBench shows a Windows alert and can download it with visible progress,
@@ -90,7 +90,7 @@ Settings also provides manual backup, integrity-check, and open-backup-folder co
 - Search by keyword, client, date range, ticket text, and posting status
 - CSV export for daily and weekly worklogs
 - Live WHD and native Sage Time Ticket posting
-- WHD TechNote ID verification plus read-only Sage ODBC save tracking
+- WHD TechNote ID verification plus read-only Sage ODBC save tracking and verified linking of manually created Sage tickets
 - Posting timestamps, Sage external references, status tracking, last-error storage, and posting payload logs
 - Durable posting-attempt records and single-instance protection against duplicate external writes
 - Verified daily/manual local database backups with 14-copy retention and an integrity check
@@ -118,7 +118,7 @@ Before either external write, TechBench saves the editor and creates a durable `
 
 WHD connections require HTTPS. Choose an explicit authentication mode in Settings, or use `Auto (detect once)` to detect and cache the first successful mode for that connection. A note is marked posted only after WHD returns a TechNote ID or TechBench reads back the exact note and duration from `TicketNotes`. Complete ticket syncs close local WHD tickets that are no longer assigned; partial or repeated-page syncs never reconcile missing tickets.
 
-Sage opens its native Time Tickets window, enters and validates one ticket, and lets Sage assign the ticket number. When automatic saving is enabled, TechBench submits Sage's Save command, then verifies the committed row through read-only ODBC. ODBC runs in a short-lived hidden worker mode of the same x86 `TechBench.exe`; a hung Sage driver is terminated at the timeout and cannot leave TechBench stuck in an "already running" state. If Sage's ticket-number label was unavailable, TechBench accepts only one uniquely matching saved ticket using its date, duration, Activity Rate billing type, and work note. Ambiguous matches remain pending. `Check Sage Save` performs the same read-only ODBC verification and does not manipulate the open Sage form.
+Sage opens its native Time Tickets window, enters and validates one ticket, and lets Sage assign the ticket number. When automatic saving is enabled, TechBench submits Sage's Save command, then verifies the committed row through read-only ODBC. ODBC runs in a short-lived hidden worker mode of the same x86 `TechBench.exe`; a hung Sage driver is terminated at the timeout and cannot leave TechBench stuck in an "already running" state. If Sage's ticket-number label was unavailable, TechBench accepts only one uniquely matching saved ticket using its date, duration, Activity Rate billing type, and work note. Ambiguous matches remain pending. `Check Sage Save` performs the same read-only ODBC verification and does not manipulate the open Sage form. For an older entry that was posted manually, `More > Link Existing Sage Ticket...` accepts the Sage ticket number and clears the pending state only after the exact saved Time Ticket passes read-only ODBC validation.
 
 Editing an entry that has already been posted prompts for confirmation. After saving a posted entry, the UI marks it as modified after posting.
 

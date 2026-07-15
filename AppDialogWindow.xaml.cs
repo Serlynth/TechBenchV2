@@ -7,26 +7,31 @@ public enum AppDialogKind
 {
     Confirmation,
     Information,
-    Error
+    Error,
+    Prompt
 }
 
 public partial class AppDialogWindow : Window
 {
     private readonly bool _isConfirmation;
+    private readonly bool _isPrompt;
 
     private AppDialogWindow(
         string title,
         string message,
         AppDialogKind kind,
         string primaryText,
-        string? secondaryText)
+        string? secondaryText,
+        string? initialValue = null)
     {
         DialogTitle = string.IsNullOrWhiteSpace(title) ? "TechBench" : title.Trim();
         DialogMessage = message ?? string.Empty;
         _isConfirmation = kind == AppDialogKind.Confirmation;
+        _isPrompt = kind == AppDialogKind.Prompt;
 
         InitializeComponent();
         DataContext = this;
+        InputBox.Text = initialValue ?? string.Empty;
         ConfigureAppearance(kind, primaryText, secondaryText);
         ContentRendered += HandleContentRendered;
     }
@@ -60,6 +65,25 @@ public partial class AppDialogWindow : Window
         ShowCore(title, message, AppDialogKind.Error, owner, "OK", secondaryText: null);
     }
 
+    public static string? Prompt(
+        string title,
+        string message,
+        string initialValue = "",
+        Window? owner = null,
+        string confirmText = "OK",
+        string cancelText = "Cancel")
+    {
+        var dialog = new AppDialogWindow(
+            title,
+            message,
+            AppDialogKind.Prompt,
+            confirmText,
+            cancelText,
+            initialValue);
+        ConfigureOwner(dialog, owner);
+        return dialog.ShowDialog() == true ? dialog.InputBox.Text.Trim() : null;
+    }
+
     private static bool ShowCore(
         string title,
         string message,
@@ -69,6 +93,12 @@ public partial class AppDialogWindow : Window
         string? secondaryText)
     {
         var dialog = new AppDialogWindow(title, message, kind, primaryText, secondaryText);
+        ConfigureOwner(dialog, owner);
+        return dialog.ShowDialog() == true;
+    }
+
+    private static void ConfigureOwner(AppDialogWindow dialog, Window? owner)
+    {
         var resolvedOwner = ResolveOwner(owner);
         if (resolvedOwner is not null)
         {
@@ -79,8 +109,6 @@ public partial class AppDialogWindow : Window
         {
             dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
         }
-
-        return dialog.ShowDialog() == true;
     }
 
     private static Window? ResolveOwner(Window? requestedOwner)
@@ -115,10 +143,12 @@ public partial class AppDialogWindow : Window
         }
 
         SecondaryButton.Content = string.IsNullOrWhiteSpace(secondaryText) ? "Cancel" : secondaryText;
-        SecondaryButton.Visibility = _isConfirmation ? Visibility.Visible : Visibility.Collapsed;
+        var hasSecondaryAction = _isConfirmation || _isPrompt;
+        SecondaryButton.Visibility = hasSecondaryAction ? Visibility.Visible : Visibility.Collapsed;
         PrimaryButton.IsDefault = !_isConfirmation;
         SecondaryButton.IsDefault = _isConfirmation;
-        SecondaryButton.IsCancel = _isConfirmation;
+        SecondaryButton.IsCancel = hasSecondaryAction;
+        InputBox.Visibility = _isPrompt ? Visibility.Visible : Visibility.Collapsed;
 
         var accentKey = kind switch
         {
@@ -134,6 +164,7 @@ public partial class AppDialogWindow : Window
         {
             AppDialogKind.Information => "i",
             AppDialogKind.Error => "\u00D7",
+            AppDialogKind.Prompt => "#",
             _ => "!"
         };
     }
@@ -145,6 +176,14 @@ public partial class AppDialogWindow : Window
             System.Windows.Threading.DispatcherPriority.ContextIdle,
             new Action(() =>
             {
+                if (_isPrompt)
+                {
+                    InputBox.Focus();
+                    InputBox.SelectAll();
+                    Keyboard.Focus(InputBox);
+                    return;
+                }
+
                 var target = _isConfirmation ? SecondaryButton : PrimaryButton;
                 FocusManager.SetFocusedElement(this, target);
                 target.Focus();
