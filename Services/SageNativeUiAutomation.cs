@@ -24,6 +24,8 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
 
     private static readonly TimeSpan OpenWindowTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan FieldTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan FieldValueTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan FieldValueStablePeriod = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan ValidationTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan NativePollInterval = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan AutomationPollInterval = TimeSpan.FromMilliseconds(250);
@@ -45,32 +47,29 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
             }
 
             var timeTickets = OpenTimeTickets(sage, cancellationToken);
-            var employeeField = WaitForFieldHandle(
+            EnterValidatedTextField(
                 timeTickets,
                 EmployeeAutomationId,
                 "Employee ID",
+                request.EmployeeId,
                 sage.ProcessId,
                 cancellationToken);
-            EnterTextField(timeTickets, employeeField, request.EmployeeId, sage.ProcessId, cancellationToken);
-            RequireExactText(employeeField, request.EmployeeId, "Employee ID");
 
-            var customerField = WaitForFieldHandle(
+            EnterValidatedTextField(
                 timeTickets,
                 CustomerAutomationId,
                 "Customer ID",
+                request.CustomerId,
                 sage.ProcessId,
                 cancellationToken);
-            EnterTextField(timeTickets, customerField, request.CustomerId, sage.ProcessId, cancellationToken);
-            RequireExactText(customerField, request.CustomerId, "Customer ID");
 
-            var activityField = WaitForFieldHandle(
+            EnterValidatedTextField(
                 timeTickets,
                 ActivityAutomationId,
                 "Activity Item",
+                request.ActivityItemId,
                 sage.ProcessId,
                 cancellationToken);
-            EnterTextField(timeTickets, activityField, request.ActivityItemId, sage.ProcessId, cancellationToken);
-            RequireExactText(activityField, request.ActivityItemId, "Activity Item");
 
             var dateText = request.TicketDate.ToString("MM/dd/yyyy", CultureInfo.InvariantCulture);
             var dateField = WaitForFieldHandle(
@@ -92,13 +91,6 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
             EnterTextField(timeTickets, durationField, durationText, sage.ProcessId, cancellationToken);
             RequireDuration(durationField, request.DurationMinutes);
 
-            var fields = new TicketFields(
-                employeeField,
-                customerField,
-                activityField,
-                dateField,
-                durationField);
-
             var billing = ResolveBillingControls(timeTickets, sage.ProcessId);
             SelectComboItem(
                 timeTickets,
@@ -112,6 +104,9 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
                 AddNote(timeTickets, sage.ProcessId, request.Note, cancellationToken);
             }
 
+            // Sage can recreate native edit controls while dependent records resolve.
+            // Always validate the live handles immediately before Save.
+            var fields = ResolveTicketFields(timeTickets, sage.ProcessId, cancellationToken);
             var validation = ValidateCompletedTicket(
                 timeTickets,
                 fields,
@@ -524,6 +519,110 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
         });
     }
 
+    private static IntPtr EnterValidatedTextField(
+        IntPtr root,
+        string automationId,
+        string fieldName,
+        string value,
+        int processId,
+        CancellationToken cancellationToken)
+    {
+        var field = WaitForFieldHandle(
+            root,
+            automationId,
+            fieldName,
+            processId,
+            cancellationToken);
+        EnterTextField(root, field, value, processId, cancellationToken);
+        return WaitForStableTextFieldValue(
+            root,
+            automationId,
+            fieldName,
+            value,
+            processId,
+            cancellationToken);
+    }
+
+    private static IntPtr WaitForStableTextFieldValue(
+        IntPtr root,
+        string automationId,
+        string fieldName,
+        string expected,
+        int processId,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var expectedText = expected.Trim();
+        TimeSpan? matchingSince = null;
+        var matchingHandle = IntPtr.Zero;
+        var currentHandle = IntPtr.Zero;
+        var lastActual = string.Empty;
+        var lastSelectorError = string.Empty;
+
+        while (stopwatch.Elapsed < FieldValueTimeout)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                currentHandle = ResolveAutomationIdHandle(root, automationId, processId);
+                lastActual = NativeMethods.ReadWindowText(currentHandle).Trim();
+                lastSelectorError = string.Empty;
+                if (lastActual.Equals(expectedText, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (matchingSince is null || matchingHandle != currentHandle)
+                    {
+                        matchingSince = stopwatch.Elapsed;
+                        matchingHandle = currentHandle;
+                    }
+
+                    if (stopwatch.Elapsed - matchingSince.Value >= FieldValueStablePeriod)
+                    {
+                        return currentHandle;
+                    }
+                }
+                else
+                {
+                    matchingSince = null;
+                    matchingHandle = IntPtr.Zero;
+                }
+            }
+            catch (SageAutomationException ex)
+            {
+                matchingSince = null;
+                matchingHandle = IntPtr.Zero;
+                lastSelectorError = ex.Message;
+            }
+
+            Thread.Sleep(AutomationPollInterval);
+        }
+
+        if (lastActual.Equals(expectedText, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new SageAutomationException(
+                $"{fieldName} '{expectedText}' did not reach a stable validated state within {FieldValueTimeout.TotalSeconds:0} seconds. No ticket was saved.");
+        }
+
+        var returnedText = string.IsNullOrWhiteSpace(lastActual) ? "blank" : $"'{lastActual}'";
+        var selectorDetail = string.IsNullOrWhiteSpace(lastSelectorError)
+            ? string.Empty
+            : $" Last selector check: {lastSelectorError}";
+        throw new SageAutomationException(
+            $"Sage did not accept {fieldName} '{expectedText}'; the field returned {returnedText} after validation. No ticket was saved.{selectorDetail}");
+    }
+
+    private static TicketFields ResolveTicketFields(
+        IntPtr root,
+        int processId,
+        CancellationToken cancellationToken)
+    {
+        return new TicketFields(
+            WaitForFieldHandle(root, EmployeeAutomationId, "Employee ID", processId, cancellationToken),
+            WaitForFieldHandle(root, CustomerAutomationId, "Customer ID", processId, cancellationToken),
+            WaitForFieldHandle(root, ActivityAutomationId, "Activity Item", processId, cancellationToken),
+            WaitForFieldHandle(root, TicketDateAutomationId, "Ticket Date", processId, cancellationToken),
+            WaitForFieldHandle(root, DurationAutomationId, "Duration", processId, cancellationToken));
+    }
+
     private static BillingControls ResolveBillingControls(IntPtr root, int processId)
     {
         var combos = EnumerateChildWindows(root)
@@ -930,7 +1029,9 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
         var actual = NativeMethods.ReadWindowText(handle).Trim();
         if (!actual.Equals(expected.Trim(), StringComparison.OrdinalIgnoreCase))
         {
-            throw new SageAutomationException($"{fieldName} did not retain its value after validation.");
+            var returnedText = string.IsNullOrWhiteSpace(actual) ? "blank" : $"'{actual}'";
+            throw new SageAutomationException(
+                $"{fieldName} changed from '{expected.Trim()}' to {returnedText} before Save. No ticket was saved.");
         }
     }
 
