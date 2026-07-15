@@ -59,6 +59,23 @@ public sealed class WorkEntryEditorViewModelTests
     }
 
     [Fact]
+    public void ClockOptionsIncludeQuarterHoursAndPreserveExactSavedTimes()
+    {
+        var editor = new WorkEntryEditorViewModel();
+
+        Assert.Equal("Not set", editor.TimeOptions[0].DisplayText);
+        Assert.Contains(editor.TimeOptions, option => option.Value == "08:15");
+
+        editor.StartTimeText = "08:07";
+        editor.EndTimeText = "08:22";
+
+        Assert.Contains(editor.TimeOptions, option => option.Value == "08:07");
+        Assert.Contains(editor.TimeOptions, option => option.Value == "08:22");
+        Assert.Equal("0", editor.DurationHoursText);
+        Assert.Equal("15", editor.DurationMinutePartText);
+    }
+
+    [Fact]
     public void DurationHoursAndMinutesBuildCanonicalTotal()
     {
         var editor = new WorkEntryEditorViewModel();

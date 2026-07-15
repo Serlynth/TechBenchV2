@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using TechBench.Models;
@@ -56,11 +57,16 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
     private bool _modifiedAfterPosting;
     private bool _isDirty;
     private int _dirtyTrackingSuppression;
+    private readonly ObservableCollection<TimeOption> _timeOptions;
 
     public WorkEntryEditorViewModel()
     {
+        _timeOptions = BuildTimeOptions();
+        TimeOptions = new ReadOnlyObservableCollection<TimeOption>(_timeOptions);
         PropertyChanged += HandleOwnPropertyChanged;
     }
+
+    public ReadOnlyObservableCollection<TimeOption> TimeOptions { get; }
 
     public int Id
     {
@@ -149,6 +155,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
         get => _startTimeText;
         set
         {
+            EnsureTimeOption(value);
             if (SetProperty(ref _startTimeText, value))
             {
                 UpdateDurationFromTimes();
@@ -162,6 +169,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
         get => _endTimeText;
         set
         {
+            EnsureTimeOption(value);
             if (SetProperty(ref _endTimeText, value))
             {
                 UpdateDurationFromTimes();
@@ -211,6 +219,55 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
     {
         get => _billable;
         set => SetProperty(ref _billable, value);
+    }
+
+    private static ObservableCollection<TimeOption> BuildTimeOptions()
+    {
+        var options = new ObservableCollection<TimeOption>
+        {
+            new(string.Empty, "Not set", -1)
+        };
+
+        for (var minutes = 0; minutes < 24 * 60; minutes += 15)
+        {
+            options.Add(CreateTimeOption(minutes));
+        }
+
+        return options;
+    }
+
+    private void EnsureTimeOption(string value)
+    {
+        if (!TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out var time)
+            || time < TimeSpan.Zero
+            || time >= TimeSpan.FromDays(1))
+        {
+            return;
+        }
+
+        var minutes = (int)time.TotalMinutes;
+        if (_timeOptions.Any(option => option.MinutesSinceMidnight == minutes))
+        {
+            return;
+        }
+
+        var insertIndex = 1;
+        while (insertIndex < _timeOptions.Count
+               && _timeOptions[insertIndex].MinutesSinceMidnight < minutes)
+        {
+            insertIndex++;
+        }
+
+        _timeOptions.Insert(insertIndex, CreateTimeOption(minutes));
+    }
+
+    private static TimeOption CreateTimeOption(int minutes)
+    {
+        var time = TimeSpan.FromMinutes(minutes);
+        return new TimeOption(
+            time.ToString(@"hh\:mm", CultureInfo.InvariantCulture),
+            DateTime.Today.Add(time).ToString("h:mm tt", CultureInfo.CurrentCulture),
+            minutes);
     }
 
     public string Note
