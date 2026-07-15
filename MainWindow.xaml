@@ -890,9 +890,29 @@
                                                 <ComboBox ItemsSource="{Binding TicketsForEditor}"
                                                           SelectedItem="{Binding Editor.SelectedTicket}"
                                                           ItemTemplate="{StaticResource TicketSelectorItemTemplate}"
-                                                          MaxDropDownHeight="280" />
+                                                          MaxDropDownHeight="280">
+                                                    <ComboBox.Style>
+                                                        <Style TargetType="{x:Type ComboBox}" BasedOn="{StaticResource {x:Type ComboBox}}">
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding Editor.UseOtherWhdTicket}" Value="True">
+                                                                    <Setter Property="IsEnabled" Value="False" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </ComboBox.Style>
+                                                </ComboBox>
+                                                <CheckBox Content="Use another WHD ticket"
+                                                          IsChecked="{Binding Editor.UseOtherWhdTicket}"
+                                                          Margin="1,7,0,0" />
+                                                <StackPanel Margin="0,6,0,0"
+                                                            Visibility="{Binding Editor.UseOtherWhdTicket, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <TextBlock Text="WHD ticket number" Style="{StaticResource FieldLabelStyle}" />
+                                                    <TextBox Text="{Binding Editor.ManualTicketNumber, UpdateSourceTrigger=PropertyChanged}"
+                                                             MaxLength="20"
+                                                             ToolTip="Closed or other authorized WHD ticket number" />
+                                                </StackPanel>
                                                 <StackPanel Margin="0,8,0,0"
-                                                            Visibility="{Binding Editor.HasNoTicket, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                                            Visibility="{Binding Editor.HasSelectedSyncedTicket, Converter={StaticResource BooleanToVisibilityConverter}}">
                                                     <TextBlock Text="{Binding Editor.SelectedTicket.Status, StringFormat=Current status: {0}}"
                                                                Style="{StaticResource MutedTextStyle}"
                                                                TextTrimming="CharacterEllipsis"
@@ -1340,7 +1360,6 @@
                                     <StackPanel Grid.Column="1" Orientation="Horizontal">
                                         <Button Content="Open WHD"
                                                 Command="{Binding OpenWhdTicketCommand}"
-                                                CommandParameter="{Binding Editor.SelectedTicket}"
                                                 Style="{StaticResource EditorActionButtonStyle}"
                                                 Visibility="{Binding ShowOpenWhdAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                         <Button Content="Save"

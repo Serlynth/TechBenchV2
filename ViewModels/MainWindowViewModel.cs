@@ -347,7 +347,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public bool IsEditorLocked => Editor.HasPostedDestination && !_isPostedEditorUnlocked;
     public bool IsEditorEditable => !IsEditorLocked && !IsEntryOperationRunning;
     public bool IsEditorReadOnly => !IsEditorEditable;
-    public bool ShowOpenWhdAction => Editor.SelectedTicket is { Id: > 0 };
+    public bool ShowOpenWhdAction => Editor.SelectedTicket is { Id: > 0 }
+        || (Editor.UseOtherWhdTicket && IsValidWhdTicketNumber(Editor.ManualTicketNumber));
     public bool HasTodayEntries => Entries.Count > 0;
     public bool HasPostingQueueEntries => PostingQueue.Count > 0;
     public bool HasUndoDelete => _lastDeletedEntry is not null;
@@ -2103,6 +2104,50 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var ticket = entry.TicketId.HasValue ? _repository.GetTicket(entry.TicketId.Value) : null;
+        if (destination == "WHD"
+            && ticket is null
+            && CreateWhdTicketReference(entry.TicketNumberText, entry.ClientId ?? 0) is { } otherWhdTicket
+            && TryResolveWhdTicketId(otherWhdTicket, out var otherWhdTicketId))
+        {
+            StatusMessage = $"Checking Web Help Desk ticket #{otherWhdTicketId}...";
+            var lookup = await _whdRestClient.GetTicketAsync(BuildWhdConnectionSettings(), otherWhdTicketId);
+            if (!lookup.Success || lookup.Ticket is null)
+            {
+                StatusMessage = lookup.Message;
+                _dialogService.Error("Post to another WHD ticket", lookup.Message);
+                return false;
+            }
+
+            var target = lookup.Ticket;
+            var confirmed = _dialogService.Confirm(
+                "Post to another WHD ticket",
+                $"Post this work note to WHD ticket #{otherWhdTicketId}?\n\n"
+                + $"{target.Subject}\n"
+                + $"WHD client: {target.Client.Name}\n"
+                + $"TechBench entry: {entry.ClientDisplay}\n"
+                + $"Status: {target.Status}\n\n"
+                + "This adds a hidden TechNote without changing the ticket's assignment or status.",
+                "Post note",
+                "Cancel");
+            if (!confirmed)
+            {
+                StatusMessage = $"Canceled posting to WHD ticket #{otherWhdTicketId}.";
+                return false;
+            }
+
+            ticket = new Ticket
+            {
+                Id = 0,
+                TicketNumber = otherWhdTicketId.ToString(),
+                ClientId = entry.ClientId ?? 0,
+                Subject = target.Subject,
+                Status = target.Status,
+                Source = "WHD",
+                ExternalId = target.ExternalId,
+                WhdStatusTypeId = target.StatusTypeId,
+                IsClosed = target.IsClosed
+            };
+        }
         var outstandingAttempt = _repository.GetOutstandingPostingAttempt(entry.Id, destination);
         if (outstandingAttempt is not null)
         {
@@ -3419,9 +3464,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(EditorSubtitle));
         }
 
-        if (e.PropertyName == nameof(WorkEntryEditorViewModel.SelectedTicket))
+        if (e.PropertyName is nameof(WorkEntryEditorViewModel.SelectedTicket)
+            or nameof(WorkEntryEditorViewModel.UseOtherWhdTicket)
+            or nameof(WorkEntryEditorViewModel.ManualTicketNumber))
         {
             OnPropertyChanged(nameof(ShowOpenWhdAction));
+            OpenWhdTicketCommand.RaiseCanExecuteChanged();
         }
 
         if (e.PropertyName == nameof(WorkEntryEditorViewModel.IsDirty))
@@ -3688,6 +3736,40 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         return false;
     }
 
+    private static bool IsValidWhdTicketNumber(string? ticketNumber)
+    {
+        return CreateWhdTicketReference(ticketNumber) is not null;
+    }
+
+    private static Ticket? CreateWhdTicketReference(string? ticketNumber, int clientId = 0)
+    {
+        var normalized = ticketNumber?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        if (normalized.StartsWith("WHD-", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized[4..];
+        }
+
+        if (!int.TryParse(normalized, out var whdTicketId) || whdTicketId <= 0)
+        {
+            return null;
+        }
+
+        return new Ticket
+        {
+            Id = 0,
+            TicketNumber = whdTicketId.ToString(),
+            ClientId = clientId,
+            Subject = "Other Web Help Desk ticket",
+            Source = "WHD",
+            ExternalId = $"WHD-{whdTicketId}"
+        };
+    }
+
     private static bool TryGetWhdTicketKey(Ticket ticket, out string key)
     {
         key = ticket.ExternalId?.Trim() ?? string.Empty;
@@ -3716,8 +3798,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             Ticket { Id: > 0 } ticket => _repository.GetTicket(ticket.Id) ?? ticket,
             WorkEntry { TicketId: not null } entry => _repository.GetTicket(entry.TicketId.Value),
+            WorkEntry entry => CreateWhdTicketReference(entry.TicketNumberText, entry.ClientId ?? 0),
+            _ when Editor.UseOtherWhdTicket => CreateWhdTicketReference(Editor.ManualTicketNumber, Editor.SelectedClient?.Id ?? 0),
             _ when Editor.SelectedTicket is { Id: > 0 } editorTicket => _repository.GetTicket(editorTicket.Id) ?? editorTicket,
             _ when SelectedEntry?.TicketId is int selectedEntryTicketId => _repository.GetTicket(selectedEntryTicketId),
+            _ when SelectedEntry is not null => CreateWhdTicketReference(SelectedEntry.TicketNumberText, SelectedEntry.ClientId ?? 0),
             _ when SelectedTicket is { Id: > 0 } selectedTicket => _repository.GetTicket(selectedTicket.Id) ?? selectedTicket,
             _ => null
         };

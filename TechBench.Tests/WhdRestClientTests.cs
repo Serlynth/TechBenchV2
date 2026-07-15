@@ -154,6 +154,46 @@ public sealed class WhdRestClientTests
         Assert.Equal(3, handler.RequestCount);
     }
 
+    [Fact]
+    public async Task GetsAnAuthorizedTicketByNumber()
+    {
+        const string response = """
+            {
+              "id": 456,
+              "subject": "Former employee ticket",
+              "statustype": { "id": 3, "statusTypeName": "Closed" },
+              "clientReporter": { "id": 11, "displayName": "Contoso" }
+            }
+            """;
+        var handler = new RecordingHandler(_ => Json(HttpStatusCode.OK, response));
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetTicketAsync(ExplicitSettings(), 456);
+
+        Assert.True(result.Success, result.Message);
+        Assert.NotNull(result.Ticket);
+        Assert.Equal("WHD-456", result.Ticket.ExternalId);
+        Assert.Equal("Former employee ticket", result.Ticket.Subject);
+        Assert.Equal("Closed", result.Ticket.Status);
+        Assert.True(result.Ticket.IsClosed);
+        Assert.Equal("Contoso", result.Ticket.Client.Name);
+        Assert.Contains("/Tickets/456", handler.LastRequestUri?.AbsolutePath);
+    }
+
+    [Fact]
+    public async Task ExplainsTechGroupPermissionDenialForDirectTicketLookup()
+    {
+        var handler = new RecordingHandler(_ => Json(HttpStatusCode.Forbidden, "{}"));
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetTicketAsync(ExplicitSettings(), 456);
+
+        Assert.False(result.Success);
+        Assert.Contains("tech group", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static WhdConnectionSettings ExplicitSettings() => new()
     {
         BaseUrl = "https://whd.example.test",
@@ -183,12 +223,14 @@ public sealed class WhdRestClientTests
     private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler
     {
         public int RequestCount { get; private set; }
+        public Uri? LastRequestUri { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             RequestCount++;
+            LastRequestUri = request.RequestUri;
             return Task.FromResult(responseFactory(request));
         }
     }

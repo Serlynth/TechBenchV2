@@ -119,6 +119,57 @@ public sealed class WhdRestClient
         }
     }
 
+    public async Task<WhdTicketLookupResult> GetTicketAsync(
+        WhdConnectionSettings settings,
+        int ticketId,
+        CancellationToken cancellationToken = default)
+    {
+        var validationError = Validate(settings);
+        if (validationError is not null)
+        {
+            return WhdTicketLookupResult.Failed(validationError);
+        }
+
+        if (ticketId <= 0)
+        {
+            return WhdTicketLookupResult.Failed("Enter a valid numeric Web Help Desk ticket number.");
+        }
+
+        try
+        {
+            var auth = await ResolveAuthenticationAsync(settings, cancellationToken);
+            var requestUri = BuildRequestUri(settings.BaseUrl, $"Tickets/{ticketId}", auth, new Dictionary<string, string>
+            {
+                ["style"] = "long"
+            });
+            using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
+            var content = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                var details = string.IsNullOrWhiteSpace(content) ? response.ReasonPhrase : content.Trim();
+                return response.StatusCode switch
+                {
+                    HttpStatusCode.Forbidden => WhdTicketLookupResult.Failed(
+                        $"Web Help Desk denied access to ticket #{ticketId}. The current technician may not have access to that ticket's tech group."),
+                    HttpStatusCode.NotFound => WhdTicketLookupResult.Failed(
+                        $"Web Help Desk ticket #{ticketId} was not found."),
+                    _ => WhdTicketLookupResult.Failed(
+                        $"Web Help Desk could not check ticket #{ticketId}: HTTP {(int)response.StatusCode} {response.ReasonPhrase}. {details}")
+                };
+            }
+
+            using var document = JsonDocument.Parse(content);
+            var ticket = ParseTickets(document.RootElement).SingleOrDefault();
+            return ticket is null
+                ? WhdTicketLookupResult.Failed($"Web Help Desk returned no details for ticket #{ticketId}.")
+                : WhdTicketLookupResult.Succeeded(ticket);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
+        {
+            return WhdTicketLookupResult.Failed($"Web Help Desk could not check ticket #{ticketId}: {ex.Message}");
+        }
+    }
+
     public async Task<WhdStatusTypeSyncResult> GetStatusTypesAsync(
         WhdConnectionSettings settings,
         CancellationToken cancellationToken = default)

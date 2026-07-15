@@ -45,6 +45,26 @@ public sealed class WhdSyncedTicket
     public WhdSyncedClient Client { get; init; } = new();
 }
 
+public sealed class WhdTicketLookupResult
+{
+    public bool Success { get; init; }
+    public string Message { get; init; } = string.Empty;
+    public WhdSyncedTicket? Ticket { get; init; }
+
+    public static WhdTicketLookupResult Failed(string message) => new()
+    {
+        Success = false,
+        Message = message
+    };
+
+    public static WhdTicketLookupResult Succeeded(WhdSyncedTicket ticket) => new()
+    {
+        Success = true,
+        Message = $"Found Web Help Desk ticket {ticket.TicketNumber}.",
+        Ticket = ticket
+    };
+}
+
 public sealed class WhdStatusTypeSyncResult
 {
     public bool Success { get; init; }

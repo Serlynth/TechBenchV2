@@ -621,6 +621,8 @@ public sealed partial class MainWindowViewModel
             }
 
             Editor.ManualTicketNumber = source.TicketNumberText ?? string.Empty;
+            Editor.UseOtherWhdTicket = !source.TicketId.HasValue
+                && !string.IsNullOrWhiteSpace(Editor.ManualTicketNumber);
             Editor.Billable = source.Billable;
         }
         finally

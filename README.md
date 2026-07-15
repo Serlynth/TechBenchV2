@@ -1,6 +1,6 @@
 # TechBench
 
-Current application version: `1.2.10`.
+Current application version: `1.2.11`.
 
 Installed builds check the public binary-only GitHub release feed for stable updates.
 When a new version is available, TechBench shows a Windows alert and can download it with visible progress,
@@ -85,7 +85,7 @@ Settings also provides manual backup, integrity-check, and open-backup-folder co
 - Weekly grouped worklog
 - Read-only synced/imported client list with source, external ID, active status, and last synced timestamp
 - Local ticket creation and ticket filtering by client
-- Entry editor with client picker, ticket picker, manual ticket number, time fields, hours/minutes duration, billable flag, work note, and internal note
+- Entry editor with client picker, assigned-ticket picker, an authorized alternate WHD ticket-number option, time fields, hours/minutes duration, billable flag, work note, and internal note
 - Start/stop timer mode that fills start, end, and duration fields
 - Search by keyword, client, date range, ticket text, and posting status
 - CSV export for daily and weekly worklogs
@@ -117,6 +117,8 @@ Posting starts from an explicit user command. No unattended background posting i
 Before either external write, TechBench saves the editor and creates a durable `PostingAttempts` row. Only one process and one attempt per entry/destination can run at a time. A crash, cancellation, or unconfirmed network result leaves an `Unknown` attempt that must be reconciled or explicitly abandoned before retrying.
 
 WHD connections require HTTPS. Choose an explicit authentication mode in Settings, or use `Auto (detect once)` to detect and cache the first successful mode for that connection. A note is marked posted only after WHD returns a TechNote ID or TechBench reads back the exact note and duration from `TicketNotes`. Complete ticket syncs close local WHD tickets that are no longer assigned; partial or repeated-page syncs never reconcile missing tickets.
+
+For a closed ticket or a ticket assigned to another technician, enable **Use another WHD ticket** and enter its number. TechBench first performs a read-only lookup and shows the ticket subject, WHD client, status, and local entry client for confirmation. It then uses the normal hidden-TechNote post and readback verification without requesting an assignment or status change. Web Help Desk permissions still apply; an inaccessible tech-group ticket remains pending with a permission error.
 
 Sage opens its native Time Tickets window, enters and validates one ticket, and lets Sage assign the ticket number. When automatic saving is enabled, TechBench submits Sage's Save command, then verifies the committed row through read-only ODBC. ODBC runs in a short-lived hidden worker mode of the same x86 `TechBench.exe`; a hung Sage driver is terminated at the timeout and cannot leave TechBench stuck in an "already running" state. If Sage's ticket-number label was unavailable, TechBench accepts only one uniquely matching saved ticket using its date, duration, Activity Rate billing type, and work note. Ambiguous matches remain pending. `Check Sage Save` performs the same read-only ODBC verification and does not manipulate the open Sage form. For an older entry that was posted manually, `More > Link Existing Sage Ticket...` accepts the Sage ticket number and clears the pending state only after the exact saved Time Ticket passes read-only ODBC validation.
 

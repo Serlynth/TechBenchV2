@@ -186,4 +186,44 @@ public sealed class WorkEntryEditorViewModelTests
         Assert.True(restored.TryBuildEntry(out var entry, out var validationMessage), validationMessage);
         Assert.Equal("onsite, Project", entry.Tags);
     }
+
+    [Fact]
+    public void AlternateWhdTicketNumberRoundTripsWithoutARegularTicketSelection()
+    {
+        var client = new Client { Id = 9, Name = "CSRI" };
+        var editor = new WorkEntryEditorViewModel();
+        editor.LoadNew(new DateTime(2026, 7, 15));
+        editor.SelectedClient = client;
+        editor.UseOtherWhdTicket = true;
+        editor.ManualTicketNumber = "WHD-456";
+        editor.DurationMinutesText = "30";
+        editor.Note = "Added the follow-up work note.";
+
+        Assert.True(editor.TryBuildEntry(out var entry, out var validationMessage), validationMessage);
+        Assert.Null(entry.TicketId);
+        Assert.Equal("456", entry.TicketNumberText);
+        Assert.False(editor.HasNoTicket);
+
+        var restored = new WorkEntryEditorViewModel();
+        restored.LoadFrom(entry, [client], []);
+
+        Assert.True(restored.UseOtherWhdTicket);
+        Assert.Equal("456", restored.ManualTicketNumber);
+        Assert.Null(restored.SelectedTicket);
+        Assert.False(restored.IsDirty);
+    }
+
+    [Fact]
+    public void AlternateWhdTicketRequiresAPositiveNumericNumber()
+    {
+        var editor = new WorkEntryEditorViewModel();
+        editor.LoadNew(new DateTime(2026, 7, 15));
+        editor.SelectedClient = new Client { Id = 9, Name = "CSRI" };
+        editor.UseOtherWhdTicket = true;
+        editor.ManualTicketNumber = "ticket-456";
+        editor.DurationMinutesText = "30";
+
+        Assert.False(editor.TryBuildEntry(out _, out var validationMessage));
+        Assert.Contains("numeric", validationMessage, StringComparison.OrdinalIgnoreCase);
+    }
 }

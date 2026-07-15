@@ -14,6 +14,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
         nameof(UseManualClient),
         nameof(ManualClientName),
         nameof(SelectedTicket),
+        nameof(UseOtherWhdTicket),
         nameof(ManualTicketNumber),
         nameof(StartTimeText),
         nameof(EndTimeText),
@@ -34,6 +35,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
     private bool _useManualClient;
     private string _manualClientName = string.Empty;
     private Ticket? _selectedTicket;
+    private bool _useOtherWhdTicket;
     private string _manualTicketNumber = string.Empty;
     private string _startTimeText = string.Empty;
     private string _endTimeText = string.Empty;
@@ -132,6 +134,21 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
             if (SetProperty(ref _selectedTicket, value))
             {
                 OnPropertyChanged(nameof(HasNoTicket));
+                OnPropertyChanged(nameof(HasSelectedSyncedTicket));
+                OnPropertyChanged(nameof(TicketWarningText));
+            }
+        }
+    }
+
+    public bool UseOtherWhdTicket
+    {
+        get => _useOtherWhdTicket;
+        set
+        {
+            if (SetProperty(ref _useOtherWhdTicket, value))
+            {
+                OnPropertyChanged(nameof(HasNoTicket));
+                OnPropertyChanged(nameof(HasSelectedSyncedTicket));
                 OnPropertyChanged(nameof(TicketWarningText));
             }
         }
@@ -430,7 +447,10 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
     public bool HasClientReference => UseManualClient
         ? !string.IsNullOrWhiteSpace(ManualClientName)
         : SelectedClient is not null;
-    public bool HasNoTicket => SelectedTicket is null || SelectedTicket.Id <= 0;
+    public bool HasNoTicket => UseOtherWhdTicket
+        ? !TryParseOtherWhdTicketNumber(ManualTicketNumber, out _)
+        : SelectedTicket is null || SelectedTicket.Id <= 0;
+    public bool HasSelectedSyncedTicket => !UseOtherWhdTicket && SelectedTicket is { Id: > 0 };
     public bool IsDurationCalculated => TimeSpan.TryParse(StartTimeText, CultureInfo.InvariantCulture, out var start)
         && TimeSpan.TryParse(EndTimeText, CultureInfo.InvariantCulture, out var end)
         && end >= start;
@@ -446,6 +466,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
             UseManualClient = false;
             ManualClientName = string.Empty;
             SelectedTicket = null;
+            UseOtherWhdTicket = false;
             ManualTicketNumber = string.Empty;
             StartTimeText = string.Empty;
             EndTimeText = string.Empty;
@@ -481,6 +502,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
             UseManualClient = SelectedClient is null && !string.IsNullOrWhiteSpace(ManualClientName);
             SelectedTicket = tickets.FirstOrDefault(ticket => ticket.Id == entry.TicketId);
             ManualTicketNumber = entry.TicketNumberText ?? string.Empty;
+            UseOtherWhdTicket = !entry.TicketId.HasValue && !string.IsNullOrWhiteSpace(ManualTicketNumber);
             StartTimeText = entry.HasTimeRange ? entry.StartTime.ToString(@"hh\:mm", CultureInfo.InvariantCulture) : string.Empty;
             EndTimeText = entry.HasTimeRange ? entry.EndTime.ToString(@"hh\:mm", CultureInfo.InvariantCulture) : string.Empty;
             DurationMinutesText = entry.DurationMinutes > 0 ? entry.DurationMinutes.ToString(CultureInfo.InvariantCulture) : string.Empty;
@@ -516,8 +538,8 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
             ClientId = UseManualClient ? null : SelectedClient?.Id,
             UseManualClient = UseManualClient,
             ManualClientName = ManualClientName,
-            TicketId = SelectedTicket is { Id: > 0 } ? SelectedTicket.Id : null,
-            ManualTicketNumber = ManualTicketNumber,
+            TicketId = !UseOtherWhdTicket && SelectedTicket is { Id: > 0 } ? SelectedTicket.Id : null,
+            ManualTicketNumber = UseOtherWhdTicket ? ManualTicketNumber : string.Empty,
             StartTimeText = StartTimeText,
             EndTimeText = EndTimeText,
             DurationMinutesText = DurationMinutesText,
@@ -546,6 +568,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
                 ? tickets.FirstOrDefault(ticket => ticket.Id == draft.TicketId.Value)
                 : null;
             ManualTicketNumber = draft.ManualTicketNumber;
+            UseOtherWhdTicket = !draft.TicketId.HasValue && !string.IsNullOrWhiteSpace(ManualTicketNumber);
             StartTimeText = draft.StartTimeText;
             EndTimeText = draft.EndTimeText;
             DurationMinutesText = draft.DurationMinutesText;
@@ -585,6 +608,14 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
             return false;
         }
 
+        var otherWhdTicketId = 0;
+        if (UseOtherWhdTicket
+            && !TryParseOtherWhdTicketNumber(ManualTicketNumber, out otherWhdTicketId))
+        {
+            validationMessage = "Enter a valid numeric Web Help Desk ticket number.";
+            return false;
+        }
+
         if (!TryResolveTimeAndDuration(out var start, out var end, out var durationMinutes, out var hasTimeRange, out validationMessage))
         {
             return false;
@@ -596,8 +627,10 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
             WorkDate = WorkDate.Date,
             ClientId = UseManualClient ? null : SelectedClient?.Id,
             ManualClientName = string.IsNullOrWhiteSpace(manualClientName) ? null : manualClientName,
-            TicketId = SelectedTicket is { Id: > 0 } ? SelectedTicket.Id : null,
-            TicketNumberText = string.IsNullOrWhiteSpace(ManualTicketNumber) ? null : ManualTicketNumber.Trim(),
+            TicketId = !UseOtherWhdTicket && SelectedTicket is { Id: > 0 } ? SelectedTicket.Id : null,
+            TicketNumberText = UseOtherWhdTicket
+                ? otherWhdTicketId.ToString(CultureInfo.InvariantCulture)
+                : null,
             HasTimeRange = hasTimeRange,
             StartTime = start,
             EndTime = end,
@@ -620,6 +653,18 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
         };
 
         return true;
+    }
+
+    private static bool TryParseOtherWhdTicketNumber(string? value, out int ticketId)
+    {
+        var normalized = value?.Trim();
+        if (normalized?.StartsWith("WHD-", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            normalized = normalized[4..];
+        }
+
+        return int.TryParse(normalized, NumberStyles.None, CultureInfo.InvariantCulture, out ticketId)
+            && ticketId > 0;
     }
 
     public static bool IsEditableProperty(string? propertyName)
