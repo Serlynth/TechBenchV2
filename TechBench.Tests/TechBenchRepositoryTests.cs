@@ -322,6 +322,43 @@ public sealed class TechBenchRepositoryTests
     }
 
     [Fact]
+    public void ReusesDistinctTagsAndMatchesOnlyWholeRequestedTags()
+    {
+        WithRepository((repository, _) =>
+        {
+            var networkEntry = new WorkEntry
+            {
+                WorkDate = new DateTime(2026, 7, 14),
+                ManualClientName = "Northwind",
+                DurationMinutes = 30,
+                Note = "Configured the network.",
+                Tags = " onsite, Network, onsite "
+            };
+            var shortTagEntry = new WorkEntry
+            {
+                WorkDate = new DateTime(2026, 7, 14),
+                ManualClientName = "Contoso",
+                DurationMinutes = 15,
+                Note = "Reviewed the short tag.",
+                Tags = "net, security"
+            };
+            repository.SaveWorkEntry(networkEntry);
+            repository.SaveWorkEntry(shortTagEntry);
+
+            Assert.Equal("onsite, Network", networkEntry.Tags);
+            Assert.Equal(["net", "Network", "onsite", "security"], repository.GetDistinctTags());
+
+            var netMatches = repository.GetWorkEntries(new WorkEntryQuery { Tags = "net" });
+            Assert.Single(netMatches);
+            Assert.Equal(shortTagEntry.Id, netMatches[0].Id);
+
+            var combinedMatches = repository.GetWorkEntries(new WorkEntryQuery { Tags = "security, NET" });
+            Assert.Single(combinedMatches);
+            Assert.Equal(shortTagEntry.Id, combinedMatches[0].Id);
+        });
+    }
+
+    [Fact]
     public void WorkEntryQueryCanExcludeCurrentEntryAndLimitRecentResults()
     {
         WithRepository((repository, _) =>

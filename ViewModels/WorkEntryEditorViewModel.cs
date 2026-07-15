@@ -605,7 +605,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
             Billable = Billable,
             Note = Note.Trim(),
             InternalNote = string.IsNullOrWhiteSpace(InternalNote) ? null : InternalNote.Trim(),
-            Tags = NormalizeTags(Tags),
+            Tags = WorkEntryTags.Normalize(Tags),
             FollowUpState = FollowUpState,
             FollowUpDueDate = FollowUpState is FollowUpState.FollowUp or FollowUpState.Waiting
                 ? FollowUpDueDate?.Date
@@ -625,13 +625,6 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
     public static bool IsEditableProperty(string? propertyName)
     {
         return propertyName is not null && EditablePropertyNames.Contains(propertyName);
-    }
-
-    private static string NormalizeTags(string value)
-    {
-        return string.Join(", ", value
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Distinct(StringComparer.OrdinalIgnoreCase));
     }
 
     private bool TryResolveTimeAndDuration(

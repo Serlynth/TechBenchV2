@@ -1,6 +1,6 @@
 # TechBench
 
-Current application version: `1.2.9`.
+Current application version: `1.2.10`.
 
 Installed builds check the public binary-only GitHub release feed for stable updates.
 When a new version is available, TechBench shows a Windows alert and can download it with visible progress,
@@ -76,7 +76,7 @@ Settings also provides manual backup, integrity-check, and open-backup-folder co
 - Note-first Today workspace with a full-size plain-text editor
 - Recovery-only draft backup after a short pause, plus crash/close recovery without changing the committed note
 - Work-note spell checking, undo, word/character counts, in-note find, timestamp and structured-note helpers
-- Tags, follow-up/waiting states, overdue badges for existing dated follow-ups, and closeout reminders
+- Reusable tags with saved-tag suggestions in the editor, an autocomplete tag filter in Search, follow-up/waiting states, overdue badges, and closeout reminders
 - Fast full-text search across work notes, internal notes, clients, tickets, and tags, with a safe SQLite fallback
 - Recent notes for the selected client, available directly beside the editor
 - Grouped, branded Common Links workspace with protected admin shortcuts for WatchGuard Cloud, Microsoft 365, Barracuda, ESET PROTECT, and Email2Phone; a Hosted DNS section for GoDaddy and Network Solutions; an optional Chrome Incognito launch for Microsoft 365 Admin; and editable custom links
@@ -100,7 +100,7 @@ Settings also provides manual backup, integrity-check, and open-backup-folder co
 
 The main editor stores a small recovery draft after a short pause, but it does not create or update the committed work entry. The editor remains visibly unsaved until you use **Save**. **New Entry** begins the next note, and the **Post** menu explicitly chooses WHD or Sage.
 
-Use comma-separated tags for projects, locations, or work types. A note marked **Follow-up** or **Waiting** appears on its entry card and in Daily Closeout until it is marked **Completed** or **None**. Search can combine text, client, ticket, date, posting status, tags, and follow-up state.
+Use comma-separated tags for projects, locations, or work types. After an entry is saved, its tags are available from **Add saved tag** in the editor and from the autocomplete **Tags** filter in Search. Multiple Search tags require every listed tag to match. A note marked **Follow-up** or **Waiting** appears on its entry card and in Daily Closeout until it is marked **Completed** or **None**. Search can combine text, client, ticket, date, posting status, tags, and follow-up state.
 
 `Ctrl+N` starts a new entry through the existing unsaved-change safeguards.
 

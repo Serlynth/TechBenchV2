@@ -22,6 +22,7 @@ public sealed partial class MainWindowViewModel
     private DateTime? _lastEditorSaveAt;
     private string _editorSaveStatus = "Saved";
     private string _searchTags = string.Empty;
+    private string? _selectedEditorTagSuggestion;
     private FollowUpOption? _searchFollowUpOption;
     private bool _searchOpenFollowUpsOnly;
     private NoteTemplate? _managedNoteTemplate;
@@ -40,6 +41,7 @@ public sealed partial class MainWindowViewModel
     public ObservableCollection<WorkEntryLinkTypeOption> NoteLinkTypeOptions { get; } = new();
     public ObservableCollection<FollowUpOption> FollowUpOptions { get; } = new();
     public ObservableCollection<FollowUpOption> SearchFollowUpOptions { get; } = new();
+    public ObservableCollection<string> TagSuggestions { get; } = new();
 
     public RelayCommand InsertRecentNoteCommand { get; private set; } = null!;
     public RelayCommand ToggleNoteLinkPickerCommand { get; private set; } = null!;
@@ -57,6 +59,22 @@ public sealed partial class MainWindowViewModel
     {
         get => _searchTags;
         set => SetProperty(ref _searchTags, value);
+    }
+
+    public string? SelectedEditorTagSuggestion
+    {
+        get => _selectedEditorTagSuggestion;
+        set
+        {
+            if (!SetProperty(ref _selectedEditorTagSuggestion, value) || string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+
+            Editor.Tags = WorkEntryTags.Add(Editor.Tags, value);
+            _selectedEditorTagSuggestion = null;
+            OnPropertyChanged();
+        }
     }
 
     public FollowUpOption? SearchFollowUpOption

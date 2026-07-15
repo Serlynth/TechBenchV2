@@ -863,10 +863,12 @@ public sealed class TechBenchRepository
             command.Parameters.AddWithValue("$keyword", $"%{query.Keyword.Trim()}%");
         }
 
-        if (!string.IsNullOrWhiteSpace(query.Tags))
+        var requestedTags = WorkEntryTags.Parse(query.Tags);
+        for (var index = 0; index < requestedTags.Count; index++)
         {
-            sql.Append(" AND w.Tags LIKE $tags");
-            command.Parameters.AddWithValue("$tags", $"%{query.Tags.Trim()}%");
+            var parameterName = $"$tag{index}";
+            sql.Append($" AND instr(',' || REPLACE(REPLACE(LOWER(TRIM(w.Tags)), ', ', ','), ' ,', ',') || ',', {parameterName}) > 0");
+            command.Parameters.AddWithValue(parameterName, $",{requestedTags[index].ToLowerInvariant()},");
         }
 
         if (query.FollowUpState.HasValue)
@@ -912,6 +914,26 @@ public sealed class TechBenchRepository
         }
 
         return entries;
+    }
+
+    public IReadOnlyList<string> GetDistinctTags()
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Tags FROM WorkEntries WHERE NULLIF(TRIM(Tags), '') IS NOT NULL ORDER BY Id";
+
+        var tags = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            foreach (var tag in WorkEntryTags.Parse(reader.GetString(0)))
+            {
+                tags.Add(tag);
+            }
+        }
+
+        return tags.ToArray();
     }
 
     public WorkEntry? GetWorkEntry(int id)
@@ -3350,6 +3372,7 @@ public sealed class TechBenchRepository
     {
         var now = DateTime.Now;
         entry.UpdatedAt = now;
+        entry.Tags = WorkEntryTags.Normalize(entry.Tags);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         if (entry.Id == 0)

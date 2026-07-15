@@ -1032,6 +1032,8 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="12" />
                                                 <ColumnDefinition Width="180" />
+                                                <ColumnDefinition Width="12" />
+                                                <ColumnDefinition Width="180" />
                                             </Grid.ColumnDefinitions>
                                             <StackPanel Grid.Column="0">
                                                 <TextBlock Text="Tags" Style="{StaticResource FieldLabelStyle}" />
@@ -1039,6 +1041,13 @@
                                                          ToolTip="Comma-separated tags" />
                                             </StackPanel>
                                             <StackPanel Grid.Column="2">
+                                                <TextBlock Text="Add saved tag" Style="{StaticResource FieldLabelStyle}" />
+                                                <ComboBox ItemsSource="{Binding TagSuggestions}"
+                                                          SelectedItem="{Binding SelectedEditorTagSuggestion, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                          IsTextSearchEnabled="True"
+                                                          ToolTip="Choose a tag used on a saved entry" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="4">
                                                 <TextBlock Text="Follow-up" Style="{StaticResource FieldLabelStyle}" />
                                                 <ComboBox ItemsSource="{Binding FollowUpOptions}"
                                                           DisplayMemberPath="DisplayName"
@@ -2218,7 +2227,11 @@
                             </StackPanel>
                             <StackPanel Width="150" Margin="0,0,12,0">
                                 <TextBlock Text="Tags" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox Text="{Binding SearchTags, UpdateSourceTrigger=PropertyChanged}" />
+                                <ComboBox ItemsSource="{Binding TagSuggestions}"
+                                          Text="{Binding SearchTags, UpdateSourceTrigger=PropertyChanged}"
+                                          IsEditable="True"
+                                          IsTextSearchEnabled="True"
+                                          StaysOpenOnEdit="True" />
                             </StackPanel>
                             <StackPanel Width="150" Margin="0,0,12,0">
                                 <TextBlock Text="Follow-up" Style="{StaticResource FieldLabelStyle}" />

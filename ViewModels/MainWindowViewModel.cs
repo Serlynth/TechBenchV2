@@ -945,12 +945,28 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         RefreshTicketStatusOptions();
         RefreshTicketList();
         RefreshCommonLinks();
+        RefreshTagSuggestions();
         RefreshTodayEntries();
         RefreshWeek();
         RefreshHistory();
         RefreshPostingQueue();
         RefreshPostingLogs();
         UpdateTotals();
+    }
+
+    private void RefreshTagSuggestions()
+    {
+        var tags = _repository.GetDistinctTags();
+        if (TagSuggestions.SequenceEqual(tags, StringComparer.Ordinal))
+        {
+            return;
+        }
+
+        TagSuggestions.Clear();
+        foreach (var tag in tags)
+        {
+            TagSuggestions.Add(tag);
+        }
     }
 
     private void RefreshClients()
