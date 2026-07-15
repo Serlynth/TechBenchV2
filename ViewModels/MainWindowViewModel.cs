@@ -185,6 +185,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         CheckDatabaseHealthCommand = new RelayCommand(_ => CheckDatabaseHealth(), _ => !IsEntryOperationRunning);
         OpenBackupFolderCommand = new RelayCommand(_ => OpenBackupFolder());
         InitializeNoteFeatures();
+        InitializeCommonLinks();
 
         StatusFilterOptions.Add("Any");
         StatusFilterOptions.Add("Draft");
@@ -897,6 +898,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Posting History" => "Showing WHD and Sage posting history",
             "Client List" => "Showing synced/imported clients",
             "Ticket List" => "Showing assigned non-closed tickets",
+            "Common Links" => "Showing commonly used websites",
             _ => $"Showing {section}"
         };
     }
@@ -929,6 +931,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             case "Ticket List":
                 RefreshTicketList();
                 break;
+            case "Common Links":
+                RefreshCommonLinks();
+                break;
         }
     }
 
@@ -937,6 +942,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         RefreshClients();
         RefreshTicketStatusOptions();
         RefreshTicketList();
+        RefreshCommonLinks();
         RefreshTodayEntries();
         RefreshWeek();
         RefreshHistory();

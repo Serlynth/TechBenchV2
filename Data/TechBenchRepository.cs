@@ -38,6 +38,7 @@ public sealed class TechBenchRepository
         EnsureSageVerificationColumns(connection);
         EnsureNoteTakingSchema(connection);
         EnsureWorkEntryLinkSchema(connection);
+        EnsureCommonLinkSchema(connection);
         EnsurePostingAttemptSchema(connection);
         RecoverInterruptedPostingAttempts(connection);
         BackfillSageTicketNumbers(connection);
@@ -1290,6 +1291,110 @@ public sealed class TechBenchRepository
         command.ExecuteNonQuery();
     }
 
+    public IReadOnlyList<CommonLink> GetCommonLinks()
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id, Name, Url, SortOrder, CreatedAt, UpdatedAt
+            FROM CommonLinks
+            ORDER BY SortOrder, Name COLLATE NOCASE, Id
+            """;
+
+        using var reader = command.ExecuteReader();
+        var links = new List<CommonLink>();
+        while (reader.Read())
+        {
+            links.Add(new CommonLink
+            {
+                Id = reader.GetInt32(0),
+                Name = reader.GetString(1),
+                Url = reader.GetString(2),
+                SortOrder = reader.GetInt32(3),
+                CreatedAt = FromDbDateTime(reader, 4) ?? DateTime.MinValue,
+                UpdatedAt = FromDbDateTime(reader, 5) ?? DateTime.MinValue
+            });
+        }
+
+        return links;
+    }
+
+    public int SaveCommonLink(CommonLink link)
+    {
+        ArgumentNullException.ThrowIfNull(link);
+        if (string.IsNullOrWhiteSpace(link.Name))
+        {
+            throw new ArgumentException("A link name is required.", nameof(link));
+        }
+
+        if (string.IsNullOrWhiteSpace(link.Url))
+        {
+            throw new ArgumentException("A link address is required.", nameof(link));
+        }
+
+        using var connection = _connectionFactory.CreateConnection();
+        connection.Open();
+        var now = DateTime.Now;
+
+        if (link.Id > 0)
+        {
+            using var updateCommand = connection.CreateCommand();
+            updateCommand.CommandText = """
+                UPDATE CommonLinks
+                SET Name = $name,
+                    Url = $url,
+                    UpdatedAt = $updatedAt
+                WHERE Id = $id
+                """;
+            updateCommand.Parameters.AddWithValue("$id", link.Id);
+            updateCommand.Parameters.AddWithValue("$name", link.Name.Trim());
+            updateCommand.Parameters.AddWithValue("$url", link.Url.Trim());
+            updateCommand.Parameters.AddWithValue("$updatedAt", ToDbDateTime(now));
+            if (updateCommand.ExecuteNonQuery() == 0)
+            {
+                throw new InvalidOperationException("The link no longer exists.");
+            }
+
+            link.Name = link.Name.Trim();
+            link.Url = link.Url.Trim();
+            link.UpdatedAt = now;
+            return link.Id;
+        }
+
+        using var insertCommand = connection.CreateCommand();
+        insertCommand.CommandText = """
+            INSERT INTO CommonLinks (Name, Url, SortOrder, CreatedAt, UpdatedAt)
+            VALUES (
+                $name,
+                $url,
+                COALESCE((SELECT MAX(SortOrder) + 1 FROM CommonLinks), 0),
+                $createdAt,
+                $updatedAt);
+            SELECT last_insert_rowid();
+            """;
+        insertCommand.Parameters.AddWithValue("$name", link.Name.Trim());
+        insertCommand.Parameters.AddWithValue("$url", link.Url.Trim());
+        insertCommand.Parameters.AddWithValue("$createdAt", ToDbDateTime(now));
+        insertCommand.Parameters.AddWithValue("$updatedAt", ToDbDateTime(now));
+        link.Id = Convert.ToInt32(insertCommand.ExecuteScalar(), CultureInfo.InvariantCulture);
+        link.Name = link.Name.Trim();
+        link.Url = link.Url.Trim();
+        link.CreatedAt = now;
+        link.UpdatedAt = now;
+        return link.Id;
+    }
+
+    public void DeleteCommonLink(int id)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM CommonLinks WHERE Id = $id";
+        command.Parameters.AddWithValue("$id", id);
+        command.ExecuteNonQuery();
+    }
+
     public IReadOnlyDictionary<string, string> GetSettings()
     {
         using var connection = _connectionFactory.CreateConnection();
@@ -1907,6 +2012,27 @@ public sealed class TechBenchRepository
         command.ExecuteNonQuery();
     }
 
+    private static void EnsureCommonLinkSchema(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            CREATE TABLE IF NOT EXISTS CommonLinks (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Name TEXT NOT NULL,
+                Url TEXT NOT NULL,
+                SortOrder INTEGER NOT NULL DEFAULT 0,
+                CreatedAt TEXT NOT NULL,
+                UpdatedAt TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS UX_CommonLinks_Url
+                ON CommonLinks(Url COLLATE NOCASE);
+            CREATE INDEX IF NOT EXISTS IX_CommonLinks_SortOrder
+                ON CommonLinks(SortOrder, Name COLLATE NOCASE);
+            """;
+        command.ExecuteNonQuery();
+    }
+
     private void RebuildWorkEntrySearchIndex(SqliteConnection connection)
     {
         if (!_fullTextSearchAvailable)
@@ -2143,6 +2269,7 @@ public sealed class TechBenchRepository
     private void Seed(SqliteConnection connection)
     {
         SeedTemplates(connection);
+        SeedCommonLinks(connection);
         SeedSetting(connection, "Whd.AutoSyncEnabled", "true");
         SeedSetting(connection, "Whd.AutoSyncMinutes", "5");
         SeedSetting(connection, "Theme", "Dark");
@@ -2274,6 +2401,56 @@ public sealed class TechBenchRepository
               AND Id NOT IN (SELECT ClientId FROM WorkEntries WHERE ClientId IS NOT NULL)
             """;
         clientCommand.ExecuteNonQuery();
+    }
+
+    private static void SeedCommonLinks(SqliteConnection connection)
+    {
+        const string seedKey = "CommonLinks.DefaultsSeededV1";
+        using (var checkCommand = connection.CreateCommand())
+        {
+            checkCommand.CommandText = "SELECT 1 FROM Settings WHERE Key = $key LIMIT 1";
+            checkCommand.Parameters.AddWithValue("$key", seedKey);
+            if (checkCommand.ExecuteScalar() is not null)
+            {
+                return;
+            }
+        }
+
+        var now = ToDbDateTime(DateTime.Now);
+        var defaults = new[]
+        {
+            ("WatchGuard Cloud", "https://cloud.watchguard.com/", 0),
+            ("Microsoft 365 Admin Center", "https://admin.microsoft.com/", 1),
+            ("Barracuda Cloud Control", "https://login.barracuda.com/", 2)
+        };
+
+        using var transaction = connection.BeginTransaction();
+        foreach (var link in defaults)
+        {
+            using var insertCommand = connection.CreateCommand();
+            insertCommand.Transaction = transaction;
+            insertCommand.CommandText = """
+                INSERT OR IGNORE INTO CommonLinks (Name, Url, SortOrder, CreatedAt, UpdatedAt)
+                VALUES ($name, $url, $sortOrder, $createdAt, $updatedAt)
+                """;
+            insertCommand.Parameters.AddWithValue("$name", link.Item1);
+            insertCommand.Parameters.AddWithValue("$url", link.Item2);
+            insertCommand.Parameters.AddWithValue("$sortOrder", link.Item3);
+            insertCommand.Parameters.AddWithValue("$createdAt", now);
+            insertCommand.Parameters.AddWithValue("$updatedAt", now);
+            insertCommand.ExecuteNonQuery();
+        }
+
+        using var markerCommand = connection.CreateCommand();
+        markerCommand.Transaction = transaction;
+        markerCommand.CommandText = """
+            INSERT INTO Settings (Key, Value)
+            VALUES ($key, 'true')
+            ON CONFLICT(Key) DO NOTHING
+            """;
+        markerCommand.Parameters.AddWithValue("$key", seedKey);
+        markerCommand.ExecuteNonQuery();
+        transaction.Commit();
     }
 
     private static void SeedTemplates(SqliteConnection connection)
@@ -3391,6 +3568,15 @@ public sealed class TechBenchRepository
             FOREIGN KEY (TargetWorkEntryId) REFERENCES WorkEntries(Id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS CommonLinks (
+            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+            Name TEXT NOT NULL,
+            Url TEXT NOT NULL,
+            SortOrder INTEGER NOT NULL DEFAULT 0,
+            CreatedAt TEXT NOT NULL,
+            UpdatedAt TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS Settings (
             Id INTEGER PRIMARY KEY AUTOINCREMENT,
             Key TEXT NOT NULL UNIQUE,
@@ -3459,6 +3645,8 @@ public sealed class TechBenchRepository
                 CASE WHEN SourceWorkEntryId < TargetWorkEntryId THEN TargetWorkEntryId ELSE SourceWorkEntryId END);
         CREATE INDEX IF NOT EXISTS IX_WorkEntryLinks_Source ON WorkEntryLinks(SourceWorkEntryId);
         CREATE INDEX IF NOT EXISTS IX_WorkEntryLinks_Target ON WorkEntryLinks(TargetWorkEntryId);
+        CREATE UNIQUE INDEX IF NOT EXISTS UX_CommonLinks_Url ON CommonLinks(Url COLLATE NOCASE);
+        CREATE INDEX IF NOT EXISTS IX_CommonLinks_SortOrder ON CommonLinks(SortOrder, Name COLLATE NOCASE);
         CREATE INDEX IF NOT EXISTS IX_ClientAliases_ClientId ON ClientAliases(ClientId);
         CREATE INDEX IF NOT EXISTS IX_Clients_ExternalId ON Clients(ExternalId);
         CREATE INDEX IF NOT EXISTS IX_Clients_SageCustomerId ON Clients(SageCustomerId);

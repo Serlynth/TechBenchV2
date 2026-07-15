@@ -284,6 +284,7 @@
         <Style x:Key="NavQueueStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Posting Queue"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavClientsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Client List"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavTicketsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Ticket List"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+        <Style x:Key="NavLinksStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Common Links"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavPostingHistoryStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Posting History"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavSettingsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Settings"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
 
@@ -443,6 +444,7 @@
                     <TextBlock Text="DIRECTORY" Style="{StaticResource SidebarGroupLabelStyle}" />
                     <Button Content="Clients" Command="{Binding NavigateCommand}" CommandParameter="Client List" Style="{StaticResource NavClientsStyle}" />
                     <Button Content="Tickets" Command="{Binding NavigateCommand}" CommandParameter="Ticket List" Style="{StaticResource NavTicketsStyle}" />
+                    <Button Content="Links" Command="{Binding NavigateCommand}" CommandParameter="Common Links" Style="{StaticResource NavLinksStyle}" />
 
                     <TextBlock Text="SYSTEM" Style="{StaticResource SidebarGroupLabelStyle}" />
                     <Button Content="Posting History" Command="{Binding NavigateCommand}" CommandParameter="Posting History" Style="{StaticResource NavPostingHistoryStyle}" />
@@ -1908,6 +1910,144 @@
                             </Border>
 
                         </StackPanel>
+                    </Border>
+                </Grid>
+
+                <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Common Links}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.35*" />
+                        <ColumnDefinition Width="14" />
+                        <ColumnDefinition Width="0.85*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Style="{StaticResource CardStyle}">
+                        <DockPanel>
+                            <Grid DockPanel.Dock="Top" Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Common Links"
+                                           Style="{StaticResource SectionHeadingStyle}"
+                                           VerticalAlignment="Center"
+                                           Margin="0" />
+                                <Button Grid.Column="1"
+                                        Content="Add Link"
+                                        Command="{Binding NewCommonLinkCommand}"
+                                        Style="{StaticResource PrimaryButtonStyle}"
+                                        Padding="12,7" />
+                            </Grid>
+
+                            <TextBlock Text="No common links saved."
+                                       Style="{StaticResource MutedTextStyle}"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Visibility="{Binding HasCommonLinks, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+
+                            <ListBox ItemsSource="{Binding CommonLinks}"
+                                     Style="{StaticResource ListBoxChromeLessStyle}"
+                                     Visibility="{Binding HasCommonLinks, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="{x:Type ListBoxItem}">
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        <Setter Property="IsTabStop" Value="False" />
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="{DynamicResource BorderBrush}"
+                                                BorderThickness="0,0,0,1"
+                                                Padding="4,12">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel VerticalAlignment="Center" Margin="0,0,14,0">
+                                                    <TextBlock Text="{Binding Name}"
+                                                               FontWeight="SemiBold"
+                                                               FontSize="14"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding Url}"
+                                                               Style="{StaticResource MutedTextStyle}"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               Margin="0,3,0,0" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="1"
+                                                            Orientation="Horizontal"
+                                                            VerticalAlignment="Center">
+                                                    <Button Content="Open"
+                                                            Command="{Binding DataContext.OpenCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="{Binding}"
+                                                            Style="{StaticResource PrimaryButtonStyle}"
+                                                            MinWidth="68"
+                                                            Padding="10,6"
+                                                            Margin="0,0,7,0" />
+                                                    <Button Content="Edit"
+                                                            Command="{Binding DataContext.EditCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="{Binding}"
+                                                            MinWidth="62"
+                                                            Padding="10,6"
+                                                            Margin="0,0,7,0" />
+                                                    <Button Content="Remove"
+                                                            Command="{Binding DataContext.DeleteCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="{Binding}"
+                                                            Style="{StaticResource DangerButtonStyle}"
+                                                            MinWidth="76"
+                                                            Padding="10,6" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                    </Border>
+
+                    <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <StackPanel Visibility="{Binding IsCommonLinkEditorOpen, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                <TextBlock Text="Link Details" Style="{StaticResource SectionHeadingStyle}" />
+                                <TextBlock Text="No link selected."
+                                           Style="{StaticResource MutedTextStyle}" />
+                            </StackPanel>
+
+                            <StackPanel Visibility="{Binding IsCommonLinkEditorOpen, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <TextBlock Text="{Binding CommonLinkEditorTitle}"
+                                           Style="{StaticResource SectionHeadingStyle}" />
+                                <TextBlock Text="Name" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding CommonLinkName, UpdateSourceTrigger=PropertyChanged}"
+                                         MaxLength="80"
+                                         Margin="0,0,0,12" />
+
+                                <TextBlock Text="Website address" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding CommonLinkUrl, UpdateSourceTrigger=PropertyChanged}"
+                                         Margin="0,0,0,8" />
+
+                                <TextBlock Text="{Binding CommonLinkValidationMessage}"
+                                           Foreground="{DynamicResource DangerBrush}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,12"
+                                           Visibility="{Binding CommonLinkValidationMessage, Converter={StaticResource StringToVisibilityConverter}}" />
+
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button Content="Save Link"
+                                            Command="{Binding SaveCommonLinkCommand}"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Padding="12,7" />
+                                    <Button Grid.Column="2"
+                                            Content="Cancel"
+                                            Command="{Binding CancelCommonLinkCommand}"
+                                            Padding="12,7" />
+                                </Grid>
+                            </StackPanel>
+                        </Grid>
                     </Border>
                 </Grid>
 

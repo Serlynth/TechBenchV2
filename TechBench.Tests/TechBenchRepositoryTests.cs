@@ -445,6 +445,54 @@ public sealed class TechBenchRepositoryTests
     }
 
     [Fact]
+    public void CommonLinksSeedOnceAndSupportCreateUpdateAndDelete()
+    {
+        WithRepository((repository, _) =>
+        {
+            var defaults = repository.GetCommonLinks();
+            Assert.Collection(
+                defaults,
+                link =>
+                {
+                    Assert.Equal("WatchGuard Cloud", link.Name);
+                    Assert.Equal("https://cloud.watchguard.com/", link.Url);
+                },
+                link =>
+                {
+                    Assert.Equal("Microsoft 365 Admin Center", link.Name);
+                    Assert.Equal("https://admin.microsoft.com/", link.Url);
+                },
+                link =>
+                {
+                    Assert.Equal("Barracuda Cloud Control", link.Name);
+                    Assert.Equal("https://login.barracuda.com/", link.Url);
+                });
+
+            repository.DeleteCommonLink(defaults[0].Id);
+            repository.Initialize();
+            Assert.DoesNotContain(repository.GetCommonLinks(), link => link.Name == "WatchGuard Cloud");
+
+            var custom = new CommonLink
+            {
+                Name = "Firewall Portal",
+                Url = "https://firewall.example.com/"
+            };
+            var id = repository.SaveCommonLink(custom);
+            Assert.True(id > 0);
+            Assert.Equal(id, custom.Id);
+
+            custom.Name = "Primary Firewall Portal";
+            repository.SaveCommonLink(custom);
+            Assert.Equal(
+                "Primary Firewall Portal",
+                repository.GetCommonLinks().Single(link => link.Id == id).Name);
+
+            repository.DeleteCommonLink(id);
+            Assert.DoesNotContain(repository.GetCommonLinks(), link => link.Id == id);
+        });
+    }
+
+    [Fact]
     public void EditorDraftAndClientAliasesRoundTrip()
     {
         WithRepository((repository, _) =>
