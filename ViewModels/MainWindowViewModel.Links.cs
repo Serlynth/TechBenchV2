@@ -1,15 +1,16 @@
 using System.Collections.ObjectModel;
-using System.ComponentModel;
-using System.Diagnostics;
 using Microsoft.Data.Sqlite;
 using TechBench.Models;
+using TechBench.Services;
 
 namespace TechBench.ViewModels;
 
 public sealed partial class MainWindowViewModel
 {
+    private const string MicrosoftAdminIncognitoSettingKey = "CommonLinks.Microsoft365Admin.OpenInChromeIncognito";
     private int _editingCommonLinkId;
     private bool _isCommonLinkEditorOpen;
+    private bool _microsoftAdminOpenInChromeIncognito;
     private string _commonLinkName = string.Empty;
     private string _commonLinkUrl = string.Empty;
     private string _commonLinkValidationMessage = string.Empty;
@@ -24,6 +25,23 @@ public sealed partial class MainWindowViewModel
     public RelayCommand OpenCommonLinkCommand { get; private set; } = null!;
 
     public bool HasCommonLinks => CommonLinks.Count > 0;
+
+    public bool MicrosoftAdminOpenInChromeIncognito
+    {
+        get => _microsoftAdminOpenInChromeIncognito;
+        set
+        {
+            if (!SetProperty(ref _microsoftAdminOpenInChromeIncognito, value))
+            {
+                return;
+            }
+
+            _repository.SaveSetting(MicrosoftAdminIncognitoSettingKey, value.ToString());
+            StatusMessage = value
+                ? "Microsoft 365 Admin will open in Chrome Incognito."
+                : "Microsoft 365 Admin will open in the default browser.";
+        }
+    }
 
     public bool IsCommonLinkEditorOpen
     {
@@ -75,6 +93,9 @@ public sealed partial class MainWindowViewModel
 
     private void InitializeCommonLinks()
     {
+        _microsoftAdminOpenInChromeIncognito = _repository
+            .GetSetting(MicrosoftAdminIncognitoSettingKey, "false")
+            .Equals("true", StringComparison.OrdinalIgnoreCase);
         NewCommonLinkCommand = new RelayCommand(_ => StartNewCommonLink());
         EditCommonLinkCommand = new RelayCommand(
             EditCommonLink,
@@ -213,17 +234,22 @@ public sealed partial class MainWindowViewModel
             return;
         }
 
-        try
+        var launchResult = link.BuiltInKey == "microsoft-365-admin"
+                           && MicrosoftAdminOpenInChromeIncognito
+            ? CommonLinkLauncher.OpenChromeIncognito(normalizedUrl)
+            : CommonLinkLauncher.OpenDefault(normalizedUrl);
+        if (launchResult.Succeeded)
         {
-            Process.Start(new ProcessStartInfo(normalizedUrl)
-            {
-                UseShellExecute = true
-            });
-            StatusMessage = $"Opened {link.Name}.";
+            StatusMessage = link.BuiltInKey == "microsoft-365-admin"
+                            && MicrosoftAdminOpenInChromeIncognito
+                ? $"Opened {link.Name} in Chrome Incognito."
+                : $"Opened {link.Name}.";
         }
-        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        else
         {
-            _dialogService.Error("Open common link", $"Could not open {link.Name}: {ex.Message}");
+            _dialogService.Error(
+                "Open common link",
+                $"Could not open {link.Name}: {launchResult.ErrorMessage}");
         }
     }
 

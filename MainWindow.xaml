@@ -2053,30 +2053,50 @@
                                                 </StackPanel>
 
                                                 <StackPanel Grid.Column="2"
-                                                            Orientation="Horizontal"
-                                                            VerticalAlignment="Center">
-                                                    <Button Content="Open"
-                                                            Command="{Binding DataContext.OpenCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                            CommandParameter="{Binding}"
-                                                            Style="{StaticResource PrimaryButtonStyle}"
-                                                            MinWidth="68"
-                                                            Padding="10,6"
-                                                            Margin="0,0,7,0" />
+                                                            VerticalAlignment="Center"
+                                                            HorizontalAlignment="Right">
                                                     <StackPanel Orientation="Horizontal"
-                                                                Visibility="{Binding IsBuiltIn, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
-                                                        <Button Content="Edit"
-                                                                Command="{Binding DataContext.EditCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                HorizontalAlignment="Right">
+                                                        <Button Content="Open"
+                                                                Command="{Binding DataContext.OpenCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                                 CommandParameter="{Binding}"
-                                                                MinWidth="62"
+                                                                Style="{StaticResource PrimaryButtonStyle}"
+                                                                MinWidth="68"
                                                                 Padding="10,6"
                                                                 Margin="0,0,7,0" />
-                                                        <Button Content="Remove"
-                                                                Command="{Binding DataContext.DeleteCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                CommandParameter="{Binding}"
-                                                                Style="{StaticResource DangerButtonStyle}"
-                                                                MinWidth="76"
-                                                                Padding="10,6" />
+                                                        <StackPanel Orientation="Horizontal"
+                                                                    Visibility="{Binding IsBuiltIn, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                                            <Button Content="Edit"
+                                                                    Command="{Binding DataContext.EditCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}"
+                                                                    MinWidth="62"
+                                                                    Padding="10,6"
+                                                                    Margin="0,0,7,0" />
+                                                            <Button Content="Remove"
+                                                                    Command="{Binding DataContext.DeleteCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding}"
+                                                                    Style="{StaticResource DangerButtonStyle}"
+                                                                    MinWidth="76"
+                                                                    Padding="10,6" />
+                                                        </StackPanel>
                                                     </StackPanel>
+                                                    <CheckBox Content="Chrome Incognito"
+                                                              IsChecked="{Binding DataContext.MicrosoftAdminOpenInChromeIncognito, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                              HorizontalAlignment="Right"
+                                                              Margin="0,8,7,0"
+                                                              ToolTip="Open Microsoft 365 Admin Center in a Chrome Incognito window">
+                                                        <CheckBox.Style>
+                                                            <Style TargetType="{x:Type CheckBox}"
+                                                                   BasedOn="{StaticResource {x:Type CheckBox}}">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding BuiltInKey}" Value="microsoft-365-admin">
+                                                                        <Setter Property="Visibility" Value="Visible" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </CheckBox.Style>
+                                                    </CheckBox>
                                                 </StackPanel>
                                             </Grid>
                                         </Border>
