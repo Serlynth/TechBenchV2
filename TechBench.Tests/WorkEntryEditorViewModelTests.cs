@@ -114,6 +114,20 @@ public sealed class WorkEntryEditorViewModelTests
     }
 
     [Fact]
+    public void MarkdownInternalNotePreservesItsExactSourceText()
+    {
+        const string markdown = "\n# Checklist\n\n```text\n  preserve indentation\n```\n\n";
+        var editor = new WorkEntryEditorViewModel();
+        editor.LoadNew(new DateTime(2026, 7, 15));
+        editor.SelectedClient = new Client { Id = 1, Name = "CSRI" };
+        editor.DurationMinutesText = "15";
+        editor.InternalNote = markdown;
+
+        Assert.True(editor.TryBuildEntry(out var entry, out var validationMessage), validationMessage);
+        Assert.Equal(markdown, entry.InternalNote);
+    }
+
+    [Fact]
     public void LoadingExistingManualEntryEnablesManualModeWithoutDirtyingEditor()
     {
         var editor = new WorkEntryEditorViewModel();

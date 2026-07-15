@@ -1,6 +1,6 @@
 # TechBench
 
-Current application version: `1.2.12`.
+Current application version: `1.2.13`.
 
 Installed builds check the public binary-only GitHub release feed for stable updates.
 When a new version is available, TechBench shows a Windows alert and can download it with visible progress,
@@ -73,7 +73,7 @@ Settings also provides manual backup, integrity-check, and open-backup-folder co
 
 ## Current Features
 
-- Note-first Today workspace with a full-size plain-text editor
+- Note-first Today workspace with a full-size plain-text work-note editor and a dedicated Markdown internal-note editor
 - Recovery-only draft backup after a short pause, plus crash/close recovery without changing the committed note
 - Work-note spell checking, undo, word/character counts, in-note find, timestamp and structured-note helpers
 - Reusable tags with saved-tag suggestions in the editor, an autocomplete tag filter in Search, follow-up/waiting states, overdue badges, and closeout reminders
@@ -85,7 +85,7 @@ Settings also provides manual backup, integrity-check, and open-backup-folder co
 - Weekly grouped worklog
 - Read-only synced/imported client list with source, external ID, active status, and last synced timestamp
 - Local ticket creation and ticket filtering by client
-- Entry editor with client picker, assigned-ticket picker, an authorized alternate WHD ticket-number option, time fields, hours/minutes duration, billable flag, work note, and internal note
+- Entry editor with client picker, assigned-ticket picker, an authorized alternate WHD ticket-number option, time fields, hours/minutes duration, billable flag, work note, and Markdown internal note
 - Start/stop timer mode that fills start, end, and duration fields
 - Search by keyword, client, date range, ticket text, and posting status
 - CSV export for daily and weekly worklogs
@@ -101,6 +101,8 @@ Settings also provides manual backup, integrity-check, and open-backup-folder co
 The main editor stores a small recovery draft after a short pause, but it does not create or update the committed work entry. The editor remains visibly unsaved until you use **Save**. **New Entry** begins the next note, and the **Post** menu explicitly chooses WHD or Sage.
 
 Use comma-separated tags for projects, locations, or work types. After an entry is saved, its tags are available from **Add saved tag** in the editor and from the autocomplete **Tags** filter in Search. Multiple Search tags require every listed tag to match. A note marked **Follow-up** or **Waiting** appears on its entry card and in Daily Closeout until it is marked **Completed** or **None**. Search can combine text, client, ticket, date, posting status, tags, and follow-up state.
+
+Internal notes accept CommonMark and GitHub-style Markdown. **Open Markdown Editor** provides Source, Split, and Preview modes, and `F11` toggles full screen. Applying the editor returns the exact Markdown source to the entry; the normal **Save** command still controls when it is committed to the local database. Historical and Sage-locked internal notes render as selectable, copyable Markdown and cannot be changed. Work notes remain plain text because they are the content synchronized to WHD and billed through Sage.
 
 `Ctrl+N` starts a new entry through the existing unsaved-change safeguards.
 

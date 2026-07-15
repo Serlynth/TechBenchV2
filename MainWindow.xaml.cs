@@ -137,6 +137,48 @@ public partial class MainWindow : Window
         OpenButtonContextMenu(sender);
     }
 
+    private void OpenInternalMarkdownEditor_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var dialog = new MarkdownEditorWindow(viewModel.Editor.InternalNote, viewModel.IsEditorReadOnly)
+        {
+            Owner = this
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        if (viewModel.IsEditorReadOnly)
+        {
+            AppDialogWindow.Info(
+                "Internal note locked",
+                "This entry became read-only before the Markdown changes could be applied.",
+                this);
+            return;
+        }
+
+        viewModel.Editor.InternalNote = dialog.MarkdownText;
+    }
+
+    private void OpenHistoryMarkdownViewer_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel { SelectedEntry.InternalNote: { } markdown })
+        {
+            return;
+        }
+
+        var dialog = new MarkdownEditorWindow(markdown, isReadOnly: true)
+        {
+            Owner = this
+        };
+        dialog.ShowDialog();
+    }
+
     private static void OpenButtonContextMenu(object sender)
     {
         if (sender is System.Windows.Controls.Button { ContextMenu: { } contextMenu } button)

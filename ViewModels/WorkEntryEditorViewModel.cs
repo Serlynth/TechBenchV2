@@ -338,8 +338,8 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
     public string NoteCountLabel => $"{NoteWordCount} words | {NoteCharacterCount} characters";
     public bool HasOpenFollowUp => FollowUpState is FollowUpState.FollowUp or FollowUpState.Waiting;
     public string InternalNoteHeader => string.IsNullOrWhiteSpace(InternalNote)
-        ? "Internal note"
-        : "Internal note (contains text)";
+        ? "Internal note (Markdown)"
+        : "Internal note (Markdown, contains text)";
 
     public bool WhdPosted
     {
@@ -637,7 +637,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
             DurationMinutes = durationMinutes,
             Billable = Billable,
             Note = Note.Trim(),
-            InternalNote = string.IsNullOrWhiteSpace(InternalNote) ? null : InternalNote.Trim(),
+            InternalNote = string.IsNullOrWhiteSpace(InternalNote) ? null : InternalNote,
             Tags = WorkEntryTags.Normalize(Tags),
             FollowUpState = FollowUpState,
             FollowUpDueDate = FollowUpState is FollowUpState.FollowUp or FollowUpState.Waiting

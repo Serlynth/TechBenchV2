@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:conv="clr-namespace:TechBench.Converters"
+        xmlns:controls="clr-namespace:TechBench.Controls"
         mc:Ignorable="d"
         Title="{Binding WindowTitle}"
         Icon="Assets/csri-techbench-icon.ico"
@@ -1065,16 +1066,42 @@
                                         </Grid>
 
                                         <Expander Header="{Binding Editor.InternalNoteHeader}"
-                                                  Margin="0,10,0,0"
-                                                  IsEnabled="{Binding IsEditorEditable}">
-                                            <TextBox Text="{Binding Editor.InternalNote, UpdateSourceTrigger=PropertyChanged}"
-                                                     AcceptsReturn="True"
-                                                     TextWrapping="Wrap"
-                                                     VerticalScrollBarVisibility="Auto"
-                                                     SpellCheck.IsEnabled="True"
-                                                     UndoLimit="100"
-                                                     MinHeight="100"
-                                                     Margin="0,8,0,0" />
+                                                  Margin="0,10,0,0">
+                                            <Grid Margin="0,8,0,0">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="Markdown source"
+                                                               Style="{StaticResource FieldLabelStyle}"
+                                                               VerticalAlignment="Center"
+                                                               Margin="1,0,0,0" />
+                                                    <Button Grid.Column="1"
+                                                            Content="Open Markdown Editor"
+                                                            MinWidth="154"
+                                                            Padding="11,6"
+                                                            Click="OpenInternalMarkdownEditor_Click" />
+                                                </Grid>
+                                                <TextBox Grid.Row="1"
+                                                         Text="{Binding Editor.InternalNote, UpdateSourceTrigger=PropertyChanged}"
+                                                         AcceptsReturn="True"
+                                                         AcceptsTab="True"
+                                                         TextWrapping="Wrap"
+                                                         VerticalScrollBarVisibility="Auto"
+                                                         HorizontalScrollBarVisibility="Disabled"
+                                                         SpellCheck.IsEnabled="True"
+                                                         UndoLimit="200"
+                                                         IsReadOnly="{Binding IsEditorReadOnly}"
+                                                         IsReadOnlyCaretVisible="True"
+                                                         FontFamily="Cascadia Mono, Consolas"
+                                                         MinHeight="110"
+                                                         Margin="0,8,0,0" />
+                                            </Grid>
                                         </Expander>
 
                                         <Expander Header="{Binding RelatedNotesHeader}"
@@ -2397,16 +2424,30 @@
 
                                     <StackPanel Visibility="{Binding SelectedEntry.InternalNote, Converter={StaticResource StringToVisibilityConverter}}"
                                                 Margin="0,12,0,0">
-                                        <TextBlock Text="Internal note" Style="{StaticResource FieldLabelStyle}" />
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Internal note (Markdown)"
+                                                       Style="{StaticResource FieldLabelStyle}"
+                                                       VerticalAlignment="Center" />
+                                            <Button Grid.Column="1"
+                                                    Content="Open"
+                                                    MinWidth="68"
+                                                    Padding="10,5"
+                                                    Margin="0,0,0,7"
+                                                    Click="OpenHistoryMarkdownViewer_Click" />
+                                        </Grid>
                                         <Border Background="{DynamicResource ControlBackgroundBrush}"
                                                 BorderBrush="{DynamicResource BorderBrush}"
                                                 BorderThickness="1"
                                                 CornerRadius="4"
                                                 Padding="10"
-                                                MinHeight="90">
-                                            <TextBlock Text="{Binding SelectedEntry.InternalNote}"
-                                                       TextWrapping="Wrap"
-                                                       Foreground="{DynamicResource PrimaryTextBrush}" />
+                                                MinHeight="110">
+                                            <controls:MarkdownViewer Markdown="{Binding SelectedEntry.InternalNote}"
+                                                                     BaseFontSize="13"
+                                                                     MaxHeight="320" />
                                         </Border>
                                     </StackPanel>
 
