@@ -1,40 +1,64 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Threading;
+using TechBench.ViewModels;
 
 namespace TechBench;
 
 public partial class MarkdownEditorWindow : Window
 {
     private readonly DispatcherTimer _previewTimer;
-    private readonly string _originalMarkdown;
-    private readonly bool _isReadOnly;
+    private readonly bool _isFixedReadOnly;
+    private readonly MainWindowViewModel? _liveViewModel;
+    private string _appliedMarkdown;
     private bool _allowClose;
     private bool _isInitializing = true;
     private bool _isFullScreen;
     private WindowState _windowedState;
 
-    public MarkdownEditorWindow(string? markdown, bool isReadOnly)
+    public MarkdownEditorWindow(MainWindowViewModel viewModel)
     {
-        _previewTimer = new DispatcherTimer(DispatcherPriority.Background)
-        {
-            Interval = TimeSpan.FromMilliseconds(180)
-        };
-        _previewTimer.Tick += PreviewTimer_Tick;
-        _originalMarkdown = markdown ?? string.Empty;
-        _isReadOnly = isReadOnly;
-        MarkdownText = _originalMarkdown;
+        ArgumentNullException.ThrowIfNull(viewModel);
+        _previewTimer = CreatePreviewTimer();
+        _liveViewModel = viewModel;
+        _appliedMarkdown = viewModel.Editor.InternalNote ?? string.Empty;
 
         InitializeComponent();
+        DataContext = viewModel;
+        ConfigureLiveEditorBindings(viewModel);
+        ApplyButton.Content = "Save Entry";
+        ApplyButton.Command = viewModel.SaveEntryCommand;
+        CancelButton.Content = "Close";
+        _isInitializing = false;
 
-        SourceTextBox.Text = _originalMarkdown;
-        SourceTextBox.IsReadOnly = _isReadOnly;
-        ReadOnlyBadge.Visibility = _isReadOnly ? Visibility.Visible : Visibility.Collapsed;
-        CancelButton.Visibility = _isReadOnly ? Visibility.Collapsed : Visibility.Visible;
-        ApplyButton.Content = _isReadOnly ? "Close" : "Apply to Entry";
-        Title = _isReadOnly ? "Internal Note - Markdown (Read Only)" : "Internal Note - Markdown";
+        RefreshLiveContext();
+        RefreshPreview();
+        UpdateLayoutMode();
+        UpdateDocumentStats();
+        viewModel.PropertyChanged += LiveViewModel_PropertyChanged;
+        viewModel.Editor.PropertyChanged += LiveEditor_PropertyChanged;
+        Closed += LiveWindow_Closed;
+        Loaded += Window_Loaded;
+    }
+
+    public MarkdownEditorWindow(string? markdown, bool isReadOnly)
+    {
+        _previewTimer = CreatePreviewTimer();
+        _isFixedReadOnly = isReadOnly;
+        _appliedMarkdown = markdown ?? string.Empty;
+        MarkdownText = _appliedMarkdown;
+
+        InitializeComponent();
+        SourceTextBox.Text = _appliedMarkdown;
+        SourceTextBox.IsReadOnly = _isFixedReadOnly;
+        ReadOnlyBadge.Visibility = _isFixedReadOnly ? Visibility.Visible : Visibility.Collapsed;
+        CancelButton.Visibility = _isFixedReadOnly ? Visibility.Collapsed : Visibility.Visible;
+        ApplyButton.Content = _isFixedReadOnly ? "Close" : "Apply";
+        ContextTextBlock.Text = _isFixedReadOnly ? "Markdown / Read only" : "Markdown";
+        Title = _isFixedReadOnly ? "Internal Note - Markdown (Read Only)" : "Internal Note - Markdown";
         _isInitializing = false;
 
         RefreshPreview();
@@ -44,13 +68,53 @@ public partial class MarkdownEditorWindow : Window
         Loaded += Window_Loaded;
     }
 
-    public string MarkdownText { get; private set; }
+    public string MarkdownText { get; private set; } = string.Empty;
 
-    private bool HasChanges => !string.Equals(SourceTextBox.Text, _originalMarkdown, StringComparison.Ordinal);
+    private bool IsLiveEditor => _liveViewModel is not null;
+    private bool HasChanges => !string.Equals(SourceTextBox.Text, _appliedMarkdown, StringComparison.Ordinal);
+
+    private DispatcherTimer CreatePreviewTimer()
+    {
+        var timer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(180)
+        };
+        timer.Tick += PreviewTimer_Tick;
+        return timer;
+    }
+
+    private void ConfigureLiveEditorBindings(MainWindowViewModel viewModel)
+    {
+        BindingOperations.SetBinding(
+            SourceTextBox,
+            System.Windows.Controls.TextBox.TextProperty,
+            new System.Windows.Data.Binding("Editor.InternalNote")
+            {
+                Source = viewModel,
+                Mode = BindingMode.TwoWay,
+                UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged
+            });
+        BindingOperations.SetBinding(
+            SourceTextBox,
+            System.Windows.Controls.TextBox.IsReadOnlyProperty,
+            new System.Windows.Data.Binding(nameof(MainWindowViewModel.IsEditorReadOnly))
+            {
+                Source = viewModel,
+                Mode = BindingMode.OneWay
+            });
+        BindingOperations.SetBinding(
+            EditorStatusText,
+            TextBlock.TextProperty,
+            new System.Windows.Data.Binding(nameof(MainWindowViewModel.EditorSaveStatus))
+            {
+                Source = viewModel,
+                Mode = BindingMode.OneWay
+            });
+    }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        if (_isReadOnly)
+        if (SourceTextBox.IsReadOnly)
         {
             PreviewModeButton.IsChecked = true;
             PreviewViewer.Focus();
@@ -59,6 +123,58 @@ public partial class MarkdownEditorWindow : Window
 
         SourceTextBox.Focus();
         Keyboard.Focus(SourceTextBox);
+    }
+
+    private void LiveViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(MainWindowViewModel.IsEditorReadOnly)
+            or nameof(MainWindowViewModel.EditorSubtitle)
+            or nameof(MainWindowViewModel.EditorTitle))
+        {
+            RefreshLiveContext();
+        }
+    }
+
+    private void LiveEditor_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_liveViewModel is null)
+        {
+            return;
+        }
+
+        if (e.PropertyName == nameof(WorkEntryEditorViewModel.IsDirty)
+            && !_liveViewModel.Editor.IsDirty)
+        {
+            _appliedMarkdown = _liveViewModel.Editor.InternalNote ?? string.Empty;
+        }
+    }
+
+    private void RefreshLiveContext()
+    {
+        if (_liveViewModel is null)
+        {
+            return;
+        }
+
+        var context = string.IsNullOrWhiteSpace(_liveViewModel.EditorSubtitle)
+            ? _liveViewModel.EditorTitle
+            : _liveViewModel.EditorSubtitle;
+        ContextTextBlock.Text = $"{context} / Markdown";
+        Title = $"Internal Note - {context}";
+        ReadOnlyBadge.Visibility = _liveViewModel.IsEditorReadOnly
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void LiveWindow_Closed(object? sender, EventArgs e)
+    {
+        if (_liveViewModel is null)
+        {
+            return;
+        }
+
+        _liveViewModel.PropertyChanged -= LiveViewModel_PropertyChanged;
+        _liveViewModel.Editor.PropertyChanged -= LiveEditor_PropertyChanged;
     }
 
     private void SourceTextBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -105,10 +221,12 @@ public partial class MarkdownEditorWindow : Window
 
     private void UpdateApplyState()
     {
-        if (ApplyButton is not null)
+        if (ApplyButton is null || IsLiveEditor)
         {
-            ApplyButton.IsEnabled = _isReadOnly || HasChanges;
+            return;
         }
+
+        ApplyButton.IsEnabled = _isFixedReadOnly || HasChanges;
     }
 
     private void ModeButton_Checked(object sender, RoutedEventArgs e)
@@ -154,7 +272,12 @@ public partial class MarkdownEditorWindow : Window
 
     private void ApplyButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_isReadOnly)
+        if (IsLiveEditor)
+        {
+            return;
+        }
+
+        if (_isFixedReadOnly)
         {
             _allowClose = true;
             Close();
@@ -162,8 +285,9 @@ public partial class MarkdownEditorWindow : Window
         }
 
         MarkdownText = SourceTextBox.Text;
+        _appliedMarkdown = MarkdownText;
         _allowClose = true;
-        DialogResult = true;
+        Close();
     }
 
     private void CancelButton_Click(object sender, RoutedEventArgs e) => Close();
@@ -171,14 +295,14 @@ public partial class MarkdownEditorWindow : Window
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
         _previewTimer.Stop();
-        if (_allowClose || _isReadOnly || !HasChanges)
+        if (IsLiveEditor || _allowClose || _isFixedReadOnly || !HasChanges)
         {
             return;
         }
 
         var discard = AppDialogWindow.Confirm(
             "Discard Markdown changes?",
-            "The internal note has changes that have not been applied to the entry.",
+            "The internal note has changes that have not been applied.",
             this,
             confirmText: "Discard",
             cancelText: "Keep Editing");
@@ -200,9 +324,20 @@ public partial class MarkdownEditorWindow : Window
             return;
         }
 
-        if (e.Key == Key.S && Keyboard.Modifiers == ModifierKeys.Control && !_isReadOnly)
+        if (e.Key == Key.S && Keyboard.Modifiers == ModifierKeys.Control)
         {
-            ApplyButton_Click(ApplyButton, new RoutedEventArgs());
+            if (_liveViewModel is not null)
+            {
+                if (_liveViewModel.SaveEntryCommand.CanExecute(null))
+                {
+                    _liveViewModel.SaveEntryCommand.Execute(null);
+                }
+            }
+            else if (!_isFixedReadOnly)
+            {
+                ApplyButton_Click(ApplyButton, new RoutedEventArgs());
+            }
+
             e.Handled = true;
             return;
         }

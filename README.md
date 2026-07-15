@@ -1,6 +1,6 @@
 # TechBench
 
-Current application version: `1.2.13`.
+Current application version: `1.2.14`.
 
 Installed builds check the public binary-only GitHub release feed for stable updates.
 When a new version is available, TechBench shows a Windows alert and can download it with visible progress,
@@ -102,7 +102,7 @@ The main editor stores a small recovery draft after a short pause, but it does n
 
 Use comma-separated tags for projects, locations, or work types. After an entry is saved, its tags are available from **Add saved tag** in the editor and from the autocomplete **Tags** filter in Search. Multiple Search tags require every listed tag to match. A note marked **Follow-up** or **Waiting** appears on its entry card and in Daily Closeout until it is marked **Completed** or **None**. Search can combine text, client, ticket, date, posting status, tags, and follow-up state.
 
-Internal notes accept CommonMark and GitHub-style Markdown. **Open Markdown Editor** provides Source, Split, and Preview modes, and `F11` toggles full screen. Applying the editor returns the exact Markdown source to the entry; the normal **Save** command still controls when it is committed to the local database. Historical and Sage-locked internal notes render as selectable, copyable Markdown and cannot be changed. Work notes remain plain text because they are the content synchronized to WHD and billed through Sage.
+Internal notes accept CommonMark and GitHub-style Markdown. **Open Markdown Editor** opens a modeless companion window with Source, Split, and Preview modes, and `F11` toggles full screen. The companion can remain open while the main TechBench window is used, follows the active entry, and writes only to that entry's in-memory editor until **Save Entry** (or the main **Save** action) commits it to the local database. Normal unsaved-change protection still applies when switching entries. Historical and Sage-locked internal notes render as selectable, copyable Markdown and cannot be changed. Work notes remain plain text because they are the content synchronized to WHD and billed through Sage.
 
 `Ctrl+N` starts a new entry through the existing unsaved-change safeguards.
 

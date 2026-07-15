@@ -91,7 +91,8 @@
                                        Foreground="{DynamicResource MutedTextBrush}" />
                         </Border>
                     </StackPanel>
-                    <TextBlock Text="Markdown"
+                    <TextBlock x:Name="ContextTextBlock"
+                               Text="Markdown"
                                Margin="0,3,0,0"
                                Foreground="{DynamicResource MutedTextBrush}" />
                 </StackPanel>
@@ -226,15 +227,22 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="20" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
                 <TextBlock x:Name="DocumentStatsText"
                            Foreground="{DynamicResource MutedTextBrush}"
                            VerticalAlignment="Center" />
 
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock x:Name="EditorStatusText"
+                           Grid.Column="1"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           VerticalAlignment="Center" />
+
+                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button x:Name="CancelButton"
-                            Content="Cancel"
+                            Content="Close"
                             MinWidth="92"
                             Margin="0,0,8,0"
                             Click="CancelButton_Click" />

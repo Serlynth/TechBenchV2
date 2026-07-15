@@ -13,6 +13,7 @@ namespace TechBench;
 public partial class MainWindow : Window
 {
     private readonly WindowsNotificationService _notificationService;
+    private MarkdownEditorWindow? _markdownEditorWindow;
 
     public MainWindow()
     {
@@ -144,25 +145,24 @@ public partial class MainWindow : Window
             return;
         }
 
-        var dialog = new MarkdownEditorWindow(viewModel.Editor.InternalNote, viewModel.IsEditorReadOnly)
+        if (_markdownEditorWindow is { IsVisible: true } existingWindow)
+        {
+            if (existingWindow.WindowState == WindowState.Minimized)
+            {
+                existingWindow.WindowState = WindowState.Normal;
+            }
+
+            existingWindow.Activate();
+            return;
+        }
+
+        var window = new MarkdownEditorWindow(viewModel)
         {
             Owner = this
         };
-        if (dialog.ShowDialog() != true)
-        {
-            return;
-        }
-
-        if (viewModel.IsEditorReadOnly)
-        {
-            AppDialogWindow.Info(
-                "Internal note locked",
-                "This entry became read-only before the Markdown changes could be applied.",
-                this);
-            return;
-        }
-
-        viewModel.Editor.InternalNote = dialog.MarkdownText;
+        _markdownEditorWindow = window;
+        window.Closed += (_, _) => _markdownEditorWindow = null;
+        window.Show();
     }
 
     private void OpenHistoryMarkdownViewer_Click(object sender, RoutedEventArgs e)
@@ -172,11 +172,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        var dialog = new MarkdownEditorWindow(markdown, isReadOnly: true)
+        var window = new MarkdownEditorWindow(markdown, isReadOnly: true)
         {
             Owner = this
         };
-        dialog.ShowDialog();
+        window.Show();
     }
 
     private static void OpenButtonContextMenu(object sender)
