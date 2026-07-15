@@ -6,6 +6,15 @@ namespace TechBench.Tests;
 
 public sealed class SageNativeUiPosterTests
 {
+    [Fact]
+    public void AllowsBoundedWaitForSlowSageNoteDialog()
+    {
+        Assert.InRange(
+            SageNativeUiAutomation.NoteDialogOpenTimeout,
+            TimeSpan.FromSeconds(15),
+            TimeSpan.FromSeconds(30));
+    }
+
     [Theory]
     [InlineData(0, 1)]
     [InlineData(1, 0)]

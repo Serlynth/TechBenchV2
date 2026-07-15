@@ -27,6 +27,8 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
     private static readonly TimeSpan FieldValueTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan FieldValueStablePeriod = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan ValidationTimeout = TimeSpan.FromSeconds(3);
+    internal static readonly TimeSpan NoteDialogOpenTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan NoteDialogCloseTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan NativePollInterval = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan AutomationPollInterval = TimeSpan.FromMilliseconds(250);
 
@@ -800,16 +802,7 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
         ActivateWindow(timeTickets, processId);
         // Sage's toolbar item is virtual (no HWND), and Invoke blocks while its modal dialog is open.
         var noteInvocation = Task.Run(() => InvokeToolbarButton(timeTickets, "Note"));
-        IntPtr noteDialog;
-        try
-        {
-            noteDialog = WaitForWindow(processId, NoteDialogTitle, ValidationTimeout, cancellationToken);
-        }
-        catch (SageAutomationException) when (noteInvocation.IsFaulted)
-        {
-            throw new SageAutomationException(
-                $"Sage Note could not be opened: {noteInvocation.Exception?.GetBaseException().Message}");
-        }
+        var noteDialog = WaitForNoteDialog(processId, noteInvocation, cancellationToken);
 
         ValidateWindow(noteDialog, processId, expectedRoot: IntPtr.Zero, expectedClassPrefix: null);
 
@@ -843,11 +836,11 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
             "accept Sage Note");
         WaitUntil(
             () => !NativeMethods.IsWindow(noteDialog),
-            ValidationTimeout,
+            NoteDialogCloseTimeout,
             cancellationToken);
         WaitUntil(
             () => noteInvocation.IsCompleted,
-            ValidationTimeout,
+            NoteDialogCloseTimeout,
             cancellationToken);
         _ = noteInvocation.Exception;
 
@@ -906,6 +899,34 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
 
         throw new SageAutomationException(
             $"The note was entered and verified, but TechBench could not identify Sage's native default OK button ({nativeButtons.Length} native button(s), {styledDefaults.Length} default-styled button(s)).");
+    }
+
+    private static IntPtr WaitForNoteDialog(
+        int processId,
+        Task noteInvocation,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < NoteDialogOpenTimeout)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (noteInvocation.IsFaulted)
+            {
+                throw new SageAutomationException(
+                    $"Sage Note could not be opened: {noteInvocation.Exception?.GetBaseException().Message}");
+            }
+
+            var noteDialog = FindTopLevelWindow(processId, NoteDialogTitle);
+            if (noteDialog != IntPtr.Zero)
+            {
+                return noteDialog;
+            }
+
+            Thread.Sleep(NativePollInterval);
+        }
+
+        throw new SageAutomationException(
+            $"Sage did not open the Note dialog within {NoteDialogOpenTimeout.TotalSeconds:0} seconds. The ticket was not saved.");
     }
 
     private static string ValidateCompletedTicket(
