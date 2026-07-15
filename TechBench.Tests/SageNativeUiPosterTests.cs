@@ -19,6 +19,23 @@ public sealed class SageNativeUiPosterTests
         Assert.Equal(expectedDelta, delta);
     }
 
+    [Theory]
+    [InlineData("", "", "", false)]
+    [InlineData("RS", "", "", true)]
+    [InlineData("", "69832", "", true)]
+    [InlineData("", "", "13001A", true)]
+    public void DetectsVisibleDataInAnExistingTimeTicket(
+        string employeeId,
+        string customerId,
+        string activityItem,
+        bool expected)
+    {
+        var result = SageNativeUiAutomation.ContainsEnteredTicketData(
+            [employeeId, customerId, activityItem]);
+
+        Assert.Equal(expected, result);
+    }
+
     [Fact]
     public async Task BuildsNativeRequestAndOnlyMarksPostedAfterOdbcConfirmation()
     {

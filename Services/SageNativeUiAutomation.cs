@@ -39,14 +39,7 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
         {
             cancellationToken.ThrowIfCancellationRequested();
             var sage = ResolveSageProcess(request.ExpectedExecutablePath);
-            var existingTicketWindow = FindTopLevelWindow(sage.ProcessId, TimeTicketsTitle);
-            if (existingTicketWindow != IntPtr.Zero)
-            {
-                throw new SageAutomationException(
-                    "Close the existing Sage Time Tickets window before posting. TechBench will not discard or overwrite an open ticket.");
-            }
-
-            var timeTickets = OpenTimeTickets(sage, cancellationToken);
+            var timeTickets = GetOrOpenTimeTickets(sage, cancellationToken);
             EnterValidatedTextField(
                 timeTickets,
                 EmployeeAutomationId,
@@ -267,38 +260,116 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
         ActivateWindow(timeTickets, sage.ProcessId);
         Thread.Sleep(100);
 
-        var employeeField = WaitForFieldHandle(
-            timeTickets,
-            EmployeeAutomationId,
-            "Employee ID",
-            sage.ProcessId,
-            cancellationToken);
-        if (string.IsNullOrWhiteSpace(NativeMethods.ReadWindowText(employeeField)))
+        return PrepareFreshTimeTicket(timeTickets, sage.ProcessId, cancellationToken);
+    }
+
+    private static IntPtr GetOrOpenTimeTickets(
+        SageProcessInfo sage,
+        CancellationToken cancellationToken)
+    {
+        var existing = FindTopLevelWindow(sage.ProcessId, TimeTicketsTitle);
+        if (existing == IntPtr.Zero)
+        {
+            return OpenTimeTickets(sage, cancellationToken);
+        }
+
+        ValidateWindow(existing, sage.ProcessId, expectedRoot: IntPtr.Zero, expectedClassPrefix: null);
+        if (!NativeMethods.IsWindowEnabled(existing))
+        {
+            throw new SageAutomationException(
+                "The open Sage Time Tickets window is blocked by a dialog. Resolve that dialog before posting.");
+        }
+
+        ActivateWindow(existing, sage.ProcessId);
+        Thread.Sleep(100);
+        return PrepareFreshTimeTicket(existing, sage.ProcessId, cancellationToken);
+    }
+
+    private static IntPtr PrepareFreshTimeTicket(
+        IntPtr timeTickets,
+        int processId,
+        CancellationToken cancellationToken)
+    {
+        if (!HasEnteredTicketData(timeTickets, processId, cancellationToken))
         {
             return timeTickets;
         }
 
         InvokeToolbarButton(timeTickets, "New");
-        Thread.Sleep(150);
-        if (!NativeMethods.IsWindowEnabled(timeTickets))
-        {
-            throw new SageAutomationException(
-                "Sage requested a save/discard decision while creating a new ticket. TechBench left the dialog untouched.");
-        }
-
-        employeeField = WaitForFieldHandle(
-            timeTickets,
-            EmployeeAutomationId,
-            "Employee ID",
-            sage.ProcessId,
-            cancellationToken);
-        if (!string.IsNullOrWhiteSpace(NativeMethods.ReadWindowText(employeeField)))
-        {
-            throw new SageAutomationException("Sage did not present a fresh blank Time Ticket after New.");
-        }
+        WaitForFreshBlankTicket(timeTickets, processId, cancellationToken);
 
         return timeTickets;
     }
+
+    private static bool HasEnteredTicketData(
+        IntPtr timeTickets,
+        int processId,
+        CancellationToken cancellationToken)
+    {
+        var values = new[]
+        {
+            NativeMethods.ReadWindowText(WaitForFieldHandle(
+                timeTickets, EmployeeAutomationId, "Employee ID", processId, cancellationToken)),
+            NativeMethods.ReadWindowText(WaitForFieldHandle(
+                timeTickets, CustomerAutomationId, "Customer ID", processId, cancellationToken)),
+            NativeMethods.ReadWindowText(WaitForFieldHandle(
+                timeTickets, ActivityAutomationId, "Activity Item", processId, cancellationToken))
+        };
+
+        return ContainsEnteredTicketData(values);
+    }
+
+    private static void WaitForFreshBlankTicket(
+        IntPtr timeTickets,
+        int processId,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var lastSelectorError = string.Empty;
+        while (stopwatch.Elapsed < FieldValueTimeout)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!NativeMethods.IsWindowEnabled(timeTickets))
+            {
+                throw new SageAutomationException(
+                    "Sage has an unsaved Time Ticket open. TechBench left the save/discard prompt untouched.");
+            }
+
+            try
+            {
+                var values = new[]
+                {
+                    NativeMethods.ReadWindowText(ResolveAutomationIdHandle(
+                        timeTickets, EmployeeAutomationId, processId)),
+                    NativeMethods.ReadWindowText(ResolveAutomationIdHandle(
+                        timeTickets, CustomerAutomationId, processId)),
+                    NativeMethods.ReadWindowText(ResolveAutomationIdHandle(
+                        timeTickets, ActivityAutomationId, processId))
+                };
+                if (!ContainsEnteredTicketData(values))
+                {
+                    return;
+                }
+
+                lastSelectorError = string.Empty;
+            }
+            catch (SageAutomationException ex)
+            {
+                lastSelectorError = ex.Message;
+            }
+
+            Thread.Sleep(AutomationPollInterval);
+        }
+
+        var selectorDetail = string.IsNullOrWhiteSpace(lastSelectorError)
+            ? string.Empty
+            : $" Last selector check: {lastSelectorError}";
+        throw new SageAutomationException(
+            $"Sage did not present a fresh blank Time Ticket within {FieldValueTimeout.TotalSeconds:0} seconds after New.{selectorDetail}");
+    }
+
+    internal static bool ContainsEnteredTicketData(IEnumerable<string?> values) =>
+        values.Any(value => !string.IsNullOrWhiteSpace(value));
 
     private static IntPtr WaitForFieldHandle(
         IntPtr timeTickets,
