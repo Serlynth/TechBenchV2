@@ -37,6 +37,7 @@ public sealed class TechBenchRepository
         EnsureWorkEntryClientReferenceSchema(connection);
         EnsureSageVerificationColumns(connection);
         EnsureNoteTakingSchema(connection);
+        EnsureWorkEntryLinkSchema(connection);
         EnsurePostingAttemptSchema(connection);
         RecoverInterruptedPostingAttempts(connection);
         BackfillSageTicketNumbers(connection);
@@ -817,6 +818,12 @@ public sealed class TechBenchRepository
             command.Parameters.AddWithValue("$clientId", query.ClientId.Value);
         }
 
+        if (query.TicketId.HasValue)
+        {
+            sql.Append(" AND w.TicketId = $ticketId");
+            command.Parameters.AddWithValue("$ticketId", query.TicketId.Value);
+        }
+
         if (query.ExcludeId.HasValue)
         {
             sql.Append(" AND w.Id <> $excludeId");
@@ -1003,6 +1010,127 @@ public sealed class TechBenchRepository
         }
 
         transaction.Commit();
+    }
+
+    public IReadOnlyList<WorkEntryLink> GetWorkEntryLinks(int workEntryId)
+    {
+        if (workEntryId <= 0)
+        {
+            return [];
+        }
+
+        using var connection = _connectionFactory.CreateConnection();
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT w.Id, w.WorkDate, w.ClientId, w.ManualClientName, w.TicketId, w.TicketNumberText, w.HasTimeRange, w.StartTime, w.EndTime,
+                   w.DurationMinutes, w.Billable, w.Note, w.InternalNote, w.Tags, w.FollowUpState, w.FollowUpDueDate,
+                   w.WhdPosted, w.WhdPostedAt, w.SagePosted, w.SagePostedAt, w.SageTicketNumber,
+                   w.PostingStatus, w.LastError, w.CreatedAt, w.UpdatedAt,
+                   COALESCE(NULLIF(w.ManualClientName, ''), c.Name, '') AS ClientName,
+                   t.TicketNumber, t.Subject AS TicketSubject, NULL AS SearchSnippet,
+                   l.Id, l.SourceWorkEntryId, l.TargetWorkEntryId, l.LinkType, l.CreatedAt
+            FROM WorkEntryLinks l
+            INNER JOIN WorkEntries w
+                ON w.Id = CASE
+                    WHEN l.SourceWorkEntryId = $workEntryId THEN l.TargetWorkEntryId
+                    ELSE l.SourceWorkEntryId
+                END
+            LEFT JOIN Clients c ON c.Id = w.ClientId
+            LEFT JOIN Tickets t ON t.Id = w.TicketId
+            WHERE l.SourceWorkEntryId = $workEntryId OR l.TargetWorkEntryId = $workEntryId
+            ORDER BY w.WorkDate DESC, w.Id DESC
+            """;
+        command.Parameters.AddWithValue("$workEntryId", workEntryId);
+
+        using var reader = command.ExecuteReader();
+        var links = new List<WorkEntryLink>();
+        while (reader.Read())
+        {
+            links.Add(new WorkEntryLink
+            {
+                Id = reader.GetInt32(29),
+                SourceWorkEntryId = reader.GetInt32(30),
+                TargetWorkEntryId = reader.GetInt32(31),
+                CurrentWorkEntryId = workEntryId,
+                LinkType = Enum.TryParse<WorkEntryLinkType>(reader.GetString(32), out var type)
+                        ? type
+                        : WorkEntryLinkType.Related,
+                CreatedAt = FromDbDateTime(reader, 33) ?? DateTime.MinValue,
+                RelatedEntry = ReadWorkEntry(reader)
+            });
+        }
+
+        return links;
+    }
+
+    public int SaveWorkEntryLink(
+        int sourceWorkEntryId,
+        int targetWorkEntryId,
+        WorkEntryLinkType linkType)
+    {
+        if (sourceWorkEntryId <= 0 || targetWorkEntryId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sourceWorkEntryId), "Both linked notes must already be saved.");
+        }
+
+        if (sourceWorkEntryId == targetWorkEntryId)
+        {
+            throw new InvalidOperationException("A note cannot be linked to itself.");
+        }
+
+        if (!Enum.IsDefined(linkType))
+        {
+            throw new ArgumentOutOfRangeException(nameof(linkType));
+        }
+
+        if (linkType == WorkEntryLinkType.Related && sourceWorkEntryId > targetWorkEntryId)
+        {
+            (sourceWorkEntryId, targetWorkEntryId) = (targetWorkEntryId, sourceWorkEntryId);
+        }
+
+        using var connection = _connectionFactory.CreateConnection();
+        connection.Open();
+        using var transaction = connection.BeginTransaction();
+        using (var deleteCommand = connection.CreateCommand())
+        {
+            deleteCommand.Transaction = transaction;
+            deleteCommand.CommandText = """
+                DELETE FROM WorkEntryLinks
+                WHERE (SourceWorkEntryId = $sourceId AND TargetWorkEntryId = $targetId)
+                   OR (SourceWorkEntryId = $targetId AND TargetWorkEntryId = $sourceId)
+                """;
+            deleteCommand.Parameters.AddWithValue("$sourceId", sourceWorkEntryId);
+            deleteCommand.Parameters.AddWithValue("$targetId", targetWorkEntryId);
+            deleteCommand.ExecuteNonQuery();
+        }
+
+        using var insertCommand = connection.CreateCommand();
+        insertCommand.Transaction = transaction;
+        insertCommand.CommandText = """
+            INSERT INTO WorkEntryLinks
+                (SourceWorkEntryId, TargetWorkEntryId, LinkType, CreatedAt)
+            VALUES
+                ($sourceId, $targetId, $linkType, $createdAt);
+            SELECT last_insert_rowid();
+            """;
+        insertCommand.Parameters.AddWithValue("$sourceId", sourceWorkEntryId);
+        insertCommand.Parameters.AddWithValue("$targetId", targetWorkEntryId);
+        insertCommand.Parameters.AddWithValue("$linkType", linkType.ToString());
+        insertCommand.Parameters.AddWithValue("$createdAt", ToDbDateTime(DateTime.Now));
+        var id = Convert.ToInt32(insertCommand.ExecuteScalar(), CultureInfo.InvariantCulture);
+        transaction.Commit();
+        return id;
+    }
+
+    public void DeleteWorkEntryLink(int linkId)
+    {
+        using var connection = _connectionFactory.CreateConnection();
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM WorkEntryLinks WHERE Id = $id";
+        command.Parameters.AddWithValue("$id", linkId);
+        command.ExecuteNonQuery();
     }
 
     public IReadOnlyList<NoteTemplate> GetTemplates()
@@ -1751,6 +1879,32 @@ public sealed class TechBenchRepository
         {
             _fullTextSearchAvailable = false;
         }
+    }
+
+    private static void EnsureWorkEntryLinkSchema(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            CREATE TABLE IF NOT EXISTS WorkEntryLinks (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                SourceWorkEntryId INTEGER NOT NULL,
+                TargetWorkEntryId INTEGER NOT NULL,
+                LinkType TEXT NOT NULL DEFAULT 'Related',
+                CreatedAt TEXT NOT NULL,
+                CHECK (SourceWorkEntryId <> TargetWorkEntryId),
+                CHECK (LinkType IN ('Related', 'FollowUpTo')),
+                FOREIGN KEY (SourceWorkEntryId) REFERENCES WorkEntries(Id) ON DELETE CASCADE,
+                FOREIGN KEY (TargetWorkEntryId) REFERENCES WorkEntries(Id) ON DELETE CASCADE
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS UX_WorkEntryLinks_Pair
+                ON WorkEntryLinks(
+                    CASE WHEN SourceWorkEntryId < TargetWorkEntryId THEN SourceWorkEntryId ELSE TargetWorkEntryId END,
+                    CASE WHEN SourceWorkEntryId < TargetWorkEntryId THEN TargetWorkEntryId ELSE SourceWorkEntryId END);
+            CREATE INDEX IF NOT EXISTS IX_WorkEntryLinks_Source ON WorkEntryLinks(SourceWorkEntryId);
+            CREATE INDEX IF NOT EXISTS IX_WorkEntryLinks_Target ON WorkEntryLinks(TargetWorkEntryId);
+            """;
+        command.ExecuteNonQuery();
     }
 
     private void RebuildWorkEntrySearchIndex(SqliteConnection connection)
@@ -3225,6 +3379,18 @@ public sealed class TechBenchRepository
             FOREIGN KEY (TicketId) REFERENCES Tickets(Id)
         );
 
+        CREATE TABLE IF NOT EXISTS WorkEntryLinks (
+            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+            SourceWorkEntryId INTEGER NOT NULL,
+            TargetWorkEntryId INTEGER NOT NULL,
+            LinkType TEXT NOT NULL DEFAULT 'Related',
+            CreatedAt TEXT NOT NULL,
+            CHECK (SourceWorkEntryId <> TargetWorkEntryId),
+            CHECK (LinkType IN ('Related', 'FollowUpTo')),
+            FOREIGN KEY (SourceWorkEntryId) REFERENCES WorkEntries(Id) ON DELETE CASCADE,
+            FOREIGN KEY (TargetWorkEntryId) REFERENCES WorkEntries(Id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS Settings (
             Id INTEGER PRIMARY KEY AUTOINCREMENT,
             Key TEXT NOT NULL UNIQUE,
@@ -3287,6 +3453,12 @@ public sealed class TechBenchRepository
         CREATE INDEX IF NOT EXISTS IX_WorkEntries_PostingStatus ON WorkEntries(PostingStatus);
         CREATE INDEX IF NOT EXISTS IX_WorkEntries_PendingWhd ON WorkEntries(WhdPosted, TicketId, TicketNumberText);
         CREATE INDEX IF NOT EXISTS IX_WorkEntries_PendingSage ON WorkEntries(SagePosted, Billable);
+        CREATE UNIQUE INDEX IF NOT EXISTS UX_WorkEntryLinks_Pair
+            ON WorkEntryLinks(
+                CASE WHEN SourceWorkEntryId < TargetWorkEntryId THEN SourceWorkEntryId ELSE TargetWorkEntryId END,
+                CASE WHEN SourceWorkEntryId < TargetWorkEntryId THEN TargetWorkEntryId ELSE SourceWorkEntryId END);
+        CREATE INDEX IF NOT EXISTS IX_WorkEntryLinks_Source ON WorkEntryLinks(SourceWorkEntryId);
+        CREATE INDEX IF NOT EXISTS IX_WorkEntryLinks_Target ON WorkEntryLinks(TargetWorkEntryId);
         CREATE INDEX IF NOT EXISTS IX_ClientAliases_ClientId ON ClientAliases(ClientId);
         CREATE INDEX IF NOT EXISTS IX_Clients_ExternalId ON Clients(ExternalId);
         CREATE INDEX IF NOT EXISTS IX_Clients_SageCustomerId ON Clients(SageCustomerId);

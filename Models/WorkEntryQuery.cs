@@ -5,6 +5,7 @@ public sealed class WorkEntryQuery
     public DateTime? StartDate { get; set; }
     public DateTime? EndDate { get; set; }
     public int? ClientId { get; set; }
+    public int? TicketId { get; set; }
     public int? ExcludeId { get; set; }
     public int? MaxResults { get; set; }
     public string? TicketText { get; set; }

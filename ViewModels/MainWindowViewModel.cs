@@ -1545,6 +1545,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void LoadEntryIntoEditor(WorkEntry entry)
     {
+        ResetNoteLinkEditorState();
         var client = ResolveEditorClient(entry.ClientId);
         IReadOnlyList<Client> clients = client is null ? [] : [client];
         var ticket = ResolveEditorTicket(entry.TicketId);
@@ -1565,6 +1566,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         Editor.MarkClean();
         EditorSaveStatus = $"Saved {entry.UpdatedAt:h:mm tt}";
         RefreshRecentClientEntries();
+        RefreshRelatedNotes();
     }
 
     private void NewEntry()
@@ -1586,6 +1588,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _selectedEntry = null;
         OnPropertyChanged(nameof(SelectedEntry));
+        ResetNoteLinkEditorState();
         SelectedDate = DateTime.Today;
         _isPostedEditorUnlocked = false;
         _isSynchronizingEditorReferences = true;
@@ -1644,6 +1647,18 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         entry.LastError = null;
         TechBenchRepository.UpdatePostingStatus(entry);
         var id = _repository.SaveWorkEntry(entry);
+        string? noteLinkError = null;
+        if (_pendingFollowUpSource is { Id: > 0 } followUpSource)
+        {
+            try
+            {
+                _repository.SaveWorkEntryLink(id, followUpSource.Id, WorkEntryLinkType.FollowUpTo);
+            }
+            catch (Exception ex)
+            {
+                noteLinkError = ex.Message;
+            }
+        }
         Editor.RunWithoutDirtyTracking(() => Editor.Id = id);
         Editor.MarkClean();
         ClearPersistedEditorDraft();
@@ -1658,7 +1673,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             LoadEntryIntoEditor(savedEntry);
         }
 
-        StatusMessage = savedEntry is null
+        StatusMessage = noteLinkError is not null
+            ? $"The note was saved, but its follow-up link could not be created: {noteLinkError}"
+            : savedEntry is null
             ? "Saved work entry."
             : $"Saved work entry for {savedEntry.ClientDisplay}.";
         return savedEntry;
@@ -1689,6 +1706,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _lastDeletedEntry = entry;
+        _lastDeletedEntryLinks = _repository.GetWorkEntryLinks(entry.Id).ToArray();
         _repository.DeleteWorkEntry(Editor.Id);
         RefreshAll();
         NewEntry();
@@ -1706,11 +1724,20 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var restored = _lastDeletedEntry;
+        var deletedId = restored.Id;
         restored.Id = 0;
         restored.LastError = null;
         TechBenchRepository.UpdatePostingStatus(restored);
         var id = _repository.SaveWorkEntry(restored);
+        foreach (var link in _lastDeletedEntryLinks)
+        {
+            var sourceId = link.SourceWorkEntryId == deletedId ? id : link.SourceWorkEntryId;
+            var targetId = link.TargetWorkEntryId == deletedId ? id : link.TargetWorkEntryId;
+            _repository.SaveWorkEntryLink(sourceId, targetId, link.LinkType);
+        }
+
         _lastDeletedEntry = null;
+        _lastDeletedEntryLinks = [];
         OnPropertyChanged(nameof(HasUndoDelete));
         OnPropertyChanged(nameof(UndoDeleteLabel));
         UndoDeleteCommand.RaiseCanExecuteChanged();
@@ -3316,6 +3343,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         DuplicateEntryCommand.RaiseCanExecuteChanged();
         UnlockPostedEntryCommand.RaiseCanExecuteChanged();
         InsertRecentNoteCommand.RaiseCanExecuteChanged();
+        RaiseNoteLinkProperties();
     }
 
     private void RaiseEditorStateProperties()

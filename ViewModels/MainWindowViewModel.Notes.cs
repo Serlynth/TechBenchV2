@@ -13,6 +13,10 @@ public sealed partial class MainWindowViewModel
     {
         Interval = TimeSpan.FromMilliseconds(1200)
     };
+    private readonly DispatcherTimer _noteLinkSearchTimer = new()
+    {
+        Interval = TimeSpan.FromMilliseconds(250)
+    };
     private bool _isPersistingEditorDraft;
     private bool _isRestoringEditorDraft;
     private DateTime? _lastEditorSaveAt;
@@ -24,12 +28,26 @@ public sealed partial class MainWindowViewModel
     private string _templateName = string.Empty;
     private string _templateCategory = string.Empty;
     private string _templateText = string.Empty;
+    private bool _isNoteLinkPickerOpen;
+    private string _noteLinkSearchText = string.Empty;
+    private WorkEntryLinkTypeOption? _selectedNoteLinkTypeOption;
+    private WorkEntry? _pendingFollowUpSource;
+    private IReadOnlyList<WorkEntryLink> _lastDeletedEntryLinks = [];
 
     public ObservableCollection<WorkEntry> RecentClientEntries { get; } = new();
+    public ObservableCollection<WorkEntryLink> RelatedNotes { get; } = new();
+    public ObservableCollection<WorkEntry> NoteLinkCandidates { get; } = new();
+    public ObservableCollection<WorkEntryLinkTypeOption> NoteLinkTypeOptions { get; } = new();
     public ObservableCollection<FollowUpOption> FollowUpOptions { get; } = new();
     public ObservableCollection<FollowUpOption> SearchFollowUpOptions { get; } = new();
 
     public RelayCommand InsertRecentNoteCommand { get; private set; } = null!;
+    public RelayCommand ToggleNoteLinkPickerCommand { get; private set; } = null!;
+    public RelayCommand LinkExistingNoteCommand { get; private set; } = null!;
+    public RelayCommand RemoveNoteLinkCommand { get; private set; } = null!;
+    public RelayCommand OpenRelatedNoteCommand { get; private set; } = null!;
+    public RelayCommand ContinueThisWorkCommand { get; private set; } = null!;
+    public RelayCommand CancelPendingNoteLinkCommand { get; private set; } = null!;
     public RelayCommand ImportGoogleSheetsCommand { get; private set; } = null!;
     public RelayCommand NewNoteTemplateCommand { get; private set; } = null!;
     public RelayCommand SaveNoteTemplateCommand { get; private set; } = null!;
@@ -110,6 +128,60 @@ public sealed partial class MainWindowViewModel
         }
     }
 
+    public bool IsNoteLinkPickerOpen
+    {
+        get => _isNoteLinkPickerOpen;
+        set
+        {
+            if (!SetProperty(ref _isNoteLinkPickerOpen, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(NoteLinkPickerButtonLabel));
+
+            if (value)
+            {
+                RefreshNoteLinkCandidates();
+            }
+            else
+            {
+                _noteLinkSearchTimer.Stop();
+                NoteLinkCandidates.Clear();
+                RaiseNoteLinkProperties();
+            }
+        }
+    }
+
+    public string NoteLinkSearchText
+    {
+        get => _noteLinkSearchText;
+        set
+        {
+            if (!SetProperty(ref _noteLinkSearchText, value) || !IsNoteLinkPickerOpen)
+            {
+                return;
+            }
+
+            _noteLinkSearchTimer.Stop();
+            _noteLinkSearchTimer.Start();
+        }
+    }
+
+    public WorkEntryLinkTypeOption? SelectedNoteLinkTypeOption
+    {
+        get => _selectedNoteLinkTypeOption;
+        set => SetProperty(ref _selectedNoteLinkTypeOption, value);
+    }
+
+    public WorkEntry? PendingFollowUpSource => _pendingFollowUpSource;
+    public bool HasPendingFollowUp => PendingFollowUpSource is not null;
+    public bool ShowRelatedNotesSection => Editor.Id > 0 || HasPendingFollowUp;
+    public bool HasRelatedNotes => RelatedNotes.Count > 0;
+    public bool HasNoteLinkCandidates => NoteLinkCandidates.Count > 0;
+    public string RelatedNotesHeader => $"Related notes ({RelatedNotes.Count})";
+    public string NoteLinkPickerButtonLabel => IsNoteLinkPickerOpen ? "Close note picker" : "Link existing note";
+
     public bool HasRecentClientEntries => RecentClientEntries.Count > 0;
     public string RecentClientNotesHeader => $"Recent client notes ({RecentClientEntries.Count})";
     public bool FullTextSearchAvailable => _repository.FullTextSearchAvailable;
@@ -117,6 +189,24 @@ public sealed partial class MainWindowViewModel
     private void InitializeNoteFeatures()
     {
         InsertRecentNoteCommand = new RelayCommand(InsertRecentNote, parameter => parameter is WorkEntry && IsEditorEditable);
+        ToggleNoteLinkPickerCommand = new RelayCommand(
+            _ => IsNoteLinkPickerOpen = !IsNoteLinkPickerOpen,
+            _ => Editor.Id > 0 && !IsEntryOperationRunning);
+        LinkExistingNoteCommand = new RelayCommand(
+            LinkExistingNote,
+            parameter => parameter is WorkEntry { Id: > 0 } && Editor.Id > 0 && !IsEntryOperationRunning);
+        RemoveNoteLinkCommand = new RelayCommand(
+            RemoveNoteLink,
+            parameter => parameter is WorkEntryLink { Id: > 0 } && !IsEntryOperationRunning);
+        OpenRelatedNoteCommand = new RelayCommand(
+            OpenRelatedNote,
+            parameter => parameter is WorkEntryLink or WorkEntry);
+        ContinueThisWorkCommand = new RelayCommand(
+            _ => ContinueThisWork(),
+            _ => Editor.Id > 0 && !IsEntryOperationRunning);
+        CancelPendingNoteLinkCommand = new RelayCommand(
+            _ => CancelPendingNoteLink(),
+            _ => HasPendingFollowUp);
         ImportGoogleSheetsCommand = new RelayCommand(_ => ImportGoogleSheetsCsv(), _ => !IsEntryOperationRunning);
         NewNoteTemplateCommand = new RelayCommand(_ => StartNewNoteTemplate());
         SaveNoteTemplateCommand = new RelayCommand(_ => SaveManagedNoteTemplate(), _ => CanSaveManagedNoteTemplate());
@@ -133,7 +223,11 @@ public sealed partial class MainWindowViewModel
         }
 
         SearchFollowUpOption = SearchFollowUpOptions[0];
+        NoteLinkTypeOptions.Add(new WorkEntryLinkTypeOption(WorkEntryLinkType.Related, "Related"));
+        NoteLinkTypeOptions.Add(new WorkEntryLinkTypeOption(WorkEntryLinkType.FollowUpTo, "Follow-up to"));
+        SelectedNoteLinkTypeOption = NoteLinkTypeOptions[0];
         _editorDraftTimer.Tick += HandleEditorDraftTimerTick;
+        _noteLinkSearchTimer.Tick += HandleNoteLinkSearchTimerTick;
     }
 
     private void HandleNoteEditorPropertyChanged(PropertyChangedEventArgs e)
@@ -146,6 +240,14 @@ public sealed partial class MainWindowViewModel
         if (e.PropertyName == nameof(WorkEntryEditorViewModel.SelectedClient))
         {
             RefreshRecentClientEntries();
+        }
+
+        if (IsNoteLinkPickerOpen
+            && e.PropertyName is nameof(WorkEntryEditorViewModel.SelectedClient)
+                or nameof(WorkEntryEditorViewModel.SelectedTicket)
+                or nameof(WorkEntryEditorViewModel.ManualClientName))
+        {
+            RefreshNoteLinkCandidates();
         }
 
         if (_isPersistingEditorDraft
@@ -166,6 +268,12 @@ public sealed partial class MainWindowViewModel
         PersistEditorRecoveryDraft();
     }
 
+    private void HandleNoteLinkSearchTimerTick(object? sender, EventArgs e)
+    {
+        _noteLinkSearchTimer.Stop();
+        RefreshNoteLinkCandidates();
+    }
+
     private void PersistEditorRecoveryDraft()
     {
         if (_isPersistingEditorDraft || IsEntryOperationRunning || IsEditorLocked || !Editor.IsDirty)
@@ -177,7 +285,7 @@ public sealed partial class MainWindowViewModel
         EditorSaveStatus = "Backing up draft";
         try
         {
-            var draft = Editor.BuildDraft();
+            var draft = BuildEditorRecoveryDraft();
             _repository.SaveEditorDraft(draft);
             _lastEditorSaveAt = draft.UpdatedAt;
             EditorSaveStatus = $"Unsaved - recovery copy {_lastEditorSaveAt.Value:h:mm tt}";
@@ -231,9 +339,14 @@ public sealed partial class MainWindowViewModel
             OnPropertyChanged(nameof(SelectedEntry));
         }
 
+        _pendingFollowUpSource = draft.PendingFollowUpSourceId is > 0
+            ? _repository.GetWorkEntry(draft.PendingFollowUpSourceId.Value)
+            : null;
+
         SyncEditorClientFilterText(Editor.SelectedClient?.DisplayName ?? string.Empty);
         RefreshEditorTickets(draft.TicketId);
         RefreshRecentClientEntries();
+        RefreshRelatedNotes();
         _lastEditorSaveAt = draft.UpdatedAt;
         EditorSaveStatus = $"Unsaved - recovered {draft.UpdatedAt:h:mm tt}";
         StatusMessage = "Recovered the last autosaved editor draft.";
@@ -258,11 +371,18 @@ public sealed partial class MainWindowViewModel
 
         try
         {
-            _repository.SaveEditorDraft(Editor.BuildDraft());
+            _repository.SaveEditorDraft(BuildEditorRecoveryDraft());
         }
         catch
         {
         }
+    }
+
+    private EditorDraft BuildEditorRecoveryDraft()
+    {
+        var draft = Editor.BuildDraft();
+        draft.PendingFollowUpSourceId = _pendingFollowUpSource?.Id;
+        return draft;
     }
 
     private void RefreshRecentClientEntries()
@@ -291,6 +411,264 @@ public sealed partial class MainWindowViewModel
     {
         OnPropertyChanged(nameof(HasRecentClientEntries));
         OnPropertyChanged(nameof(RecentClientNotesHeader));
+    }
+
+    private void RefreshRelatedNotes()
+    {
+        RelatedNotes.Clear();
+        if (Editor.Id > 0)
+        {
+            foreach (var link in _repository.GetWorkEntryLinks(Editor.Id))
+            {
+                RelatedNotes.Add(link);
+            }
+        }
+
+        RaiseNoteLinkProperties();
+    }
+
+    private void RefreshNoteLinkCandidates()
+    {
+        NoteLinkCandidates.Clear();
+        if (!IsNoteLinkPickerOpen || Editor.Id <= 0)
+        {
+            RaiseNoteLinkProperties();
+            return;
+        }
+
+        var excludedIds = RelatedNotes
+            .Select(static link => link.RelatedEntry.Id)
+            .Append(Editor.Id)
+            .ToHashSet();
+        var candidates = new List<WorkEntry>();
+
+        void AddCandidates(IEnumerable<WorkEntry> entries)
+        {
+            foreach (var entry in entries)
+            {
+                if (!excludedIds.Add(entry.Id))
+                {
+                    continue;
+                }
+
+                candidates.Add(entry);
+            }
+        }
+
+        var searchText = NoteLinkSearchText.Trim();
+        if (!string.IsNullOrWhiteSpace(searchText))
+        {
+            AddCandidates(_repository.GetWorkEntries(new WorkEntryQuery
+            {
+                Keyword = searchText,
+                ExcludeId = Editor.Id,
+                MaxResults = 20
+            }));
+        }
+        else
+        {
+            if (Editor.SelectedTicket is { Id: > 0 } ticket)
+            {
+                AddCandidates(_repository.GetWorkEntries(new WorkEntryQuery
+                {
+                    TicketId = ticket.Id,
+                    ExcludeId = Editor.Id,
+                    MaxResults = 8
+                }));
+            }
+
+            if (Editor.SelectedClient is { Id: > 0 } client)
+            {
+                AddCandidates(_repository.GetWorkEntries(new WorkEntryQuery
+                {
+                    ClientId = client.Id,
+                    ExcludeId = Editor.Id,
+                    MaxResults = 12
+                }));
+            }
+
+            var recentEntries = _repository.GetWorkEntries(new WorkEntryQuery
+            {
+                ExcludeId = Editor.Id,
+                MaxResults = 24
+            });
+            if (Editor.UseManualClient && !string.IsNullOrWhiteSpace(Editor.ManualClientName))
+            {
+                var manualClientName = Editor.ManualClientName.Trim();
+                AddCandidates(recentEntries.Where(entry =>
+                    entry.ClientDisplay.Equals(manualClientName, StringComparison.OrdinalIgnoreCase)));
+            }
+
+            AddCandidates(recentEntries);
+        }
+
+        foreach (var candidate in candidates.Take(12))
+        {
+            NoteLinkCandidates.Add(candidate);
+        }
+
+        RaiseNoteLinkProperties();
+    }
+
+    private void LinkExistingNote(object? parameter)
+    {
+        if (parameter is not WorkEntry { Id: > 0 } candidate
+            || Editor.Id <= 0
+            || SelectedNoteLinkTypeOption is not { } linkType)
+        {
+            return;
+        }
+
+        _repository.SaveWorkEntryLink(Editor.Id, candidate.Id, linkType.Value);
+        IsNoteLinkPickerOpen = false;
+        _noteLinkSearchText = string.Empty;
+        OnPropertyChanged(nameof(NoteLinkSearchText));
+        RefreshRelatedNotes();
+        StatusMessage = $"Linked the {candidate.WorkDate:M/d/yyyy} note as {linkType.DisplayName.ToLowerInvariant()}.";
+    }
+
+    private void RemoveNoteLink(object? parameter)
+    {
+        if (parameter is not WorkEntryLink { Id: > 0 } link)
+        {
+            return;
+        }
+
+        _repository.DeleteWorkEntryLink(link.Id);
+        RefreshRelatedNotes();
+        if (IsNoteLinkPickerOpen)
+        {
+            RefreshNoteLinkCandidates();
+        }
+
+        StatusMessage = "Note link removed.";
+    }
+
+    private void OpenRelatedNote(object? parameter)
+    {
+        var targetId = parameter switch
+        {
+            WorkEntryLink link => link.RelatedEntry.Id,
+            WorkEntry entry => entry.Id,
+            _ => 0
+        };
+        var target = targetId > 0 ? _repository.GetWorkEntry(targetId) : null;
+        if (target is null)
+        {
+            StatusMessage = "The linked note is no longer available.";
+            RefreshRelatedNotes();
+            return;
+        }
+
+        SelectedEntry = target;
+        if (Editor.Id != target.Id)
+        {
+            return;
+        }
+
+        CurrentSection = "Today";
+        SelectedDate = target.WorkDate;
+        StatusMessage = $"Opened the linked {target.WorkDate:M/d/yyyy} note for {target.ClientDisplay}.";
+    }
+
+    private void ContinueThisWork()
+    {
+        var source = Editor.Id > 0 ? _repository.GetWorkEntry(Editor.Id) : null;
+        if (source is null)
+        {
+            return;
+        }
+
+        NewEntry();
+        if (Editor.Id != 0 || _selectedEntry is not null)
+        {
+            return;
+        }
+
+        _pendingFollowUpSource = source;
+        _isSynchronizingEditorReferences = true;
+        try
+        {
+            if (source.ClientId.HasValue && ResolveEditorClient(source.ClientId) is { } client)
+            {
+                Editor.SelectedClient = client;
+                Editor.UseManualClient = false;
+                Editor.ManualClientName = string.Empty;
+            }
+            else
+            {
+                Editor.SelectedClient = null;
+                Editor.UseManualClient = true;
+                Editor.ManualClientName = source.ManualClientName ?? source.ClientDisplay;
+            }
+
+            Editor.ManualTicketNumber = source.TicketNumberText ?? string.Empty;
+            Editor.Billable = source.Billable;
+        }
+        finally
+        {
+            _isSynchronizingEditorReferences = false;
+        }
+
+        SyncEditorClientFilterText(Editor.SelectedClient?.DisplayName ?? string.Empty);
+        RefreshEditorClientOptions();
+        RefreshEditorTickets(source.TicketId);
+        RefreshRecentClientEntries();
+        RefreshRelatedNotes();
+        EditorSaveStatus = "Unsaved";
+        RaiseNoteLinkProperties();
+        PersistEditorRecoveryDraft();
+        StatusMessage = $"Started a follow-up to the {source.WorkDate:M/d/yyyy} note. The link will be created when this note is saved.";
+    }
+
+    private void CancelPendingNoteLink()
+    {
+        if (_pendingFollowUpSource is null)
+        {
+            return;
+        }
+
+        _pendingFollowUpSource = null;
+        RaiseNoteLinkProperties();
+        if (Editor.IsDirty)
+        {
+            PersistEditorRecoveryDraft();
+        }
+
+        StatusMessage = "The new note will be saved without a follow-up link.";
+    }
+
+    private void ResetNoteLinkEditorState(bool clearPendingFollowUp = true)
+    {
+        _noteLinkSearchTimer.Stop();
+        _isNoteLinkPickerOpen = false;
+        _noteLinkSearchText = string.Empty;
+        if (clearPendingFollowUp)
+        {
+            _pendingFollowUpSource = null;
+        }
+
+        NoteLinkCandidates.Clear();
+        RelatedNotes.Clear();
+        OnPropertyChanged(nameof(IsNoteLinkPickerOpen));
+        OnPropertyChanged(nameof(NoteLinkSearchText));
+        RaiseNoteLinkProperties();
+    }
+
+    private void RaiseNoteLinkProperties()
+    {
+        OnPropertyChanged(nameof(PendingFollowUpSource));
+        OnPropertyChanged(nameof(HasPendingFollowUp));
+        OnPropertyChanged(nameof(ShowRelatedNotesSection));
+        OnPropertyChanged(nameof(HasRelatedNotes));
+        OnPropertyChanged(nameof(HasNoteLinkCandidates));
+        OnPropertyChanged(nameof(RelatedNotesHeader));
+        OnPropertyChanged(nameof(NoteLinkPickerButtonLabel));
+        ToggleNoteLinkPickerCommand.RaiseCanExecuteChanged();
+        LinkExistingNoteCommand.RaiseCanExecuteChanged();
+        RemoveNoteLinkCommand.RaiseCanExecuteChanged();
+        ContinueThisWorkCommand.RaiseCanExecuteChanged();
+        CancelPendingNoteLinkCommand.RaiseCanExecuteChanged();
     }
 
     private void InsertRecentNote(object? parameter)
@@ -383,6 +761,8 @@ public sealed partial class MainWindowViewModel
         PersistEditorDraftBeforeExit();
         _editorDraftTimer.Stop();
         _editorDraftTimer.Tick -= HandleEditorDraftTimerTick;
+        _noteLinkSearchTimer.Stop();
+        _noteLinkSearchTimer.Tick -= HandleNoteLinkSearchTimerTick;
     }
 
     private void ImportGoogleSheetsCsv()

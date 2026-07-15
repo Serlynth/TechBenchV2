@@ -18,5 +18,6 @@ public sealed class EditorDraft
     public string Tags { get; set; } = string.Empty;
     public FollowUpState FollowUpState { get; set; }
     public DateTime? FollowUpDueDate { get; set; }
+    public int? PendingFollowUpSourceId { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.Now;
 }

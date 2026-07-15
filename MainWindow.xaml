@@ -1058,6 +1058,202 @@
                                                      Margin="0,8,0,0" />
                                         </Expander>
 
+                                        <Expander Header="{Binding RelatedNotesHeader}"
+                                                  Margin="0,10,0,0"
+                                                  IsExpanded="{Binding HasPendingFollowUp, Mode=OneWay}"
+                                                  Visibility="{Binding ShowRelatedNotesSection, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <StackPanel Margin="0,8,0,0">
+                                                <Border Background="{DynamicResource AccentSoftBrush}"
+                                                        BorderBrush="{DynamicResource AccentBrush}"
+                                                        BorderThickness="1"
+                                                        CornerRadius="6"
+                                                        Padding="10,8"
+                                                        Margin="0,0,0,9"
+                                                        Visibility="{Binding HasPendingFollowUp, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <StackPanel>
+                                                            <TextBlock Text="This will be a follow-up to"
+                                                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                                                       FontWeight="SemiBold" />
+                                                            <TextBlock Text="{Binding PendingFollowUpSource.ClientDisplay}"
+                                                                       TextTrimming="CharacterEllipsis"
+                                                                       Margin="0,3,0,0" />
+                                                            <TextBlock Foreground="{DynamicResource MutedTextBrush}"
+                                                                       FontSize="11"
+                                                                       TextTrimming="CharacterEllipsis">
+                                                                <Run Text="{Binding PendingFollowUpSource.WorkDate, Mode=OneWay, StringFormat={}{0:M/d/yyyy}}" />
+                                                                <Run Text="  /  " />
+                                                                <Run Text="{Binding PendingFollowUpSource.TicketDisplay, Mode=OneWay}" />
+                                                                <Run Text="  /  " />
+                                                                <Run Text="{Binding PendingFollowUpSource.NotePreview, Mode=OneWay}" />
+                                                            </TextBlock>
+                                                        </StackPanel>
+                                                        <Button Grid.Column="1"
+                                                                Content="Cancel link"
+                                                                Command="{Binding CancelPendingNoteLinkCommand}"
+                                                                Padding="9,4"
+                                                                MinHeight="28"
+                                                                Margin="12,0,0,0"
+                                                                VerticalAlignment="Center" />
+                                                    </Grid>
+                                                </Border>
+
+                                                <ItemsControl ItemsSource="{Binding RelatedNotes}"
+                                                              Visibility="{Binding HasRelatedNotes, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Border BorderBrush="{DynamicResource BorderBrush}"
+                                                                    BorderThickness="0,0,0,1"
+                                                                    Padding="0,0,0,8"
+                                                                    Margin="0,0,0,8">
+                                                                <Grid>
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="96" />
+                                                                        <ColumnDefinition Width="*" />
+                                                                        <ColumnDefinition Width="Auto" />
+                                                                        <ColumnDefinition Width="Auto" />
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <Border Grid.Column="0"
+                                                                            Style="{StaticResource BadgeStyle}"
+                                                                            Background="{DynamicResource NeutralBadgeBrush}"
+                                                                            HorizontalAlignment="Left"
+                                                                            VerticalAlignment="Top">
+                                                                        <TextBlock Text="{Binding RelationshipLabel}"
+                                                                                   Style="{StaticResource BadgeTextStyle}" />
+                                                                    </Border>
+                                                                    <StackPanel Grid.Column="1" Margin="8,0,10,0">
+                                                                        <TextBlock Text="{Binding RelatedEntry.ClientDisplay}"
+                                                                                   FontWeight="SemiBold"
+                                                                                   TextTrimming="CharacterEllipsis" />
+                                                                        <TextBlock Foreground="{DynamicResource MutedTextBrush}"
+                                                                                   FontSize="11"
+                                                                                   TextTrimming="CharacterEllipsis">
+                                                                            <Run Text="{Binding RelatedEntry.WorkDate, Mode=OneWay, StringFormat={}{0:M/d/yyyy}}" />
+                                                                            <Run Text="  /  " />
+                                                                            <Run Text="{Binding RelatedEntry.TicketDisplay, Mode=OneWay}" />
+                                                                            <Run Text="  /  " />
+                                                                            <Run Text="{Binding RelatedEntry.NotePreview, Mode=OneWay}" />
+                                                                        </TextBlock>
+                                                                    </StackPanel>
+                                                                    <Button Grid.Column="2"
+                                                                            Content="Open"
+                                                                            Command="{Binding DataContext.OpenRelatedNoteCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                            CommandParameter="{Binding}"
+                                                                            Padding="9,4"
+                                                                            MinHeight="28"
+                                                                            VerticalAlignment="Center"
+                                                                            Margin="0,0,7,0" />
+                                                                    <Button Grid.Column="3"
+                                                                            Content="Remove"
+                                                                            Command="{Binding DataContext.RemoveNoteLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                            CommandParameter="{Binding}"
+                                                                            Padding="9,4"
+                                                                            MinHeight="28"
+                                                                            VerticalAlignment="Center" />
+                                                                </Grid>
+                                                            </Border>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+
+                                                <WrapPanel Visibility="{Binding Editor.IsExistingEntry, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <Button Content="{Binding NoteLinkPickerButtonLabel}"
+                                                            Command="{Binding ToggleNoteLinkPickerCommand}"
+                                                            Padding="11,5"
+                                                            MinHeight="30"
+                                                            Margin="0,0,8,0" />
+                                                    <Button Content="Continue this work"
+                                                            Command="{Binding ContinueThisWorkCommand}"
+                                                            Padding="11,5"
+                                                            MinHeight="30" />
+                                                </WrapPanel>
+
+                                                <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                        BorderBrush="{DynamicResource BorderBrush}"
+                                                        BorderThickness="1"
+                                                        CornerRadius="6"
+                                                        Padding="10"
+                                                        Margin="0,9,0,0"
+                                                        Visibility="{Binding IsNoteLinkPickerOpen, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <StackPanel>
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="12" />
+                                                                <ColumnDefinition Width="150" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <StackPanel Grid.Column="0">
+                                                                <TextBlock Text="Find by client, ticket, or note text"
+                                                                           Style="{StaticResource FieldLabelStyle}" />
+                                                                <TextBox Text="{Binding NoteLinkSearchText, UpdateSourceTrigger=PropertyChanged}" />
+                                                            </StackPanel>
+                                                            <StackPanel Grid.Column="2">
+                                                                <TextBlock Text="Relationship"
+                                                                           Style="{StaticResource FieldLabelStyle}" />
+                                                                <ComboBox ItemsSource="{Binding NoteLinkTypeOptions}"
+                                                                          DisplayMemberPath="DisplayName"
+                                                                          SelectedItem="{Binding SelectedNoteLinkTypeOption}" />
+                                                            </StackPanel>
+                                                        </Grid>
+
+                                                        <TextBlock Text="Suggested notes"
+                                                                   Style="{StaticResource MutedTextStyle}"
+                                                                   Margin="1,9,0,6" />
+                                                        <TextBlock Text="No matching notes found."
+                                                                   Style="{StaticResource MutedTextStyle}"
+                                                                   Margin="1,4,0,3"
+                                                                   Visibility="{Binding HasNoteLinkCandidates, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                                                        <ScrollViewer MaxHeight="270"
+                                                                      VerticalScrollBarVisibility="Auto"
+                                                                      Visibility="{Binding HasNoteLinkCandidates, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                            <ItemsControl ItemsSource="{Binding NoteLinkCandidates}">
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate>
+                                                                        <Grid Margin="0,0,0,8">
+                                                                            <Grid.ColumnDefinitions>
+                                                                                <ColumnDefinition Width="82" />
+                                                                                <ColumnDefinition Width="150" />
+                                                                                <ColumnDefinition Width="*" />
+                                                                                <ColumnDefinition Width="Auto" />
+                                                                            </Grid.ColumnDefinitions>
+                                                                            <TextBlock Text="{Binding WorkDate, StringFormat={}{0:M/d/yyyy}}"
+                                                                                       Style="{StaticResource MutedTextStyle}"
+                                                                                       VerticalAlignment="Center" />
+                                                                            <StackPanel Grid.Column="1" Margin="7,0,10,0">
+                                                                                <TextBlock Text="{Binding ClientDisplay}"
+                                                                                           FontWeight="SemiBold"
+                                                                                           TextTrimming="CharacterEllipsis" />
+                                                                                <TextBlock Text="{Binding TicketDisplay}"
+                                                                                           Style="{StaticResource MutedTextStyle}"
+                                                                                           TextTrimming="CharacterEllipsis" />
+                                                                            </StackPanel>
+                                                                            <TextBlock Grid.Column="2"
+                                                                                       Text="{Binding DisplayPreview}"
+                                                                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                                                                       TextTrimming="CharacterEllipsis"
+                                                                                       VerticalAlignment="Center"
+                                                                                       Margin="0,0,10,0" />
+                                                                            <Button Grid.Column="3"
+                                                                                    Content="Link"
+                                                                                    Command="{Binding DataContext.LinkExistingNoteCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                    CommandParameter="{Binding}"
+                                                                                    Padding="9,4"
+                                                                                    MinHeight="28"
+                                                                                    VerticalAlignment="Center" />
+                                                                        </Grid>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                        </ScrollViewer>
+                                                    </StackPanel>
+                                                </Border>
+                                            </StackPanel>
+                                        </Expander>
+
                                         <Expander Header="{Binding RecentClientNotesHeader}"
                                                   Margin="0,10,0,0"
                                                   Visibility="{Binding HasRecentClientEntries, Converter={StaticResource BooleanToVisibilityConverter}}">

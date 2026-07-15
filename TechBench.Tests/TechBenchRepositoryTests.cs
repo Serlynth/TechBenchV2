@@ -356,6 +356,95 @@ public sealed class TechBenchRepositoryTests
     }
 
     [Fact]
+    public void NoteLinksRoundTripWithFollowUpDirectionAndCascadeOnDelete()
+    {
+        WithRepository((repository, _) =>
+        {
+            var earlier = new WorkEntry
+            {
+                WorkDate = new DateTime(2026, 7, 13),
+                ManualClientName = "Northwind",
+                DurationMinutes = 30,
+                Note = "Started workstation setup."
+            };
+            var later = new WorkEntry
+            {
+                WorkDate = new DateTime(2026, 7, 14),
+                ManualClientName = "Northwind",
+                DurationMinutes = 45,
+                Note = "Finished workstation setup."
+            };
+            repository.SaveWorkEntry(earlier);
+            repository.SaveWorkEntry(later);
+
+            repository.SaveWorkEntryLink(later.Id, earlier.Id, WorkEntryLinkType.FollowUpTo);
+
+            var laterLink = Assert.Single(repository.GetWorkEntryLinks(later.Id));
+            var earlierLink = Assert.Single(repository.GetWorkEntryLinks(earlier.Id));
+            Assert.Equal("Follow-up to", laterLink.RelationshipLabel);
+            Assert.Equal(earlier.Id, laterLink.RelatedEntry.Id);
+            Assert.Equal("Followed by", earlierLink.RelationshipLabel);
+            Assert.Equal(later.Id, earlierLink.RelatedEntry.Id);
+
+            repository.SaveWorkEntryLink(earlier.Id, later.Id, WorkEntryLinkType.Related);
+
+            Assert.Equal("Related", Assert.Single(repository.GetWorkEntryLinks(earlier.Id)).RelationshipLabel);
+            Assert.Single(repository.GetWorkEntryLinks(later.Id));
+
+            repository.DeleteWorkEntry(earlier.Id);
+
+            Assert.Empty(repository.GetWorkEntryLinks(later.Id));
+        });
+    }
+
+    [Fact]
+    public void WorkEntryQueryCanFilterLinkCandidatesByTicketId()
+    {
+        WithRepository((repository, _) =>
+        {
+            var client = new Client { Name = "Northwind" };
+            repository.SaveClient(client);
+            var firstTicket = new Ticket
+            {
+                ClientId = client.Id,
+                TicketNumber = "101",
+                Subject = "First issue"
+            };
+            var secondTicket = new Ticket
+            {
+                ClientId = client.Id,
+                TicketNumber = "102",
+                Subject = "Second issue"
+            };
+            repository.SaveTicket(firstTicket);
+            repository.SaveTicket(secondTicket);
+            var first = new WorkEntry
+            {
+                WorkDate = new DateTime(2026, 7, 13),
+                ClientId = client.Id,
+                TicketId = firstTicket.Id,
+                DurationMinutes = 15,
+                Note = "First ticket note"
+            };
+            var second = new WorkEntry
+            {
+                WorkDate = new DateTime(2026, 7, 14),
+                ClientId = client.Id,
+                TicketId = secondTicket.Id,
+                DurationMinutes = 15,
+                Note = "Second ticket note"
+            };
+            repository.SaveWorkEntry(first);
+            repository.SaveWorkEntry(second);
+
+            var matches = repository.GetWorkEntries(new WorkEntryQuery { TicketId = firstTicket.Id });
+
+            Assert.Single(matches);
+            Assert.Equal(first.Id, matches[0].Id);
+        });
+    }
+
+    [Fact]
     public void EditorDraftAndClientAliasesRoundTrip()
     {
         WithRepository((repository, _) =>
@@ -382,7 +471,8 @@ public sealed class TechBenchRepositoryTests
                 DurationMinutesText = "45",
                 Note = "Recovered note",
                 Tags = "project",
-                FollowUpState = FollowUpState.FollowUp
+                FollowUpState = FollowUpState.FollowUp,
+                PendingFollowUpSourceId = committedEntry.Id
             };
             repository.SaveEditorDraft(draft);
             repository.SaveClientAlias("short name", client.Id);
@@ -391,6 +481,7 @@ public sealed class TechBenchRepositoryTests
             Assert.NotNull(loaded);
             Assert.Equal("Recovered note", loaded.Note);
             Assert.Equal(FollowUpState.FollowUp, loaded.FollowUpState);
+            Assert.Equal(committedEntry.Id, loaded.PendingFollowUpSourceId);
             Assert.Equal("Committed note", repository.GetWorkEntry(committedEntry.Id)?.Note);
             Assert.Equal(client.Id, repository.GetClientAliases()["SHORT NAME"]);
 
