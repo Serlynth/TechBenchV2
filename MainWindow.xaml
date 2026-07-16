@@ -1780,16 +1780,60 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
 
-                        <ItemsControl ItemsSource="{Binding HistoryTimelineEntries}"
+                        <ItemsControl ItemsSource="{Binding HistoryTimelineGroups}"
                                       Visibility="{Binding HistoryViewMode, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Inline}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Button Command="{Binding DataContext.EditEntryCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                            CommandParameter="{Binding}"
-                                            Style="{StaticResource EntryCardButtonStyle}"
-                                            ToolTip="Open this entry in the editor">
-                                        <ContentControl Content="{Binding}" ContentTemplate="{StaticResource EntryCardTemplate}" />
-                                    </Button>
+                                    <StackPanel Margin="0,0,0,14">
+                                        <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                BorderBrush="{DynamicResource BorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="6"
+                                                Padding="12,9"
+                                                Margin="0,0,0,10">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding Header}"
+                                                           FontSize="15"
+                                                           FontWeight="SemiBold"
+                                                           TextWrapping="NoWrap"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <WrapPanel Grid.Column="1"
+                                                           HorizontalAlignment="Right"
+                                                           Margin="20,0,0,0">
+                                                    <StackPanel Orientation="Horizontal" Margin="0,0,14,0">
+                                                        <TextBlock Text="Total " Foreground="{DynamicResource MutedTextBrush}" />
+                                                        <TextBlock Text="{Binding TotalLabel}" FontWeight="SemiBold" />
+                                                    </StackPanel>
+                                                    <StackPanel Orientation="Horizontal" Margin="0,0,14,0">
+                                                        <TextBlock Text="Billable " Foreground="{DynamicResource MutedTextBrush}" />
+                                                        <TextBlock Text="{Binding BillableLabel}" FontWeight="SemiBold" />
+                                                    </StackPanel>
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock Text="Non-billable " Foreground="{DynamicResource MutedTextBrush}" />
+                                                        <TextBlock Text="{Binding NonBillableLabel}" FontWeight="SemiBold" />
+                                                    </StackPanel>
+                                                </WrapPanel>
+                                            </Grid>
+                                        </Border>
+
+                                        <ItemsControl ItemsSource="{Binding Entries}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Button Command="{Binding DataContext.EditEntryCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="{Binding}"
+                                                            Style="{StaticResource EntryCardButtonStyle}"
+                                                            ToolTip="Open this entry in the editor">
+                                                        <ContentControl Content="{Binding}" ContentTemplate="{StaticResource EntryCardTemplate}" />
+                                                    </Button>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>

@@ -262,6 +262,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public ObservableCollection<DayWorkGroup> WeekGroups { get; } = new();
     public ObservableCollection<HistoryWorkGroup> HistoryGroups { get; } = new();
     public ObservableCollection<WorkEntry> HistoryTimelineEntries { get; } = new();
+    public ObservableCollection<DayWorkGroup> HistoryTimelineGroups { get; } = new();
     public ObservableCollection<WorkEntry> SearchResults { get; } = new();
     public ObservableCollection<WorkEntry> PostingQueue { get; } = new();
     public ObservableCollection<PostingLog> PostingLogs { get; } = new();
@@ -1238,6 +1239,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             HistoryGroups.Clear();
             HistoryTimelineEntries.Clear();
+            HistoryTimelineGroups.Clear();
             _historyBillableMinutes = 0;
             _historyNonBillableMinutes = 0;
             _historyEntryCount = 0;
@@ -1262,11 +1264,25 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         HistoryTimelineEntries.Clear();
+        HistoryTimelineGroups.Clear();
         foreach (var entry in entries
                      .OrderByDescending(static entry => entry.WorkDate)
                      .ThenBy(static entry => entry.StartTime))
         {
             HistoryTimelineEntries.Add(entry);
+        }
+
+        foreach (var dayGroup in entries
+                     .GroupBy(static entry => entry.WorkDate.Date)
+                     .OrderByDescending(static group => group.Key)
+                     .Select(group => new DayWorkGroup
+                     {
+                         Date = group.Key,
+                         Entries = new ObservableCollection<WorkEntry>(
+                             group.OrderBy(static entry => entry.StartTime))
+                     }))
+        {
+            HistoryTimelineGroups.Add(dayGroup);
         }
 
         _historyBillableMinutes = entries.Where(static entry => entry.Billable).Sum(static entry => entry.DurationMinutes);
