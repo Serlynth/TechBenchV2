@@ -255,9 +255,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
 
     private void EnsureTimeOption(string value)
     {
-        if (!TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out var time)
-            || time < TimeSpan.Zero
-            || time >= TimeSpan.FromDays(1))
+        if (!TryParseClockTime(value, out var time))
         {
             return;
         }
@@ -451,8 +449,8 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
         ? !TryParseOtherWhdTicketNumber(ManualTicketNumber, out _)
         : SelectedTicket is null || SelectedTicket.Id <= 0;
     public bool HasSelectedSyncedTicket => !UseOtherWhdTicket && SelectedTicket is { Id: > 0 };
-    public bool IsDurationCalculated => TimeSpan.TryParse(StartTimeText, CultureInfo.InvariantCulture, out var start)
-        && TimeSpan.TryParse(EndTimeText, CultureInfo.InvariantCulture, out var end)
+    public bool IsDurationCalculated => TryParseClockTime(StartTimeText, out var start)
+        && TryParseClockTime(EndTimeText, out var end)
         && end >= start;
     public string TicketWarningText => HasNoTicket ? "No Ticket" : string.Empty;
 
@@ -724,13 +722,13 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
             return true;
         }
 
-        if (!TimeSpan.TryParse(StartTimeText, CultureInfo.InvariantCulture, out start))
+        if (!TryParseClockTime(StartTimeText, out start))
         {
             validationMessage = "Start time must be a valid time, such as 08:30.";
             return false;
         }
 
-        if (!TimeSpan.TryParse(EndTimeText, CultureInfo.InvariantCulture, out end))
+        if (!TryParseClockTime(EndTimeText, out end))
         {
             validationMessage = "End time must be a valid time, such as 09:15.";
             return false;
@@ -756,12 +754,85 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
 
     private void UpdateDurationFromTimes()
     {
-        if (TimeSpan.TryParse(StartTimeText, CultureInfo.InvariantCulture, out var start)
-            && TimeSpan.TryParse(EndTimeText, CultureInfo.InvariantCulture, out var end)
+        if (TryParseClockTime(StartTimeText, out var start)
+            && TryParseClockTime(EndTimeText, out var end)
             && end >= start)
         {
             DurationMinutesText = ((int)Math.Round((end - start).TotalMinutes, MidpointRounding.AwayFromZero)).ToString(CultureInfo.InvariantCulture);
         }
+    }
+
+    private static bool TryParseClockTime(string value, out TimeSpan time)
+    {
+        time = default;
+        var text = value.Trim();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        if (TryParseCompactClockTime(text, out time))
+        {
+            return true;
+        }
+
+        if (DateTime.TryParse(text, CultureInfo.CurrentCulture, DateTimeStyles.AllowWhiteSpaces, out var parsedDate)
+            || DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out parsedDate))
+        {
+            time = parsedDate.TimeOfDay;
+            return time >= TimeSpan.Zero && time < TimeSpan.FromDays(1);
+        }
+
+        if (TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out time))
+        {
+            return time >= TimeSpan.Zero && time < TimeSpan.FromDays(1);
+        }
+
+        return false;
+    }
+
+    private static bool TryParseCompactClockTime(string text, out TimeSpan time)
+    {
+        time = default;
+        var compact = text.Trim();
+        var isPm = compact.EndsWith("pm", StringComparison.OrdinalIgnoreCase);
+        var isAm = compact.EndsWith("am", StringComparison.OrdinalIgnoreCase);
+        if (isPm || isAm)
+        {
+            compact = compact[..^2].Trim();
+        }
+
+        compact = compact.Replace(":", string.Empty, StringComparison.Ordinal);
+        if (compact.Length is < 1 or > 4 || compact.Any(static character => !char.IsDigit(character)))
+        {
+            return false;
+        }
+
+        var hoursText = compact.Length <= 2 ? compact : compact[..^2];
+        var minutesText = compact.Length <= 2 ? "0" : compact[^2..];
+        if (!int.TryParse(hoursText, CultureInfo.InvariantCulture, out var hours)
+            || !int.TryParse(minutesText, CultureInfo.InvariantCulture, out var minutes)
+            || minutes > 59)
+        {
+            return false;
+        }
+
+        if (isPm && hours is >= 1 and < 12)
+        {
+            hours += 12;
+        }
+        else if (isAm && hours == 12)
+        {
+            hours = 0;
+        }
+
+        if (hours is < 0 or > 23)
+        {
+            return false;
+        }
+
+        time = new TimeSpan(hours, minutes, 0);
+        return true;
     }
 
     private void SynchronizeDurationPartsFromTotal(string totalMinutesText)

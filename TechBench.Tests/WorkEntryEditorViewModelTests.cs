@@ -75,6 +75,34 @@ public sealed class WorkEntryEditorViewModelTests
         Assert.Equal("15", editor.DurationMinutePartText);
     }
 
+    [Theory]
+    [InlineData("8", "9", 60, "08:00:00", "09:00:00")]
+    [InlineData("830", "10", 90, "08:30:00", "10:00:00")]
+    [InlineData("8:30 AM", "9:15 AM", 45, "08:30:00", "09:15:00")]
+    [InlineData("5pm", "6 PM", 60, "17:00:00", "18:00:00")]
+    public void TypedClockTimesBuildEntriesAndUpdateDuration(
+        string startText,
+        string endText,
+        int expectedMinutes,
+        string expectedStart,
+        string expectedEnd)
+    {
+        var editor = new WorkEntryEditorViewModel();
+        editor.LoadNew(new DateTime(2026, 7, 14));
+        editor.SelectedClient = new Client { Id = 1, Name = "CSRI" };
+
+        editor.StartTimeText = startText;
+        editor.EndTimeText = endText;
+
+        Assert.True(editor.IsDurationCalculated);
+        Assert.Equal((expectedMinutes / 60).ToString(), editor.DurationHoursText);
+        Assert.Equal((expectedMinutes % 60).ToString(), editor.DurationMinutePartText);
+        Assert.True(editor.TryBuildEntry(out var entry, out var validationMessage), validationMessage);
+        Assert.Equal(expectedMinutes, entry.DurationMinutes);
+        Assert.Equal(TimeSpan.Parse(expectedStart), entry.StartTime);
+        Assert.Equal(TimeSpan.Parse(expectedEnd), entry.EndTime);
+    }
+
     [Fact]
     public void DurationHoursAndMinutesBuildCanonicalTotal()
     {
