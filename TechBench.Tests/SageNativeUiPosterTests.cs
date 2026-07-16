@@ -60,6 +60,7 @@ public sealed class SageNativeUiPosterTests
             "147773"));
         var poster = new SageNativeUiPoster(automation, verifier);
         var entry = BuildEntry();
+        entry.InternalNote = "- This should stay out of Sage.";
         var client = new Client { Id = 8, Name = "Example Client", SageCustomerId = "80000" };
         var settings = BuildSettings(autoSave: true);
 

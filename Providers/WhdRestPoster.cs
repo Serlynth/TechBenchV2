@@ -1,4 +1,5 @@
 using TechBench.Models;
+using TechBench.Services;
 
 namespace TechBench.Providers;
 
@@ -53,7 +54,7 @@ public sealed class WhdRestPoster : IWorkEntryPoster
         return _whdRestClient.PostTicketNoteAsync(
             whdSettings,
             whdTicketId,
-            entry.Note,
+            WhdNoteTextFormatter.BuildWhdNoteText(entry),
             entry.DurationMinutes,
             cancellationToken);
     }

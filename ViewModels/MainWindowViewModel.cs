@@ -2745,7 +2745,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             entry.DurationMinutes,
             entry.Billable,
             entry.Note,
-            entry.InternalNote,
+            InternalNote = destination == "WHD" ? entry.InternalNote : null,
             ClientExternalId = client.ExternalId,
             client.SageCustomerId,
             TicketExternalId = ticket?.ExternalId,

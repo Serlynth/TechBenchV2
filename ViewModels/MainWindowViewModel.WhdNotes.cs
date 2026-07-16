@@ -3,6 +3,7 @@ using System.Text.Json;
 using TechBench.Data;
 using TechBench.Models;
 using TechBench.Providers;
+using TechBench.Services;
 
 namespace TechBench.ViewModels;
 
@@ -135,7 +136,7 @@ public sealed partial class MainWindowViewModel
             return false;
         }
 
-        var localText = NormalizeWhdNote(entry.Note);
+        var localText = NormalizeWhdNote(WhdNoteTextFormatter.BuildWhdNoteText(entry));
         var remoteText = NormalizeWhdNote(remote.NoteText);
         var snapshotText = lastSyncedNote is null ? null : NormalizeWhdNote(lastSyncedNote);
         var syncDecision = DecideWhdNoteSync(localText, remoteText, snapshotText);
@@ -156,14 +157,14 @@ public sealed partial class MainWindowViewModel
         {
             var useWhd = allowConflictPrompt && _dialogService.Confirm(
                 "Sync WHD note",
-                $"WHD TechNote #{techNoteId} differs from the TechBench work note. Replace the local work note with the WHD version?",
+                $"WHD TechNote #{techNoteId} differs from the TechBench WHD note. Replace the local work/internal note with the WHD version?",
                 "Use WHD note",
                 "Review later");
             if (!useWhd)
             {
                 RecordWhdSyncConflict(
                     entry,
-                    "The WHD and TechBench work notes differ. No note was changed.",
+                    "The WHD and TechBench WHD notes differ. No note was changed.",
                     trackingLog.ExternalReference,
                     refreshAfter);
                 return false;
@@ -196,8 +197,8 @@ public sealed partial class MainWindowViewModel
             var replaceWhd = allowConflictPrompt && _dialogService.Confirm(
                 "WHD note conflict",
                 snapshotText is null
-                    ? $"TechBench cannot establish a prior sync baseline for WHD TechNote #{techNoteId}, and its text differs from this entry. Replace the WHD note with the TechBench work note?"
-                    : $"Both TechBench and WHD TechNote #{techNoteId} changed since the last verified sync. Replace the WHD note with the TechBench work note?",
+                    ? $"TechBench cannot establish a prior sync baseline for WHD TechNote #{techNoteId}, and its text differs from this entry. Replace the WHD note with the TechBench work/internal note?"
+                    : $"Both TechBench and WHD TechNote #{techNoteId} changed since the last verified sync. Replace the WHD note with the TechBench work/internal note?",
                 "Update WHD",
                 "Keep both unchanged");
             if (!replaceWhd)
@@ -215,7 +216,7 @@ public sealed partial class MainWindowViewModel
             BuildWhdConnectionSettings(),
             whdTicketId,
             techNoteId,
-            entry.Note);
+            WhdNoteTextFormatter.BuildWhdNoteText(entry));
         if (!update.Success)
         {
             RecordWhdSyncFailure(entry, update.Message, trackingLog.ExternalReference, refreshAfter, update.Payload);
@@ -224,7 +225,7 @@ public sealed partial class MainWindowViewModel
 
         RecordWhdSyncSuccess(
             entry,
-            entry.Note,
+            WhdNoteTextFormatter.BuildWhdNoteText(entry),
             update.Message,
             update.ExternalReference ?? trackingLog.ExternalReference!,
             update.Payload,
@@ -263,7 +264,9 @@ public sealed partial class MainWindowViewModel
         string payload,
         bool refreshAfter)
     {
-        entry.Note = synchronizedNote.Trim();
+        var splitNote = WhdNoteTextFormatter.SplitWhdNoteText(synchronizedNote);
+        entry.Note = splitNote.WorkNote;
+        entry.InternalNote = string.IsNullOrWhiteSpace(splitNote.InternalNote) ? null : splitNote.InternalNote;
         entry.WhdPosted = true;
         entry.WhdPostedAt = DateTime.Now;
         entry.LastError = null;
@@ -300,7 +303,7 @@ public sealed partial class MainWindowViewModel
         {
             WorkEntryId = entry.Id,
             Destination = "WHD",
-            Payload = string.IsNullOrWhiteSpace(payload) ? BuildWhdNoteSnapshotPayload(entry.Note) : payload,
+            Payload = string.IsNullOrWhiteSpace(payload) ? BuildWhdNoteSnapshotPayload(WhdNoteTextFormatter.BuildWhdNoteText(entry)) : payload,
             Success = false,
             Message = fullMessage,
             ExternalReference = externalReference,
@@ -324,7 +327,7 @@ public sealed partial class MainWindowViewModel
         {
             WorkEntryId = entry.Id,
             Destination = "WHD",
-            Payload = BuildWhdNoteSnapshotPayload(entry.Note),
+            Payload = BuildWhdNoteSnapshotPayload(WhdNoteTextFormatter.BuildWhdNoteText(entry)),
             Success = false,
             Message = fullMessage,
             ExternalReference = externalReference,
