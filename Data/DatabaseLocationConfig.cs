@@ -4,14 +4,14 @@ namespace TechBench.Data;
 
 public static class DatabaseLocationConfig
 {
-    private const string ConfigurationFileName = "database-location.txt";
+    private const string ConfigurationFileName = "local-cache-location.txt";
 
     public static string ConfigurationDirectory
     {
         get
         {
             var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            return Path.Combine(appData, "TechBench");
+            return Path.Combine(appData, "TechBenchV2");
         }
     }
 
@@ -19,7 +19,7 @@ public static class DatabaseLocationConfig
         Path.Combine(ConfigurationDirectory, ConfigurationFileName);
 
     public static string DefaultDatabasePath =>
-        Path.Combine(ConfigurationDirectory, "techbench.db");
+        Path.Combine(ConfigurationDirectory, "techbench-v2-local.db");
 
     public static bool HasConfiguredLocation => File.Exists(ConfigurationFilePath);
 

@@ -10,11 +10,11 @@ public sealed class SqliteConnectionFactory
     public SqliteConnectionFactory()
     {
 #if VISUAL_QA
-        var visualQaDirectory = Path.Combine(Path.GetTempPath(), "TechBench-VisualQA");
+        var visualQaDirectory = Path.Combine(Path.GetTempPath(), "TechBenchV2-VisualQA");
         Directory.CreateDirectory(visualQaDirectory);
         _databasePath = Path.Combine(visualQaDirectory, $"techbench-{Environment.ProcessId}.db");
 #else
-        var overridePath = Environment.GetEnvironmentVariable("TECHBENCH_DATABASE_PATH");
+        var overridePath = Environment.GetEnvironmentVariable("TECHBENCH_V2_LOCAL_DATABASE_PATH");
         if (!string.IsNullOrWhiteSpace(overridePath))
         {
             var fullOverridePath = Path.GetFullPath(overridePath);

@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Threading;
+using Microsoft.Data.SqlClient;
 using Microsoft.Win32;
 using TechBench.Data;
 using TechBench.Models;
@@ -29,6 +30,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly ICredentialStore _credentialStore;
     private readonly DatabaseBackupService _databaseBackupService;
     private readonly DatabaseLocationService _databaseLocationService;
+    private readonly bool _isServerMode;
     private readonly PostingExecutionCoordinator _postingCoordinator = new();
     private readonly DispatcherTimer _whdAutoSyncTimer = new();
     private readonly DispatcherTimer _sageVerificationTimer = new() { Interval = TimeSpan.FromSeconds(30) };
@@ -142,6 +144,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _credentialStore = credentialStore;
         _databaseBackupService = databaseBackupService;
         _databaseLocationService = databaseLocationService;
+        _isServerMode = clientProvider is not LocalClientProvider;
         Updates = new AppUpdateViewModel(
             appUpdateService,
             () => _databaseBackupService.CreateBackup("Pre-update database backup"),
@@ -157,7 +160,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         DeleteEntryCommand = new RelayCommand(_ => DeleteEntry(), _ => CanDeleteEditorEntry());
         DuplicateEntryCommand = new RelayCommand(_ => DuplicateEntry(), _ => Editor.Id > 0);
         UndoDeleteCommand = new RelayCommand(_ => UndoDelete(), _ => _lastDeletedEntry is not null);
-        RefreshAllCommand = new RelayCommand(_ => RefreshAll());
+        RefreshAllCommand = new RelayCommand(_ => RefreshAll(forceRemoteRefresh: true));
         ExportDailyCsvCommand = new RelayCommand(_ => ExportDailyCsv());
         ExportWeeklyCsvCommand = new RelayCommand(_ => ExportWeeklyCsv());
         RefreshHistoryCommand = new RelayCommand(_ => RefreshHistory());
@@ -181,16 +184,18 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         OpenPostingLogEntryCommand = new RelayCommand(OpenPostingLogEntry, parameter => parameter is PostingLog { WorkEntryId: > 0 } || SelectedPostingLog is { WorkEntryId: > 0 });
         ChangeTicketStatusCommand = new AsyncRelayCommand(ChangeTicketStatusAsync, CanChangeTicketStatus);
         SelectEditorClientCommand = new RelayCommand(SelectEditorClient, parameter => parameter is Client);
-        SaveSageCustomerMappingCommand = new RelayCommand(_ => SaveSageCustomerMapping(), _ => SelectedSageMappingClient is not null);
+        SaveSageCustomerMappingCommand = new RelayCommand(
+            _ => SaveSageCustomerMapping(),
+            _ => !_isServerMode && SelectedSageMappingClient is not null);
         ApplyClientMatchCommand = new RelayCommand(_ => ApplyClientMatch(), _ => CanApplyClientMatch());
         SaveSettingsCommand = new RelayCommand(_ => SaveSettings());
         TestWhdConnectionCommand = new AsyncRelayCommand(TestWhdConnectionAsync);
         SyncWhdTicketsCommand = new AsyncRelayCommand(SyncWhdTicketsNowAsync);
-        SyncWhdClientsCommand = new AsyncRelayCommand(SyncWhdClientsAsync);
+        SyncWhdClientsCommand = new AsyncRelayCommand(SyncWhdClientsAsync, _ => !_isServerMode);
         SyncWhdStatusesCommand = new AsyncRelayCommand(SyncWhdStatusesAsync);
         TestSageConnectionCommand = new RelayCommand(_ => TestSageConnection());
         TestSageOdbcCommand = new AsyncRelayCommand(TestSageOdbcAsync);
-        SyncSageCustomersCommand = new AsyncRelayCommand(SyncSageCustomersAsync);
+        SyncSageCustomersCommand = new AsyncRelayCommand(SyncSageCustomersAsync, _ => !_isServerMode);
         BackupDatabaseCommand = new RelayCommand(_ => BackupDatabase(), _ => !IsEntryOperationRunning);
         CheckDatabaseHealthCommand = new RelayCommand(_ => CheckDatabaseHealth(), _ => !IsEntryOperationRunning);
         OpenBackupFolderCommand = new RelayCommand(_ => OpenBackupFolder());
@@ -243,7 +248,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _whdAutoSyncTimer.Tick += HandleWhdAutoSyncTimerTick;
         _sageVerificationTimer.Tick += HandleSageVerificationTimerTick;
 
-        _repository.ReconcileSafeClientMatches();
+        if (!_isServerMode)
+        {
+            _repository.ReconcileSafeClientMatches();
+        }
         LoadSettings();
         RefreshDatabaseSafetyStatus();
         RefreshAll();
@@ -425,7 +433,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    public string WindowTitle => $"TechBench - {CurrentSection}";
+    public string WindowTitle => $"TechBench V2 - {CurrentSection}";
 
     public string StatusMessage
     {
@@ -1009,7 +1017,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void RefreshAll()
+    private void RefreshAll(bool forceRemoteRefresh = false)
     {
         RefreshClients();
         RefreshTicketStatusOptions();
@@ -1047,17 +1055,53 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var sageMappingClientId = SelectedSageMappingClient?.Id;
         var selectedManagedClientId = SelectedManagedClient?.Id;
 
+        IReadOnlyList<Client> sharedClients;
+        try
+        {
+            sharedClients = _clientProvider
+                .SearchClientsAsync(ClientSearchText)
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch (SqlException ex)
+        {
+            StatusMessage = ex.Number switch
+            {
+                -2 => "The shared SQL Server did not respond before the connection timed out.",
+                229 => "Your Windows account does not have permission to read the TechBench client list.",
+                4060 => "The TechBench SQL database is unavailable.",
+                18456 => "SQL Server did not accept your Windows domain identity.",
+                _ => $"The shared SQL client list is unavailable: {ex.Message}"
+            };
+            return;
+        }
+        catch (TaskCanceledException)
+        {
+            StatusMessage = "The shared SQL Server did not respond before the request was cancelled.";
+            return;
+        }
+        catch (InvalidOperationException ex)
+        {
+            StatusMessage = ex.Message;
+            return;
+        }
+
+        // Phase 1 compatibility only: unported V1-derived workflows still
+        // resolve client foreign keys from the transitional local repository.
+        // This cache is removed when WorkEntries and Tickets move to SQL Server.
+        _repository.SynchronizeServerClientCache(sharedClients);
+
         Clients.Clear();
-        foreach (var client in _clientProvider.SearchClientsAsync(ClientSearchText).GetAwaiter().GetResult())
+        foreach (var client in sharedClients)
         {
             Clients.Add(client);
         }
 
-        var allManagedClients = _repository.GetClients();
+        var allManagedClients = sharedClients;
         ManagedClients.Clear();
         foreach (var client in string.IsNullOrWhiteSpace(ClientSearchText)
                      ? allManagedClients
-                     : _repository.GetClients(searchTerm: ClientSearchText))
+                     : sharedClients)
         {
             ManagedClients.Add(client);
         }
@@ -1100,7 +1144,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private void RefreshClientMatchOptions()
     {
         var selectedCandidateId = SelectedSageMatchCandidate?.Id;
-        var candidates = _repository.GetClients(includeInactive: false)
+        var candidates = ManagedClients
             .Where(ClientMatchingService.IsSageMatchCandidate)
             .OrderBy(client => client.SageCustomerName ?? client.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -3092,6 +3136,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void SaveSageCustomerMapping()
     {
+        if (_isServerMode)
+        {
+            _dialogService.Info(
+                "Shared client mapping",
+                "Client mappings are server-managed in TechBench V2. The admin client editor will be wired to the server in the next migration step.");
+            return;
+        }
+
         if (SelectedSageMappingClient is null)
         {
             _dialogService.Error("Sage customer mapping", "Select a client before saving a Sage Customer ID mapping.");
@@ -3106,7 +3158,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private bool CanApplyClientMatch()
     {
-        return !IsEntryOperationRunning
+        return !_isServerMode
+            && !IsEntryOperationRunning
             && SelectedManagedClient is not null
             && SelectedManagedClient.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase)
             && SelectedSageMatchCandidate is not null
@@ -3206,7 +3259,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     private bool CanChangeDatabaseLocation() =>
-        !IsEntryOperationRunning
+        !_isServerMode
+        && !IsEntryOperationRunning
         && !_isWhdAutoSyncRunning
         && !_isSageVerificationRunning
         && !_isSagePostingRunning
@@ -3306,7 +3360,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _repository.Initialize();
-        _repository.ReconcileSafeClientMatches();
+        if (!_isServerMode)
+        {
+            _repository.ReconcileSafeClientMatches();
+        }
         var integrity = _databaseBackupService.CheckIntegrity();
         if (!integrity.IsHealthy)
         {
@@ -3387,7 +3444,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _repository.DeleteSetting("Sage.DefaultCustomerId");
         _repository.SaveSetting("Sage.ActivityItemId", SageActivityItemId.Trim());
         _repository.SaveSetting("Sage.NativeAutoSave", SageNativeAutoSave.ToString());
-        if (SelectedSageMappingClient is not null)
+        if (!_isServerMode && SelectedSageMappingClient is not null)
         {
             _repository.SaveSetting(BuildSageCustomerSettingKey(SelectedSageMappingClient.Id), SageMappedCustomerId.Trim());
             _repository.SaveClientSageMapping(SelectedSageMappingClient.Id, SageMappedCustomerId.Trim());
@@ -4302,7 +4359,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void TryAutoMatchSageCustomerForTicket(Ticket? ticket)
     {
-        if (ticket is not { Id: > 0, ClientId: > 0 })
+        if (_isServerMode || ticket is not { Id: > 0, ClientId: > 0 })
         {
             return;
         }

@@ -4,17 +4,21 @@ using Velopack.Sources;
 
 namespace TechBench.Services;
 
-public sealed class VelopackAppUpdateService : IAppUpdateService
+public sealed class V2AppUpdateService : IAppUpdateService
 {
-    public const string ReleaseRepositoryUrl = "https://github.com/Serlynth/TechBench-Releases";
+    public const string ReleaseRepositoryUrl =
+        "https://github.com/Serlynth/TechBenchV2-Releases";
 
     private readonly UpdateManager _updateManager;
     private UpdateInfo? _pendingUpdate;
 
-    public VelopackAppUpdateService()
+    public V2AppUpdateService()
     {
         _updateManager = new UpdateManager(
-            new GithubSource(ReleaseRepositoryUrl, accessToken: null, prerelease: false));
+            new GithubSource(
+                ReleaseRepositoryUrl,
+                accessToken: null,
+                prerelease: true));
     }
 
     public bool IsInstalled => _updateManager.IsInstalled;
@@ -52,7 +56,8 @@ public sealed class VelopackAppUpdateService : IAppUpdateService
     {
         ArgumentNullException.ThrowIfNull(progress);
         var update = _pendingUpdate
-            ?? throw new InvalidOperationException("Check for an update before downloading it.");
+            ?? throw new InvalidOperationException(
+                "Check for a TechBench V2 update before downloading it.");
 
         await _updateManager.DownloadUpdatesAsync(
             update,
@@ -63,7 +68,8 @@ public sealed class VelopackAppUpdateService : IAppUpdateService
     public void BeginApplyAndRestart()
     {
         var update = _pendingUpdate
-            ?? throw new InvalidOperationException("No downloaded update is ready to install.");
+            ?? throw new InvalidOperationException(
+                "No downloaded TechBench V2 update is ready to install.");
         var version = update.TargetFullRelease.Version.ToNormalizedString();
 
         _updateManager.WaitExitThenApplyUpdates(
@@ -75,7 +81,7 @@ public sealed class VelopackAppUpdateService : IAppUpdateService
 
     private static string GetAssemblyVersion()
     {
-        var assembly = Assembly.GetEntryAssembly() ?? typeof(VelopackAppUpdateService).Assembly;
+        var assembly = Assembly.GetEntryAssembly() ?? typeof(V2AppUpdateService).Assembly;
         var informational = assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
             .InformationalVersion;

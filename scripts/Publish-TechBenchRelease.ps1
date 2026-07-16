@@ -8,7 +8,7 @@ param(
 
     [string]$ReleaseNotesPath,
 
-    [string]$RepositoryUrl = 'https://github.com/Serlynth/TechBench-Releases',
+    [string]$RepositoryUrl = 'https://github.com/Serlynth/TechBenchV2-Releases',
 
     [switch]$Publish,
 
@@ -25,6 +25,8 @@ $projectPath = Join-Path $repoRoot 'TechBench.csproj'
 $testProjectPath = Join-Path $repoRoot 'TechBench.Tests\TechBench.Tests.csproj'
 $iconPath = Join-Path $repoRoot 'Assets\csri-techbench-icon.ico'
 $splashPath = Join-Path $repoRoot 'Assets\csri-techbench-logo.png'
+$numericVersion = ($Version -split '-', 2)[0]
+$isPrerelease = $Version.Contains('-')
 
 if ([string]::IsNullOrWhiteSpace($ReleaseNotesPath)) {
     $ReleaseNotesPath = Join-Path $repoRoot "release-notes\$Version.md"
@@ -94,23 +96,31 @@ try {
     New-Item -ItemType Directory -Path $distDirectory -Force | Out-Null
 
     $repositoryUri = [Uri]$RepositoryUrl
-    $repositorySlug = $repositoryUri.AbsolutePath.Trim('/')
-    $releaseListJson = gh release list --repo $repositorySlug --limit 100 --json tagName
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Unable to read existing GitHub releases.'
+    if ($repositoryUri.Scheme -ne 'https' -or $repositoryUri.Host -ne 'github.com') {
+        throw 'The V2 release repository must be an HTTPS GitHub repository URL.'
     }
-    $releaseListText = ($releaseListJson -join '').Trim()
-    $existingReleases = if ($releaseListText -eq '[]') {
-        @()
-    } else {
-        @($releaseListText | ConvertFrom-Json)
+
+    $existingReleases = @()
+    if ($Publish) {
+        $repositorySlug = $repositoryUri.AbsolutePath.Trim('/')
+        $releaseListJson = gh release list --repo $repositorySlug --limit 100 --json tagName
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Unable to read existing V2 GitHub releases.'
+        }
+        $releaseListText = ($releaseListJson -join '').Trim()
+        $existingReleases = if ($releaseListText -eq '[]') {
+            @()
+        } else {
+            @($releaseListText | ConvertFrom-Json)
+        }
     }
+
     $hasExistingRelease = $existingReleases.Count -gt 0
     if ($Publish -and $existingReleases.tagName -contains "v$Version") {
         throw "GitHub release v$Version already exists. Versions are immutable; choose a new version."
     }
 
-    if ($hasExistingRelease) {
+    if ($Publish -and $hasExistingRelease) {
         Invoke-Checked $dotnet @(
             'tool', 'run', 'vpk', '--',
             'download', 'github',
@@ -130,8 +140,8 @@ try {
         '-p:DebugType=None',
         '-p:DebugSymbols=false',
         "-p:Version=$Version",
-        "-p:AssemblyVersion=$Version.0",
-        "-p:FileVersion=$Version.0"
+        "-p:AssemblyVersion=$numericVersion.0",
+        "-p:FileVersion=$numericVersion.0"
     )
 
     $packArguments = @(
@@ -140,14 +150,14 @@ try {
         '--outputDir', $releaseDirectory,
         '--channel', 'win',
         '--runtime', 'win-x86',
-        '--packId', 'CSRI.TechBench',
+        '--packId', 'CSRI.TechBenchV2',
         '--packVersion', $Version,
         '--packDir', $publishDirectory,
         '--packAuthors', 'CSRI',
-        '--packTitle', 'TechBench',
+        '--packTitle', 'TechBench V2',
         '--releaseNotes', $ReleaseNotesPath,
         '--icon', $iconPath,
-        '--mainExe', 'TechBench.exe',
+        '--mainExe', 'TechBenchV2.exe',
         '--splashImage', $splashPath,
         '--splashProgressColor', '#3B82F6',
         '--shortcuts', 'Desktop,StartMenuRoot',
@@ -167,7 +177,7 @@ try {
         throw 'Velopack did not produce a Setup executable.'
     }
 
-    $distSetupPath = Join-Path $distDirectory 'TechBenchSetup.exe'
+    $distSetupPath = Join-Path $distDirectory 'TechBenchV2Setup.exe'
     Copy-Item -LiteralPath $setup.FullName -Destination $distSetupPath -Force
 
     if ($Publish) {
@@ -184,13 +194,14 @@ try {
             '--repoUrl', $RepositoryUrl,
             '--token', $token,
             '--publish',
+            '--pre', $isPrerelease.ToString().ToLowerInvariant(),
             '--tag', "v$Version",
-            '--releaseName', "TechBench $Version"
+            '--releaseName', "TechBench V2 $Version"
         )
 
-        Write-Host "Published TechBench $Version to $RepositoryUrl/releases/tag/v$Version"
+        Write-Host "Published TechBench V2 $Version to $RepositoryUrl/releases/tag/v$Version"
     } else {
-        Write-Host "Built TechBench $Version locally. Add -Publish after reviewing the package."
+        Write-Host "Built TechBench V2 $Version locally. Configure a V2 repository before using -Publish."
     }
 
     Write-Host "Installer: $distSetupPath"

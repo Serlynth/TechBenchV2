@@ -172,6 +172,59 @@ public sealed class TechBenchRepository
         return id;
     }
 
+    public void SynchronizeServerClientCache(IReadOnlyList<Client> clients)
+    {
+        ArgumentNullException.ThrowIfNull(clients);
+        using var connection = _connectionFactory.CreateConnection();
+        connection.Open();
+        using var transaction = connection.BeginTransaction();
+
+        foreach (var client in clients.Where(static client => client.Id > 0))
+        {
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT INTO Clients
+                    (Id, Name, Source, ExternalId, IsActive, LastSyncedAt,
+                     WhdLocationName, WhdContactName, SageCustomerId, SageCustomerName,
+                     SageContactName, SageTelephone, MatchStatus)
+                VALUES
+                    ($id, $name, $source, $externalId, $isActive, $lastSyncedAt,
+                     $whdLocationName, $whdContactName, $sageCustomerId, $sageCustomerName,
+                     $sageContactName, $sageTelephone, $matchStatus)
+                ON CONFLICT(Id) DO UPDATE SET
+                    Name = excluded.Name,
+                    Source = excluded.Source,
+                    ExternalId = excluded.ExternalId,
+                    IsActive = excluded.IsActive,
+                    LastSyncedAt = excluded.LastSyncedAt,
+                    WhdLocationName = excluded.WhdLocationName,
+                    WhdContactName = excluded.WhdContactName,
+                    SageCustomerId = excluded.SageCustomerId,
+                    SageCustomerName = excluded.SageCustomerName,
+                    SageContactName = excluded.SageContactName,
+                    SageTelephone = excluded.SageTelephone,
+                    MatchStatus = excluded.MatchStatus
+                """;
+            command.Parameters.AddWithValue("$id", client.Id);
+            command.Parameters.AddWithValue("$name", client.Name.Trim());
+            command.Parameters.AddWithValue("$source", string.IsNullOrWhiteSpace(client.Source) ? "Server" : client.Source.Trim());
+            command.Parameters.AddWithValue("$externalId", ToDbText(client.ExternalId));
+            command.Parameters.AddWithValue("$isActive", client.IsActive ? 1 : 0);
+            command.Parameters.AddWithValue("$lastSyncedAt", ToDbDateTime(client.LastSyncedAt));
+            command.Parameters.AddWithValue("$whdLocationName", ToDbText(client.WhdLocationName));
+            command.Parameters.AddWithValue("$whdContactName", ToDbText(client.WhdContactName));
+            command.Parameters.AddWithValue("$sageCustomerId", ToDbText(client.SageCustomerId));
+            command.Parameters.AddWithValue("$sageCustomerName", ToDbText(client.SageCustomerName));
+            command.Parameters.AddWithValue("$sageContactName", ToDbText(client.SageContactName));
+            command.Parameters.AddWithValue("$sageTelephone", ToDbText(client.SageTelephone));
+            command.Parameters.AddWithValue("$matchStatus", string.IsNullOrWhiteSpace(client.MatchStatus) ? "Unmatched" : client.MatchStatus.Trim());
+            command.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
     public IReadOnlyList<Ticket> GetTickets(int? clientId = null, string? searchTerm = null, bool includeClosed = false)
     {
         using var connection = _connectionFactory.CreateConnection();

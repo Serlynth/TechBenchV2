@@ -1,50 +1,37 @@
-# TechBench Updates
+# TechBench V2 updates
 
-TechBench uses Velopack and the public binary-only repository at
-`https://github.com/Serlynth/TechBench-Releases`.
+TechBench V2 keeps the same Velopack update experience as V1, but uses a
+completely separate GitHub Releases feed.
 
-## Installed app behavior
+V2 must never use the V1 pack ID, installer name, or GitHub release feed. The V2 release script now uses:
 
-- TechBench checks for stable updates eight seconds after launch and every six hours afterward.
-- Each available version triggers one Windows notification per app session and remains visible in an in-app banner until dismissed.
-- Settings includes the installed version, update status, and a manual **Check for Updates** command.
-- An available update appears as a full-width in-app banner.
-- **Update now** reports download progress, backs up the current recovery draft, creates and verifies a SQLite backup, launches the updater, closes TechBench, installs the update, and reopens the app.
-- If backup verification fails, installation does not begin.
+- Pack ID: `CSRI.TechBenchV2`
+- Main executable: `TechBenchV2.exe`
+- Installer: `TechBenchV2Setup.exe`
+- Title: `TechBench V2`
+- Release feed: `https://github.com/Serlynth/TechBenchV2-Releases`
 
-## First installation
-
-Run `dist\TechBenchSetup.exe` once on the work PC. The previous loose `TechBench.exe`
-does not have the installation metadata required for self-update.
-
-The application installs separately from the configured TechBench database, so installing
-or updating the executable does not replace the worklog database.
-
-## Publishing a version
-
-1. Commit the source changes.
-2. Add `release-notes\<version>.md`.
-3. Run:
+Local packages can be built without a repository:
 
 ```powershell
-.\scripts\Publish-TechBenchRelease.ps1 -Version <version> -Publish
+.\scripts\Publish-TechBenchRelease.ps1 -Version <version> -AllowDirty
 ```
 
-The script restores the pinned Velopack tool, runs all tests, publishes a self-contained
-`win-x86` build, creates the installer/update packages, and uploads them through the
-authenticated GitHub CLI. It never stores a GitHub token in source or in TechBench.
+Publishing targets the V2-only release repository by default:
 
-For a package-only rehearsal, omit `-Publish`. A dirty-tree rehearsal additionally
-requires `-AllowDirty`.
+```powershell
+.\scripts\Publish-TechBenchRelease.ps1 `
+  -Version <version> `
+  -Publish
+```
 
-## Signing
+The V2 client includes prerelease updates while it is in the alpha/beta cycle.
+The publishing script marks versions containing a prerelease suffix, such as
+`2.0.0-alpha.1`, as GitHub prereleases automatically.
+Before the first published installer:
 
-Releases are currently unsigned. When a Windows code-signing certificate is available,
-set `TECHBENCH_SIGN_PARAMS` to the appropriate `signtool.exe` arguments before running
-the release script. The value and certificate must remain outside source control.
-
-## Rollback
-
-- Source before updater integration is tagged `pre-updater-2026-07-14`.
-- Published releases are immutable and retained in GitHub Releases.
-- Database backups are stored in a `Backups` folder beside the configured database.
+1. Create the public `Serlynth/TechBenchV2-Releases` release-only repository.
+2. Authenticate `gh` on the release workstation.
+3. Publish a V2 alpha package.
+4. Install V1 and V2 side by side.
+5. Verify each client sees only its own release feed and installer identity.

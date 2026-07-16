@@ -10,7 +10,15 @@ public sealed class WindowsCredentialStore : ICredentialStore
     private const uint GenericCredentialType = 1;
     private const uint PersistLocalMachine = 2;
     private const int MaxCredentialBlobBytes = 2560;
-    private const string TargetPrefix = "TechBench/";
+    private const string DefaultTargetPrefix = "TechBenchV2/";
+    private readonly string _targetPrefix;
+
+    public WindowsCredentialStore(string? scope = null)
+    {
+        _targetPrefix = string.IsNullOrWhiteSpace(scope)
+            ? DefaultTargetPrefix
+            : $"{DefaultTargetPrefix}{scope.Trim().Trim('/')}/";
+    }
 
     public string GetSecret(string key)
     {
@@ -107,14 +115,14 @@ public sealed class WindowsCredentialStore : ICredentialStore
         }
     }
 
-    private static string BuildTargetName(string key)
+    private string BuildTargetName(string key)
     {
         if (string.IsNullOrWhiteSpace(key))
         {
             throw new ArgumentException("Credential keys cannot be blank.", nameof(key));
         }
 
-        return $"{TargetPrefix}{key.Trim()}";
+        return $"{_targetPrefix}{key.Trim()}";
     }
 
     [DllImport("Advapi32.dll", EntryPoint = "CredReadW", CharSet = CharSet.Unicode, SetLastError = true)]

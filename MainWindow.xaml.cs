@@ -15,20 +15,24 @@ public partial class MainWindow : Window
     private readonly WindowsNotificationService _notificationService;
     private MarkdownEditorWindow? _markdownEditorWindow;
 
-    public MainWindow()
+    public MainWindow(
+        SqlServerConnectionFactory connectionFactory,
+        CurrentUserContext currentUser)
     {
         InitializeComponent();
         EditorClientComboBox.AddHandler(
             System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent,
             new TextChangedEventHandler(EditorClientComboBox_TextChanged));
 
-        InitialDatabaseLocationPrompt.ConfigureIfNeeded();
-        var connectionFactory = new SqliteConnectionFactory();
-        var databaseLocationService = new DatabaseLocationService(connectionFactory);
-        var databaseBackupService = new DatabaseBackupService(connectionFactory);
+        var localDatabasePath = LocalUserDataPath.ResolveDatabasePath(
+            currentUser.DatabaseInstanceId,
+            currentUser.UserSid);
+        var localConnectionFactory = new SqliteConnectionFactory(localDatabasePath);
+        var databaseLocationService = new DatabaseLocationService(localConnectionFactory);
+        var databaseBackupService = new DatabaseBackupService(localConnectionFactory);
         databaseBackupService.CreateDailyBackupIfDue();
 
-        var repository = new TechBenchRepository(connectionFactory);
+        var repository = new TechBenchRepository(localConnectionFactory);
         repository.Initialize();
         databaseBackupService.CheckIntegrity();
         var whdRestClient = new WhdRestClient();
@@ -37,7 +41,7 @@ public partial class MainWindow : Window
 
         var viewModel = new MainWindowViewModel(
             repository,
-            new LocalClientProvider(repository),
+            new SqlServerClientProvider(connectionFactory),
             new LocalTicketProvider(repository),
             new WhdRestPoster(whdRestClient),
             new SageNativeUiPoster(new SageNativeUiAutomation(), sageOdbcClient),
@@ -45,13 +49,19 @@ public partial class MainWindow : Window
             sageOdbcClient,
             new AppDialogService(),
             _notificationService,
-            new WindowsCredentialStore(),
+            new WindowsCredentialStore(LocalUserDataPath.ResolveCredentialScope(
+                currentUser.DatabaseInstanceId,
+                currentUser.UserSid)),
             databaseBackupService,
             databaseLocationService,
-            new VelopackAppUpdateService(),
+            new V2AppUpdateService(),
             () => System.Windows.Application.Current.Shutdown());
 
         DataContext = viewModel;
+        viewModel.StatusMessage =
+            $"Connected to {connectionFactory.Options.Server}/{connectionFactory.Options.Database} "
+            + $"as {currentUser.DisplayName}. Shared clients are live; "
+            + "unported workflows remain transitional in this alpha.";
         if (!string.IsNullOrWhiteSpace(App.UpdateCompletionVersion))
         {
             viewModel.Updates.MarkUpdateCompleted(App.UpdateCompletionVersion);

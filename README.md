@@ -1,176 +1,151 @@
-# TechBench
+# TechBench V2
 
-Current application version: `1.2.20`.
+TechBench V2 is the multi-user successor to TechBench 1.x. It keeps the existing Windows/WPF workstation experience while moving meaningful application data into a shared SQL Server database.
 
-Installed builds check the public binary-only GitHub release feed for stable updates.
-When a new version is available, TechBench shows a Windows alert and can download it with visible progress,
-create a verified database backup, install it, and restart automatically. See
-[`docs/UPDATES.md`](docs/UPDATES.md) for installation and publishing details.
+The original `TechBench` workspace is not modified. V1 and V2 have separate product identities, executables, mutex names, settings, credential namespaces, and update paths.
 
-TechBench is a standalone Windows desktop worklog and ticket-notes application for small IT service workflows. It stores data in SQLite, opens to the daily worklog, and posts the Sage/WHD Note to SolarWinds Web Help Desk and native Time Tickets in Sage 50.
+V2 also has its own Velopack package identity and GitHub Releases feed:
+`https://github.com/Serlynth/TechBenchV2-Releases`. It never checks or installs
+packages from the V1 update repository.
+
+Current milestone: `2.0.0-alpha.1` — Phase 1.
+
+## Current status
+
+This repository is an alpha under active architectural conversion.
+
+Phase 1 establishes:
+
+- the independent TechBench V2 application identity
+- direct WPF-to-SQL Server connectivity
+- Windows Integrated Authentication
+- Active Directory/database-role authorization
+- database schema/version and current-user checks
+- the shared client list as the first direct-SQL workflow
+
+The remaining workflows are not yet considered ported. Today, history, search, tickets, templates, settings, drafts, imports, posting logs, WHD synchronization, Sage synchronization, and posting coordination may still contain V1-derived local repository behavior until their SQL Server phases are completed.
+
+Do not treat this alpha as a production-ready multi-user release. The older API,
+PostgreSQL, Identity-login, Docker, and token-client prototype have been removed.
+The remaining SQLite code supports only workflows that have not yet reached their
+direct-SQL migration phase.
+
+## Final deployment model
+
+There is no TechBench web server, API process, container, or background server service.
+
+```text
+TechBench V2 WPF client
+    -> Microsoft.Data.SqlClient
+    -> Windows Integrated Authentication
+    -> existing SQL Server 2016
+    -> TechBenchV2 database at compatibility level 130
+```
+
+SQL Server is the source of truth for shared clients, tickets, work entries, Personal Notes, drafts, templates, Common Links, settings, posting state, synchronization state, imports, and audit history.
+
+WHD and Sage operations continue to run on the workstation. WHD and Sage secrets remain protected in Windows Credential Manager.
+
+See [docs/V2-ARCHITECTURE.md](docs/V2-ARCHITECTURE.md) for the target schema, security boundary, phases, and migration rules.
+
+## Authentication and access
+
+Users do not create a TechBench account or enter a database password. The application connects as the current Windows user.
+
+The DBA maps approved Active Directory groups into database roles such as:
+
+- `TechBench_Technician`
+- `TechBench_Manager`
+- `TechBench_Admin`
+- `TechBench_SyncOperator`
+
+The database enforces permissions. WPF button visibility is only a user-interface convenience and is not an authorization boundary.
+
+Normal application users should receive execution rights on approved stored procedures, not broad direct access to the underlying tables.
 
 ## Requirements
 
+Development:
+
 - Windows
-- .NET 8 SDK 8.0.422 (pinned by `global.json`)
+- .NET SDK 8.0.422, pinned by `global.json`
 
-This workspace was verified with a local .NET SDK at:
+Deployment:
 
-```powershell
-C:\Users\skoog\.dotnet\dotnet.exe --version
-```
+- domain-joined or trusted-domain Windows workstations
+- an existing SQL Server 2016 instance
+- a `TechBenchV2` database at compatibility level 130
+- approved Active Directory groups mapped by the DBA
+- TCP connectivity from workstations to SQL Server
+- TLS 1.2 and a server certificate trusted by the workstations
+- SQL Server Full-Text Search if the full search implementation will use it
 
-## Run
+SQL Server 2016 extended support ended July 14, 2026. Production deployment requires confirmation of SP3/current approved patches and Extended Security Updates coverage, or a documented database upgrade plan:
 
-```powershell
-dotnet restore
-dotnet run
-```
+<https://learn.microsoft.com/lifecycle/products/sql-server-2016>
 
-If your PATH still points at an older SDK, run:
+## Build and test
 
-```powershell
-C:\Users\skoog\.dotnet\dotnet.exe run
-```
-
-## Build
+Restore and build the V2 desktop solution:
 
 ```powershell
-dotnet build
-```
-
-Create a self-contained Windows build:
-
-```powershell
-dotnet publish -c Release -r win-x86 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true -o dist
-```
-
-The published app will be under:
-
-```text
-dist\TechBench.exe
-```
-
-## Local Data
-
-On first launch, TechBench offers to store its SQLite database on this PC or at another path. The default is:
-
-```text
-%LOCALAPPDATA%\TechBench\techbench.db
-```
-
-WHD and Sage credentials are stored as protected generic credentials in Windows Credential Manager, not in the SQLite database.
-
-An existing installation continues using its current database. Settings provides **Move Database** and **Use Existing** commands, and TechBench creates a verified backup before either switch. Moving copies the database, verifies the copy, changes the active path, and retains the old file for rollback.
-
-OneDrive and Dropbox paths are supported for moving a worklog between computers, but this is file synchronization, not a multi-user database. TechBench must be closed everywhere else before another computer opens the synced database.
-
-The first launch creates the schema, note templates, and live-posting defaults. It does not create sample work entries.
-
-TechBench creates one verified SQLite backup per day at startup and keeps the newest 14 copies in a `Backups` folder beside the active database. For the default path, that is:
-
-```text
-%LOCALAPPDATA%\TechBench\Backups
-```
-
-Settings also provides manual backup, integrity-check, database-location, and open-folder commands. Backups use SQLite's online backup API and are accepted only after `PRAGMA quick_check` succeeds.
-
-## Current Features
-
-- Note-first Today workspace with a full-size plain-text Sage/WHD Note editor and a dedicated Markdown Personal Note editor
-- Recovery-only draft backup after a short pause, plus crash/close recovery without changing the committed note
-- Work-note spell checking, undo, word/character counts, in-note find, timestamp and structured-note helpers
-- Reusable tags with saved-tag suggestions in the editor, an autocomplete tag filter in Search, follow-up/waiting states, overdue badges, and closeout reminders
-- Fast full-text search across Sage/WHD Notes, Personal Notes, clients, tickets, and tags, with a safe SQLite fallback
-- Recent notes for the selected client, available directly beside the editor
-- Grouped, branded Common Links workspace with protected admin shortcuts for WatchGuard Cloud, Microsoft 365, Barracuda, ESET PROTECT, and Email2Phone; a Hosted DNS section for GoDaddy and Network Solutions; an optional Chrome Incognito launch for Microsoft 365 Admin; and editable custom links
-- Google Sheets CSV migration with preview, client matching, reusable aliases, duration conversion, duplicate warnings, a verified pre-import backup, and one transactional commit
-- Daily worklog with entry cards, billable/non-billable totals, and pending WHD/Sage counts
-- Weekly grouped worklog
-- Client Matching workspace that pairs WHD company locations with Sage customers, automatically consolidates unique exact name matches, and presents fuzzy suggestions for manual review
-- Local ticket creation and ticket filtering by client
-- Entry editor with client picker, assigned-ticket picker, an authorized alternate WHD ticket-number option, time fields, hours/minutes duration, billable flag, Sage/WHD Note, and Markdown Personal Note
-- Start/stop timer mode that fills start, end, and duration fields
-- Search by keyword, client, date range, ticket text, and posting status
-- CSV export for daily and weekly worklogs
-- Live WHD and native Sage Time Ticket posting
-- Exact-ID WHD TechNote verification and note synchronization, plus read-only Sage ODBC save tracking and verified linking of manually created Sage tickets
-- Posting timestamps, Sage external references, status tracking, last-error storage, and posting payload logs
-- Durable posting-attempt records and single-instance protection against duplicate external writes
-- Configurable database location, first-run path choice, verified live database moves, and daily/manual backups with 14-copy retention
-- Dark-first UI with a light theme toggle
-
-## Note Workflow
-
-The main editor stores a small recovery draft after a short pause, but it does not create or update the committed work entry. The editor remains visibly unsaved until you use **Save**. **New Entry** begins the next note, and the **Post** menu explicitly chooses WHD or Sage.
-
-Use comma-separated tags for projects, locations, or work types. After an entry is saved, its tags are available from **Add saved tag** in the editor and from the autocomplete **Tags** filter in Search. Multiple Search tags require every listed tag to match. A note marked **Follow-up** or **Waiting** appears on its entry card and in Daily Closeout until it is marked **Completed** or **None**. Search can combine text, client, ticket, date, posting status, tags, and follow-up state.
-
-Personal Notes accept CommonMark and GitHub-style Markdown. **Open Personal Note Editor** opens a modeless companion window with Source, Split, and Preview modes, and `F11` toggles full screen. The companion can remain open while the main TechBench window is used, follows the active entry, and writes only to that entry's in-memory editor until **Save Entry** (or the main **Save** action) commits it to the database. Normal unsaved-change protection still applies when switching entries. Historical and Sage-locked Personal Notes render as selectable, copyable Markdown and cannot be changed.
-
-The Sage/WHD Note is always the plain-text note sent to WHD and Sage. A per-entry **Include Personal Note when posting to WHD** checkbox can append the Personal Note to WHD under a clearly marked Markdown section. It is off by default. Sage never receives the Personal Note.
-
-## Client Matching
-
-WHD synchronization reads company **Locations**, while Sage synchronization reads Sage customers. TechBench stores one combined client row when those records represent the same customer. Exact normalized names and strong, mutually unique fuzzy matches are consolidated automatically. This handles minor spelling differences such as `Delancy`/`Delancey` and shortened names such as `Devine & Partners`/`Devine & Partners Communications Group`. Ambiguous pairs remain separate for review.
-
-The **Clients** workspace shows matched, WHD-only, and Sage-only totals. Select a WHD-only location to review TechBench's strongest remaining Sage suggestion or choose the correct Sage customer manually. Matching reassigns existing local notes, tickets, and aliases to the combined client so duplicate client rows no longer split a customer's history.
-
-`Ctrl+N` starts a new entry through the existing unsaved-change safeguards.
-
-## Google Sheets Import
-
-Export the old Google Sheet as CSV, then use **Settings > Worklog Import**. TechBench previews every recognized row before writing anything. The default duration rule matches the legacy sheet shown during development: values below 10 are interpreted as hours, while values of 10 or more are interpreted as minutes. The preview can switch all values to hours or all to minutes.
-
-Client names are matched against synced TechBench, WHD, and Sage names. A mapping selected in the preview is remembered as an import alias. Unmatched rows can remain custom clients. Potential duplicates are unchecked by default. Immediately before import, TechBench creates and verifies a database backup, then writes all selected notes and aliases in one SQLite transaction.
-
-## Posting Behavior
-
-Posting starts from an explicit user command. No unattended background posting is implemented. Read-only Sage save verification may run in the background for an already-created or uncertain ticket.
-
-Before either external write, TechBench saves the editor and creates a durable `PostingAttempts` row. Only one process and one attempt per entry/destination can run at a time. A crash, cancellation, or unconfirmed network result leaves an `Unknown` attempt that must be reconciled or explicitly abandoned before retrying.
-
-WHD connections require HTTPS. Choose an explicit authentication mode in Settings, or use `Auto (detect once)` to detect and cache the first successful mode for that connection. A note is marked posted only after WHD returns a TechNote ID or TechBench reads back the exact note and duration from `TicketNotes`. Complete ticket syncs close local WHD tickets that are no longer assigned; partial or repeated-page syncs never reconcile missing tickets.
-
-For a closed ticket or a ticket assigned to another technician, enable **Use another WHD ticket** and enter its number. TechBench first performs a read-only lookup and shows the ticket subject, WHD client, status, and local entry client for confirmation. It then uses the normal hidden-TechNote post and readback verification without requesting an assignment or status change. Web Help Desk permissions still apply; an inaccessible tech-group ticket remains pending with a permission error.
-
-After a verified WHD post, the entry remains editable until it is posted to Sage. Saving compares the local WHD payload, the exact WHD TechNote, and the last verified snapshot: one-sided changes synchronize automatically, while competing changes require an explicit choice. **Sync WHD Note** can pull the WHD version on demand. Updates use `PUT` against the tracked TechNote ID and never fall back to creating another note. A WHD note without TechBench's Personal Note marker updates only the Sage/WHD Note and preserves the local Personal Note. Sage posting first verifies this WHD synchronization when the entry has a ticket.
-
-Once a Sage ticket is verified as saved, the entry is permanently read-only. The editor has no unlock bypass, and the repository rejects later changes or deletion so the billed note cannot drift from Sage.
-
-Sage opens its native Time Tickets window, enters and validates one ticket, and lets Sage assign the ticket number. When automatic saving is enabled, TechBench submits Sage's Save command, then verifies the committed row through read-only ODBC. ODBC runs in a short-lived hidden worker mode of the same x86 `TechBench.exe`; a hung Sage driver is terminated at the timeout and cannot leave TechBench stuck in an "already running" state. If Sage's ticket-number label was unavailable, TechBench accepts only one uniquely matching saved ticket using its date, duration, Activity Rate billing type, and Sage/WHD Note. Ambiguous matches remain pending. `Check Sage Save` performs the same read-only ODBC verification and does not manipulate the open Sage form. For an older entry that was posted manually, `More > Link Existing Sage Ticket...` accepts the Sage ticket number and clears the pending state only after the exact saved Time Ticket passes read-only ODBC validation.
-
-WHD-posted entries remain editable and show a synchronization-pending state after local changes. Sage-posted entries remain available for viewing and copying, but cannot be changed.
-
-## Restore A Backup
-
-1. In Settings, note the current database and backup paths.
-2. Close TechBench everywhere the database may be open.
-3. Rename the current database so it remains available for diagnosis.
-4. Copy the chosen file from the adjacent `Backups` folder to the active database path.
-5. Start TechBench and run **Settings > Check Integrity**.
-
-The verified rollback archive created before the July 14, 2026 note-first changes is outside the workspace at:
-
-```text
-C:\Users\skoog\OneDrive\Documents\Coding\TechBench-NoteFirst-Rollback-20260714-102647.zip
-```
-
-## Project Structure
-
-- `Models` - client sync metadata, ticket, work entry, templates, posting status, query, and log models
-- `Data` - SQLite connection factory, configurable database path, schema creation, client sync metadata migration, seed data, and repository methods
-- `Providers` - client/ticket provider interfaces plus live WHD and Sage posters
-- `Services` - client matching, database relocation/backup, dialog, CSV export, durable posting coordination, isolated Sage ODBC work, Sage desktop automation, and theme services
-- `ViewModels` - MVVM state, commands, editor state, weekly grouping, timer, search, settings, and posting orchestration
-- `Converters` - WPF visibility converters
-- `MainWindow.xaml` - the desktop UI
-
-## Verification
-
-The test project automatically uses x64 while the production application remains x86 for Sage:
-
-```powershell
+dotnet restore TechBenchV2.sln
+dotnet build TechBenchV2.sln
 dotnet test TechBench.Tests\TechBench.Tests.csproj -c Release
-dotnet list TechBench.csproj package --vulnerable --include-transitive
 ```
+
+The production client remains x86 because Sage desktop integration requires it. Tests may use x64 where configured.
+
+SQL integration, security, and migration tests must also run against an actual SQL Server 2016 staging database. Testing on a newer SQL Server with compatibility level 130 is not sufficient to detect every engine-version incompatibility.
+
+## Database provisioning
+
+The database is provisioned and upgraded with DBA-owned, versioned SQL scripts or a database project.
+
+The DBA deployment is responsible for:
+
+- creating the database and setting compatibility level 130
+- creating schemas, tables, indexes, stored procedures, and security policies
+- creating database roles and mapping AD groups
+- configuring the trusted TLS endpoint
+- recording the schema version
+- configuring backups, integrity checks, retention, and restore procedures
+
+The desktop application does not apply production schema migrations and does not require a companion service to be started.
+
+A representative connection string is:
+
+```text
+Server=tcp:sqlserver.example.local,1433;
+Database=TechBenchV2;
+Integrated Security=true;
+Encrypt=true;
+TrustServerCertificate=false;
+Application Name=TechBenchV2;
+Connect Timeout=5;
+```
+
+No username or password belongs in this connection string. The server and database names are deployment configuration.
+
+## Data and migration rules
+
+- Never point V2 at a live V1 SQLite database.
+- Never put a SQLite database on a network share.
+- Import only from a verified copy of a V1 database.
+- Assign every imported work entry to an explicit Windows/AD SID.
+- Preserve legacy identifiers in an import mapping table.
+- Deduplicate clients using WHD/Sage external identities before name similarity.
+- Verify row counts, relationships, posting locks, ownership, and sample note content before cutover.
+- Do not use V1 and V2 as dual writable systems.
+
+V1 remains untouched and available for rollback or historical reference. After final migration, operational procedures must treat it as archive-only.
+
+## Phase roadmap
+
+1. Phase 1 — integrated SQL connection, roles, schema checks, and shared clients.
+2. Phase 2 — Today work entries, owner-only Personal Notes, links, drafts, and concurrency.
+3. Phase 3 — tickets, history, search, templates, links, settings, imports, and reporting.
+4. Phase 4 — centralized posting attempts and WHD/Sage synchronization coordination.
+5. Phase 5 — V1 migration, pilot, backup/restore rehearsal, and production cutover.
+
+Until the relevant phase is complete, a screen that still uses transitional local persistence is not part of the shared multi-user guarantee.
