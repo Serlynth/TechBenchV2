@@ -1,6 +1,6 @@
 # TechBench
 
-Current application version: `1.2.19`.
+Current application version: `1.2.20`.
 
 Installed builds check the public binary-only GitHub release feed for stable updates.
 When a new version is available, TechBench shows a Windows alert and can download it with visible progress,
@@ -112,9 +112,9 @@ The Sage/WHD Note is always the plain-text note sent to WHD and Sage. A per-entr
 
 ## Client Matching
 
-WHD synchronization reads company **Locations**, while Sage synchronization reads Sage customers. TechBench stores one combined client row when those records represent the same customer. Unique normalized company-name matches are consolidated automatically; punctuation, apostrophes, common legal suffixes, and a small set of company-name abbreviations are ignored for comparison.
+WHD synchronization reads company **Locations**, while Sage synchronization reads Sage customers. TechBench stores one combined client row when those records represent the same customer. Exact normalized names and strong, mutually unique fuzzy matches are consolidated automatically. This handles minor spelling differences such as `Delancy`/`Delancey` and shortened names such as `Devine & Partners`/`Devine & Partners Communications Group`. Ambiguous pairs remain separate for review.
 
-The **Clients** workspace shows matched, WHD-only, and Sage-only totals. Select a WHD-only location to review TechBench's strongest Sage suggestion or choose the correct Sage customer manually. Fuzzy suggestions are never merged without confirmation. Matching reassigns existing local notes, tickets, and aliases to the combined client so duplicate client rows no longer split a customer's history.
+The **Clients** workspace shows matched, WHD-only, and Sage-only totals. Select a WHD-only location to review TechBench's strongest remaining Sage suggestion or choose the correct Sage customer manually. Matching reassigns existing local notes, tickets, and aliases to the combined client so duplicate client rows no longer split a customer's history.
 
 `Ctrl+N` starts a new entry through the existing unsaved-change safeguards.
 

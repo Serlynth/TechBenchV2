@@ -243,6 +243,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _whdAutoSyncTimer.Tick += HandleWhdAutoSyncTimerTick;
         _sageVerificationTimer.Tick += HandleSageVerificationTimerTick;
 
+        _repository.ReconcileSafeClientMatches();
         LoadSettings();
         RefreshDatabaseSafetyStatus();
         RefreshAll();
@@ -1100,7 +1101,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         var selectedCandidateId = SelectedSageMatchCandidate?.Id;
         var candidates = _repository.GetClients(includeInactive: false)
-            .Where(IsAvailableSageMatchCandidate)
+            .Where(ClientMatchingService.IsSageMatchCandidate)
             .OrderBy(client => client.SageCustomerName ?? client.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -3109,25 +3110,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             && SelectedManagedClient is not null
             && SelectedManagedClient.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase)
             && SelectedSageMatchCandidate is not null
-            && IsAvailableSageMatchCandidate(SelectedSageMatchCandidate);
-    }
-
-    private static bool IsAvailableSageMatchCandidate(Client client)
-    {
-        if (string.IsNullOrWhiteSpace(client.SageCustomerId))
-        {
-            return false;
-        }
-
-        if (client.Source.Equals("Sage", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return client.Source.Equals("Both", StringComparison.OrdinalIgnoreCase)
-            && !(client.ExternalId ?? string.Empty)
-                .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Any(id => id.StartsWith("WHD-LOCATION-", StringComparison.OrdinalIgnoreCase));
+            && ClientMatchingService.IsSageMatchCandidate(SelectedSageMatchCandidate);
     }
 
     private void ApplyClientMatch()
@@ -3323,6 +3306,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _repository.Initialize();
+        _repository.ReconcileSafeClientMatches();
         var integrity = _databaseBackupService.CheckIntegrity();
         if (!integrity.IsHealthy)
         {
@@ -3585,7 +3569,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private int SaveWhdClients(IReadOnlyList<WhdSyncedClient> whdClients, bool reconcileMissing)
     {
         var alreadyMatched = _repository.SynchronizeWhdClients(whdClients, DateTime.Now, reconcileMissing);
-        return alreadyMatched + _repository.ReconcileExactClientMatches();
+        return alreadyMatched + _repository.ReconcileSafeClientMatches();
     }
 
     private void SaveWhdStatusTypes(IReadOnlyList<WhdStatusType> statusTypes)
@@ -3779,7 +3763,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var (savedCount, staleCount) = _repository.SynchronizeSageCustomers(customers, DateTime.Now);
-        var matchedCount = _repository.ReconcileExactClientMatches();
+        var matchedCount = _repository.ReconcileSafeClientMatches();
 
         RefreshClients();
         StatusMessage = $"Synced {savedCount} active Sage customers from {SageDsn.Trim()}."

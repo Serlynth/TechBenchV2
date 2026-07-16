@@ -8,8 +8,16 @@ public sealed record ClientMatchSuggestion(
     double Score,
     string Description);
 
+public sealed record ClientAutomaticMatch(
+    Client WhdClient,
+    Client SageClient,
+    double Score);
+
 public static class ClientMatchingService
 {
+    private const double AutomaticMatchThreshold = 0.86;
+    private const double AutomaticMatchMargin = 0.08;
+
     private static readonly IReadOnlyDictionary<string, string> WordAliases =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -70,6 +78,92 @@ public static class ClientMatchingService
                     : $"Possible company-name match ({top.Score:P0}); review before linking.";
 
         return new ClientMatchSuggestion(top.Candidate, top.Score, description);
+    }
+
+    public static IReadOnlyList<ClientAutomaticMatch> FindSafeAutomaticMatches(
+        IEnumerable<Client> whdClients,
+        IEnumerable<Client> sageClients)
+    {
+        var whdCandidates = whdClients
+            .Where(IsWhdLocationCandidate)
+            .OrderBy(static client => client.Id)
+            .ToList();
+        var sageCandidates = sageClients
+            .Where(IsSageMatchCandidate)
+            .OrderBy(static client => client.Id)
+            .ToList();
+        if (whdCandidates.Count == 0 || sageCandidates.Count == 0)
+        {
+            return Array.Empty<ClientAutomaticMatch>();
+        }
+
+        var scores = whdCandidates
+            .SelectMany(whd => sageCandidates.Select(sage => new MatchScore(
+                whd,
+                sage,
+                ScoreNames(ResolveWhdName(whd), ResolveSageName(sage)))))
+            .ToList();
+        var matches = new List<ClientAutomaticMatch>();
+
+        foreach (var whd in whdCandidates)
+        {
+            var whdRanking = scores
+                .Where(score => score.WhdClient.Id == whd.Id)
+                .OrderByDescending(static score => score.Score)
+                .ThenBy(static score => score.SageClient.Id)
+                .ToList();
+            if (!HasUniqueAutomaticLead(whdRanking.Select(static score => score.Score)))
+            {
+                continue;
+            }
+
+            var best = whdRanking[0];
+            if (!IsStructurallySafeAutomaticMatch(
+                    ResolveWhdName(whd),
+                    ResolveSageName(best.SageClient)))
+            {
+                continue;
+            }
+
+            var sageRanking = scores
+                .Where(score => score.SageClient.Id == best.SageClient.Id)
+                .OrderByDescending(static score => score.Score)
+                .ThenBy(static score => score.WhdClient.Id)
+                .ToList();
+            if (sageRanking[0].WhdClient.Id != whd.Id
+                || !HasUniqueAutomaticLead(sageRanking.Select(static score => score.Score)))
+            {
+                continue;
+            }
+
+            matches.Add(new ClientAutomaticMatch(whd, best.SageClient, best.Score));
+        }
+
+        return matches;
+    }
+
+    public static bool IsWhdLocationCandidate(Client client)
+    {
+        return client.IsActive
+            && client.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(client.SageCustomerId)
+            && HasWhdLocationExternalId(client.ExternalId);
+    }
+
+    public static bool IsSageMatchCandidate(Client client)
+    {
+        if (!client.IsActive || string.IsNullOrWhiteSpace(client.SageCustomerId))
+        {
+            return false;
+        }
+
+        if (client.Source.Equals("Sage", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return client.Source.Equals("Both", StringComparison.OrdinalIgnoreCase)
+            && !HasWhdLocationExternalId(client.ExternalId);
     }
 
     public static double ScoreNames(string? left, string? right)
@@ -169,6 +263,54 @@ public static class ClientMatchingService
             ? client.SageCustomerName
             : client.Name;
 
+    private static bool HasUniqueAutomaticLead(IEnumerable<double> rankedScores)
+    {
+        var scores = rankedScores.Take(2).ToArray();
+        return scores.Length > 0
+            && scores[0] >= AutomaticMatchThreshold
+            && (scores.Length == 1 || scores[0] - scores[1] >= AutomaticMatchMargin);
+    }
+
+    private static bool IsStructurallySafeAutomaticMatch(string? left, string? right)
+    {
+        var leftNormalized = NormalizeCompanyName(left);
+        var rightNormalized = NormalizeCompanyName(right);
+        if (leftNormalized.Length == 0 || rightNormalized.Length == 0)
+        {
+            return false;
+        }
+
+        if (leftNormalized.Equals(rightNormalized, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var editSimilarity = 1d
+            - ((double)LevenshteinDistance(leftNormalized, rightNormalized)
+                / Math.Max(leftNormalized.Length, rightNormalized.Length));
+        if (editSimilarity >= 0.92)
+        {
+            return true;
+        }
+
+        var shorter = leftNormalized.Length <= rightNormalized.Length
+            ? leftNormalized
+            : rightNormalized;
+        var longer = leftNormalized.Length <= rightNormalized.Length
+            ? rightNormalized
+            : leftNormalized;
+        return shorter.Length >= 12
+            && (longer.StartsWith($"{shorter} ", StringComparison.Ordinal)
+                || longer.EndsWith($" {shorter}", StringComparison.Ordinal));
+    }
+
+    private static bool HasWhdLocationExternalId(string? externalIds)
+    {
+        return (externalIds ?? string.Empty)
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(id => id.StartsWith("WHD-LOCATION-", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static int LevenshteinDistance(string left, string right)
     {
         var previous = new int[right.Length + 1];
@@ -194,4 +336,6 @@ public static class ClientMatchingService
 
         return previous[right.Length];
     }
+
+    private sealed record MatchScore(Client WhdClient, Client SageClient, double Score);
 }

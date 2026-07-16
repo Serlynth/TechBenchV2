@@ -943,6 +943,49 @@ public sealed class TechBenchRepositoryTests
     }
 
     [Fact]
+    public void ReconcilesStrongUniqueLocationAndSageNames()
+    {
+        WithRepository((repository, _) =>
+        {
+            repository.SaveClient(new Client
+            {
+                Name = "Delancy Street Partners, LLC",
+                Source = "WHD",
+                ExternalId = "WHD-LOCATION-289",
+                WhdLocationName = "Delancy Street Partners, LLC"
+            });
+            repository.SaveClient(new Client
+            {
+                Name = "Delancey Street Partners, LLC",
+                Source = "Sage",
+                SageCustomerId = "68710",
+                SageCustomerName = "Delancey Street Partners, LLC"
+            });
+            repository.SaveClient(new Client
+            {
+                Name = "Devine & Partners",
+                Source = "WHD",
+                ExternalId = "WHD-LOCATION-63",
+                WhdLocationName = "Devine & Partners"
+            });
+            repository.SaveClient(new Client
+            {
+                Name = "DEVINE & PARTNERS COMMUNICATIONS GROUP",
+                Source = "Sage",
+                SageCustomerId = "19104",
+                SageCustomerName = "DEVINE & PARTNERS COMMUNICATIONS GROUP"
+            });
+
+            Assert.Equal(2, repository.ReconcileStrongClientMatches());
+            var clients = repository.GetClients();
+            Assert.Equal(2, clients.Count);
+            Assert.All(clients, client => Assert.Equal("Both", client.Source));
+            Assert.Contains(clients, client => client.SageCustomerId == "68710");
+            Assert.Contains(clients, client => client.SageCustomerId == "19104");
+        });
+    }
+
+    [Fact]
     public void WhdTicketSyncReusesMatchedCompanyLocationInsteadOfCreatingAContactDuplicate()
     {
         WithRepository((repository, _) =>

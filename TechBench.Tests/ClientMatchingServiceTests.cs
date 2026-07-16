@@ -46,4 +46,124 @@ public sealed class ClientMatchingServiceTests
         Assert.Equal(correct.Id, suggestion.Candidate.Id);
         Assert.True(suggestion.Score >= 0.68);
     }
+
+    [Fact]
+    public void AutomaticallyMatchesUniqueDelanceyAndDevineLocationPairs()
+    {
+        var whdClients = new[]
+        {
+            new Client
+            {
+                Id = 1,
+                Name = "Delancy Street Partners, LLC",
+                Source = "WHD",
+                ExternalId = "WHD-LOCATION-289",
+                WhdLocationName = "Delancy Street Partners, LLC"
+            },
+            new Client
+            {
+                Id = 2,
+                Name = "Devine & Partners",
+                Source = "WHD",
+                ExternalId = "WHD-LOCATION-63",
+                WhdLocationName = "Devine & Partners"
+            },
+            new Client
+            {
+                Id = 5,
+                Name = "Friends Central",
+                Source = "WHD",
+                ExternalId = "WHD-LOCATION-44",
+                WhdLocationName = "Friends Central"
+            }
+        };
+        var sageClients = new[]
+        {
+            new Client
+            {
+                Id = 3,
+                Name = "Delancey Street Partners, LLC",
+                Source = "Sage",
+                SageCustomerId = "68710",
+                SageCustomerName = "Delancey Street Partners, LLC"
+            },
+            new Client
+            {
+                Id = 4,
+                Name = "DEVINE & PARTNERS COMMUNICATIONS GROUP",
+                Source = "Sage",
+                SageCustomerId = "19104",
+                SageCustomerName = "DEVINE & PARTNERS COMMUNICATIONS GROUP"
+            },
+            new Client
+            {
+                Id = 6,
+                Name = "FRIEND'S CENTRAL SCHOOL",
+                Source = "Sage",
+                SageCustomerId = "30462",
+                SageCustomerName = "FRIEND'S CENTRAL SCHOOL"
+            }
+        };
+
+        var matches = ClientMatchingService.FindSafeAutomaticMatches(whdClients, sageClients);
+
+        Assert.Equal(3, matches.Count);
+        Assert.Contains(matches, match => match.WhdClient.Id == 1 && match.SageClient.Id == 3);
+        Assert.Contains(matches, match => match.WhdClient.Id == 2 && match.SageClient.Id == 4);
+        Assert.Contains(matches, match => match.WhdClient.Id == 5 && match.SageClient.Id == 6);
+    }
+
+    [Fact]
+    public void DoesNotAutomaticallyMatchAmbiguousSimilarLocations()
+    {
+        var whd = new Client
+        {
+            Id = 1,
+            Name = "Alpha School",
+            Source = "WHD",
+            ExternalId = "WHD-LOCATION-1",
+            WhdLocationName = "Alpha School"
+        };
+        var sageClients = new[]
+        {
+            new Client
+            {
+                Id = 2,
+                Source = "Sage",
+                SageCustomerId = "A1",
+                SageCustomerName = "Alpha School East"
+            },
+            new Client
+            {
+                Id = 3,
+                Source = "Sage",
+                SageCustomerId = "A2",
+                SageCustomerName = "Alpha School West"
+            }
+        };
+
+        Assert.Empty(ClientMatchingService.FindSafeAutomaticMatches([whd], sageClients));
+    }
+
+    [Fact]
+    public void DoesNotAutomaticallyMatchGenericShortPrefix()
+    {
+        var whd = new Client
+        {
+            Id = 1,
+            Name = "Main Line",
+            Source = "WHD",
+            ExternalId = "WHD-LOCATION-1",
+            WhdLocationName = "Main Line"
+        };
+        var sage = new Client
+        {
+            Id = 2,
+            Source = "Sage",
+            SageCustomerId = "M1",
+            SageCustomerName = "Main Line Health"
+        };
+
+        Assert.Empty(ClientMatchingService.FindSafeAutomaticMatches([whd], [sage]));
+    }
 }

@@ -571,10 +571,10 @@ public sealed class TechBenchRepository
     {
         var clients = GetClients(includeInactive: true);
         var whdClients = clients
-            .Where(client => HasWhdIdentity(client) && !HasSageIdentity(client))
+            .Where(ClientMatchingService.IsWhdLocationCandidate)
             .ToList();
         var sageGroups = clients
-            .Where(client => HasSageIdentity(client) && !HasWhdIdentity(client))
+            .Where(ClientMatchingService.IsSageMatchCandidate)
             .GroupBy(
                 client => NormalizeClientMatchKey(ResolveCompanyNameForMatch(client)),
                 StringComparer.Ordinal)
@@ -596,6 +596,25 @@ public sealed class TechBenchRepository
         }
 
         return matchedCount;
+    }
+
+    public int ReconcileStrongClientMatches()
+    {
+        var clients = GetClients(includeInactive: true);
+        var matches = ClientMatchingService.FindSafeAutomaticMatches(clients, clients);
+        var matchedCount = 0;
+        foreach (var match in matches)
+        {
+            MergeClientRecords(match.WhdClient.Id, match.SageClient.Id);
+            matchedCount++;
+        }
+
+        return matchedCount;
+    }
+
+    public int ReconcileSafeClientMatches()
+    {
+        return ReconcileExactClientMatches() + ReconcileStrongClientMatches();
     }
 
     public int RemoveStaleSageCustomers(IReadOnlyCollection<string> activeSageCustomerIds, DateTime? syncedAt = null)
