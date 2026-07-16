@@ -33,7 +33,7 @@ Domain-joined Windows workstation
         | encrypted TDS connection
         v
 Existing SQL Server 2016 instance
-    TechBenchV2 database
+    TechBench database
     compatibility level 130
 ```
 
@@ -43,7 +43,7 @@ A representative production connection string is:
 
 ```text
 Server=tcp:sqlserver.example.local,1433;
-Database=TechBenchV2;
+Database=TechBench;
 Integrated Security=true;
 Encrypt=true;
 TrustServerCertificate=false;
@@ -161,7 +161,7 @@ Database creation and schema changes are DBA operations. The desktop application
 
 Versioned DBA scripts or a SQL Server database project should:
 
-1. create the `TechBenchV2` database
+1. create the `TechBench` database
 2. set compatibility level 130
 3. create schemas, tables, indexes, procedures, and security policies
 4. create database roles

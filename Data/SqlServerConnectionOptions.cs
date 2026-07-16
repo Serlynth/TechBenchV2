@@ -7,6 +7,7 @@ public sealed record SqlServerConnectionOptions(
     string Database,
     bool TrustServerCertificate = false)
 {
+    public const string DefaultDatabaseName = "TechBench";
     public const string DefaultApplicationName = "TechBench V2";
     public const int DefaultConnectTimeoutSeconds = 15;
     public const int DefaultCommandTimeoutSeconds = 30;

@@ -14,7 +14,8 @@ public partial class DatabaseConnectionWindow : Window
     {
         InitializeComponent();
         ServerTextBox.Text = initialOptions?.Server ?? string.Empty;
-        DatabaseTextBox.Text = initialOptions?.Database ?? "TechBenchV2";
+        DatabaseTextBox.Text =
+            initialOptions?.Database ?? SqlServerConnectionOptions.DefaultDatabaseName;
         TrustServerCertificateCheckBox.IsChecked =
             initialOptions?.TrustServerCertificate ?? false;
         WindowsIdentityTextBlock.Text =

@@ -575,10 +575,9 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    IF IS_ROLEMEMBER(N'tb_role_auditor') <> 1
-       AND IS_ROLEMEMBER(N'tb_role_deployer') <> 1
+    IF IS_ROLEMEMBER(N'tb_role_admin') <> 1
     BEGIN
-        THROW 51003, N'The Windows login is not authorized to read TechBench audit events.', 1;
+        THROW 51003, N'Only a current TechBench Admin may read TechBench audit events.', 1;
     END;
 
     SET @Limit =

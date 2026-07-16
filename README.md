@@ -39,7 +39,7 @@ TechBench V2 WPF client
     -> Microsoft.Data.SqlClient
     -> Windows Integrated Authentication
     -> existing SQL Server 2016
-    -> TechBenchV2 database at compatibility level 130
+    -> TechBench database at compatibility level 130
 ```
 
 SQL Server is the source of truth for shared clients, tickets, work entries, Personal Notes, drafts, templates, Common Links, settings, posting state, synchronization state, imports, and audit history.
@@ -74,7 +74,7 @@ Deployment:
 
 - domain-joined or trusted-domain Windows workstations
 - an existing SQL Server 2016 instance
-- a `TechBenchV2` database at compatibility level 130
+- a `TechBench` database at compatibility level 130
 - approved Active Directory groups mapped by the DBA
 - TCP connectivity from workstations to SQL Server
 - TLS 1.2 and a server certificate trusted by the workstations
@@ -117,7 +117,7 @@ A representative connection string is:
 
 ```text
 Server=tcp:sqlserver.example.local,1433;
-Database=TechBenchV2;
+Database=TechBench;
 Integrated Security=true;
 Encrypt=true;
 TrustServerCertificate=false;

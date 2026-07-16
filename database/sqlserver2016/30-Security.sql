@@ -14,12 +14,8 @@ SELECT [PrincipalName]
 FROM
 (
     VALUES
-        (N'$(DeploymentGroup)'),
-        (N'$(TechnicianGroup)'),
-        (N'$(ManagerGroup)'),
-        (N'$(AdminGroup)'),
-        (N'$(SyncOperatorGroup)'),
-        (N'$(AuditReaderGroup)')
+        (N'$(UserGroup)'),
+        (N'$(AdminGroup)')
 ) AS Principals([PrincipalName]);
 
 OPEN PrincipalCursor;
@@ -49,6 +45,45 @@ GO
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
+DECLARE @LegacyRoleName sysname;
+DECLARE @LegacyMemberName sysname;
+DECLARE @LegacySql nvarchar(max);
+
+DECLARE LegacyMembershipCursor CURSOR LOCAL FAST_FORWARD FOR
+SELECT
+    role_principal.[name],
+    member_principal.[name]
+FROM sys.database_role_members AS drm
+INNER JOIN sys.database_principals AS role_principal
+    ON role_principal.[principal_id] = drm.[role_principal_id]
+INNER JOIN sys.database_principals AS member_principal
+    ON member_principal.[principal_id] = drm.[member_principal_id]
+WHERE role_principal.[name] IN
+    (N'tb_role_auditor', N'tb_role_deployer');
+
+OPEN LegacyMembershipCursor;
+FETCH NEXT FROM LegacyMembershipCursor
+INTO @LegacyRoleName, @LegacyMemberName;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    SET @LegacySql =
+        N'ALTER ROLE ' + QUOTENAME(@LegacyRoleName)
+        + N' DROP MEMBER ' + QUOTENAME(@LegacyMemberName) + N';';
+    EXEC sys.sp_executesql @LegacySql;
+
+    FETCH NEXT FROM LegacyMembershipCursor
+    INTO @LegacyRoleName, @LegacyMemberName;
+END;
+
+CLOSE LegacyMembershipCursor;
+DEALLOCATE LegacyMembershipCursor;
+
+IF DATABASE_PRINCIPAL_ID(N'tb_role_auditor') IS NOT NULL
+    DROP ROLE [tb_role_auditor];
+IF DATABASE_PRINCIPAL_ID(N'tb_role_deployer') IS NOT NULL
+    DROP ROLE [tb_role_deployer];
+
 IF DATABASE_PRINCIPAL_ID(N'tb_role_user') IS NULL
     CREATE ROLE [tb_role_user] AUTHORIZATION [dbo];
 IF DATABASE_PRINCIPAL_ID(N'tb_role_manager') IS NULL
@@ -57,10 +92,6 @@ IF DATABASE_PRINCIPAL_ID(N'tb_role_admin') IS NULL
     CREATE ROLE [tb_role_admin] AUTHORIZATION [dbo];
 IF DATABASE_PRINCIPAL_ID(N'tb_role_sync_operator') IS NULL
     CREATE ROLE [tb_role_sync_operator] AUTHORIZATION [dbo];
-IF DATABASE_PRINCIPAL_ID(N'tb_role_auditor') IS NULL
-    CREATE ROLE [tb_role_auditor] AUTHORIZATION [dbo];
-IF DATABASE_PRINCIPAL_ID(N'tb_role_deployer') IS NULL
-    CREATE ROLE [tb_role_deployer] AUTHORIZATION [dbo];
 
 DECLARE @Principal sysname;
 DECLARE @DefaultSchema sysname;
@@ -71,12 +102,8 @@ SELECT [PrincipalName], [DefaultSchema]
 FROM
 (
     VALUES
-        (N'$(DeploymentGroup)', N'dbo'),
-        (N'$(TechnicianGroup)', N'tb_app'),
-        (N'$(ManagerGroup)', N'tb_app'),
-        (N'$(AdminGroup)', N'tb_app'),
-        (N'$(SyncOperatorGroup)', N'tb_app'),
-        (N'$(AuditReaderGroup)', N'tb_app')
+        (N'$(UserGroup)', N'tb_app'),
+        (N'$(AdminGroup)', N'tb_app')
 ) AS Principals([PrincipalName], [DefaultSchema]);
 
 OPEN UserCursor;
@@ -107,15 +134,11 @@ DECLARE @Membership TABLE
 
 INSERT INTO @Membership([RoleName], [MemberName])
 VALUES
-    (N'tb_role_deployer', N'$(DeploymentGroup)'),
-    (N'tb_role_user', N'$(TechnicianGroup)'),
-    (N'tb_role_user', N'$(ManagerGroup)'),
-    (N'tb_role_manager', N'$(ManagerGroup)'),
+    (N'tb_role_user', N'$(UserGroup)'),
     (N'tb_role_user', N'$(AdminGroup)'),
     (N'tb_role_manager', N'$(AdminGroup)'),
     (N'tb_role_admin', N'$(AdminGroup)'),
-    (N'tb_role_sync_operator', N'$(SyncOperatorGroup)'),
-    (N'tb_role_auditor', N'$(AuditReaderGroup)');
+    (N'tb_role_sync_operator', N'$(AdminGroup)');
 
 DECLARE @RoleName sysname;
 DECLARE @MemberName sysname;

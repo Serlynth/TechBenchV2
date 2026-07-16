@@ -7,13 +7,8 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
 DECLARE @DatabaseName sysname = N'$(DatabaseName)';
-DECLARE @DatabaseOwnerLogin sysname = N'$(DatabaseOwnerLogin)';
-DECLARE @DeploymentGroup sysname = N'$(DeploymentGroup)';
-DECLARE @TechnicianGroup sysname = N'$(TechnicianGroup)';
-DECLARE @ManagerGroup sysname = N'$(ManagerGroup)';
+DECLARE @UserGroup sysname = N'$(UserGroup)';
 DECLARE @AdminGroup sysname = N'$(AdminGroup)';
-DECLARE @SyncOperatorGroup sysname = N'$(SyncOperatorGroup)';
-DECLARE @AuditReaderGroup sysname = N'$(AuditReaderGroup)';
 DECLARE @ProductMajorVersion int =
     TRY_CONVERT(int, SERVERPROPERTY(N'ProductMajorVersion'));
 DECLARE @ProductVersion nvarchar(128) =
@@ -34,7 +29,7 @@ END;
 IF IS_SRVROLEMEMBER(N'sysadmin') <> 1
 BEGIN
     RAISERROR(
-        N'The initial TechBench deployment must run under a sysadmin Windows login.',
+        N'The initial TechBench deployment must run under a SQL Server sysadmin login.',
         16,
         1);
     RETURN;
@@ -51,51 +46,55 @@ BEGIN
     RETURN;
 END;
 
-IF NULLIF(LTRIM(RTRIM(@DatabaseOwnerLogin)), N'') IS NULL
-   OR NULLIF(LTRIM(RTRIM(@DeploymentGroup)), N'') IS NULL
-   OR NULLIF(LTRIM(RTRIM(@TechnicianGroup)), N'') IS NULL
-   OR NULLIF(LTRIM(RTRIM(@ManagerGroup)), N'') IS NULL
+IF NULLIF(LTRIM(RTRIM(@UserGroup)), N'') IS NULL
    OR NULLIF(LTRIM(RTRIM(@AdminGroup)), N'') IS NULL
-   OR NULLIF(LTRIM(RTRIM(@SyncOperatorGroup)), N'') IS NULL
-   OR NULLIF(LTRIM(RTRIM(@AuditReaderGroup)), N'') IS NULL
 BEGIN
-    RAISERROR(N'Every AD-principal SQLCMD variable must be supplied.', 16, 1);
+    RAISERROR(N'UserGroup and AdminGroup must both be supplied.', 16, 1);
     RETURN;
 END;
 
-IF @DatabaseOwnerLogin NOT LIKE N'%\%'
-   OR @DeploymentGroup NOT LIKE N'%\%'
-   OR @TechnicianGroup NOT LIKE N'%\%'
-   OR @ManagerGroup NOT LIKE N'%\%'
+IF @UserGroup NOT LIKE N'%\%'
    OR @AdminGroup NOT LIKE N'%\%'
-   OR @SyncOperatorGroup NOT LIKE N'%\%'
-   OR @AuditReaderGroup NOT LIKE N'%\%'
 BEGIN
     RAISERROR(
-        N'AD principals must use DOMAIN\name format. SQL logins are not accepted by this package.',
+        N'Application groups must use DOMAIN\name format.',
         16,
         1);
     RETURN;
 END;
 
-IF @TechnicianGroup = @AdminGroup
+IF @UserGroup = @AdminGroup
 BEGIN
     RAISERROR(
-        N'TechnicianGroup and AdminGroup must be distinct so ordinary users do not receive administration rights.',
+        N'UserGroup and AdminGroup must be distinct so ordinary users do not receive administration rights.',
         16,
         1);
     RETURN;
 END;
 
-IF @DatabaseOwnerLogin IN
-       (@DeploymentGroup, @TechnicianGroup, @ManagerGroup, @AdminGroup,
-        @SyncOperatorGroup, @AuditReaderGroup)
-   OR @DeploymentGroup IN
-       (@TechnicianGroup, @ManagerGroup, @AdminGroup,
-        @SyncOperatorGroup, @AuditReaderGroup)
+BEGIN TRY
+    EXEC master.dbo.xp_logininfo
+        @acctname = @UserGroup,
+        @option = N'members';
+
+    EXEC master.dbo.xp_logininfo
+        @acctname = @AdminGroup,
+        @option = N'members';
+END TRY
+BEGIN CATCH
+    DECLARE @GroupError nvarchar(2048) = ERROR_MESSAGE();
+    RAISERROR(
+        N'SQL Server could not resolve one of the TechBench AD groups: %s',
+        16,
+        1,
+        @GroupError);
+    RETURN;
+END CATCH;
+
+IF SUSER_SNAME(0x01) IS NULL
 BEGIN
     RAISERROR(
-        N'DatabaseOwnerLogin and DeploymentGroup must be dedicated DBA principals, separate from each other and the application groups.',
+        N'The built-in SQL Server owner principal (SID 0x01) could not be resolved.',
         16,
         1);
     RETURN;
@@ -112,12 +111,8 @@ BEGIN
     PRINT N'WARNING: SQL Server 2016 normal extended support ended July 14, 2026. Confirm ESU coverage or an upgrade plan.';
 END;
 PRINT N'  Database: ' + @DatabaseName;
-PRINT N'  Database owner: ' + @DatabaseOwnerLogin;
-PRINT N'  Deployment group: ' + @DeploymentGroup;
-PRINT N'  Technician group: ' + @TechnicianGroup;
-PRINT N'  Manager group: ' + @ManagerGroup;
+PRINT N'  Database owner: ' + SUSER_SNAME(0x01) + N' (built-in SID 0x01)';
+PRINT N'  User group: ' + @UserGroup;
 PRINT N'  Admin group: ' + @AdminGroup;
-PRINT N'  Sync Operator group: ' + @SyncOperatorGroup;
-PRINT N'  Audit Reader group: ' + @AuditReaderGroup;
-PRINT N'AD principal resolution is performed by the create/security scripts.';
+PRINT N'AD group resolution passed.';
 GO
