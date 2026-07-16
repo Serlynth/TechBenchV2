@@ -38,7 +38,7 @@ public sealed partial class MainWindowViewModel
             IsEntryOperationRunning = true;
         }
 
-        EntryOperationText = "Reading the exact work note from WHD...";
+        EntryOperationText = "Reading the exact Sage/WHD Note from WHD...";
         try
         {
             await SynchronizeWhdEntryAsync(entry, WhdSyncIntent.PullRemote, allowConflictPrompt: true);
@@ -105,7 +105,7 @@ public sealed partial class MainWindowViewModel
 
         if (!entry.WhdPosted || !entry.HasTicket)
         {
-            StatusMessage = "Post and verify the work note in WHD before synchronizing it.";
+            StatusMessage = "Post and verify the Sage/WHD Note in WHD before synchronizing it.";
             return false;
         }
 
@@ -146,7 +146,7 @@ public sealed partial class MainWindowViewModel
             RecordWhdSyncSuccess(
                 entry,
                 remote.NoteText,
-                $"Verified WHD TechNote #{techNoteId}; the work note is synchronized.",
+                $"Verified WHD TechNote #{techNoteId}; the Sage/WHD Note is synchronized.",
                 trackingLog.ExternalReference!,
                 BuildWhdNoteSnapshotPayload(remote.NoteText),
                 refreshAfter);
@@ -157,7 +157,7 @@ public sealed partial class MainWindowViewModel
         {
             var useWhd = allowConflictPrompt && _dialogService.Confirm(
                 "Sync WHD note",
-                $"WHD TechNote #{techNoteId} differs from the TechBench WHD note. Replace the local work/internal note with the WHD version?",
+                $"WHD TechNote #{techNoteId} differs from the TechBench WHD note. Replace the local Sage/WHD Note with the WHD version? Your Personal Note will only change when the WHD note contains a Personal Note section.",
                 "Use WHD note",
                 "Review later");
             if (!useWhd)
@@ -173,7 +173,7 @@ public sealed partial class MainWindowViewModel
             RecordWhdSyncSuccess(
                 entry,
                 remote.NoteText,
-                $"Updated the TechBench work note from WHD TechNote #{techNoteId}.",
+                $"Updated the TechBench Sage/WHD Note from WHD TechNote #{techNoteId}.",
                 trackingLog.ExternalReference!,
                 BuildWhdNoteSnapshotPayload(remote.NoteText),
                 refreshAfter);
@@ -185,7 +185,7 @@ public sealed partial class MainWindowViewModel
             RecordWhdSyncSuccess(
                 entry,
                 remote.NoteText,
-                $"WHD TechNote #{techNoteId} had a newer work note; TechBench was updated to match it.",
+                $"WHD TechNote #{techNoteId} had a newer Sage/WHD Note; TechBench was updated to match it.",
                 trackingLog.ExternalReference!,
                 BuildWhdNoteSnapshotPayload(remote.NoteText),
                 refreshAfter);
@@ -197,8 +197,8 @@ public sealed partial class MainWindowViewModel
             var replaceWhd = allowConflictPrompt && _dialogService.Confirm(
                 "WHD note conflict",
                 snapshotText is null
-                    ? $"TechBench cannot establish a prior sync baseline for WHD TechNote #{techNoteId}, and its text differs from this entry. Replace the WHD note with the TechBench work/internal note?"
-                    : $"Both TechBench and WHD TechNote #{techNoteId} changed since the last verified sync. Replace the WHD note with the TechBench work/internal note?",
+                    ? $"TechBench cannot establish a prior sync baseline for WHD TechNote #{techNoteId}, and its text differs from this entry. Replace the WHD note with the TechBench Sage/WHD Note and its optionally included Personal Note?"
+                    : $"Both TechBench and WHD TechNote #{techNoteId} changed since the last verified sync. Replace the WHD note with the TechBench Sage/WHD Note and its optionally included Personal Note?",
                 "Update WHD",
                 "Keep both unchanged");
             if (!replaceWhd)
@@ -265,8 +265,16 @@ public sealed partial class MainWindowViewModel
         bool refreshAfter)
     {
         var splitNote = WhdNoteTextFormatter.SplitWhdNoteText(synchronizedNote);
-        entry.Note = splitNote.WorkNote;
-        entry.InternalNote = string.IsNullOrWhiteSpace(splitNote.InternalNote) ? null : splitNote.InternalNote;
+        entry.Note = splitNote.SageWhdNote;
+        if (splitNote.IncludesPersonalNote)
+        {
+            entry.InternalNote = string.IsNullOrWhiteSpace(splitNote.PersonalNote) ? null : splitNote.PersonalNote;
+            entry.IncludePersonalNoteInWhd = !string.IsNullOrWhiteSpace(splitNote.PersonalNote);
+        }
+        else
+        {
+            entry.IncludePersonalNoteInWhd = false;
+        }
         entry.WhdPosted = true;
         entry.WhdPostedAt = DateTime.Now;
         entry.LastError = null;

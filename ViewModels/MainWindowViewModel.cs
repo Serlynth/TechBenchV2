@@ -28,6 +28,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly IUserNotificationService _notificationService;
     private readonly ICredentialStore _credentialStore;
     private readonly DatabaseBackupService _databaseBackupService;
+    private readonly DatabaseLocationService _databaseLocationService;
     private readonly PostingExecutionCoordinator _postingCoordinator = new();
     private readonly DispatcherTimer _whdAutoSyncTimer = new();
     private readonly DispatcherTimer _sageVerificationTimer = new() { Interval = TimeSpan.FromSeconds(30) };
@@ -48,6 +49,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private int _whdPendingCount;
     private int _sagePendingCount;
     private string _clientSearchText = string.Empty;
+    private Client? _selectedManagedClient;
+    private Client? _selectedSageMatchCandidate;
+    private string _clientMatchSuggestionText = "Select an unmatched WHD location to review its Sage match.";
+    private int _matchedClientCount;
+    private int _unmatchedWhdClientCount;
+    private int _unmatchedSageClientCount;
     private string _editorClientFilterText = string.Empty;
     private bool _isEditorClientDropDownOpen;
     private bool _isSyncingEditorClientFilterText;
@@ -119,6 +126,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         IUserNotificationService notificationService,
         ICredentialStore credentialStore,
         DatabaseBackupService databaseBackupService,
+        DatabaseLocationService databaseLocationService,
         IAppUpdateService appUpdateService,
         Action shutdownApplication)
     {
@@ -133,6 +141,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _notificationService = notificationService;
         _credentialStore = credentialStore;
         _databaseBackupService = databaseBackupService;
+        _databaseLocationService = databaseLocationService;
         Updates = new AppUpdateViewModel(
             appUpdateService,
             () => _databaseBackupService.CreateBackup("Pre-update database backup"),
@@ -173,6 +182,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ChangeTicketStatusCommand = new AsyncRelayCommand(ChangeTicketStatusAsync, CanChangeTicketStatus);
         SelectEditorClientCommand = new RelayCommand(SelectEditorClient, parameter => parameter is Client);
         SaveSageCustomerMappingCommand = new RelayCommand(_ => SaveSageCustomerMapping(), _ => SelectedSageMappingClient is not null);
+        ApplyClientMatchCommand = new RelayCommand(_ => ApplyClientMatch(), _ => CanApplyClientMatch());
         SaveSettingsCommand = new RelayCommand(_ => SaveSettings());
         TestWhdConnectionCommand = new AsyncRelayCommand(TestWhdConnectionAsync);
         SyncWhdTicketsCommand = new AsyncRelayCommand(SyncWhdTicketsNowAsync);
@@ -184,6 +194,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         BackupDatabaseCommand = new RelayCommand(_ => BackupDatabase(), _ => !IsEntryOperationRunning);
         CheckDatabaseHealthCommand = new RelayCommand(_ => CheckDatabaseHealth(), _ => !IsEntryOperationRunning);
         OpenBackupFolderCommand = new RelayCommand(_ => OpenBackupFolder());
+        MoveDatabaseCommand = new RelayCommand(_ => MoveDatabase(), _ => CanChangeDatabaseLocation());
+        UseExistingDatabaseCommand = new RelayCommand(_ => UseExistingDatabase(), _ => CanChangeDatabaseLocation());
+        OpenDatabaseFolderCommand = new RelayCommand(_ => OpenDatabaseFolder());
         InitializeNoteFeatures();
         InitializeCommonLinks();
 
@@ -255,6 +268,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public ObservableCollection<Client> Clients { get; } = new();
     public ObservableCollection<Client> EditorClients { get; } = new();
     public ObservableCollection<Client> ManagedClients { get; } = new();
+    public ObservableCollection<Client> SageMatchCandidates { get; } = new();
     public ObservableCollection<Ticket> TicketsForEditor { get; } = new();
     public ObservableCollection<Ticket> Tickets { get; } = new();
     public ObservableCollection<TicketStatusOption> TicketStatusOptions { get; } = new();
@@ -307,6 +321,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public AsyncRelayCommand ChangeTicketStatusCommand { get; }
     public RelayCommand SelectEditorClientCommand { get; }
     public RelayCommand SaveSageCustomerMappingCommand { get; }
+    public RelayCommand ApplyClientMatchCommand { get; }
     public RelayCommand SaveSettingsCommand { get; }
     public AsyncRelayCommand TestWhdConnectionCommand { get; }
     public AsyncRelayCommand SyncWhdTicketsCommand { get; }
@@ -318,6 +333,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public RelayCommand BackupDatabaseCommand { get; }
     public RelayCommand CheckDatabaseHealthCommand { get; }
     public RelayCommand OpenBackupFolderCommand { get; }
+    public RelayCommand MoveDatabaseCommand { get; }
+    public RelayCommand UseExistingDatabaseCommand { get; }
+    public RelayCommand OpenDatabaseFolderCommand { get; }
 
     public string DatabasePath => _repository.DatabasePath;
     public string DatabaseBackupDirectory => _databaseBackupService.BackupDirectory;
@@ -375,6 +393,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 RaiseEntryCommandStates();
                 BackupDatabaseCommand.RaiseCanExecuteChanged();
                 CheckDatabaseHealthCommand.RaiseCanExecuteChanged();
+                ApplyClientMatchCommand.RaiseCanExecuteChanged();
+                MoveDatabaseCommand.RaiseCanExecuteChanged();
+                UseExistingDatabaseCommand.RaiseCanExecuteChanged();
                 ImportGoogleSheetsCommand.RaiseCanExecuteChanged();
                 Updates.RefreshCommandStates();
             }
@@ -602,6 +623,52 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
         }
     }
+
+    public Client? SelectedManagedClient
+    {
+        get => _selectedManagedClient;
+        set
+        {
+            if (SetProperty(ref _selectedManagedClient, value))
+            {
+                RefreshClientMatchOptions();
+            }
+        }
+    }
+
+    public Client? SelectedSageMatchCandidate
+    {
+        get => _selectedSageMatchCandidate;
+        set
+        {
+            if (SetProperty(ref _selectedSageMatchCandidate, value))
+            {
+                if (value is not null && SelectedManagedClient is not null)
+                {
+                    var score = ClientMatchingService.ScoreNames(
+                        SelectedManagedClient.WhdLocationName ?? SelectedManagedClient.Name,
+                        value.SageCustomerName ?? value.Name);
+                    ClientMatchSuggestionText = $"Selected Sage customer {value.SageCustomerLabel} ({score:P0} name similarity).";
+                }
+
+                ApplyClientMatchCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string ClientMatchSuggestionText
+    {
+        get => _clientMatchSuggestionText;
+        private set => SetProperty(ref _clientMatchSuggestionText, value);
+    }
+
+    public string ClientMatchSelectionLabel => SelectedManagedClient is null
+        ? "No WHD location selected"
+        : $"{SelectedManagedClient.WhdLocationLabel} · {SelectedManagedClient.MatchStatusLabel}";
+
+    public string MatchedClientCountLabel => $"{_matchedClientCount} matched";
+    public string UnmatchedWhdClientCountLabel => $"{_unmatchedWhdClientCount} WHD only";
+    public string UnmatchedSageClientCountLabel => $"{_unmatchedSageClientCount} Sage only";
 
     public string EditorClientFilterText
     {
@@ -977,6 +1044,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var ticketFilterId = TicketClientFilter?.Id;
         var searchClientId = SearchClient?.Id;
         var sageMappingClientId = SelectedSageMappingClient?.Id;
+        var selectedManagedClientId = SelectedManagedClient?.Id;
 
         Clients.Clear();
         foreach (var client in _clientProvider.SearchClientsAsync(ClientSearchText).GetAwaiter().GetResult())
@@ -984,11 +1052,24 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             Clients.Add(client);
         }
 
+        var allManagedClients = _repository.GetClients();
         ManagedClients.Clear();
-        foreach (var client in _repository.GetClients(searchTerm: ClientSearchText))
+        foreach (var client in string.IsNullOrWhiteSpace(ClientSearchText)
+                     ? allManagedClients
+                     : _repository.GetClients(searchTerm: ClientSearchText))
         {
             ManagedClients.Add(client);
         }
+
+        _matchedClientCount = allManagedClients.Count(client =>
+            client.Source.Equals("Both", StringComparison.OrdinalIgnoreCase));
+        _unmatchedWhdClientCount = allManagedClients.Count(client =>
+            client.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase));
+        _unmatchedSageClientCount = allManagedClients.Count(client =>
+            client.Source.Equals("Sage", StringComparison.OrdinalIgnoreCase));
+        OnPropertyChanged(nameof(MatchedClientCountLabel));
+        OnPropertyChanged(nameof(UnmatchedWhdClientCountLabel));
+        OnPropertyChanged(nameof(UnmatchedSageClientCountLabel));
 
         if (!Editor.IsDirty)
         {
@@ -1008,7 +1089,58 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         TicketClientFilter = ticketFilterId.HasValue ? Clients.FirstOrDefault(client => client.Id == ticketFilterId.Value) : TicketClientFilter;
         SearchClient = searchClientId.HasValue ? Clients.FirstOrDefault(client => client.Id == searchClientId.Value) : SearchClient;
         SelectedSageMappingClient = sageMappingClientId.HasValue ? Clients.FirstOrDefault(client => client.Id == sageMappingClientId.Value) : SelectedSageMappingClient;
+        SelectedManagedClient = selectedManagedClientId.HasValue
+            ? ManagedClients.FirstOrDefault(client => client.Id == selectedManagedClientId.Value)
+            : SelectedManagedClient;
+        RefreshClientMatchOptions();
         RefreshEditorClientOptions();
+    }
+
+    private void RefreshClientMatchOptions()
+    {
+        var selectedCandidateId = SelectedSageMatchCandidate?.Id;
+        var candidates = _repository.GetClients(includeInactive: false)
+            .Where(IsAvailableSageMatchCandidate)
+            .OrderBy(client => client.SageCustomerName ?? client.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        SageMatchCandidates.Clear();
+        foreach (var candidate in candidates)
+        {
+            SageMatchCandidates.Add(candidate);
+        }
+
+        OnPropertyChanged(nameof(ClientMatchSelectionLabel));
+        if (SelectedManagedClient is null)
+        {
+            _selectedSageMatchCandidate = null;
+            OnPropertyChanged(nameof(SelectedSageMatchCandidate));
+            ClientMatchSuggestionText = "Select an unmatched WHD location to review its Sage match.";
+            ApplyClientMatchCommand.RaiseCanExecuteChanged();
+            return;
+        }
+
+        if (!SelectedManagedClient.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase))
+        {
+            _selectedSageMatchCandidate = null;
+            OnPropertyChanged(nameof(SelectedSageMatchCandidate));
+            ClientMatchSuggestionText = SelectedManagedClient.Source.Equals("Both", StringComparison.OrdinalIgnoreCase)
+                ? $"Already linked to {SelectedManagedClient.SageCustomerLabel}."
+                : "This is a Sage-only customer. Select a WHD-only location to create a match.";
+            ApplyClientMatchCommand.RaiseCanExecuteChanged();
+            return;
+        }
+
+        var suggestion = ClientMatchingService.FindBestSuggestion(SelectedManagedClient, candidates);
+        var restoredCandidate = selectedCandidateId.HasValue
+            ? candidates.FirstOrDefault(candidate => candidate.Id == selectedCandidateId.Value)
+            : null;
+        _selectedSageMatchCandidate = restoredCandidate ?? suggestion?.Candidate;
+        OnPropertyChanged(nameof(SelectedSageMatchCandidate));
+        ClientMatchSuggestionText = suggestion is null
+            ? "No confident automatic suggestion. Choose the correct Sage customer manually."
+            : $"{suggestion.Description} Suggested: {suggestion.Candidate.SageCustomerLabel}";
+        ApplyClientMatchCommand.RaiseCanExecuteChanged();
     }
 
     private void RefreshEditorClientOptions()
@@ -1478,7 +1610,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var items = new[]
         {
             BuildCloseoutItem("missing-duration", "Missing duration", missingDuration, "Entries need a duration before posting."),
-            BuildCloseoutItem("missing-note", "Missing note", missingNote, "Entries should have a work note."),
+            BuildCloseoutItem("missing-note", "Missing note", missingNote, "Entries should have a Sage/WHD Note."),
             BuildCloseoutItem("open-follow-ups", "Open follow-ups", openFollowUps, "Notes still have a follow-up or waiting action."),
             BuildCloseoutItem("whd-pending", "WHD pending", whdPending, "Ticket notes still need WHD posting."),
             BuildCloseoutItem("sage-pending", "Sage pending", sagePending, "Entries still need Sage ticket posting."),
@@ -1674,7 +1806,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         IsEntryOperationRunning = true;
-        EntryOperationText = "Synchronizing the work note with WHD...";
+        EntryOperationText = "Synchronizing the Sage/WHD Note with WHD...";
         try
         {
             await SynchronizeWhdEntryAsync(savedEntry, WhdSyncIntent.PushLocal, allowConflictPrompt: true);
@@ -1829,6 +1961,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             Billable = source.Billable,
             Note = source.Note,
             InternalNote = source.InternalNote,
+            IncludePersonalNoteInWhd = source.IncludePersonalNoteInWhd,
             Tags = source.Tags,
             FollowUpState = source.FollowUpState,
             FollowUpDueDate = source.FollowUpDueDate,
@@ -1905,7 +2038,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             IsEntryOperationRunning = true;
         }
 
-        EntryOperationText = "Posting the work note to WHD...";
+        EntryOperationText = "Posting the Sage/WHD Note to WHD...";
         try
         {
             var entry = ResolveEntryForPosting(parameter);
@@ -1917,7 +2050,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
             if (!entry.HasTicket)
             {
-                StatusMessage = "Select a Web Help Desk ticket before posting the work note.";
+                StatusMessage = "Select a Web Help Desk ticket before posting the Sage/WHD Note.";
                 return;
             }
 
@@ -1972,7 +2105,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 StatusMessage = "Post and verify the WHD note before creating the Sage ticket.";
                 _dialogService.Error(
                     "Create Sage ticket",
-                    "This entry has a WHD ticket, so its work note must be posted and verified in WHD before Sage can lock it.");
+                    "This entry has a WHD ticket, so its Sage/WHD Note must be posted and verified in WHD before Sage can lock it.");
                 if (ownsOperationState)
                 {
                     EntryOperationText = string.Empty;
@@ -2072,7 +2205,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private async Task BatchPostWhdAsync(object? parameter)
     {
         IsEntryOperationRunning = true;
-        EntryOperationText = "Synchronizing selected work notes with WHD...";
+        EntryOperationText = "Synchronizing selected Sage/WHD Notes with WHD...";
         try
         {
             var entries = GetSelectedPostingQueueEntriesForPosting()
@@ -2200,7 +2333,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             var target = lookup.Ticket;
             var confirmed = _dialogService.Confirm(
                 "Post to another WHD ticket",
-                $"Post this work note to WHD ticket #{otherWhdTicketId}?\n\n"
+                $"Post this Sage/WHD Note to WHD ticket #{otherWhdTicketId}?\n\n"
                 + $"{target.Subject}\n"
                 + $"WHD client: {target.Client.Name}\n"
                 + $"TechBench entry: {entry.ClientDisplay}\n"
@@ -2745,7 +2878,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             entry.DurationMinutes,
             entry.Billable,
             entry.Note,
-            InternalNote = destination == "WHD" ? entry.InternalNote : null,
+            PersonalNote = destination == "WHD" && entry.IncludePersonalNoteInWhd
+                ? entry.InternalNote
+                : null,
+            IncludePersonalNoteInWhd = destination == "WHD" && entry.IncludePersonalNoteInWhd,
             ClientExternalId = client.ExternalId,
             client.SageCustomerId,
             TicketExternalId = ticket?.ExternalId,
@@ -2967,6 +3103,68 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         StatusMessage = $"Saved Sage Customer ID mapping for {SelectedSageMappingClient.Name}.";
     }
 
+    private bool CanApplyClientMatch()
+    {
+        return !IsEntryOperationRunning
+            && SelectedManagedClient is not null
+            && SelectedManagedClient.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase)
+            && SelectedSageMatchCandidate is not null
+            && IsAvailableSageMatchCandidate(SelectedSageMatchCandidate);
+    }
+
+    private static bool IsAvailableSageMatchCandidate(Client client)
+    {
+        if (string.IsNullOrWhiteSpace(client.SageCustomerId))
+        {
+            return false;
+        }
+
+        if (client.Source.Equals("Sage", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return client.Source.Equals("Both", StringComparison.OrdinalIgnoreCase)
+            && !(client.ExternalId ?? string.Empty)
+                .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Any(id => id.StartsWith("WHD-LOCATION-", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void ApplyClientMatch()
+    {
+        if (!CanApplyClientMatch())
+        {
+            return;
+        }
+
+        var whdClient = SelectedManagedClient!;
+        var sageClient = SelectedSageMatchCandidate!;
+        var confirmed = _dialogService.Confirm(
+            "Match customer records",
+            $"Link WHD location \"{whdClient.WhdLocationLabel}\" to Sage customer \"{sageClient.SageCustomerLabel}\"?\n\n"
+            + "TechBench will merge the two records and keep existing notes and tickets attached.",
+            "Match",
+            "Cancel");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        try
+        {
+            var merged = _repository.MergeClientRecords(whdClient.Id, sageClient.Id);
+            var mergedId = merged.Id;
+            RefreshClients();
+            SelectedManagedClient = ManagedClients.FirstOrDefault(client => client.Id == mergedId);
+            StatusMessage = $"Matched {merged.WhdLocationLabel} to {merged.SageCustomerLabel}.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            StatusMessage = ex.Message;
+            _dialogService.Error("Customer matching", ex.Message);
+        }
+    }
+
     private void RefreshDatabaseSafetyStatus()
     {
         var integrity = _databaseBackupService.LastIntegrityResult
@@ -3021,6 +3219,159 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             StatusMessage = $"Could not open the backup folder: {ex.Message}";
             _dialogService.Error("Open backups", StatusMessage);
+        }
+    }
+
+    private bool CanChangeDatabaseLocation() =>
+        !IsEntryOperationRunning
+        && !_isWhdAutoSyncRunning
+        && !_isSageVerificationRunning
+        && !_isSagePostingRunning
+        && !Editor.IsDirty;
+
+    private void MoveDatabase()
+    {
+        if (!CanChangeDatabaseLocation())
+        {
+            return;
+        }
+
+        var confirmed = _dialogService.Confirm(
+            "Move TechBench database",
+            "TechBench will copy the current database to the selected location and keep the old file for rollback.\n\n"
+            + "If you choose OneDrive or Dropbox, close TechBench on every other computer before opening this database.",
+            "Choose Location",
+            "Cancel");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Move TechBench Database",
+            Filter = "TechBench database (*.db)|*.db",
+            FileName = "techbench.db",
+            DefaultExt = ".db",
+            AddExtension = true,
+            OverwritePrompt = false,
+            InitialDirectory = Path.GetDirectoryName(DatabasePath)
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        var backup = _databaseBackupService.CreateBackup("Pre-move database backup");
+        if (!backup.Succeeded)
+        {
+            _dialogService.Error("Move database", backup.Message);
+            return;
+        }
+
+        CompleteDatabaseLocationChange(_databaseLocationService.MoveDatabase(dialog.FileName));
+    }
+
+    private void UseExistingDatabase()
+    {
+        if (!CanChangeDatabaseLocation())
+        {
+            return;
+        }
+
+        var confirmed = _dialogService.Confirm(
+            "Use existing database",
+            "Select an existing TechBench database, such as one stored in OneDrive or Dropbox.\n\n"
+            + "Only one computer may have a cloud-synced database open at a time.",
+            "Select Database",
+            "Cancel");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Use Existing TechBench Database",
+            Filter = "TechBench database (*.db)|*.db|All files (*.*)|*.*",
+            CheckFileExists = true,
+            Multiselect = false,
+            InitialDirectory = Path.GetDirectoryName(DatabasePath)
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        var backup = _databaseBackupService.CreateBackup("Pre-switch database backup");
+        if (!backup.Succeeded)
+        {
+            _dialogService.Error("Use existing database", backup.Message);
+            return;
+        }
+
+        CompleteDatabaseLocationChange(_databaseLocationService.UseExistingDatabase(dialog.FileName));
+    }
+
+    private void CompleteDatabaseLocationChange(DatabaseLocationResult result)
+    {
+        if (!result.Succeeded)
+        {
+            StatusMessage = result.Message;
+            _dialogService.Error("Database location", result.Message);
+            return;
+        }
+
+        _repository.Initialize();
+        var integrity = _databaseBackupService.CheckIntegrity();
+        if (!integrity.IsHealthy)
+        {
+            var rollbackMessage = string.Empty;
+            if (!string.IsNullOrWhiteSpace(result.PreviousPath))
+            {
+                var rollback = _databaseLocationService.UseExistingDatabase(result.PreviousPath);
+                if (rollback.Succeeded)
+                {
+                    _repository.Initialize();
+                    rollbackMessage = $"\n\nTechBench restored the previous database at {result.PreviousPath}.";
+                }
+            }
+
+            StatusMessage = $"{integrity.Message}{rollbackMessage}";
+            _dialogService.Error("Database location", StatusMessage);
+            RefreshDatabaseSafetyStatus();
+            OnPropertyChanged(nameof(DatabasePath));
+            OnPropertyChanged(nameof(DatabaseBackupDirectory));
+            return;
+        }
+
+        LoadSettings();
+        RefreshDatabaseSafetyStatus();
+        OnPropertyChanged(nameof(DatabasePath));
+        OnPropertyChanged(nameof(DatabaseBackupDirectory));
+        RefreshAll();
+        PrimeKnownWhdTicketKeys();
+        NewEntry();
+        StatusMessage = result.Message;
+        _dialogService.Info("Database location", result.Message);
+    }
+
+    private void OpenDatabaseFolder()
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(DatabasePath)!;
+            Directory.CreateDirectory(directory);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = directory,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            StatusMessage = $"Could not open the database folder: {ex.Message}";
+            _dialogService.Error("Database location", StatusMessage);
         }
     }
 
@@ -3100,27 +3451,27 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         if (!HasWhdConnectionFields())
         {
-            const string message = "Enter the Web Help Desk base URL, username, and API key/password before syncing clients.";
+            const string message = "Enter the Web Help Desk base URL, username, and API key/password before syncing locations.";
             StatusMessage = message;
-            _dialogService.Error("Web Help Desk clients", message);
+            _dialogService.Error("Web Help Desk locations", message);
             return;
         }
 
-        StatusMessage = "Syncing Web Help Desk clients...";
+        StatusMessage = "Syncing Web Help Desk locations...";
         var result = await _whdRestClient.GetClientsAsync(BuildWhdConnectionSettings());
         if (!result.Success)
         {
             StatusMessage = result.Message;
-            _dialogService.Error("Web Help Desk clients", result.Message);
+            _dialogService.Error("Web Help Desk locations", result.Message);
             return;
         }
 
-        var matchedCount = SaveWhdClients(result.Clients);
+        var matchedCount = SaveWhdClients(result.Clients, result.IsComplete);
         RefreshAll();
         StatusMessage = matchedCount > 0
-            ? $"{result.Message} Auto-matched {matchedCount} to Sage customer(s)."
+            ? $"{result.Message} Matched {matchedCount} location(s) to Sage customer(s)."
             : result.Message;
-        _dialogService.Info("Web Help Desk clients", StatusMessage);
+        _dialogService.Info("Web Help Desk locations", StatusMessage);
     }
 
     private async Task SyncWhdStatusesAsync(object? parameter)
@@ -3231,9 +3582,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _repository.SynchronizeWhdTickets(whdTickets, syncedAt, reconcileMissing);
     }
 
-    private int SaveWhdClients(IReadOnlyList<WhdSyncedClient> whdClients)
+    private int SaveWhdClients(IReadOnlyList<WhdSyncedClient> whdClients, bool reconcileMissing)
     {
-        return _repository.SynchronizeWhdClients(whdClients, DateTime.Now);
+        var alreadyMatched = _repository.SynchronizeWhdClients(whdClients, DateTime.Now, reconcileMissing);
+        return alreadyMatched + _repository.ReconcileExactClientMatches();
     }
 
     private void SaveWhdStatusTypes(IReadOnlyList<WhdStatusType> statusTypes)
@@ -3427,11 +3779,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var (savedCount, staleCount) = _repository.SynchronizeSageCustomers(customers, DateTime.Now);
+        var matchedCount = _repository.ReconcileExactClientMatches();
 
         RefreshClients();
-        StatusMessage = staleCount > 0
-            ? $"Synced {savedCount} active Sage customers from {SageDsn.Trim()}. Removed or deactivated {staleCount} old Sage customer(s)."
-            : $"Synced {savedCount} active Sage customers from {SageDsn.Trim()}.";
+        StatusMessage = $"Synced {savedCount} active Sage customers from {SageDsn.Trim()}."
+            + (matchedCount > 0 ? $" Matched {matchedCount} to WHD location(s)." : string.Empty)
+            + (staleCount > 0 ? $" Removed or deactivated {staleCount} old Sage customer(s)." : string.Empty);
         _dialogService.Info("Sage customers", StatusMessage);
     }
 
@@ -3575,6 +3928,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         if (e.PropertyName == nameof(WorkEntryEditorViewModel.IsDirty))
         {
             OnPropertyChanged(nameof(WorkspaceStateLabel));
+            MoveDatabaseCommand.RaiseCanExecuteChanged();
+            UseExistingDatabaseCommand.RaiseCanExecuteChanged();
         }
 
         if (e.PropertyName is nameof(WorkEntryEditorViewModel.HasPostedDestination)

@@ -58,7 +58,7 @@ public partial class MarkdownEditorWindow : Window
         CancelButton.Visibility = _isFixedReadOnly ? Visibility.Collapsed : Visibility.Visible;
         ApplyButton.Content = _isFixedReadOnly ? "Close" : "Apply";
         ContextTextBlock.Text = _isFixedReadOnly ? "Markdown / Read only" : "Markdown";
-        Title = _isFixedReadOnly ? "Internal Note - Markdown (Read Only)" : "Internal Note - Markdown";
+        Title = _isFixedReadOnly ? "Personal Note - Markdown (Read Only)" : "Personal Note - Markdown";
         _isInitializing = false;
 
         RefreshPreview();
@@ -160,7 +160,7 @@ public partial class MarkdownEditorWindow : Window
             ? _liveViewModel.EditorTitle
             : _liveViewModel.EditorSubtitle;
         ContextTextBlock.Text = $"{context} / Markdown";
-        Title = $"Internal Note - {context}";
+        Title = $"Personal Note - {context}";
         ReadOnlyBadge.Visibility = _liveViewModel.IsEditorReadOnly
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -302,7 +302,7 @@ public partial class MarkdownEditorWindow : Window
 
         var discard = AppDialogWindow.Confirm(
             "Discard Markdown changes?",
-            "The internal note has changes that have not been applied.",
+            "The Personal Note has changes that have not been applied.",
             this,
             confirmText: "Discard",
             cancelText: "Keep Editing");

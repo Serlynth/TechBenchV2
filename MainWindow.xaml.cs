@@ -22,7 +22,9 @@ public partial class MainWindow : Window
             System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent,
             new TextChangedEventHandler(EditorClientComboBox_TextChanged));
 
+        InitialDatabaseLocationPrompt.ConfigureIfNeeded();
         var connectionFactory = new SqliteConnectionFactory();
+        var databaseLocationService = new DatabaseLocationService(connectionFactory);
         var databaseBackupService = new DatabaseBackupService(connectionFactory);
         databaseBackupService.CreateDailyBackupIfDue();
 
@@ -45,6 +47,7 @@ public partial class MainWindow : Window
             _notificationService,
             new WindowsCredentialStore(),
             databaseBackupService,
+            databaseLocationService,
             new VelopackAppUpdateService(),
             () => System.Windows.Application.Current.Shutdown());
 

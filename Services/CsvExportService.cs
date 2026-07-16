@@ -8,7 +8,7 @@ public static class CsvExportService
     public static string BuildWorkEntryCsv(IEnumerable<WorkEntry> entries)
     {
         var builder = new StringBuilder();
-        builder.AppendLine("WorkDate,StartTime,EndTime,DurationMinutes,Client,Ticket,Billable,WHDPosted,SagePosted,Status,Tags,FollowUp,FollowUpDueDate,Note,InternalNote");
+        builder.AppendLine("WorkDate,StartTime,EndTime,DurationMinutes,Client,Ticket,Billable,WHDPosted,SagePosted,Status,Tags,FollowUp,FollowUpDueDate,SageWhdNote,PersonalNote");
 
         foreach (var entry in entries)
         {

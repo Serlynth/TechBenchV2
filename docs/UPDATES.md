@@ -17,8 +17,8 @@ TechBench uses Velopack and the public binary-only repository at
 Run `dist\TechBenchSetup.exe` once on the work PC. The previous loose `TechBench.exe`
 does not have the installation metadata required for self-update.
 
-The application installs separately from `%LocalAppData%\TechBench\techbench.db`, so
-installing or updating the executable does not replace the worklog database.
+The application installs separately from the configured TechBench database, so installing
+or updating the executable does not replace the worklog database.
 
 ## Publishing a version
 
@@ -47,4 +47,4 @@ the release script. The value and certificate must remain outside source control
 
 - Source before updater integration is tagged `pre-updater-2026-07-14`.
 - Published releases are immutable and retained in GitHub Releases.
-- Database backups are stored under `%LocalAppData%\TechBench\Backups`.
+- Database backups are stored in a `Backups` folder beside the configured database.

@@ -15,6 +15,7 @@ public sealed class EditorDraft
     public bool Billable { get; set; } = true;
     public string Note { get; set; } = string.Empty;
     public string InternalNote { get; set; } = string.Empty;
+    public bool IncludePersonalNoteInWhd { get; set; }
     public string Tags { get; set; } = string.Empty;
     public FollowUpState FollowUpState { get; set; }
     public DateTime? FollowUpDueDate { get; set; }

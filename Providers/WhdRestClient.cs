@@ -214,7 +214,7 @@ public sealed class WhdRestClient
 
             for (var page = 1; page <= 200; page++)
             {
-                var batch = await GetClientsPageAsync(settings, auth, page, PageSize, cancellationToken);
+                var batch = await GetLocationsPageAsync(settings, auth, page, PageSize, cancellationToken);
                 if (batch.Count == 0)
                 {
                     isComplete = true;
@@ -250,7 +250,7 @@ public sealed class WhdRestClient
             }
 
             return WhdClientSyncResult.Succeeded(
-                $"Synced {clients.Count} active Web Help Desk client(s)."
+                $"Synced {clients.Count} active Web Help Desk location(s)."
                 + (isComplete ? string.Empty : " Paging stopped because WHD repeated a page; stale-client reconciliation was skipped."),
                 clients,
                 isComplete);
@@ -281,7 +281,7 @@ public sealed class WhdRestClient
 
         if (string.IsNullOrWhiteSpace(noteText))
         {
-            return PostingResult.Failed("Enter a work note before posting to Web Help Desk.");
+            return PostingResult.Failed("Enter a Sage/WHD Note before posting to Web Help Desk.");
         }
 
         if (durationMinutes <= 0)
@@ -331,7 +331,7 @@ public sealed class WhdRestClient
                 ? PostingResult.Uncertain(
                     "Web Help Desk accepted the note, but TechBench could not read back a TechNote ID. The entry remains WHD pending to avoid a false posted status.",
                     payload)
-                : PostingResult.Succeeded("Posted and verified the work note in Web Help Desk.", payload, externalReference);
+                : PostingResult.Succeeded("Posted and verified the Sage/WHD Note in Web Help Desk.", payload, externalReference);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
@@ -450,7 +450,7 @@ public sealed class WhdRestClient
 
         if (string.IsNullOrWhiteSpace(noteText))
         {
-            return PostingResult.Failed("Enter a work note before updating Web Help Desk.");
+            return PostingResult.Failed("Enter a Sage/WHD Note before updating Web Help Desk.");
         }
 
         var payload = JsonSerializer.Serialize(
@@ -649,14 +649,14 @@ public sealed class WhdRestClient
         return ParseTickets(document.RootElement);
     }
 
-    private async Task<IReadOnlyList<WhdSyncedClient>> GetClientsPageAsync(
+    private async Task<IReadOnlyList<WhdSyncedClient>> GetLocationsPageAsync(
         WhdConnectionSettings settings,
         WhdAuthParameters auth,
         int page,
         int limit,
         CancellationToken cancellationToken)
     {
-        var requestUri = BuildRequestUri(settings.BaseUrl, "Clients", auth, new Dictionary<string, string>
+        var requestUri = BuildRequestUri(settings.BaseUrl, "Locations", auth, new Dictionary<string, string>
         {
             ["style"] = "long",
             ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
@@ -669,13 +669,13 @@ public sealed class WhdRestClient
         {
             var message = string.IsNullOrWhiteSpace(content) ? response.ReasonPhrase : content.Trim();
             throw new HttpRequestException(
-                $"HTTP {(int)response.StatusCode} from Web Help Desk clients: {message}",
+                $"HTTP {(int)response.StatusCode} from Web Help Desk locations: {message}",
                 null,
                 response.StatusCode);
         }
 
         using var document = JsonDocument.Parse(content);
-        return ParseClients(document.RootElement);
+        return ParseLocations(document.RootElement);
     }
 
     private async Task<IReadOnlyList<WhdStatusType>> GetStatusTypesListAsync(
@@ -898,30 +898,45 @@ public sealed class WhdRestClient
             .ToList();
     }
 
-    private static IReadOnlyList<WhdSyncedClient> ParseClients(JsonElement root)
+    private static IReadOnlyList<WhdSyncedClient> ParseLocations(JsonElement root)
     {
-        var clients = new List<WhdSyncedClient>();
-
-        if (root.ValueKind == JsonValueKind.Array)
+        var locations = new List<WhdSyncedClient>();
+        foreach (var locationElement in EnumerateRecords(root))
         {
-            foreach (var clientElement in root.EnumerateArray())
-            {
-                AddClient(clients, clientElement);
-            }
-        }
-        else if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("records", out var records) && records.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var clientElement in records.EnumerateArray())
-            {
-                AddClient(clients, clientElement);
-            }
-        }
-        else if (root.ValueKind == JsonValueKind.Object)
-        {
-            AddClient(clients, root);
+            AddLocation(locations, locationElement);
         }
 
-        return clients;
+        return locations;
+    }
+
+    private static void AddLocation(List<WhdSyncedClient> locations, JsonElement locationElement)
+    {
+        if (locationElement.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        var id = ReadString(locationElement, "id");
+        var locationName = ReadString(locationElement, "locationName")
+            ?? ReadString(locationElement, "displayName")
+            ?? ReadString(locationElement, "name");
+        if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(locationName))
+        {
+            return;
+        }
+
+        var isActive = !ReadBoolean(locationElement, "deleted")
+            && !ReadBoolean(locationElement, "inactive")
+            && !ReadBoolean(locationElement, "isInactive");
+        var trimmedName = locationName.Trim();
+        locations.Add(new WhdSyncedClient
+        {
+            ExternalId = $"WHD-LOCATION-{id.Trim()}",
+            Name = trimmedName,
+            LocationName = trimmedName,
+            ContactName = null,
+            IsActive = isActive
+        });
     }
 
     private static void AddStatusType(List<WhdStatusType> statusTypes, JsonElement statusTypeElement)
@@ -947,46 +962,6 @@ public sealed class WhdRestClient
             Id = id.Value,
             Name = name,
             IsClosed = IsClosedStatus(name)
-        });
-    }
-
-    private static void AddClient(List<WhdSyncedClient> clients, JsonElement clientElement)
-    {
-        if (clientElement.ValueKind != JsonValueKind.Object)
-        {
-            return;
-        }
-
-        var id = ReadString(clientElement, "id")
-            ?? ReadString(clientElement, "username")
-            ?? ReadString(clientElement, "email")
-            ?? ReadString(clientElement, "displayName");
-        if (string.IsNullOrWhiteSpace(id))
-        {
-            return;
-        }
-
-        var clientName = ReadString(clientElement, "displayName")
-            ?? ReadString(clientElement, "fullName")
-            ?? BuildName(clientElement)
-            ?? ReadString(clientElement, "clientName")
-            ?? ReadString(clientElement, "name")
-            ?? ReadString(clientElement, "username")
-            ?? ReadString(clientElement, "email")
-            ?? id;
-
-        var locationName = ReadLocationName(clientElement);
-        var isActive = !ReadBoolean(clientElement, "deleted")
-            && !ReadBoolean(clientElement, "inactive")
-            && !ReadBoolean(clientElement, "disabled");
-
-        clients.Add(new WhdSyncedClient
-        {
-            ExternalId = FormatWhdId(id),
-            Name = BuildClientDisplayName(locationName, clientName),
-            LocationName = string.IsNullOrWhiteSpace(locationName) ? null : locationName.Trim(),
-            ContactName = string.IsNullOrWhiteSpace(clientName) ? null : clientName.Trim(),
-            IsActive = isActive
         });
     }
 

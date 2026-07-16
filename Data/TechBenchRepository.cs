@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 using TechBench.Models;
+using TechBench.Services;
 
 namespace TechBench.Data;
 
@@ -37,6 +38,7 @@ public sealed class TechBenchRepository
         EnsureWorkEntryClientReferenceSchema(connection);
         EnsureSageVerificationColumns(connection);
         EnsureNoteTakingSchema(connection);
+        EnsurePersonalNotePostingColumn(connection);
         EnsureWorkEntryLinkSchema(connection);
         EnsureCommonLinkSchema(connection);
         EnsurePostingAttemptSchema(connection);
@@ -429,7 +431,23 @@ public sealed class TechBenchRepository
             return;
         }
 
-        client.SageCustomerId = string.IsNullOrWhiteSpace(sageCustomerId) ? null : sageCustomerId.Trim();
+        var normalizedCustomerId = string.IsNullOrWhiteSpace(sageCustomerId) ? null : sageCustomerId.Trim();
+        if (normalizedCustomerId is not null)
+        {
+            var existingSageClient = GetClients(includeInactive: true)
+                .FirstOrDefault(candidate => candidate.Id != clientId
+                    && string.Equals(
+                        candidate.SageCustomerId?.Trim(),
+                        normalizedCustomerId,
+                        StringComparison.OrdinalIgnoreCase));
+            if (existingSageClient is not null && HasWhdIdentity(client))
+            {
+                MergeClientRecords(clientId, existingSageClient.Id);
+                return;
+            }
+        }
+
+        client.SageCustomerId = normalizedCustomerId;
         if (!string.IsNullOrWhiteSpace(sageCustomerName))
         {
             client.SageCustomerName = sageCustomerName.Trim();
@@ -442,6 +460,142 @@ public sealed class TechBenchRepository
         client.Source = MergeClientSources(client.Source, "Sage");
         client.MatchStatus = string.IsNullOrWhiteSpace(client.SageCustomerId) ? "Unmatched" : "Manual match";
         SaveClient(client);
+    }
+
+    public Client MergeClientRecords(int whdClientId, int sageClientId)
+    {
+        if (whdClientId <= 0 || sageClientId <= 0 || whdClientId == sageClientId)
+        {
+            throw new ArgumentException("Select separate WHD and Sage client records to match.");
+        }
+
+        using var connection = _connectionFactory.CreateConnection();
+        connection.Open();
+        using var transaction = connection.BeginTransaction();
+        var target = GetClient(connection, transaction, whdClientId)
+            ?? throw new InvalidOperationException("The selected WHD client no longer exists.");
+        var source = GetClient(connection, transaction, sageClientId)
+            ?? throw new InvalidOperationException("The selected Sage customer no longer exists.");
+
+        if (!HasWhdIdentity(target) && HasWhdIdentity(source))
+        {
+            (target, source) = (source, target);
+        }
+
+        if (!HasWhdIdentity(target))
+        {
+            throw new InvalidOperationException("The selected TechBench client is not linked to a WHD location.");
+        }
+
+        if (!HasSageIdentity(source))
+        {
+            throw new InvalidOperationException("The selected match is not linked to a Sage customer.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(target.SageCustomerId)
+            && !string.Equals(
+                target.SageCustomerId.Trim(),
+                source.SageCustomerId?.Trim(),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("This WHD location is already linked to a different Sage customer.");
+        }
+
+        var affectedWorkEntryIds = new List<int>();
+        using (var affectedEntries = connection.CreateCommand())
+        {
+            affectedEntries.Transaction = transaction;
+            affectedEntries.CommandText = """
+                SELECT Id
+                FROM WorkEntries
+                WHERE ClientId = $targetId OR ClientId = $sourceId
+                """;
+            affectedEntries.Parameters.AddWithValue("$targetId", target.Id);
+            affectedEntries.Parameters.AddWithValue("$sourceId", source.Id);
+            using var reader = affectedEntries.ExecuteReader();
+            while (reader.Read())
+            {
+                affectedWorkEntryIds.Add(reader.GetInt32(0));
+            }
+        }
+
+        using (var moveWorkEntries = connection.CreateCommand())
+        {
+            moveWorkEntries.Transaction = transaction;
+            moveWorkEntries.CommandText = "UPDATE WorkEntries SET ClientId = $targetId WHERE ClientId = $sourceId";
+            moveWorkEntries.Parameters.AddWithValue("$targetId", target.Id);
+            moveWorkEntries.Parameters.AddWithValue("$sourceId", source.Id);
+            moveWorkEntries.ExecuteNonQuery();
+        }
+
+        using (var moveTickets = connection.CreateCommand())
+        {
+            moveTickets.Transaction = transaction;
+            moveTickets.CommandText = "UPDATE Tickets SET ClientId = $targetId WHERE ClientId = $sourceId";
+            moveTickets.Parameters.AddWithValue("$targetId", target.Id);
+            moveTickets.Parameters.AddWithValue("$sourceId", source.Id);
+            moveTickets.ExecuteNonQuery();
+        }
+
+        using (var moveAliases = connection.CreateCommand())
+        {
+            moveAliases.Transaction = transaction;
+            moveAliases.CommandText = "UPDATE ClientAliases SET ClientId = $targetId WHERE ClientId = $sourceId";
+            moveAliases.Parameters.AddWithValue("$targetId", target.Id);
+            moveAliases.Parameters.AddWithValue("$sourceId", source.Id);
+            moveAliases.ExecuteNonQuery();
+        }
+
+        target = MergeClient(target, source);
+        target.MatchStatus = "Manual match";
+        SaveClient(connection, transaction, target);
+
+        using (var deleteSource = connection.CreateCommand())
+        {
+            deleteSource.Transaction = transaction;
+            deleteSource.CommandText = "DELETE FROM Clients WHERE Id = $sourceId";
+            deleteSource.Parameters.AddWithValue("$sourceId", source.Id);
+            deleteSource.ExecuteNonQuery();
+        }
+
+        foreach (var workEntryId in affectedWorkEntryIds)
+        {
+            UpdateWorkEntrySearchIndex(connection, transaction, workEntryId);
+        }
+
+        transaction.Commit();
+        return target;
+    }
+
+    public int ReconcileExactClientMatches()
+    {
+        var clients = GetClients(includeInactive: true);
+        var whdClients = clients
+            .Where(client => HasWhdIdentity(client) && !HasSageIdentity(client))
+            .ToList();
+        var sageGroups = clients
+            .Where(client => HasSageIdentity(client) && !HasWhdIdentity(client))
+            .GroupBy(
+                client => NormalizeClientMatchKey(ResolveCompanyNameForMatch(client)),
+                StringComparer.Ordinal)
+            .Where(static group => !string.IsNullOrWhiteSpace(group.Key))
+            .ToDictionary(static group => group.Key, static group => group.ToList(), StringComparer.Ordinal);
+        var matchedCount = 0;
+
+        foreach (var whdClient in whdClients)
+        {
+            var key = NormalizeClientMatchKey(ResolveCompanyNameForMatch(whdClient));
+            if (!sageGroups.TryGetValue(key, out var matches) || matches.Count != 1)
+            {
+                continue;
+            }
+
+            MergeClientRecords(whdClient.Id, matches[0].Id);
+            sageGroups.Remove(key);
+            matchedCount++;
+        }
+
+        return matchedCount;
     }
 
     public int RemoveStaleSageCustomers(IReadOnlyCollection<string> activeSageCustomerIds, DateTime? syncedAt = null)
@@ -686,12 +840,19 @@ public sealed class TechBenchRepository
         transaction.Commit();
     }
 
-    public int SynchronizeWhdClients(IReadOnlyList<WhdSyncedClient> whdClients, DateTime syncedAt)
+    public int SynchronizeWhdClients(
+        IReadOnlyList<WhdSyncedClient> whdClients,
+        DateTime syncedAt,
+        bool reconcileMissing = false)
     {
         using var connection = _connectionFactory.CreateConnection();
         connection.Open();
         using var transaction = connection.BeginTransaction();
         var clients = ReadAllClients(connection, transaction);
+        var activeExternalIds = whdClients
+            .Where(static client => client.IsActive && !string.IsNullOrWhiteSpace(client.ExternalId))
+            .Select(static client => client.ExternalId.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var matchedCount = 0;
 
         foreach (var whdClient in whdClients.Where(static client => client.IsActive))
@@ -718,6 +879,11 @@ public sealed class TechBenchRepository
             {
                 matchedCount++;
             }
+        }
+
+        if (reconcileMissing && activeExternalIds.Count > 0)
+        {
+            RemoveStaleWhdOnlyClients(connection, transaction, clients, activeExternalIds, syncedAt);
         }
 
         transaction.Commit();
@@ -788,7 +954,7 @@ public sealed class TechBenchRepository
             : string.Empty;
         var sql = new StringBuilder($$"""
             SELECT w.Id, w.WorkDate, w.ClientId, w.ManualClientName, w.TicketId, w.TicketNumberText, w.HasTimeRange, w.StartTime, w.EndTime,
-                   w.DurationMinutes, w.Billable, w.Note, w.InternalNote, w.Tags, w.FollowUpState, w.FollowUpDueDate,
+                   w.DurationMinutes, w.Billable, w.Note, w.InternalNote, w.IncludePersonalNoteInWhd, w.Tags, w.FollowUpState, w.FollowUpDueDate,
                    w.WhdPosted, w.WhdPostedAt, w.SagePosted, w.SagePostedAt, w.SageTicketNumber,
                    w.PostingStatus, w.LastError, w.CreatedAt, w.UpdatedAt,
                    COALESCE(NULLIF(w.ManualClientName, ''), c.Name, '') AS ClientName,
@@ -956,7 +1122,7 @@ public sealed class TechBenchRepository
         using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT w.Id, w.WorkDate, w.ClientId, w.ManualClientName, w.TicketId, w.TicketNumberText, w.HasTimeRange, w.StartTime, w.EndTime,
-                   w.DurationMinutes, w.Billable, w.Note, w.InternalNote, w.Tags, w.FollowUpState, w.FollowUpDueDate,
+                   w.DurationMinutes, w.Billable, w.Note, w.InternalNote, w.IncludePersonalNoteInWhd, w.Tags, w.FollowUpState, w.FollowUpDueDate,
                    w.WhdPosted, w.WhdPostedAt, w.SagePosted, w.SagePostedAt, w.SageTicketNumber,
                    w.PostingStatus, w.LastError, w.CreatedAt, w.UpdatedAt,
                    COALESCE(NULLIF(w.ManualClientName, ''), c.Name, '') AS ClientName,
@@ -1070,7 +1236,7 @@ public sealed class TechBenchRepository
         using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT w.Id, w.WorkDate, w.ClientId, w.ManualClientName, w.TicketId, w.TicketNumberText, w.HasTimeRange, w.StartTime, w.EndTime,
-                   w.DurationMinutes, w.Billable, w.Note, w.InternalNote, w.Tags, w.FollowUpState, w.FollowUpDueDate,
+                   w.DurationMinutes, w.Billable, w.Note, w.InternalNote, w.IncludePersonalNoteInWhd, w.Tags, w.FollowUpState, w.FollowUpDueDate,
                    w.WhdPosted, w.WhdPostedAt, w.SagePosted, w.SagePostedAt, w.SageTicketNumber,
                    w.PostingStatus, w.LastError, w.CreatedAt, w.UpdatedAt,
                    COALESCE(NULLIF(w.ManualClientName, ''), c.Name, '') AS ClientName,
@@ -1095,14 +1261,14 @@ public sealed class TechBenchRepository
         {
             links.Add(new WorkEntryLink
             {
-                Id = reader.GetInt32(29),
-                SourceWorkEntryId = reader.GetInt32(30),
-                TargetWorkEntryId = reader.GetInt32(31),
+                Id = reader.GetInt32(30),
+                SourceWorkEntryId = reader.GetInt32(31),
+                TargetWorkEntryId = reader.GetInt32(32),
                 CurrentWorkEntryId = workEntryId,
-                LinkType = Enum.TryParse<WorkEntryLinkType>(reader.GetString(32), out var type)
+                LinkType = Enum.TryParse<WorkEntryLinkType>(reader.GetString(33), out var type)
                         ? type
                         : WorkEntryLinkType.Related,
-                CreatedAt = FromDbDateTime(reader, 33) ?? DateTime.MinValue,
+                CreatedAt = FromDbDateTime(reader, 34) ?? DateTime.MinValue,
                 RelatedEntry = ReadWorkEntry(reader)
             });
         }
@@ -1827,6 +1993,11 @@ public sealed class TechBenchRepository
         using var command = connection.CreateCommand();
         command.CommandText = "CREATE INDEX IF NOT EXISTS IX_WorkEntries_SageTicketNumber ON WorkEntries(SageTicketNumber)";
         command.ExecuteNonQuery();
+    }
+
+    private static void EnsurePersonalNotePostingColumn(SqliteConnection connection)
+    {
+        EnsureColumn(connection, "WorkEntries", "IncludePersonalNoteInWhd", "INTEGER NOT NULL DEFAULT 0");
     }
 
     private static void EnsurePostingAttemptSchema(SqliteConnection connection)
@@ -3003,6 +3174,41 @@ public sealed class TechBenchRepository
         return changedCount;
     }
 
+    private static int RemoveStaleWhdOnlyClients(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        IReadOnlyList<Client> clients,
+        IReadOnlySet<string> activeExternalIds,
+        DateTime syncedAt)
+    {
+        var staleClients = clients
+            .Where(client => client.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(client.ExternalId)
+                && !activeExternalIds.Any(activeId => ContainsExternalId(client.ExternalId, activeId)))
+            .ToList();
+        var changedCount = 0;
+
+        foreach (var client in staleClients)
+        {
+            if (!ClientHasReferences(connection, transaction, client.Id))
+            {
+                using var deleteCommand = connection.CreateCommand();
+                deleteCommand.Transaction = transaction;
+                deleteCommand.CommandText = "DELETE FROM Clients WHERE Id = $id";
+                deleteCommand.Parameters.AddWithValue("$id", client.Id);
+                changedCount += deleteCommand.ExecuteNonQuery();
+                continue;
+            }
+
+            client.IsActive = false;
+            client.LastSyncedAt = syncedAt;
+            SaveClient(connection, transaction, client);
+            changedCount++;
+        }
+
+        return changedCount;
+    }
+
     private static bool ClientHasReferences(
         SqliteConnection connection,
         SqliteTransaction transaction,
@@ -3205,6 +3411,13 @@ public sealed class TechBenchRepository
             || client.Source.Equals("Sage", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool HasWhdIdentity(Client client)
+    {
+        return !string.IsNullOrWhiteSpace(client.ExternalId)
+            || !string.IsNullOrWhiteSpace(client.WhdLocationName)
+            || client.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string MergeClientSources(string? existingSource, string? incomingSource)
     {
         var existing = NormalizeClientSource(existingSource);
@@ -3220,14 +3433,6 @@ public sealed class TechBenchRepository
     private static string BuildClientDisplayName(Client client)
     {
         var locationName = client.WhdLocationName?.Trim();
-        var contactName = client.WhdContactName?.Trim();
-        if (!string.IsNullOrWhiteSpace(locationName) && !string.IsNullOrWhiteSpace(contactName))
-        {
-            return contactName.Contains(locationName, StringComparison.OrdinalIgnoreCase)
-                ? contactName
-                : $"{locationName} - {contactName}";
-        }
-
         if (!string.IsNullOrWhiteSpace(locationName))
         {
             return locationName;
@@ -3243,14 +3448,14 @@ public sealed class TechBenchRepository
 
     private static string ResolveCompanyNameForMatch(Client client)
     {
-        if (!string.IsNullOrWhiteSpace(client.SageCustomerName))
-        {
-            return client.SageCustomerName.Trim();
-        }
-
         if (!string.IsNullOrWhiteSpace(client.WhdLocationName))
         {
             return client.WhdLocationName.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(client.SageCustomerName))
+        {
+            return client.SageCustomerName.Trim();
         }
 
         SplitWhdDisplayName(client.Name, out var locationName, out _);
@@ -3314,29 +3519,7 @@ public sealed class TechBenchRepository
     }
 
     private static string NormalizeClientMatchKey(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return string.Empty;
-        }
-
-        var builder = new StringBuilder(value.Length);
-        foreach (var character in value.ToUpperInvariant())
-        {
-            builder.Append(char.IsLetterOrDigit(character) ? character : ' ');
-        }
-
-        var words = builder.ToString()
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToList();
-
-        while (words.Count > 0 && words[^1] is "INC" or "INCORPORATED" or "LLC" or "LTD" or "LIMITED" or "CO" or "COMPANY")
-        {
-            words.RemoveAt(words.Count - 1);
-        }
-
-        return string.Join(' ', words);
-    }
+        => ClientMatchingService.NormalizeCompanyName(value);
 
     private static bool ClientHasReferences(SqliteConnection connection, int clientId)
     {
@@ -3368,6 +3551,24 @@ public sealed class TechBenchRepository
             SageTelephone = reader.IsDBNull(11) ? null : reader.GetString(11),
             MatchStatus = reader.IsDBNull(12) ? "Unmatched" : reader.GetString(12)
         };
+    }
+
+    private static Client? GetClient(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        int clientId)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"""
+            SELECT {ClientSelectColumns}
+            FROM Clients
+            WHERE Id = $clientId
+            LIMIT 1
+            """;
+        command.Parameters.AddWithValue("$clientId", clientId);
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? ReadClient(reader) : null;
     }
 
     private static Ticket ReadTicket(SqliteDataReader reader)
@@ -3419,12 +3620,12 @@ public sealed class TechBenchRepository
             command.CommandText = """
                 INSERT INTO WorkEntries
                     (WorkDate, ClientId, ManualClientName, TicketId, TicketNumberText, HasTimeRange, StartTime, EndTime, DurationMinutes,
-                     Billable, Note, InternalNote, Tags, FollowUpState, FollowUpDueDate,
+                     Billable, Note, InternalNote, IncludePersonalNoteInWhd, Tags, FollowUpState, FollowUpDueDate,
                      WhdPosted, WhdPostedAt, SagePosted, SagePostedAt, SageTicketNumber,
                      PostingStatus, LastError, CreatedAt, UpdatedAt)
                 VALUES
                     ($workDate, $clientId, $manualClientName, $ticketId, $ticketNumberText, $hasTimeRange, $startTime, $endTime, $durationMinutes,
-                     $billable, $note, $internalNote, $tags, $followUpState, $followUpDueDate,
+                     $billable, $note, $internalNote, $includePersonalNoteInWhd, $tags, $followUpState, $followUpDueDate,
                      $whdPosted, $whdPostedAt, $sagePosted, $sagePostedAt, $sageTicketNumber,
                      $postingStatus, $lastError, $createdAt, $updatedAt);
                 SELECT last_insert_rowid();
@@ -3446,6 +3647,7 @@ public sealed class TechBenchRepository
                     Billable = $billable,
                     Note = $note,
                     InternalNote = $internalNote,
+                    IncludePersonalNoteInWhd = $includePersonalNoteInWhd,
                     Tags = $tags,
                     FollowUpState = $followUpState,
                     FollowUpDueDate = $followUpDueDate,
@@ -3577,24 +3779,25 @@ public sealed class TechBenchRepository
             Billable = reader.GetInt32(10) == 1,
             Note = reader.GetString(11),
             InternalNote = reader.IsDBNull(12) ? null : reader.GetString(12),
-            Tags = reader.IsDBNull(13) ? string.Empty : reader.GetString(13),
-            FollowUpState = Enum.TryParse<FollowUpState>(reader.GetString(14), out var followUpState)
+            IncludePersonalNoteInWhd = reader.GetInt32(13) == 1,
+            Tags = reader.IsDBNull(14) ? string.Empty : reader.GetString(14),
+            FollowUpState = Enum.TryParse<FollowUpState>(reader.GetString(15), out var followUpState)
                 ? followUpState
                 : FollowUpState.None,
-            FollowUpDueDate = FromDbDateTime(reader, 15),
-            WhdPosted = reader.GetInt32(16) == 1,
-            WhdPostedAt = FromDbDateTime(reader, 17),
-            SagePosted = reader.GetInt32(18) == 1,
-            SagePostedAt = FromDbDateTime(reader, 19),
-            SageTicketNumber = reader.IsDBNull(20) ? null : reader.GetString(20),
-            PostingStatus = Enum.TryParse<PostingStatus>(reader.GetString(21), out var status) ? status : PostingStatus.Draft,
-            LastError = reader.IsDBNull(22) ? null : reader.GetString(22),
-            CreatedAt = DateTime.Parse(reader.GetString(23), CultureInfo.InvariantCulture),
-            UpdatedAt = DateTime.Parse(reader.GetString(24), CultureInfo.InvariantCulture),
-            ClientName = reader.GetString(25),
-            TicketNumber = reader.IsDBNull(26) ? null : reader.GetString(26),
-            TicketSubject = reader.IsDBNull(27) ? null : reader.GetString(27),
-            SearchSnippet = reader.IsDBNull(28) ? null : reader.GetString(28)
+            FollowUpDueDate = FromDbDateTime(reader, 16),
+            WhdPosted = reader.GetInt32(17) == 1,
+            WhdPostedAt = FromDbDateTime(reader, 18),
+            SagePosted = reader.GetInt32(19) == 1,
+            SagePostedAt = FromDbDateTime(reader, 20),
+            SageTicketNumber = reader.IsDBNull(21) ? null : reader.GetString(21),
+            PostingStatus = Enum.TryParse<PostingStatus>(reader.GetString(22), out var status) ? status : PostingStatus.Draft,
+            LastError = reader.IsDBNull(23) ? null : reader.GetString(23),
+            CreatedAt = DateTime.Parse(reader.GetString(24), CultureInfo.InvariantCulture),
+            UpdatedAt = DateTime.Parse(reader.GetString(25), CultureInfo.InvariantCulture),
+            ClientName = reader.GetString(26),
+            TicketNumber = reader.IsDBNull(27) ? null : reader.GetString(27),
+            TicketSubject = reader.IsDBNull(28) ? null : reader.GetString(28),
+            SearchSnippet = reader.IsDBNull(29) ? null : reader.GetString(29)
         };
     }
 
@@ -3612,6 +3815,7 @@ public sealed class TechBenchRepository
         command.Parameters.AddWithValue("$billable", entry.Billable ? 1 : 0);
         command.Parameters.AddWithValue("$note", entry.Note.Trim());
         command.Parameters.AddWithValue("$internalNote", string.IsNullOrWhiteSpace(entry.InternalNote) ? DBNull.Value : entry.InternalNote.Trim());
+        command.Parameters.AddWithValue("$includePersonalNoteInWhd", entry.IncludePersonalNoteInWhd ? 1 : 0);
         command.Parameters.AddWithValue("$tags", string.IsNullOrWhiteSpace(entry.Tags) ? string.Empty : entry.Tags.Trim());
         command.Parameters.AddWithValue("$followUpState", entry.FollowUpState.ToString());
         command.Parameters.AddWithValue("$followUpDueDate", ToDbDateTime(entry.FollowUpDueDate));
@@ -3709,6 +3913,7 @@ public sealed class TechBenchRepository
             Billable INTEGER NOT NULL DEFAULT 1,
             Note TEXT NOT NULL DEFAULT '',
             InternalNote TEXT NULL,
+            IncludePersonalNoteInWhd INTEGER NOT NULL DEFAULT 0,
             Tags TEXT NOT NULL DEFAULT '',
             FollowUpState TEXT NOT NULL DEFAULT 'None',
             FollowUpDueDate TEXT NULL,

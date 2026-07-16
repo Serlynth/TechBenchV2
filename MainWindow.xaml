@@ -932,7 +932,7 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="Work note" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBlock Text="Sage/WHD Note" Style="{StaticResource FieldLabelStyle}" />
                                             <TextBlock Grid.Column="1"
                                                        Text="{Binding Editor.NoteCountLabel}"
                                                        Style="{StaticResource MutedTextStyle}"
@@ -1085,12 +1085,19 @@
                                                         <ColumnDefinition Width="*" />
                                                         <ColumnDefinition Width="Auto" />
                                                     </Grid.ColumnDefinitions>
-                                                    <TextBlock Text="Markdown source"
-                                                               Style="{StaticResource FieldLabelStyle}"
-                                                               VerticalAlignment="Center"
-                                                               Margin="1,0,0,0" />
+                                                    <StackPanel>
+                                                        <TextBlock Text="Personal Note Markdown"
+                                                                   Style="{StaticResource FieldLabelStyle}"
+                                                                   VerticalAlignment="Center"
+                                                                   Margin="1,0,0,0" />
+                                                        <CheckBox Content="Include Personal Note when posting to WHD"
+                                                                  IsChecked="{Binding Editor.IncludePersonalNoteInWhd}"
+                                                                  IsEnabled="{Binding IsEditorEditable}"
+                                                                  Margin="1,6,0,0"
+                                                                  ToolTip="Off by default. Sage never receives the Personal Note." />
+                                                    </StackPanel>
                                                     <Button Grid.Column="1"
-                                                            Content="Open Markdown Editor"
+                                                            Content="Open Personal Note Editor"
                                                             MinWidth="154"
                                                             Padding="11,6"
                                                             Click="OpenInternalMarkdownEditor_Click" />
@@ -1852,9 +1859,85 @@
                     <Border Style="{StaticResource CardStyle}">
                         <DockPanel>
                             <StackPanel DockPanel.Dock="Top">
-                                <TextBlock Text="Client List" Style="{StaticResource SectionHeadingStyle}" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Client Matching" Style="{StaticResource SectionHeadingStyle}" />
+                                        <TextBlock Text="One TechBench client per customer, linked to its WHD location and Sage customer."
+                                                   Style="{StaticResource MutedTextStyle}"
+                                                   Margin="0,0,0,10" />
+                                    </StackPanel>
+                                    <WrapPanel Grid.Column="1" HorizontalAlignment="Right">
+                                        <Button Content="Sync WHD Locations"
+                                                Command="{Binding SyncWhdClientsCommand}"
+                                                MinWidth="150"
+                                                Margin="0,0,8,8" />
+                                        <Button Content="Sync Sage Customers"
+                                                Command="{Binding SyncSageCustomersCommand}"
+                                                Style="{StaticResource PrimaryButtonStyle}"
+                                                MinWidth="152"
+                                                Margin="0,0,0,8" />
+                                    </WrapPanel>
+                                </Grid>
                                 <TextBlock Text="Search clients" Style="{StaticResource FieldLabelStyle}" />
                                 <TextBox Text="{Binding ClientSearchText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,12" />
+
+                                <WrapPanel Margin="0,0,0,12">
+                                    <Border Style="{StaticResource BadgeStyle}" Background="{DynamicResource SuccessBrush}">
+                                        <TextBlock Text="{Binding MatchedClientCountLabel}" Style="{StaticResource BadgeTextStyle}" />
+                                    </Border>
+                                    <Border Style="{StaticResource BadgeStyle}" Background="{DynamicResource WarningBrush}">
+                                        <TextBlock Text="{Binding UnmatchedWhdClientCountLabel}" Style="{StaticResource BadgeTextStyle}" />
+                                    </Border>
+                                    <Border Style="{StaticResource BadgeStyle}" Background="{DynamicResource NoTicketBadgeBrush}">
+                                        <TextBlock Text="{Binding UnmatchedSageClientCountLabel}" Style="{StaticResource BadgeTextStyle}" />
+                                    </Border>
+                                </WrapPanel>
+
+                                <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="12"
+                                        Margin="0,0,0,12">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="1.2*" />
+                                            <ColumnDefinition Width="16" />
+                                            <ColumnDefinition Width="1.4*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="Selected WHD location" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBlock Text="{Binding ClientMatchSelectionLabel}"
+                                                       Style="{StaticResource DetailValueStyle}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       ToolTip="{Binding ClientMatchSelectionLabel}" />
+                                            <TextBlock Text="{Binding ClientMatchSuggestionText}"
+                                                       Style="{StaticResource MutedTextStyle}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,5,0,0" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="Sage customer" Style="{StaticResource FieldLabelStyle}" />
+                                            <ComboBox ItemsSource="{Binding SageMatchCandidates}"
+                                                      SelectedItem="{Binding SelectedSageMatchCandidate}"
+                                                      DisplayMemberPath="SageCustomerLabel"
+                                                      IsTextSearchEnabled="True"
+                                                      ToolTip="Choose the Sage customer that represents the same company." />
+                                        </StackPanel>
+                                        <Button Grid.Column="3"
+                                                Content="Match"
+                                                Command="{Binding ApplyClientMatchCommand}"
+                                                Style="{StaticResource PrimaryButtonStyle}"
+                                                MinWidth="88"
+                                                Margin="12,20,0,0"
+                                                VerticalAlignment="Top" />
+                                    </Grid>
+                                </Border>
 
                                 <Border Background="{DynamicResource PanelAltBackgroundBrush}"
                                         BorderBrush="{DynamicResource BorderBrush}"
@@ -1884,6 +1967,7 @@
                             </StackPanel>
 
                             <ListBox ItemsSource="{Binding ManagedClients}"
+                                     SelectedItem="{Binding SelectedManagedClient}"
                                      Style="{StaticResource ListBoxChromeLessStyle}">
                                 <ListBox.ItemContainerStyle>
                                     <Style TargetType="{x:Type ListBoxItem}">
@@ -2460,7 +2544,7 @@
                                                Visibility="{Binding SelectedEntry.LastError, Converter={StaticResource StringToVisibilityConverter}}"
                                                Margin="0,12,0,0" />
 
-                                    <TextBlock Text="Work note" Style="{StaticResource FieldLabelStyle}" Margin="0,12,0,0" />
+                                    <TextBlock Text="Sage/WHD Note" Style="{StaticResource FieldLabelStyle}" Margin="0,12,0,0" />
                                     <Border Background="{DynamicResource ControlBackgroundBrush}"
                                             BorderBrush="{DynamicResource BorderBrush}"
                                             BorderThickness="1"
@@ -2481,9 +2565,16 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="Internal note (Markdown)"
+                                            <StackPanel>
+                                                <TextBlock Text="Personal Note (Markdown)"
                                                        Style="{StaticResource FieldLabelStyle}"
                                                        VerticalAlignment="Center" />
+                                                <TextBlock Text="Included in WHD"
+                                                           Foreground="{DynamicResource SuccessBrush}"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Visibility="{Binding SelectedEntry.IncludePersonalNoteInWhd, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                            </StackPanel>
                                             <Button Grid.Column="1"
                                                     Content="Open"
                                                     MinWidth="68"
@@ -2870,9 +2961,9 @@
                                                 Command="{Binding SyncWhdTicketsCommand}"
                                                 MinWidth="136"
                                                 Margin="0,0,8,0" />
-                                        <Button Content="Manual WHD Clients"
+                                        <Button Content="Sync WHD Locations Now"
                                                 Command="{Binding SyncWhdClientsCommand}"
-                                                MinWidth="142"
+                                                MinWidth="172"
                                                 Margin="0,0,8,0" />
                                         <Button Content="Sync Ticket Statuses"
                                                 Command="{Binding SyncWhdStatusesCommand}"
@@ -3098,14 +3189,36 @@
                                     <TextBlock Text="{Binding LastDatabaseBackupLabel}"
                                                Style="{StaticResource MutedTextStyle}"
                                                Margin="0,0,0,6" />
+                                    <TextBlock Text="Current database" Style="{StaticResource FieldLabelStyle}" Margin="0,4,0,2" />
+                                    <TextBlock Text="{Binding DatabasePath}"
+                                               Style="{StaticResource MutedTextStyle}"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding DatabasePath}"
+                                               Margin="0,0,0,6" />
                                     <TextBlock Text="{Binding DatabaseBackupDirectory}"
                                                Style="{StaticResource MutedTextStyle}"
                                                TextTrimming="CharacterEllipsis"
                                                ToolTip="{Binding DatabaseBackupDirectory}" />
+                                    <TextBlock Text="OneDrive/Dropbox storage is supported for moving between PCs, but the database must only be open on one computer at a time."
+                                               Style="{StaticResource MutedTextStyle}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,7,0,0" />
                                 </StackPanel>
                                 <WrapPanel Grid.Column="1"
                                            HorizontalAlignment="Right"
                                            VerticalAlignment="Center">
+                                    <Button Content="Move Database"
+                                            Command="{Binding MoveDatabaseCommand}"
+                                            MinWidth="122"
+                                            Margin="0,0,8,8" />
+                                    <Button Content="Use Existing"
+                                            Command="{Binding UseExistingDatabaseCommand}"
+                                            MinWidth="112"
+                                            Margin="0,0,8,8" />
+                                    <Button Content="Open Database"
+                                            Command="{Binding OpenDatabaseFolderCommand}"
+                                            MinWidth="116"
+                                            Margin="0,0,8,8" />
                                     <Button Content="Back Up Now"
                                             Command="{Binding BackupDatabaseCommand}"
                                             Style="{StaticResource PrimaryButtonStyle}"

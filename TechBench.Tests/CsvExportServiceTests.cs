@@ -22,7 +22,7 @@ public sealed class CsvExportServiceTests
             }
         });
 
-        Assert.StartsWith("WorkDate,StartTime,EndTime,DurationMinutes,Client,Ticket,Billable,WHDPosted,SagePosted,Status,Tags,FollowUp,FollowUpDueDate,Note,InternalNote", csv);
+        Assert.StartsWith("WorkDate,StartTime,EndTime,DurationMinutes,Client,Ticket,Billable,WHDPosted,SagePosted,Status,Tags,FollowUp,FollowUpDueDate,SageWhdNote,PersonalNote", csv);
         Assert.Contains("Walk-in client", csv);
         Assert.Contains("\"setup, onsite\",Waiting,2026-07-16", csv);
     }

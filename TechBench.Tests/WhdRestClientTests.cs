@@ -209,6 +209,30 @@ public sealed class WhdRestClientTests
     }
 
     [Fact]
+    public async Task SyncsWhdLocationsAsCustomerCompanies()
+    {
+        const string response = """
+            [
+              {"id": 12, "locationName": "Friends Central School", "isInactive": false},
+              {"id": 13, "locationName": "Old Location", "isInactive": true}
+            ]
+            """;
+        var handler = new RecordingHandler(_ => Json(HttpStatusCode.OK, response));
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetClientsAsync(ExplicitSettings());
+
+        Assert.True(result.Success, result.Message);
+        var location = Assert.Single(result.Clients);
+        Assert.Equal("WHD-LOCATION-12", location.ExternalId);
+        Assert.Equal("Friends Central School", location.Name);
+        Assert.Equal("Friends Central School", location.LocationName);
+        Assert.Null(location.ContactName);
+        Assert.Contains("/Locations", handler.Requests[0].Uri?.AbsolutePath);
+    }
+
+    [Fact]
     public async Task AutoAuthenticationIsDetectedOnlyOncePerConnection()
     {
         const string response = "[{\"id\":1,\"subject\":\"One\",\"clientReporter\":{\"id\":1,\"displayName\":\"Client\"}}]";

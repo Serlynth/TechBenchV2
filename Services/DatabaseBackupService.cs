@@ -28,12 +28,11 @@ public sealed class DatabaseBackupService
     {
         _connectionFactory = connectionFactory;
         _clock = clock;
-        BackupDirectory = Path.Combine(
-            Path.GetDirectoryName(_connectionFactory.DatabasePath)!,
-            "Backups");
     }
 
-    public string BackupDirectory { get; }
+    public string BackupDirectory => Path.Combine(
+        Path.GetDirectoryName(_connectionFactory.DatabasePath)!,
+        "Backups");
     public DatabaseBackupResult? LastBackupResult { get; private set; }
     public DatabaseIntegrityResult? LastIntegrityResult { get; private set; }
 

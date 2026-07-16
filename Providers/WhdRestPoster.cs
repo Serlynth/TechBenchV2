@@ -30,7 +30,7 @@ public sealed class WhdRestPoster : IWorkEntryPoster
 
         if (string.IsNullOrWhiteSpace(entry.Note))
         {
-            return Task.FromResult(PostingResult.Failed("Enter a work note before posting to Web Help Desk."));
+            return Task.FromResult(PostingResult.Failed("Enter a Sage/WHD Note before posting to Web Help Desk."));
         }
 
         if (entry.DurationMinutes <= 0)

@@ -24,6 +24,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
         nameof(Billable),
         nameof(Note),
         nameof(InternalNote),
+        nameof(IncludePersonalNoteInWhd),
         nameof(Tags),
         nameof(FollowUpState),
         nameof(FollowUpDueDate)
@@ -46,6 +47,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
     private bool _billable = true;
     private string _note = string.Empty;
     private string _internalNote = string.Empty;
+    private bool _includePersonalNoteInWhd;
     private string _tags = string.Empty;
     private FollowUpState _followUpState;
     private DateTime? _followUpDueDate;
@@ -305,6 +307,12 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
         set => SetProperty(ref _internalNote, value);
     }
 
+    public bool IncludePersonalNoteInWhd
+    {
+        get => _includePersonalNoteInWhd;
+        set => SetProperty(ref _includePersonalNoteInWhd, value);
+    }
+
     public string Tags
     {
         get => _tags;
@@ -336,8 +344,8 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
     public string NoteCountLabel => $"{NoteWordCount} words | {NoteCharacterCount} characters";
     public bool HasOpenFollowUp => FollowUpState is FollowUpState.FollowUp or FollowUpState.Waiting;
     public string InternalNoteHeader => string.IsNullOrWhiteSpace(InternalNote)
-        ? "Internal note (Markdown)"
-        : "Internal note (Markdown, contains text)";
+        ? "Personal Note (Markdown)"
+        : "Personal Note (Markdown, contains text)";
 
     public bool WhdPosted
     {
@@ -472,6 +480,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
             Billable = true;
             Note = string.Empty;
             InternalNote = string.Empty;
+            IncludePersonalNoteInWhd = false;
             Tags = string.Empty;
             FollowUpState = FollowUpState.None;
             FollowUpDueDate = null;
@@ -507,6 +516,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
             Billable = entry.Billable;
             Note = entry.Note;
             InternalNote = entry.InternalNote ?? string.Empty;
+            IncludePersonalNoteInWhd = entry.IncludePersonalNoteInWhd;
             Tags = entry.Tags;
             FollowUpState = entry.FollowUpState;
             FollowUpDueDate = entry.FollowUpDueDate;
@@ -544,6 +554,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
             Billable = Billable,
             Note = Note,
             InternalNote = InternalNote,
+            IncludePersonalNoteInWhd = IncludePersonalNoteInWhd,
             Tags = Tags,
             FollowUpState = FollowUpState,
             FollowUpDueDate = FollowUpDueDate,
@@ -573,6 +584,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
             Billable = draft.Billable;
             Note = draft.Note;
             InternalNote = draft.InternalNote;
+            IncludePersonalNoteInWhd = draft.IncludePersonalNoteInWhd;
             Tags = draft.Tags;
             FollowUpState = draft.FollowUpState;
             FollowUpDueDate = draft.FollowUpDueDate;
@@ -636,6 +648,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
             Billable = Billable,
             Note = Note.Trim(),
             InternalNote = string.IsNullOrWhiteSpace(InternalNote) ? null : InternalNote,
+            IncludePersonalNoteInWhd = IncludePersonalNoteInWhd && !string.IsNullOrWhiteSpace(InternalNote),
             Tags = WorkEntryTags.Normalize(Tags),
             FollowUpState = FollowUpState,
             FollowUpDueDate = FollowUpState is FollowUpState.FollowUp or FollowUpState.Waiting

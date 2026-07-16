@@ -5,7 +5,7 @@ namespace TechBench.Data;
 
 public sealed class SqliteConnectionFactory
 {
-    private readonly string _databasePath;
+    private string _databasePath;
 
     public SqliteConnectionFactory()
     {
@@ -23,10 +23,8 @@ public sealed class SqliteConnectionFactory
             return;
         }
 
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var databaseDirectory = Path.Combine(appData, "TechBench");
-        Directory.CreateDirectory(databaseDirectory);
-        _databasePath = Path.Combine(databaseDirectory, "techbench.db");
+        _databasePath = DatabaseLocationConfig.ResolveDatabasePath();
+        Directory.CreateDirectory(Path.GetDirectoryName(_databasePath)!);
 #endif
     }
 
@@ -38,6 +36,13 @@ public sealed class SqliteConnectionFactory
     }
 
     public string DatabasePath => _databasePath;
+
+    internal void UseDatabasePath(string databasePath)
+    {
+        var fullPath = Path.GetFullPath(databasePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        _databasePath = fullPath;
+    }
 
     public SqliteConnection CreateConnection()
     {

@@ -150,9 +150,11 @@ public sealed class WorkEntryEditorViewModelTests
         editor.SelectedClient = new Client { Id = 1, Name = "CSRI" };
         editor.DurationMinutesText = "15";
         editor.InternalNote = markdown;
+        editor.IncludePersonalNoteInWhd = true;
 
         Assert.True(editor.TryBuildEntry(out var entry, out var validationMessage), validationMessage);
         Assert.Equal(markdown, entry.InternalNote);
+        Assert.True(entry.IncludePersonalNoteInWhd);
     }
 
     [Fact]

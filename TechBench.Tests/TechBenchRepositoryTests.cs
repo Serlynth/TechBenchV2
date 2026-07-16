@@ -432,6 +432,7 @@ public sealed class TechBenchRepositoryTests
                 DurationMinutes = 30,
                 Note = "Configured the Zephyr firewall and verified traffic.",
                 InternalNote = "Waiting for customer confirmation.",
+                IncludePersonalNoteInWhd = true,
                 Tags = "network, onsite",
                 FollowUpState = FollowUpState.Waiting,
                 FollowUpDueDate = new DateTime(2026, 7, 16)
@@ -448,6 +449,7 @@ public sealed class TechBenchRepositoryTests
 
             Assert.NotNull(loaded);
             Assert.Equal("network, onsite", loaded.Tags);
+            Assert.True(loaded.IncludePersonalNoteInWhd);
             Assert.Equal(FollowUpState.Waiting, loaded.FollowUpState);
             Assert.Equal(new DateTime(2026, 7, 16), loaded.FollowUpDueDate);
             Assert.Contains(keywordResults, candidate => candidate.Id == entry.Id);
@@ -865,6 +867,174 @@ public sealed class TechBenchRepositoryTests
 
             repository.DeleteTemplate(templateId);
             Assert.DoesNotContain(repository.GetTemplates(), candidate => candidate.Id == templateId);
+        });
+    }
+
+    [Fact]
+    public void MergesWhdAndSageClientsWithoutLeavingDuplicateReferences()
+    {
+        WithRepository((repository, _) =>
+        {
+            var whd = new Client
+            {
+                Name = "Friends Central",
+                Source = "WHD",
+                ExternalId = "WHD-LOCATION-44",
+                WhdLocationName = "Friends Central",
+                LastSyncedAt = DateTime.Now
+            };
+            repository.SaveClient(whd);
+            var sage = new Client
+            {
+                Name = "FRIEND'S CENTRAL SCHOOL",
+                Source = "Sage",
+                SageCustomerId = "30462",
+                SageCustomerName = "FRIEND'S CENTRAL SCHOOL",
+                SageContactName = "Dan Crowley",
+                LastSyncedAt = DateTime.Now
+            };
+            repository.SaveClient(sage);
+            var entry = new WorkEntry
+            {
+                WorkDate = new DateTime(2026, 7, 16),
+                ClientId = sage.Id,
+                DurationMinutes = 30,
+                Note = "Updated the firewall."
+            };
+            repository.SaveWorkEntry(entry);
+            repository.SaveClientAlias("FCS", sage.Id);
+
+            var merged = repository.MergeClientRecords(whd.Id, sage.Id);
+
+            Assert.Equal("Both", merged.Source);
+            Assert.Equal("30462", merged.SageCustomerId);
+            Assert.Equal("Friends Central", merged.WhdLocationName);
+            Assert.Null(repository.GetClient(sage.Id));
+            Assert.Equal(whd.Id, repository.GetWorkEntry(entry.Id)?.ClientId);
+            Assert.Equal(whd.Id, repository.GetClientAliases()["FCS"]);
+        });
+    }
+
+    [Fact]
+    public void ReconcilesExactNormalizedWhdAndSageNames()
+    {
+        WithRepository((repository, _) =>
+        {
+            repository.SaveClient(new Client
+            {
+                Name = "Friends Central School",
+                Source = "WHD",
+                ExternalId = "WHD-LOCATION-44",
+                WhdLocationName = "Friends Central School"
+            });
+            repository.SaveClient(new Client
+            {
+                Name = "FRIEND'S CENTRAL SCHOOL",
+                Source = "Sage",
+                SageCustomerId = "30462",
+                SageCustomerName = "FRIEND'S CENTRAL SCHOOL"
+            });
+
+            Assert.Equal(1, repository.ReconcileExactClientMatches());
+            var merged = Assert.Single(repository.GetClients());
+            Assert.Equal("Both", merged.Source);
+            Assert.Equal("30462", merged.SageCustomerId);
+        });
+    }
+
+    [Fact]
+    public void WhdTicketSyncReusesMatchedCompanyLocationInsteadOfCreatingAContactDuplicate()
+    {
+        WithRepository((repository, _) =>
+        {
+            var location = new Client
+            {
+                Name = "Friends Central",
+                Source = "WHD",
+                ExternalId = "WHD-LOCATION-44",
+                WhdLocationName = "Friends Central"
+            };
+            repository.SaveClient(location);
+            var sage = new Client
+            {
+                Name = "FRIEND'S CENTRAL SCHOOL",
+                Source = "Sage",
+                SageCustomerId = "30462",
+                SageCustomerName = "FRIEND'S CENTRAL SCHOOL"
+            };
+            repository.SaveClient(sage);
+            repository.MergeClientRecords(location.Id, sage.Id);
+
+            repository.SynchronizeWhdTickets(
+                [
+                    new WhdSyncedTicket
+                    {
+                        ExternalId = "WHD-123",
+                        TicketNumber = "WHD-123",
+                        Subject = "Wireless issue",
+                        Status = "Open",
+                        Client = new WhdSyncedClient
+                        {
+                            ExternalId = "WHD-77",
+                            Name = "Friends Central - Ed",
+                            LocationName = "Friends Central",
+                            ContactName = "Ed"
+                        }
+                    }
+                ],
+                DateTime.Now,
+                reconcileMissing: true);
+
+            var client = Assert.Single(repository.GetClients());
+            Assert.Equal("Friends Central", client.Name);
+            Assert.Equal("Ed", client.WhdContactName);
+            Assert.Equal("30462", client.SageCustomerId);
+            Assert.True(TechBenchRepository.ContainsExternalId(client.ExternalId, "WHD-LOCATION-44"));
+            Assert.True(TechBenchRepository.ContainsExternalId(client.ExternalId, "WHD-77"));
+            Assert.Equal(client.Id, Assert.Single(repository.GetTickets()).ClientId);
+        });
+    }
+
+    [Fact]
+    public void CorrectLocationCanAbsorbLegacyMatchedWhdContactRecord()
+    {
+        WithRepository((repository, _) =>
+        {
+            var location = new Client
+            {
+                Name = "Friends Central",
+                Source = "WHD",
+                ExternalId = "WHD-LOCATION-44",
+                WhdLocationName = "Friends Central"
+            };
+            repository.SaveClient(location);
+            var legacy = new Client
+            {
+                Name = "Friends Central - Ed",
+                Source = "Both",
+                ExternalId = "WHD-77",
+                WhdLocationName = "Friends Central",
+                WhdContactName = "Ed",
+                SageCustomerId = "30462",
+                SageCustomerName = "FRIEND'S CENTRAL SCHOOL"
+            };
+            repository.SaveClient(legacy);
+            var entry = new WorkEntry
+            {
+                WorkDate = new DateTime(2026, 7, 16),
+                ClientId = legacy.Id,
+                DurationMinutes = 15,
+                Note = "Reviewed the ticket."
+            };
+            repository.SaveWorkEntry(entry);
+
+            var merged = repository.MergeClientRecords(location.Id, legacy.Id);
+
+            Assert.Equal("Both", merged.Source);
+            Assert.Equal("Friends Central", merged.Name);
+            Assert.Equal("30462", merged.SageCustomerId);
+            Assert.Null(repository.GetClient(legacy.Id));
+            Assert.Equal(location.Id, repository.GetWorkEntry(entry.Id)?.ClientId);
         });
     }
 

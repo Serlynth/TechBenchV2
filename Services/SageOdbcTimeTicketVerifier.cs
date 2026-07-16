@@ -383,7 +383,7 @@ public sealed class SageOdbcTimeTicketVerifier : ISageTimeTicketVerifier
                 .FirstOrDefault(note => !string.IsNullOrWhiteSpace(note))
                 ?? string.Empty;
             var preview = actualNote.Length <= 80 ? actualNote : $"{actualNote[..77]}...";
-            mismatches.Add($"work note does not match (ODBC returned '{preview}')");
+            mismatches.Add($"Sage/WHD Note does not match (ODBC returned '{preview}')");
         }
 
         return mismatches;

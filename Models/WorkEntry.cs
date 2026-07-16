@@ -15,6 +15,7 @@ public sealed class WorkEntry
     public bool Billable { get; set; } = true;
     public string Note { get; set; } = string.Empty;
     public string? InternalNote { get; set; }
+    public bool IncludePersonalNoteInWhd { get; set; }
     public string Tags { get; set; } = string.Empty;
     public FollowUpState FollowUpState { get; set; }
     public DateTime? FollowUpDueDate { get; set; }
@@ -126,7 +127,7 @@ public sealed class WorkEntry
         {
             if (string.IsNullOrWhiteSpace(Note))
             {
-                return "(No work note yet)";
+                return "(No Sage/WHD Note yet)";
             }
 
             var flattened = Note.ReplaceLineEndings(" ").Trim();

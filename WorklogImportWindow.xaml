@@ -118,7 +118,7 @@
                 </DataGridTemplateColumn>
                 <DataGridTextColumn Header="Source" Binding="{Binding SourceDuration}" IsReadOnly="True" Width="70" />
                 <DataGridTextColumn Header="Minutes" Binding="{Binding DurationMinutes, UpdateSourceTrigger=PropertyChanged}" Width="78" />
-                <DataGridTextColumn Header="Work note" Binding="{Binding Note}" IsReadOnly="True" Width="*" MinWidth="260" />
+                <DataGridTextColumn Header="Sage/WHD Note" Binding="{Binding Note}" IsReadOnly="True" Width="*" MinWidth="260" />
                 <DataGridTextColumn Header="Status" Binding="{Binding MatchLabel}" IsReadOnly="True" Width="125" />
             </DataGrid.Columns>
         </DataGrid>
