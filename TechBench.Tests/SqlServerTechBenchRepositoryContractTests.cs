@@ -7,9 +7,9 @@ namespace TechBench.Tests;
 public sealed class SqlServerTechBenchRepositoryContractTests
 {
     [Fact]
-    public void ClientTargetsV0002Schema()
+    public void ClientTargetsV0003Schema()
     {
-        Assert.Equal(2, SqlServerConnectionFactory.SupportedSchemaVersion);
+        Assert.Equal(3, SqlServerConnectionFactory.SupportedSchemaVersion);
     }
 
     [Fact]
@@ -105,5 +105,24 @@ public sealed class SqlServerTechBenchRepositoryContractTests
         Assert.Equal(
             typeof(SqlServerTechBenchRepository),
             parameter.ParameterType);
+    }
+
+    [Fact]
+    public void SharedPersistenceContractUsesOrganizationScopeAndAdminProcedures()
+    {
+        Assert.Equal("Organization", SqlServerTechBenchRepository.OrganizationScope);
+        Assert.Equal(
+            "[tb_app].[AdminSaveOrganizationSetting]",
+            SqlServerTechBenchRepository.Procedures.SaveOrganizationSetting);
+        Assert.Equal(
+            "[tb_app].[AdminDeleteOrganizationSetting]",
+            SqlServerTechBenchRepository.Procedures.DeleteOrganizationSetting);
+
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
+            nameof(ITechBenchRepository.SaveOrganizationSetting)));
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
+            nameof(ITechBenchRepository.DeleteOrganizationSetting)));
+        Assert.Equal("Organization", new TechBench.Models.NoteTemplate().ScopeType);
+        Assert.Equal("Organization", new TechBench.Models.CommonLink().ScopeType);
     }
 }

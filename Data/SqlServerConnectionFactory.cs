@@ -8,7 +8,7 @@ public sealed class SqlServerConnectionFactory
 {
     public const string CurrentUserContextStoredProcedure =
         "[tb_app].[GetCurrentUserContext]";
-    public const int SupportedSchemaVersion = 2;
+    public const int SupportedSchemaVersion = 3;
 
     public SqlServerConnectionFactory(SqlServerConnectionOptions options)
     {

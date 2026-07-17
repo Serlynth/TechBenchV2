@@ -18,6 +18,7 @@ namespace TechBench.Data;
 public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
 {
     private const string UserSettingScope = "User";
+    internal const string OrganizationScope = "Organization";
     private const int PostingLeaseSeconds = 1800;
 
     private static readonly JsonSerializerOptions PayloadJsonOptions =
@@ -92,6 +93,10 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         public const string GetSettings = "[tb_app].[GetSettings]";
         public const string SaveSetting = "[tb_app].[SaveUserSetting]";
         public const string DeleteSetting = "[tb_app].[DeleteUserSetting]";
+        public const string SaveOrganizationSetting =
+            "[tb_app].[AdminSaveOrganizationSetting]";
+        public const string DeleteOrganizationSetting =
+            "[tb_app].[AdminDeleteOrganizationSetting]";
         public const string AddPostingLog = "[tb_app].[AddPostingLog]";
         public const string GetLatestVerifiedWhdPostingLog =
             "[tb_app].[GetLatestVerifiedWhdPostingLog]";

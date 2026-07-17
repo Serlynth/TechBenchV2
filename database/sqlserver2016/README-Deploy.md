@@ -68,19 +68,23 @@ Run the scripts in this order:
 2. `10-CreateDatabase.sql`
 3. `20-BaselineSchema.sql`
 4. `21-V0002-OperationalSchema.sql`
-5. `30-Security.sql`
-6. `40-StoredProcedures.sql`
-7. `41-V0002-WorkProcedures.sql`
-8. `42-V0002-SharedProcedures.sql`
-9. `43-V0002-PostingProcedures.sql`
-10. `44-V0002-SyncImportProcedures.sql`
-11. `50-Grants.sql`
-12. `51-V0002-OperationalGrants.sql`
-13. `90-Verify.sql`
-14. `91-V0002-OperationalVerify.sql`
+5. `22-V0003-SharedReferenceData.sql`
+6. `30-Security.sql`
+7. `40-StoredProcedures.sql`
+8. `41-V0002-WorkProcedures.sql`
+9. `42-V0002-SharedProcedures.sql`
+10. `43-V0002-PostingProcedures.sql`
+11. `44-V0002-SyncImportProcedures.sql`
+12. `45-V0003-SharedReferenceProcedures.sql`
+13. `50-Grants.sql`
+14. `51-V0002-OperationalGrants.sql`
+15. `90-Verify.sql`
+16. `91-V0002-OperationalVerify.sql`
+17. `92-V0003-SharedReferenceVerify.sql`
 
-The scripts are idempotent for the Phase 1 baseline and the V0002 operational
-storage migration. They stop on validation or deployment errors.
+The scripts are idempotent for the baseline, V0002 operational-storage, and
+V0003 shared-reference-data migrations. They stop on validation or deployment
+errors.
 
 ## Database behavior
 
@@ -106,6 +110,9 @@ checks, retention, and restore testing remain DBA/operations responsibilities.
 - V0002 procedures store tickets, work entries, owner-private Personal Notes,
   links, drafts, templates, Common Links, organization/user settings, aliases,
   posting coordination, synchronization runs, imports, and legacy mappings.
+- V0003 promotes Common Links and import/customer aliases to organization
+  scope, adds the canonical shared tag catalog, and separates shared WHD/Sage
+  defaults from per-user identity settings.
 - `tb_app.EnsureWorkspaceDefaults` idempotently creates the original seven
   built-in Common Links and seven note templates after the first authenticated
   application user has been registered.

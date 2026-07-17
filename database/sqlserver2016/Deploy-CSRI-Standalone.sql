@@ -1285,6 +1285,377 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 22-V0003-SharedReferenceData.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+/*
+    V0003 promotes shared reference data to an organization-wide boundary.
+    It is intentionally additive so an installed V0002 database upgrades in place.
+*/
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.OperationalStorage.0002'
+      AND [SchemaVersion] = 2
+)
+BEGIN
+    RAISERROR(
+        N'The TechBench V0002 operational schema must be installed before SharedReferenceData.0003.',
+        16,
+        1);
+    RETURN;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.SharedReferenceData.0003'
+      AND [SchemaVersion] = 3
+)
+BEGIN
+    PRINT N'SqlServer2016.SharedReferenceData.0003 is already installed.';
+    RETURN;
+END;
+
+IF OBJECT_ID(N'tb_data.OrganizationTags', N'U') IS NOT NULL
+BEGIN
+    RAISERROR(
+        N'OrganizationTags exists without the V0003 migration marker. Stop and investigate the partial deployment.',
+        16,
+        1);
+    RETURN;
+END;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    CREATE TABLE [tb_data].[OrganizationTags]
+    (
+        [Id] int IDENTITY(1,1) NOT NULL,
+        [Tag] nvarchar(1000) NOT NULL,
+        [TagHash] binary(32) NOT NULL,
+        [CreatedByWindowsSid] varbinary(85) NOT NULL,
+        [CreatedAtUtc] datetime2(3) NOT NULL
+            CONSTRAINT [DF_OrganizationTags_CreatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+        [RowVersion] rowversion NOT NULL,
+        CONSTRAINT [PK_OrganizationTags] PRIMARY KEY CLUSTERED ([Id]),
+        CONSTRAINT [FK_OrganizationTags_CreatedBy]
+            FOREIGN KEY ([CreatedByWindowsSid])
+            REFERENCES [tb_security].[Users]([WindowsSid]),
+        CONSTRAINT [CK_OrganizationTags_Canonical]
+            CHECK
+            (
+                LEN([Tag]) > 0
+                AND [Tag] = LTRIM(RTRIM([Tag]))
+                AND DATALENGTH([Tag]) <= 2000
+            )
+    );
+
+    CREATE UNIQUE INDEX [UX_OrganizationTags_TagHash]
+        ON [tb_data].[OrganizationTags]([TagHash]);
+
+    ;WITH parsed_tags AS
+    (
+        SELECT
+            LTRIM(RTRIM(tag.[value])) AS [Tag],
+            CONVERT(
+                binary(32),
+                HASHBYTES
+                (
+                    N'SHA2_256',
+                    CONVERT(
+                        varbinary(2000),
+                        UPPER(LTRIM(RTRIM(tag.[value])))
+                    )
+                )
+            ) AS [TagHash],
+            work_entry.[CreatedByWindowsSid],
+            work_entry.[Id] AS [WorkEntryId]
+        FROM [tb_data].[WorkEntries] AS work_entry
+        CROSS APPLY STRING_SPLIT(COALESCE(work_entry.[Tags], N''), N',') AS tag
+        WHERE NULLIF(LTRIM(RTRIM(tag.[value])), N'') IS NOT NULL
+    ),
+    ranked_tags AS
+    (
+        SELECT
+            [Tag],
+            [TagHash],
+            [CreatedByWindowsSid],
+            ROW_NUMBER() OVER
+            (
+                PARTITION BY [TagHash]
+                ORDER BY [WorkEntryId], [Tag]
+            ) AS [TagRank]
+        FROM parsed_tags
+    )
+    INSERT INTO [tb_data].[OrganizationTags]
+    (
+        [Tag],
+        [TagHash],
+        [CreatedByWindowsSid]
+    )
+    SELECT
+        [Tag],
+        [TagHash],
+        [CreatedByWindowsSid]
+    FROM ranked_tags
+    WHERE [TagRank] = 1;
+
+    /*
+        Common Links are one organization catalog. Existing organization rows win;
+        otherwise the newest row wins, with built-ins preferred. Identical URLs are
+        already interchangeable under the catalog's URL uniqueness contract.
+    */
+    ;WITH ranked_links AS
+    (
+        SELECT
+            [Id],
+            ROW_NUMBER() OVER
+            (
+                PARTITION BY [UrlHash]
+                ORDER BY
+                    CASE WHEN [ScopeType] = N'Organization' THEN 0 ELSE 1 END,
+                    CASE WHEN [BuiltInKey] IS NOT NULL THEN 0 ELSE 1 END,
+                    [UpdatedAtUtc] DESC,
+                    [Id] DESC
+            ) AS [LinkRank]
+        FROM [tb_data].[CommonLinks]
+    )
+    DELETE common_link
+    FROM [tb_data].[CommonLinks] AS common_link
+    INNER JOIN ranked_links AS ranked_link
+        ON ranked_link.[Id] = common_link.[Id]
+    WHERE ranked_link.[LinkRank] > 1;
+
+    UPDATE [tb_data].[CommonLinks]
+    SET
+        [ScopeType] = N'Organization',
+        [OwnerWindowsSid] = NULL
+    WHERE [ScopeType] <> N'Organization'
+       OR [OwnerWindowsSid] IS NOT NULL;
+
+    DECLARE @CommonLinkDefault sysname;
+    SELECT @CommonLinkDefault = default_constraint.[name]
+    FROM sys.default_constraints AS default_constraint
+    INNER JOIN sys.columns AS column_definition
+        ON column_definition.[object_id] = default_constraint.[parent_object_id]
+       AND column_definition.[column_id] = default_constraint.[parent_column_id]
+    WHERE default_constraint.[parent_object_id] = OBJECT_ID(N'tb_data.CommonLinks')
+      AND column_definition.[name] = N'ScopeType';
+
+    IF @CommonLinkDefault IS NOT NULL
+        EXEC
+        (
+            N'ALTER TABLE [tb_data].[CommonLinks] DROP CONSTRAINT '
+            + QUOTENAME(@CommonLinkDefault)
+            + N';'
+        );
+
+    ALTER TABLE [tb_data].[CommonLinks]
+        ADD CONSTRAINT [DF_CommonLinks_ScopeType]
+        DEFAULT (N'Organization') FOR [ScopeType];
+
+    /*
+        Client aliases are shared matching knowledge. Preserve an existing
+        organization mapping when present; otherwise choose the most recently
+        updated mapping deterministically before promoting it.
+    */
+    ;WITH ranked_aliases AS
+    (
+        SELECT
+            [Id],
+            ROW_NUMBER() OVER
+            (
+                PARTITION BY [Alias]
+                ORDER BY
+                    CASE WHEN [ScopeType] = N'Organization' THEN 0 ELSE 1 END,
+                    [UpdatedAtUtc] DESC,
+                    [Id] DESC
+            ) AS [AliasRank]
+        FROM [tb_data].[ClientAliases]
+    )
+    DELETE client_alias
+    FROM [tb_data].[ClientAliases] AS client_alias
+    INNER JOIN ranked_aliases AS ranked_alias
+        ON ranked_alias.[Id] = client_alias.[Id]
+    WHERE ranked_alias.[AliasRank] > 1;
+
+    UPDATE [tb_data].[ClientAliases]
+    SET
+        [ScopeType] = N'Organization',
+        [OwnerWindowsSid] = NULL
+    WHERE [ScopeType] <> N'Organization'
+       OR [OwnerWindowsSid] IS NOT NULL;
+
+    DECLARE @ClientAliasDefault sysname;
+    SELECT @ClientAliasDefault = default_constraint.[name]
+    FROM sys.default_constraints AS default_constraint
+    INNER JOIN sys.columns AS column_definition
+        ON column_definition.[object_id] = default_constraint.[parent_object_id]
+       AND column_definition.[column_id] = default_constraint.[parent_column_id]
+    WHERE default_constraint.[parent_object_id] = OBJECT_ID(N'tb_data.ClientAliases')
+      AND column_definition.[name] = N'ScopeType';
+
+    IF @ClientAliasDefault IS NOT NULL
+        EXEC
+        (
+            N'ALTER TABLE [tb_data].[ClientAliases] DROP CONSTRAINT '
+            + QUOTENAME(@ClientAliasDefault)
+            + N';'
+        );
+
+    ALTER TABLE [tb_data].[ClientAliases]
+        ADD CONSTRAINT [DF_ClientAliases_ScopeType]
+        DEFAULT (N'Organization') FOR [ScopeType];
+
+    /*
+        Promote a personal template only when its name/category has no competing
+        text. Exact duplicates are collapsed deterministically. Conflicting
+        personal variants remain personal so the migration never discards or
+        guesses between different note content.
+    */
+    DELETE personal_template
+    FROM [tb_data].[Templates] AS personal_template
+    WHERE personal_template.[ScopeType] = N'User'
+      AND EXISTS
+      (
+          SELECT 1
+          FROM [tb_data].[Templates] AS organization_template
+          WHERE organization_template.[ScopeType] = N'Organization'
+            AND organization_template.[Name] = personal_template.[Name]
+            AND organization_template.[Category] = personal_template.[Category]
+            AND organization_template.[TemplateText] = personal_template.[TemplateText]
+      );
+
+    UPDATE candidate
+    SET
+        [ScopeType] = N'Organization',
+        [OwnerWindowsSid] = NULL
+    FROM [tb_data].[Templates] AS candidate
+    WHERE candidate.[ScopeType] = N'User'
+      AND NOT EXISTS
+      (
+          SELECT 1
+          FROM [tb_data].[Templates] AS conflict
+          WHERE conflict.[Name] = candidate.[Name]
+            AND conflict.[Category] = candidate.[Category]
+            AND conflict.[TemplateText] <> candidate.[TemplateText]
+      )
+      AND NOT EXISTS
+      (
+          SELECT 1
+          FROM [tb_data].[Templates] AS earlier_duplicate
+          WHERE earlier_duplicate.[ScopeType] = N'User'
+            AND earlier_duplicate.[Name] = candidate.[Name]
+            AND earlier_duplicate.[Category] = candidate.[Category]
+            AND earlier_duplicate.[TemplateText] = candidate.[TemplateText]
+            AND earlier_duplicate.[Id] < candidate.[Id]
+      );
+
+    DELETE personal_template
+    FROM [tb_data].[Templates] AS personal_template
+    WHERE personal_template.[ScopeType] = N'User'
+      AND EXISTS
+      (
+          SELECT 1
+          FROM [tb_data].[Templates] AS organization_template
+          WHERE organization_template.[ScopeType] = N'Organization'
+            AND organization_template.[Name] = personal_template.[Name]
+            AND organization_template.[Category] = personal_template.[Category]
+            AND organization_template.[TemplateText] = personal_template.[TemplateText]
+      );
+
+    /* Promote shared connection/configuration keys; retain identity settings. */
+    DECLARE @SharedSettingKeys TABLE
+    (
+        [SettingKey] nvarchar(200) NOT NULL PRIMARY KEY
+    );
+
+    INSERT INTO @SharedSettingKeys([SettingKey])
+    VALUES
+        (N'Whd.BaseUrl'),
+        (N'Whd.AuthenticationMode'),
+        (N'Sage.ActivityItemId');
+
+    INSERT INTO [tb_data].[OrganizationSettings]
+    (
+        [SettingKey],
+        [SettingValue],
+        [UpdatedByWindowsSid],
+        [UpdatedAtUtc]
+    )
+    SELECT
+        shared_key.[SettingKey],
+        latest_setting.[SettingValue],
+        latest_setting.[OwnerWindowsSid],
+        latest_setting.[UpdatedAtUtc]
+    FROM @SharedSettingKeys AS shared_key
+    CROSS APPLY
+    (
+        SELECT TOP (1)
+            user_setting.[SettingValue],
+            user_setting.[OwnerWindowsSid],
+            user_setting.[UpdatedAtUtc]
+        FROM [tb_user].[UserSettings] AS user_setting
+        WHERE user_setting.[SettingKey] = shared_key.[SettingKey]
+        ORDER BY
+            user_setting.[UpdatedAtUtc] DESC,
+            user_setting.[OwnerWindowsSid] DESC
+    ) AS latest_setting
+    WHERE NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_data].[OrganizationSettings] AS organization_setting
+        WHERE organization_setting.[SettingKey] = shared_key.[SettingKey]
+    );
+
+    DELETE user_setting
+    FROM [tb_user].[UserSettings] AS user_setting
+    INNER JOIN @SharedSettingKeys AS shared_key
+        ON shared_key.[SettingKey] = user_setting.[SettingKey];
+
+    INSERT INTO [tb_deploy].[SchemaMigrations]
+    (
+        [MigrationId],
+        [SchemaVersion],
+        [ReleaseVersion],
+        [ScriptChecksum]
+    )
+    VALUES
+    (
+        N'SqlServer2016.SharedReferenceData.0003',
+        3,
+        N'2.0.0-alpha.3',
+        NULL
+    );
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0
+        ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+PRINT N'SqlServer2016.SharedReferenceData.0003 installed.';
+GO
+
+-- ============================================================================
+-- END 22-V0003-SharedReferenceData.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 30-Security.sql
 -- ============================================================================
 
@@ -2867,15 +3238,13 @@ BEGIN
         @IsAdmin = @IsAdmin OUTPUT,
         @IsSyncOperator = @IsSyncOperator OUTPUT;
 
-    IF @IncludeAllUsers = 1 AND @IsManager <> 1 AND @IsAdmin <> 1
-        THROW 51120, N'Only a Manager or Admin may read organization-wide tags.', 1;
-
-    SELECT DISTINCT
-        LTRIM(RTRIM(tag.[value])) AS [Tag]
-    FROM [tb_data].[WorkEntries] AS work_entry
-    CROSS APPLY STRING_SPLIT(work_entry.[Tags], N',') AS tag
-    WHERE (@IncludeAllUsers = 1 OR work_entry.[OwnerWindowsSid] = @UserSid)
-      AND NULLIF(LTRIM(RTRIM(tag.[value])), N'') IS NOT NULL
+    /*
+        @IncludeAllUsers is retained for desktop contract compatibility. Tags are
+        now a canonical organization catalog, so every authorized user receives
+        the same list without this procedure reading or exposing work entries.
+    */
+    SELECT [Tag]
+    FROM [tb_data].[OrganizationTags]
     ORDER BY [Tag];
 END;
 GO
@@ -3189,6 +3558,51 @@ BEGIN
                 );
             END;
         END;
+
+        /*
+            Publish newly entered tags to the organization catalog in the same
+            transaction as the work-entry save. Range locks serialize first use
+            of a tag across workstations; no direct table grant is required.
+        */
+        ;WITH parsed_tags AS
+        (
+            SELECT DISTINCT
+                LTRIM(RTRIM(tag.[value])) AS [Tag],
+                CONVERT
+                (
+                    binary(32),
+                    HASHBYTES
+                    (
+                        N'SHA2_256',
+                        CONVERT
+                        (
+                            varbinary(2000),
+                            UPPER(LTRIM(RTRIM(tag.[value])))
+                        )
+                    )
+                ) AS [TagHash]
+            FROM STRING_SPLIT(@Tags, N',') AS tag
+            WHERE NULLIF(LTRIM(RTRIM(tag.[value])), N'') IS NOT NULL
+        )
+        INSERT INTO [tb_data].[OrganizationTags]
+        (
+            [Tag],
+            [TagHash],
+            [CreatedByWindowsSid],
+            [CreatedAtUtc]
+        )
+        SELECT
+            parsed_tag.[Tag],
+            parsed_tag.[TagHash],
+            @UserSid,
+            @NowUtc
+        FROM parsed_tags AS parsed_tag
+        WHERE NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[OrganizationTags] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [TagHash] = parsed_tag.[TagHash]
+        );
 
         EXEC [tb_security].[WriteAuditEvent]
             @Action = @Action,
@@ -9055,6 +9469,1015 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 45-V0003-SharedReferenceProcedures.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+GO
+
+IF OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[GetRepositoryCapabilities];
+GO
+
+CREATE PROCEDURE [tb_app].[GetRepositoryCapabilities]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SELECT
+        CONVERT(int, 3) AS [SchemaVersion],
+        CONVERT(bit, 0) AS [FullTextSearchAvailable],
+        CONVERT(bit, 1) AS [SupportsTickets],
+        CONVERT(bit, 1) AS [SupportsWorkEntries],
+        CONVERT(bit, 1) AS [SupportsPrivateNotes],
+        CONVERT(bit, 1) AS [SupportsPostingLeases],
+        CONVERT(bit, 1) AS [SupportsSyncLeases],
+        CONVERT(bit, 1) AS [SupportsImports];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.GetCommonLinks', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[GetCommonLinks];
+GO
+
+CREATE PROCEDURE [tb_app].[GetCommonLinks]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SELECT
+        [Id],
+        [ScopeType],
+        [Name],
+        [Url],
+        [SortOrder],
+        [BuiltInKey],
+        [CreatedAtUtc] AS [CreatedAt],
+        [UpdatedAtUtc] AS [UpdatedAt],
+        [RowVersion]
+    FROM [tb_data].[CommonLinks]
+    WHERE [ScopeType] = N'Organization'
+    ORDER BY [SortOrder], [Name], [Id];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SaveCommonLink', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SaveCommonLink];
+GO
+
+CREATE PROCEDURE [tb_app].[SaveCommonLink]
+    @Id int = NULL,
+    @ScopeType nvarchar(20) = N'Organization',
+    @Name nvarchar(160),
+    @Url nvarchar(2048),
+    @SortOrder int = 0,
+    @BuiltInKey nvarchar(120) = NULL,
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SET @ScopeType =
+        COALESCE(NULLIF(LTRIM(RTRIM(@ScopeType)), N''), N'Organization');
+    SET @Name = NULLIF(LTRIM(RTRIM(@Name)), N'');
+    SET @Url = NULLIF(LTRIM(RTRIM(@Url)), N'');
+    SET @BuiltInKey = NULLIF(LTRIM(RTRIM(@BuiltInKey)), N'');
+
+    IF @ScopeType <> N'Organization'
+        THROW 51300, N'Common Links are organization-scoped in schema version 3.', 1;
+    IF @IsAdmin <> 1
+        THROW 51301, N'Only an Admin may save organization Common Links.', 1;
+    IF @Name IS NULL OR @Url IS NULL
+        THROW 51300, N'Common-link name and URL are required.', 1;
+    IF @Id IS NOT NULL AND @ExpectedRowVersion IS NULL
+        THROW 51302, N'ExpectedRowVersion is required when updating a Common Link.', 1;
+    IF @Id IS NOT NULL
+       AND EXISTS
+       (
+           SELECT 1
+           FROM [tb_data].[CommonLinks]
+           WHERE [Id] = @Id
+             AND [BuiltInKey] IS NOT NULL
+       )
+        THROW 51303, N'Built-in Common Links cannot be changed.', 1;
+
+    DECLARE @NowUtc datetime2(3) = SYSUTCDATETIME();
+    DECLARE @UrlHash binary(32) =
+        CONVERT(binary(32), HASHBYTES(N'SHA2_256', CONVERT(varbinary(8000), @Url)));
+    DECLARE @Action nvarchar(120);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF @Id IS NULL
+        BEGIN
+            INSERT INTO [tb_data].[CommonLinks]
+            (
+                [ScopeType],
+                [OwnerWindowsSid],
+                [Name],
+                [Url],
+                [UrlHash],
+                [SortOrder],
+                [BuiltInKey],
+                [CreatedByWindowsSid],
+                [UpdatedByWindowsSid],
+                [CreatedAtUtc],
+                [UpdatedAtUtc]
+            )
+            VALUES
+            (
+                N'Organization',
+                NULL,
+                @Name,
+                @Url,
+                @UrlHash,
+                @SortOrder,
+                @BuiltInKey,
+                @UserSid,
+                @UserSid,
+                @NowUtc,
+                @NowUtc
+            );
+
+            SET @Id = CONVERT(int, SCOPE_IDENTITY());
+            SET @Action = N'CommonLinkCreated';
+        END
+        ELSE
+        BEGIN
+            IF NOT EXISTS
+            (
+                SELECT 1
+                FROM [tb_data].[CommonLinks] WITH (UPDLOCK, HOLDLOCK)
+                WHERE [Id] = @Id
+                  AND [ScopeType] = N'Organization'
+            )
+                THROW 51304, N'The organization Common Link does not exist.', 1;
+
+            UPDATE [tb_data].[CommonLinks]
+            SET
+                [ScopeType] = N'Organization',
+                [OwnerWindowsSid] = NULL,
+                [Name] = @Name,
+                [Url] = @Url,
+                [UrlHash] = @UrlHash,
+                [SortOrder] = @SortOrder,
+                [BuiltInKey] = @BuiltInKey,
+                [UpdatedByWindowsSid] = @UserSid,
+                [UpdatedAtUtc] = @NowUtc
+            WHERE [Id] = @Id
+              AND [RowVersion] = @ExpectedRowVersion;
+
+            IF @@ROWCOUNT = 0
+                THROW 51305, N'The Common Link changed after it was loaded.', 1;
+
+            SET @Action = N'CommonLinkUpdated';
+        END;
+
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action = @Action,
+            @EntityType = N'CommonLink',
+            @EntityId = CONVERT(nvarchar(120), @Id),
+            @RequestId = @RequestId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        [Id],
+        [ScopeType],
+        [Name],
+        [Url],
+        [SortOrder],
+        [BuiltInKey],
+        [CreatedAtUtc] AS [CreatedAt],
+        [UpdatedAtUtc] AS [UpdatedAt],
+        [RowVersion]
+    FROM [tb_data].[CommonLinks]
+    WHERE [Id] = @Id;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.DeleteCommonLink', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[DeleteCommonLink];
+GO
+
+CREATE PROCEDURE [tb_app].[DeleteCommonLink]
+    @Id int,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1
+        THROW 51306, N'Only an Admin may delete organization Common Links.', 1;
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [tb_data].[CommonLinks]
+        WHERE [Id] = @Id
+          AND [BuiltInKey] IS NOT NULL
+    )
+        THROW 51303, N'Built-in Common Links cannot be removed.', 1;
+
+    DELETE FROM [tb_data].[CommonLinks]
+    WHERE [Id] = @Id
+      AND [ScopeType] = N'Organization'
+      AND [RowVersion] = @ExpectedRowVersion;
+
+    IF @@ROWCOUNT = 0
+        THROW 51307, N'The Common Link was not found or changed after it was loaded.', 1;
+
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action = N'CommonLinkDeleted',
+        @EntityType = N'CommonLink',
+        @EntityId = CONVERT(nvarchar(120), @Id),
+        @RequestId = @RequestId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.GetClientAliases', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[GetClientAliases];
+GO
+
+CREATE PROCEDURE [tb_app].[GetClientAliases]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SELECT
+        [Id],
+        [ScopeType],
+        [Alias],
+        [ClientId],
+        [UpdatedAtUtc] AS [UpdatedAt],
+        [RowVersion]
+    FROM [tb_data].[ClientAliases]
+    WHERE [ScopeType] = N'Organization'
+    ORDER BY [Alias];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SaveClientAlias', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SaveClientAlias];
+GO
+
+CREATE PROCEDURE [tb_app].[SaveClientAlias]
+    @Id bigint = NULL,
+    @ScopeType nvarchar(20) = N'Organization',
+    @Alias nvarchar(240),
+    @ClientId int,
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SET @ScopeType =
+        COALESCE(NULLIF(LTRIM(RTRIM(@ScopeType)), N''), N'Organization');
+    SET @Alias = NULLIF(LTRIM(RTRIM(@Alias)), N'');
+
+    IF @ScopeType <> N'Organization'
+        THROW 51310, N'Client aliases are organization-scoped in schema version 3.', 1;
+    IF @Alias IS NULL
+        THROW 51310, N'Client alias is required.', 1;
+    IF NOT EXISTS (SELECT 1 FROM [tb_data].[Clients] WHERE [Id] = @ClientId)
+        THROW 51310, N'The selected client does not exist.', 1;
+
+    DECLARE @NowUtc datetime2(3) = SYSUTCDATETIME();
+    DECLARE @StoredAlias nvarchar(240);
+    DECLARE @StoredClientId int;
+    DECLARE @StoredRowVersion binary(8);
+    DECLARE @Action nvarchar(120);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF @Id IS NULL
+        BEGIN
+            SELECT
+                @Id = [Id],
+                @StoredAlias = [Alias],
+                @StoredClientId = [ClientId],
+                @StoredRowVersion = [RowVersion]
+            FROM [tb_data].[ClientAliases] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [ScopeType] = N'Organization'
+              AND [Alias] = @Alias;
+
+            IF @Id IS NULL
+            BEGIN
+                INSERT INTO [tb_data].[ClientAliases]
+                (
+                    [ScopeType],
+                    [OwnerWindowsSid],
+                    [Alias],
+                    [ClientId],
+                    [CreatedByWindowsSid],
+                    [UpdatedByWindowsSid],
+                    [CreatedAtUtc],
+                    [UpdatedAtUtc]
+                )
+                VALUES
+                (
+                    N'Organization',
+                    NULL,
+                    @Alias,
+                    @ClientId,
+                    @UserSid,
+                    @UserSid,
+                    @NowUtc,
+                    @NowUtc
+                );
+
+                SET @Id = CONVERT(bigint, SCOPE_IDENTITY());
+                SET @Action = N'ClientAliasCreated';
+            END
+            ELSE IF @StoredClientId <> @ClientId
+            BEGIN
+                IF @IsAdmin <> 1
+                    THROW 51311, N'Only an Admin may change an existing organization client alias.', 1;
+
+                UPDATE [tb_data].[ClientAliases]
+                SET
+                    [ClientId] = @ClientId,
+                    [UpdatedByWindowsSid] = @UserSid,
+                    [UpdatedAtUtc] = @NowUtc
+                WHERE [Id] = @Id
+                  AND [RowVersion] = @StoredRowVersion;
+
+                IF @@ROWCOUNT = 0
+                    THROW 51312, N'The client alias changed while it was being saved.', 1;
+
+                SET @Action = N'ClientAliasUpdated';
+            END;
+            /* Same alias + client is intentionally an idempotent success. */
+        END
+        ELSE
+        BEGIN
+            SELECT
+                @StoredAlias = [Alias],
+                @StoredClientId = [ClientId],
+                @StoredRowVersion = [RowVersion]
+            FROM [tb_data].[ClientAliases] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [Id] = @Id
+              AND [ScopeType] = N'Organization';
+
+            IF @StoredAlias IS NULL
+                THROW 51313, N'The organization client alias does not exist.', 1;
+
+            IF @StoredAlias <> @Alias OR @StoredClientId <> @ClientId
+            BEGIN
+                IF @IsAdmin <> 1
+                    THROW 51311, N'Only an Admin may change an existing organization client alias.', 1;
+                IF @ExpectedRowVersion IS NULL
+                    THROW 51314, N'ExpectedRowVersion is required when changing a client alias.', 1;
+
+                UPDATE [tb_data].[ClientAliases]
+                SET
+                    [Alias] = @Alias,
+                    [ClientId] = @ClientId,
+                    [UpdatedByWindowsSid] = @UserSid,
+                    [UpdatedAtUtc] = @NowUtc
+                WHERE [Id] = @Id
+                  AND [RowVersion] = @ExpectedRowVersion;
+
+                IF @@ROWCOUNT = 0
+                    THROW 51312, N'The client alias changed after it was loaded.', 1;
+
+                SET @Action = N'ClientAliasUpdated';
+            END;
+            /* Reusing the same loaded mapping is also idempotent for all users. */
+        END;
+
+        IF @Action IS NOT NULL
+        BEGIN
+            EXEC [tb_security].[WriteAuditEvent]
+                @Action = @Action,
+                @EntityType = N'ClientAlias',
+                @EntityId = CONVERT(nvarchar(120), @Id),
+                @RequestId = @RequestId;
+        END;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        [Id],
+        [ScopeType],
+        [Alias],
+        [ClientId],
+        [UpdatedAtUtc] AS [UpdatedAt],
+        [RowVersion]
+    FROM [tb_data].[ClientAliases]
+    WHERE [Id] = @Id;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.DeleteClientAlias', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[DeleteClientAlias];
+GO
+
+CREATE PROCEDURE [tb_app].[DeleteClientAlias]
+    @Id bigint,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1
+        THROW 51315, N'Only an Admin may delete organization client aliases.', 1;
+
+    DELETE FROM [tb_data].[ClientAliases]
+    WHERE [Id] = @Id
+      AND [ScopeType] = N'Organization'
+      AND [RowVersion] = @ExpectedRowVersion;
+
+    IF @@ROWCOUNT = 0
+        THROW 51316, N'The client alias was not found or changed after it was loaded.', 1;
+
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action = N'ClientAliasDeleted',
+        @EntityType = N'ClientAlias',
+        @EntityId = CONVERT(nvarchar(120), @Id),
+        @RequestId = @RequestId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SaveTemplate', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SaveTemplate];
+GO
+
+CREATE PROCEDURE [tb_app].[SaveTemplate]
+    @Id int = NULL,
+    @ScopeType nvarchar(20) = N'Organization',
+    @Name nvarchar(160),
+    @Category nvarchar(160) = N'',
+    @TemplateText nvarchar(max) = N'',
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SET @ScopeType =
+        COALESCE(NULLIF(LTRIM(RTRIM(@ScopeType)), N''), N'Organization');
+    SET @Name = NULLIF(LTRIM(RTRIM(@Name)), N'');
+    SET @Category = COALESCE(LTRIM(RTRIM(@Category)), N'');
+    SET @TemplateText = COALESCE(@TemplateText, N'');
+
+    IF @ScopeType <> N'Organization'
+        THROW 51330, N'Templates are organization-scoped in schema version 3; legacy personal templates are read-only.', 1;
+    IF @IsAdmin <> 1
+        THROW 51331, N'Only an Admin may save organization templates.', 1;
+    IF @Name IS NULL
+        THROW 51330, N'Template name is required.', 1;
+    IF @Id IS NOT NULL AND @ExpectedRowVersion IS NULL
+        THROW 51332, N'ExpectedRowVersion is required when updating a template.', 1;
+
+    DECLARE @NowUtc datetime2(3) = SYSUTCDATETIME();
+    DECLARE @Action nvarchar(120);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF @Id IS NULL
+        BEGIN
+            INSERT INTO [tb_data].[Templates]
+            (
+                [ScopeType],
+                [OwnerWindowsSid],
+                [Name],
+                [Category],
+                [TemplateText],
+                [CreatedByWindowsSid],
+                [UpdatedByWindowsSid],
+                [CreatedAtUtc],
+                [UpdatedAtUtc]
+            )
+            VALUES
+            (
+                N'Organization',
+                NULL,
+                @Name,
+                @Category,
+                @TemplateText,
+                @UserSid,
+                @UserSid,
+                @NowUtc,
+                @NowUtc
+            );
+
+            SET @Id = CONVERT(int, SCOPE_IDENTITY());
+            SET @Action = N'TemplateCreated';
+        END
+        ELSE
+        BEGIN
+            IF NOT EXISTS
+            (
+                SELECT 1
+                FROM [tb_data].[Templates] WITH (UPDLOCK, HOLDLOCK)
+                WHERE [Id] = @Id
+                  AND [ScopeType] = N'Organization'
+                  AND [OwnerWindowsSid] IS NULL
+            )
+                THROW 51333, N'The organization template does not exist; legacy personal templates are read-only.', 1;
+
+            UPDATE [tb_data].[Templates]
+            SET
+                [Name] = @Name,
+                [Category] = @Category,
+                [TemplateText] = @TemplateText,
+                [UpdatedByWindowsSid] = @UserSid,
+                [UpdatedAtUtc] = @NowUtc
+            WHERE [Id] = @Id
+              AND [ScopeType] = N'Organization'
+              AND [OwnerWindowsSid] IS NULL
+              AND [RowVersion] = @ExpectedRowVersion;
+
+            IF @@ROWCOUNT = 0
+                THROW 51334, N'The template changed after it was loaded.', 1;
+
+            SET @Action = N'TemplateUpdated';
+        END;
+
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action = @Action,
+            @EntityType = N'Template',
+            @EntityId = CONVERT(nvarchar(120), @Id),
+            @RequestId = @RequestId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        [Id],
+        [ScopeType],
+        [Name],
+        [Category],
+        [TemplateText],
+        [UpdatedAtUtc] AS [UpdatedAt],
+        [RowVersion]
+    FROM [tb_data].[Templates]
+    WHERE [Id] = @Id;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.DeleteTemplate', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[DeleteTemplate];
+GO
+
+CREATE PROCEDURE [tb_app].[DeleteTemplate]
+    @Id int,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1
+        THROW 51335, N'Only an Admin may delete organization templates.', 1;
+
+    DELETE FROM [tb_data].[Templates]
+    WHERE [Id] = @Id
+      AND [ScopeType] = N'Organization'
+      AND [OwnerWindowsSid] IS NULL
+      AND [RowVersion] = @ExpectedRowVersion;
+
+    IF @@ROWCOUNT = 0
+        THROW 51336, N'The organization template was not found or changed; legacy personal templates are read-only.', 1;
+
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action = N'TemplateDeleted',
+        @EntityType = N'Template',
+        @EntityId = CONVERT(nvarchar(120), @Id),
+        @RequestId = @RequestId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SaveUserSetting', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SaveUserSetting];
+GO
+
+CREATE PROCEDURE [tb_app].[SaveUserSetting]
+    @SettingKey nvarchar(200),
+    @SettingValue nvarchar(max),
+    @ExpectedRowVersion binary(8) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SET @SettingKey = NULLIF(LTRIM(RTRIM(@SettingKey)), N'');
+    SET @SettingValue = COALESCE(@SettingValue, N'');
+
+    IF @SettingKey IS NULL
+        THROW 51220, N'SettingKey is required.', 1;
+    IF @SettingKey IN
+       (
+           N'Whd.BaseUrl',
+           N'Whd.AuthenticationMode',
+           N'Sage.ActivityItemId'
+       )
+        THROW 51320, N'This setting is organization-scoped and may be changed only through organization settings.', 1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM [tb_user].[UserSettings] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [OwnerWindowsSid] = @UserSid
+              AND [SettingKey] = @SettingKey
+        )
+        BEGIN
+            IF @ExpectedRowVersion IS NULL
+                THROW 51221, N'ExpectedRowVersion is required for an existing user setting.', 1;
+
+            UPDATE [tb_user].[UserSettings]
+            SET
+                [SettingValue] = @SettingValue,
+                [UpdatedAtUtc] = SYSUTCDATETIME()
+            WHERE [OwnerWindowsSid] = @UserSid
+              AND [SettingKey] = @SettingKey
+              AND [RowVersion] = @ExpectedRowVersion;
+
+            IF @@ROWCOUNT = 0
+                THROW 51222, N'The user setting changed after it was loaded.', 1;
+        END
+        ELSE
+        BEGIN
+            IF @ExpectedRowVersion IS NOT NULL
+                THROW 51222, N'The user setting changed after it was loaded.', 1;
+
+            INSERT INTO [tb_user].[UserSettings]
+            (
+                [OwnerWindowsSid],
+                [SettingKey],
+                [SettingValue]
+            )
+            VALUES
+            (
+                @UserSid,
+                @SettingKey,
+                @SettingValue
+            );
+        END;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        CONVERT(nvarchar(20), N'User') AS [ScopeType],
+        [SettingKey],
+        [SettingValue],
+        [UpdatedAtUtc] AS [UpdatedAt],
+        [RowVersion]
+    FROM [tb_user].[UserSettings]
+    WHERE [OwnerWindowsSid] = @UserSid
+      AND [SettingKey] = @SettingKey;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.DeleteUserSetting', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[DeleteUserSetting];
+GO
+
+CREATE PROCEDURE [tb_app].[DeleteUserSetting]
+    @SettingKey nvarchar(200),
+    @ExpectedRowVersion binary(8) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SET @SettingKey = NULLIF(LTRIM(RTRIM(@SettingKey)), N'');
+
+    IF @SettingKey IN
+       (
+           N'Whd.BaseUrl',
+           N'Whd.AuthenticationMode',
+           N'Sage.ActivityItemId'
+       )
+        THROW 51320, N'This setting is organization-scoped and may be changed only through organization settings.', 1;
+
+    DELETE FROM [tb_user].[UserSettings]
+    WHERE [OwnerWindowsSid] = @UserSid
+      AND [SettingKey] = @SettingKey
+      AND (@ExpectedRowVersion IS NULL OR [RowVersion] = @ExpectedRowVersion);
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminSaveTemplate', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminSaveTemplate];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminSaveTemplate]
+    @Id int = NULL,
+    @Name nvarchar(160),
+    @Category nvarchar(160) = N'',
+    @TemplateText nvarchar(max) = N'',
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    EXEC [tb_app].[SaveTemplate]
+        @Id = @Id,
+        @ScopeType = N'Organization',
+        @Name = @Name,
+        @Category = @Category,
+        @TemplateText = @TemplateText,
+        @ExpectedRowVersion = @ExpectedRowVersion,
+        @RequestId = @RequestId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminSaveCommonLink', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminSaveCommonLink];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminSaveCommonLink]
+    @Id int = NULL,
+    @Name nvarchar(160),
+    @Url nvarchar(2048),
+    @SortOrder int = 0,
+    @BuiltInKey nvarchar(120) = NULL,
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    EXEC [tb_app].[SaveCommonLink]
+        @Id = @Id,
+        @ScopeType = N'Organization',
+        @Name = @Name,
+        @Url = @Url,
+        @SortOrder = @SortOrder,
+        @BuiltInKey = @BuiltInKey,
+        @ExpectedRowVersion = @ExpectedRowVersion,
+        @RequestId = @RequestId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminSaveClientAlias', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminSaveClientAlias];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminSaveClientAlias]
+    @Alias nvarchar(240),
+    @ClientId int,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+    DECLARE @Id bigint;
+    DECLARE @ExpectedRowVersion binary(8);
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1
+        THROW 51317, N'Only an Admin may use the administrative client-alias operation.', 1;
+
+    SELECT
+        @Id = [Id],
+        @ExpectedRowVersion = [RowVersion]
+    FROM [tb_data].[ClientAliases]
+    WHERE [ScopeType] = N'Organization'
+      AND [Alias] = @Alias;
+
+    EXEC [tb_app].[SaveClientAlias]
+        @Id = @Id,
+        @ScopeType = N'Organization',
+        @Alias = @Alias,
+        @ClientId = @ClientId,
+        @ExpectedRowVersion = @ExpectedRowVersion,
+        @RequestId = @RequestId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminDeleteClientAlias', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminDeleteClientAlias];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminDeleteClientAlias]
+    @Alias nvarchar(240),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+    DECLARE @Id bigint;
+    DECLARE @ExpectedRowVersion binary(8);
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1
+        THROW 51317, N'Only an Admin may use the administrative client-alias operation.', 1;
+
+    SELECT
+        @Id = [Id],
+        @ExpectedRowVersion = [RowVersion]
+    FROM [tb_data].[ClientAliases]
+    WHERE [ScopeType] = N'Organization'
+      AND [Alias] = @Alias;
+
+    IF @Id IS NOT NULL
+    BEGIN
+        EXEC [tb_app].[DeleteClientAlias]
+            @Id = @Id,
+            @ExpectedRowVersion = @ExpectedRowVersion,
+            @RequestId = @RequestId;
+    END;
+END;
+GO
+
+PRINT N'TechBench V0003 shared-reference procedures created.';
+GO
+
+-- ============================================================================
+-- END 45-V0003-SharedReferenceProcedures.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 50-Grants.sql
 -- ============================================================================
 
@@ -9713,9 +11136,9 @@ IF
 (
     SELECT MAX([SchemaVersion])
     FROM [tb_deploy].[SchemaMigrations]
-) <> 2
+) NOT IN (2, 3)
 BEGIN
-    PRINT N'FAIL: The installed TechBench schema version is not 2.';
+    PRINT N'FAIL: V0002 verification supports installed schema version 2 or 3.';
     SET @FailureCount += 1;
 END;
 
@@ -10394,6 +11817,458 @@ GO
 
 -- ============================================================================
 -- END 91-V0002-OperationalVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 92-V0003-SharedReferenceVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @FailureCount int = 0;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.SharedReferenceData.0003'
+      AND [SchemaVersion] = 3
+      AND [ReleaseVersion] = N'2.0.0-alpha.3'
+)
+BEGIN
+    PRINT N'FAIL: SharedReferenceData.0003 migration marker is missing or invalid.';
+    SET @FailureCount += 1;
+END;
+
+IF
+(
+    SELECT MAX([SchemaVersion])
+    FROM [tb_deploy].[SchemaMigrations]
+) <> 3
+BEGIN
+    PRINT N'FAIL: The installed TechBench schema version is not 3.';
+    SET @FailureCount += 1;
+END;
+
+IF OBJECT_ID(N'tb_data.OrganizationTags', N'U') IS NULL
+BEGIN
+    PRINT N'FAIL: tb_data.OrganizationTags is missing.';
+    SET @FailureCount += 1;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.columns
+    WHERE [object_id] = OBJECT_ID(N'tb_data.OrganizationTags')
+      AND [name] = N'Tag'
+      AND TYPE_NAME([user_type_id]) = N'nvarchar'
+      AND [max_length] = 2000
+      AND [is_nullable] = 0
+)
+BEGIN
+    PRINT N'FAIL: OrganizationTags.Tag is not bounded to nvarchar(1000) NOT NULL.';
+    SET @FailureCount += 1;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.columns
+    WHERE [object_id] = OBJECT_ID(N'tb_data.OrganizationTags')
+      AND [name] = N'RowVersion'
+      AND [system_type_id] = 189
+      AND [is_nullable] = 0
+)
+BEGIN
+    PRINT N'FAIL: OrganizationTags lacks its required rowversion concurrency token.';
+    SET @FailureCount += 1;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.columns
+    WHERE [object_id] = OBJECT_ID(N'tb_data.OrganizationTags')
+      AND [name] = N'TagHash'
+      AND TYPE_NAME([user_type_id]) = N'binary'
+      AND [max_length] = 32
+      AND [is_nullable] = 0
+)
+BEGIN
+    PRINT N'FAIL: OrganizationTags.TagHash is not binary(32) NOT NULL.';
+    SET @FailureCount += 1;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [object_id] = OBJECT_ID(N'tb_data.OrganizationTags')
+      AND [name] = N'UX_OrganizationTags_TagHash'
+      AND [is_unique] = 1
+)
+BEGIN
+    PRINT N'FAIL: The canonical organization-tag hash is not uniquely indexed.';
+    SET @FailureCount += 1;
+END;
+
+IF OBJECT_ID(N'tb_data.OrganizationTags', N'U') IS NOT NULL
+   AND EXISTS
+   (
+       SELECT 1
+       FROM [tb_data].[OrganizationTags]
+       WHERE NULLIF(LTRIM(RTRIM([Tag])), N'') IS NULL
+          OR [Tag] <> LTRIM(RTRIM([Tag]))
+          OR DATALENGTH([Tag]) > 2000
+   )
+BEGIN
+    PRINT N'FAIL: OrganizationTags contains a blank, untrimmed, or over-length tag.';
+    SET @FailureCount += 1;
+END;
+
+IF OBJECT_ID(N'tb_data.OrganizationTags', N'U') IS NOT NULL
+   AND EXISTS
+   (
+       SELECT 1
+       FROM [tb_data].[WorkEntries] AS work_entry
+       CROSS APPLY STRING_SPLIT(COALESCE(work_entry.[Tags], N''), N',') AS tag
+       WHERE NULLIF(LTRIM(RTRIM(tag.[value])), N'') IS NOT NULL
+         AND NOT EXISTS
+         (
+             SELECT 1
+             FROM [tb_data].[OrganizationTags] AS organization_tag
+             WHERE organization_tag.[TagHash] =
+                 CONVERT
+                 (
+                     binary(32),
+                     HASHBYTES
+                     (
+                         N'SHA2_256',
+                         CONVERT
+                         (
+                             varbinary(2000),
+                             UPPER(LTRIM(RTRIM(tag.[value])))
+                         )
+                     )
+                 )
+         )
+   )
+BEGIN
+    PRINT N'FAIL: One or more existing work-entry tags were not backfilled.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @GetDistinctTagsDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetDistinctTags'));
+DECLARE @SaveWorkEntryDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveWorkEntry'));
+
+IF @GetDistinctTagsDefinition IS NULL
+   OR CHARINDEX(N'[tb_data].[OrganizationTags]', @GetDistinctTagsDefinition) = 0
+   OR CHARINDEX(N'[tb_data].[WorkEntries]', @GetDistinctTagsDefinition) > 0
+BEGIN
+    PRINT N'FAIL: GetDistinctTags is not isolated to the canonical organization catalog.';
+    SET @FailureCount += 1;
+END;
+
+IF @SaveWorkEntryDefinition IS NULL
+   OR CHARINDEX(N'[tb_data].[OrganizationTags]', @SaveWorkEntryDefinition) = 0
+   OR CHARINDEX(N'UPDLOCK', @SaveWorkEntryDefinition) = 0
+   OR CHARINDEX(N'HOLDLOCK', @SaveWorkEntryDefinition) = 0
+   OR CHARINDEX(N'MERGE', @SaveWorkEntryDefinition) > 0
+BEGIN
+    PRINT N'FAIL: SaveWorkEntry does not transaction-safely publish canonical tags without MERGE.';
+    SET @FailureCount += 1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM [tb_data].[CommonLinks]
+    WHERE [ScopeType] <> N'Organization'
+       OR [OwnerWindowsSid] IS NOT NULL
+)
+BEGIN
+    PRINT N'FAIL: A Common Link remains outside organization scope.';
+    SET @FailureCount += 1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM [tb_data].[ClientAliases]
+    WHERE [ScopeType] <> N'Organization'
+       OR [OwnerWindowsSid] IS NOT NULL
+)
+BEGIN
+    PRINT N'FAIL: A client alias remains outside organization scope.';
+    SET @FailureCount += 1;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.default_constraints AS default_constraint
+    INNER JOIN sys.columns AS column_definition
+        ON column_definition.[object_id] = default_constraint.[parent_object_id]
+       AND column_definition.[column_id] = default_constraint.[parent_column_id]
+    WHERE default_constraint.[parent_object_id] = OBJECT_ID(N'tb_data.CommonLinks')
+      AND column_definition.[name] = N'ScopeType'
+      AND CHARINDEX(N'Organization', default_constraint.[definition]) > 0
+)
+BEGIN
+    PRINT N'FAIL: CommonLinks.ScopeType does not default to Organization.';
+    SET @FailureCount += 1;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.default_constraints AS default_constraint
+    INNER JOIN sys.columns AS column_definition
+        ON column_definition.[object_id] = default_constraint.[parent_object_id]
+       AND column_definition.[column_id] = default_constraint.[parent_column_id]
+    WHERE default_constraint.[parent_object_id] = OBJECT_ID(N'tb_data.ClientAliases')
+      AND column_definition.[name] = N'ScopeType'
+      AND CHARINDEX(N'Organization', default_constraint.[definition]) > 0
+)
+BEGIN
+    PRINT N'FAIL: ClientAliases.ScopeType does not default to Organization.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @SaveCommonLinkDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveCommonLink'));
+DECLARE @DeleteCommonLinkDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteCommonLink'));
+DECLARE @GetTemplatesDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetTemplates'));
+DECLARE @SaveTemplateDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveTemplate'));
+DECLARE @DeleteTemplateDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteTemplate'));
+DECLARE @SaveClientAliasDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveClientAlias'));
+DECLARE @DeleteClientAliasDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteClientAlias'));
+
+IF @GetTemplatesDefinition IS NULL
+   OR CHARINDEX(N'[ScopeType] = N''Organization''', @GetTemplatesDefinition) = 0
+   OR CHARINDEX(N'[ScopeType] = N''User''', @GetTemplatesDefinition) = 0
+   OR @SaveTemplateDefinition IS NULL
+   OR CHARINDEX(N'@ScopeType nvarchar(20) = N''Organization''', @SaveTemplateDefinition) = 0
+   OR CHARINDEX(N'@ScopeType <> N''Organization''', @SaveTemplateDefinition) = 0
+   OR CHARINDEX(N'@IsAdmin <> 1', @SaveTemplateDefinition) = 0
+   OR CHARINDEX(N'[ScopeType] = N''Organization''', @SaveTemplateDefinition) = 0
+   OR @DeleteTemplateDefinition IS NULL
+   OR CHARINDEX(N'@IsAdmin <> 1', @DeleteTemplateDefinition) = 0
+   OR CHARINDEX(N'[ScopeType] = N''Organization''', @DeleteTemplateDefinition) = 0
+BEGIN
+    PRINT N'FAIL: Templates are not organization/Admin-managed with legacy personal rows read-only.';
+    SET @FailureCount += 1;
+END;
+
+IF @SaveCommonLinkDefinition IS NULL
+   OR CHARINDEX(N'@ScopeType nvarchar(20) = N''Organization''', @SaveCommonLinkDefinition) = 0
+   OR CHARINDEX(N'@IsAdmin <> 1', @SaveCommonLinkDefinition) = 0
+   OR @DeleteCommonLinkDefinition IS NULL
+   OR CHARINDEX(N'@IsAdmin <> 1', @DeleteCommonLinkDefinition) = 0
+BEGIN
+    PRINT N'FAIL: Common-link writes are not organization-only and Admin-managed.';
+    SET @FailureCount += 1;
+END;
+
+IF @SaveClientAliasDefinition IS NULL
+   OR CHARINDEX(N'@ScopeType nvarchar(20) = N''Organization''', @SaveClientAliasDefinition) = 0
+   OR CHARINDEX(N'UPDLOCK', @SaveClientAliasDefinition) = 0
+   OR CHARINDEX(N'HOLDLOCK', @SaveClientAliasDefinition) = 0
+   OR CHARINDEX(N'@IsAdmin <> 1', @SaveClientAliasDefinition) = 0
+   OR @DeleteClientAliasDefinition IS NULL
+   OR CHARINDEX(N'@IsAdmin <> 1', @DeleteClientAliasDefinition) = 0
+BEGIN
+    PRINT N'FAIL: Client aliases do not implement shared idempotent insert and Admin-only mutation.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(
+       N'@ScopeType = N''Organization''',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminSaveTemplate'))) = 0
+   OR CHARINDEX(
+       N'@ScopeType = N''Organization''',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminSaveCommonLink'))) = 0
+   OR CHARINDEX(
+       N'@ScopeType = N''Organization''',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminSaveClientAlias'))) = 0
+BEGIN
+    PRINT N'FAIL: An administrative shared-data wrapper does not use Organization scope.';
+    SET @FailureCount += 1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM [tb_user].[UserSettings]
+    WHERE [SettingKey] IN
+    (
+        N'Whd.BaseUrl',
+        N'Whd.AuthenticationMode',
+        N'Sage.ActivityItemId'
+    )
+)
+BEGIN
+    PRINT N'FAIL: A shared connection/configuration key remains user-scoped.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(
+       N'Whd.BaseUrl',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
+   OR CHARINDEX(
+       N'Whd.AuthenticationMode',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
+   OR CHARINDEX(
+       N'Sage.ActivityItemId',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
+BEGIN
+    PRINT N'FAIL: SaveUserSetting does not protect organization-scoped keys.';
+    SET @FailureCount += 1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM [tb_data].[Templates] AS personal_template
+    WHERE personal_template.[ScopeType] = N'User'
+      AND EXISTS
+      (
+          SELECT 1
+          FROM [tb_data].[Templates] AS organization_template
+          WHERE organization_template.[ScopeType] = N'Organization'
+            AND organization_template.[Name] = personal_template.[Name]
+            AND organization_template.[Category] = personal_template.[Category]
+            AND organization_template.[TemplateText] = personal_template.[TemplateText]
+      )
+)
+BEGIN
+    PRINT N'FAIL: An exact personal/organization template duplicate was not deduplicated.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(
+       N'CONVERT(int, 3)',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'))) = 0
+BEGIN
+    PRINT N'FAIL: GetRepositoryCapabilities does not report schema version 3.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @ExpectedGrants TABLE
+(
+    [RoleName] sysname NOT NULL,
+    [ObjectName] nvarchar(300) NOT NULL,
+    PRIMARY KEY ([RoleName], [ObjectName])
+);
+
+INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
+VALUES
+    (N'tb_role_user', N'tb_app.GetRepositoryCapabilities'),
+    (N'tb_role_user', N'tb_app.GetDistinctTags'),
+    (N'tb_role_user', N'tb_app.SaveWorkEntry'),
+    (N'tb_role_user', N'tb_app.GetCommonLinks'),
+    (N'tb_role_user', N'tb_app.SaveCommonLink'),
+    (N'tb_role_user', N'tb_app.DeleteCommonLink'),
+    (N'tb_role_user', N'tb_app.GetClientAliases'),
+    (N'tb_role_user', N'tb_app.SaveClientAlias'),
+    (N'tb_role_user', N'tb_app.DeleteClientAlias'),
+    (N'tb_role_user', N'tb_app.SaveUserSetting'),
+    (N'tb_role_user', N'tb_app.DeleteUserSetting'),
+    (N'tb_role_admin', N'tb_app.AdminSaveOrganizationSetting'),
+    (N'tb_role_admin', N'tb_app.AdminDeleteOrganizationSetting');
+
+DECLARE @MissingGrantCount int =
+(
+    SELECT COUNT(*)
+    FROM @ExpectedGrants AS expected_grant
+    WHERE NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.database_permissions AS permission
+        INNER JOIN sys.database_principals AS grantee
+            ON grantee.[principal_id] = permission.[grantee_principal_id]
+        WHERE grantee.[name] = expected_grant.[RoleName]
+          AND permission.[class] = 1
+          AND permission.[major_id] = OBJECT_ID(expected_grant.[ObjectName])
+          AND permission.[permission_name] = N'EXECUTE'
+          AND permission.[state] IN (N'G', N'W')
+    )
+);
+
+IF @MissingGrantCount > 0
+BEGIN
+    PRINT N'FAIL: One or more V0003 procedure grants are missing.';
+    SET @FailureCount += @MissingGrantCount;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions AS permission
+    INNER JOIN sys.database_principals AS grantee
+        ON grantee.[principal_id] = permission.[grantee_principal_id]
+    WHERE permission.[class] = 1
+      AND permission.[major_id] = OBJECT_ID(N'tb_data.OrganizationTags')
+      AND grantee.[name] IN
+      (
+          N'tb_role_user',
+          N'tb_role_manager',
+          N'tb_role_admin',
+          N'tb_role_sync_operator'
+      )
+      AND permission.[permission_name] IN
+      (
+          N'SELECT', N'INSERT', N'UPDATE', N'DELETE', N'CONTROL', N'ALTER'
+      )
+      AND permission.[state] IN (N'G', N'W')
+)
+BEGIN
+    PRINT N'FAIL: An application role has direct access to OrganizationTags.';
+    SET @FailureCount += 1;
+END;
+
+IF @FailureCount > 0
+BEGIN
+    RAISERROR(
+        N'TechBench V0003 shared-reference verification failed with %d issue(s).',
+        16,
+        1,
+        @FailureCount);
+    RETURN;
+END;
+
+PRINT N'TechBench V0003 shared-reference verification passed.';
+
+SELECT
+    DB_NAME() AS [DatabaseName],
+    MAX([SchemaVersion]) AS [SchemaVersion],
+    MAX
+    (
+        CASE
+            WHEN [MigrationId] = N'SqlServer2016.SharedReferenceData.0003'
+                THEN [AppliedAtUtc]
+        END
+    ) AS [SharedReferenceDataAppliedAtUtc]
+FROM [tb_deploy].[SchemaMigrations];
+GO
+
+-- ============================================================================
+-- END 92-V0003-SharedReferenceVerify.sql
 -- ============================================================================
 
 PRINT N'TechBench deployment completed successfully on CSRI-SQL.';

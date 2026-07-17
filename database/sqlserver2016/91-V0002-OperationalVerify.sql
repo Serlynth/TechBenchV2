@@ -24,9 +24,9 @@ IF
 (
     SELECT MAX([SchemaVersion])
     FROM [tb_deploy].[SchemaMigrations]
-) <> 2
+) NOT IN (2, 3)
 BEGIN
-    PRINT N'FAIL: The installed TechBench schema version is not 2.';
+    PRINT N'FAIL: V0002 verification supports installed schema version 2 or 3.';
     SET @FailureCount += 1;
 END;
 

@@ -771,15 +771,13 @@ BEGIN
         @IsAdmin = @IsAdmin OUTPUT,
         @IsSyncOperator = @IsSyncOperator OUTPUT;
 
-    IF @IncludeAllUsers = 1 AND @IsManager <> 1 AND @IsAdmin <> 1
-        THROW 51120, N'Only a Manager or Admin may read organization-wide tags.', 1;
-
-    SELECT DISTINCT
-        LTRIM(RTRIM(tag.[value])) AS [Tag]
-    FROM [tb_data].[WorkEntries] AS work_entry
-    CROSS APPLY STRING_SPLIT(work_entry.[Tags], N',') AS tag
-    WHERE (@IncludeAllUsers = 1 OR work_entry.[OwnerWindowsSid] = @UserSid)
-      AND NULLIF(LTRIM(RTRIM(tag.[value])), N'') IS NOT NULL
+    /*
+        @IncludeAllUsers is retained for desktop contract compatibility. Tags are
+        now a canonical organization catalog, so every authorized user receives
+        the same list without this procedure reading or exposing work entries.
+    */
+    SELECT [Tag]
+    FROM [tb_data].[OrganizationTags]
     ORDER BY [Tag];
 END;
 GO
@@ -1093,6 +1091,51 @@ BEGIN
                 );
             END;
         END;
+
+        /*
+            Publish newly entered tags to the organization catalog in the same
+            transaction as the work-entry save. Range locks serialize first use
+            of a tag across workstations; no direct table grant is required.
+        */
+        ;WITH parsed_tags AS
+        (
+            SELECT DISTINCT
+                LTRIM(RTRIM(tag.[value])) AS [Tag],
+                CONVERT
+                (
+                    binary(32),
+                    HASHBYTES
+                    (
+                        N'SHA2_256',
+                        CONVERT
+                        (
+                            varbinary(2000),
+                            UPPER(LTRIM(RTRIM(tag.[value])))
+                        )
+                    )
+                ) AS [TagHash]
+            FROM STRING_SPLIT(@Tags, N',') AS tag
+            WHERE NULLIF(LTRIM(RTRIM(tag.[value])), N'') IS NOT NULL
+        )
+        INSERT INTO [tb_data].[OrganizationTags]
+        (
+            [Tag],
+            [TagHash],
+            [CreatedByWindowsSid],
+            [CreatedAtUtc]
+        )
+        SELECT
+            parsed_tag.[Tag],
+            parsed_tag.[TagHash],
+            @UserSid,
+            @NowUtc
+        FROM parsed_tags AS parsed_tag
+        WHERE NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[OrganizationTags] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [TagHash] = parsed_tag.[TagHash]
+        );
 
         EXEC [tb_security].[WriteAuditEvent]
             @Action = @Action,

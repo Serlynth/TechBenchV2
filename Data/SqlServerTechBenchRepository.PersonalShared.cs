@@ -195,8 +195,8 @@ public sealed partial class SqlServerTechBenchRepository
                         aliases[alias] = clientId;
                         var aliasId = GetInt64(reader, "Id");
                         if (aliasId > 0
-                            && GetString(reader, "ScopeType", "User")
-                                .Equals("User", StringComparison.OrdinalIgnoreCase))
+                            && GetString(reader, "ScopeType", OrganizationScope)
+                                .Equals(OrganizationScope, StringComparison.OrdinalIgnoreCase))
                         {
                             _clientAliasIds[alias] = aliasId;
                             TrackRowVersion("ClientAlias", aliasId, reader);
@@ -225,7 +225,7 @@ public sealed partial class SqlServerTechBenchRepository
                 command =>
                 {
                     AddBigInt(command, "@Id", aliasId > 0 ? aliasId : null);
-                    AddRequiredText(command, "@ScopeType", 20, "User");
+                    AddRequiredText(command, "@ScopeType", 20, OrganizationScope);
                     AddRequiredText(command, "@Alias", 240, normalizedAlias);
                     AddInt(command, "@ClientId", clientId);
                     AddBinary(
@@ -357,9 +357,16 @@ public sealed partial class SqlServerTechBenchRepository
     public IReadOnlyDictionary<string, string> GetSettings() =>
         GetSettingsAsync().GetAwaiter().GetResult();
 
-    public Task<IReadOnlyDictionary<string, string>> GetSettingsAsync(
-        CancellationToken cancellationToken = default) =>
-        QueryAsync(
+    public async Task<IReadOnlyDictionary<string, string>> GetSettingsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        foreach (var trackedKey in _rowVersions.Keys.Where(
+                     static key => key.StartsWith("Setting:", StringComparison.Ordinal)))
+        {
+            _rowVersions.TryRemove(trackedKey, out _);
+        }
+
+        return await QueryAsync(
             Procedures.GetSettings,
             null,
             async (reader, token) =>
@@ -382,17 +389,17 @@ public sealed partial class SqlServerTechBenchRepository
                         "SettingValue",
                         GetString(reader, "Value"));
                     var rowVersion = GetBytes(reader, "RowVersion");
-                    if (rowVersion is { Length: > 0 }
-                        && GetString(reader, "ScopeType")
-                            .Equals("User", StringComparison.OrdinalIgnoreCase))
+                    var scopeType = GetString(reader, "ScopeType", UserSettingScope);
+                    if (rowVersion is { Length: > 0 })
                     {
-                        _rowVersions[BuildSettingRowVersionKey(key)] = rowVersion;
+                        _rowVersions[BuildSettingRowVersionKey(scopeType, key)] = rowVersion;
                     }
                 }
 
                 return (IReadOnlyDictionary<string, string>)settings;
             },
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
+    }
 
     public string GetSetting(string key, string fallback = "") =>
         GetSettingAsync(key, fallback).GetAwaiter().GetResult();
@@ -466,6 +473,73 @@ public sealed partial class SqlServerTechBenchRepository
                 cancellationToken)
             .ConfigureAwait(false);
         _rowVersions.TryRemove(BuildSettingRowVersionKey(key), out _);
+    }
+
+    public void SaveOrganizationSetting(string key, string value) =>
+        SaveOrganizationSettingAsync(key, value).GetAwaiter().GetResult();
+
+    public async Task SaveOrganizationSettingAsync(
+        string key,
+        string value,
+        CancellationToken cancellationToken = default)
+    {
+        await QueryAsync(
+                Procedures.SaveOrganizationSetting,
+                command =>
+                {
+                    AddRequiredText(command, "@SettingKey", 200, key);
+                    AddMaxText(command, "@SettingValue", value);
+                    AddBinary(
+                        command,
+                        "@ExpectedRowVersion",
+                        8,
+                        GetSettingRowVersion(key, OrganizationScope));
+                    AddGuid(command, "@RequestId", Guid.NewGuid());
+                },
+                async (reader, token) =>
+                {
+                    if (!await reader.ReadAsync(token).ConfigureAwait(false))
+                    {
+                        return false;
+                    }
+
+                    var rowVersion = GetBytes(reader, "RowVersion");
+                    if (rowVersion is { Length: > 0 })
+                    {
+                        _rowVersions[
+                            BuildSettingRowVersionKey(OrganizationScope, key)] = rowVersion;
+                    }
+
+                    return true;
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public void DeleteOrganizationSetting(string key) =>
+        DeleteOrganizationSettingAsync(key).GetAwaiter().GetResult();
+
+    public async Task DeleteOrganizationSettingAsync(
+        string key,
+        CancellationToken cancellationToken = default)
+    {
+        await ExecuteNonQueryAsync(
+                Procedures.DeleteOrganizationSetting,
+                command =>
+                {
+                    AddRequiredText(command, "@SettingKey", 200, key);
+                    AddBinary(
+                        command,
+                        "@ExpectedRowVersion",
+                        8,
+                        GetSettingRowVersion(key, OrganizationScope));
+                    AddGuid(command, "@RequestId", Guid.NewGuid());
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+        _rowVersions.TryRemove(
+            BuildSettingRowVersionKey(OrganizationScope, key),
+            out _);
     }
 
     private NoteTemplate ReadTemplate(SqlDataReader reader)
@@ -547,11 +621,18 @@ public sealed partial class SqlServerTechBenchRepository
         return link;
     }
 
-    private string BuildSettingRowVersionKey(string key) =>
-        $"Setting:{UserSettingScope}:{key.Trim()}";
+    private static string BuildSettingRowVersionKey(string scopeType, string key) =>
+        $"Setting:{scopeType.Trim()}:{key.Trim()}";
 
-    private byte[]? GetSettingRowVersion(string key) =>
-        _rowVersions.TryGetValue(BuildSettingRowVersionKey(key), out var rowVersion)
+    private static string BuildSettingRowVersionKey(string key) =>
+        BuildSettingRowVersionKey(UserSettingScope, key);
+
+    private byte[]? GetSettingRowVersion(
+        string key,
+        string scopeType = UserSettingScope) =>
+        _rowVersions.TryGetValue(
+            BuildSettingRowVersionKey(scopeType, key),
+            out var rowVersion)
             ? rowVersion
             : null;
 

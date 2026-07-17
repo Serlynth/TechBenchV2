@@ -128,6 +128,10 @@ public interface ITechBenchRepository
 
     void DeleteSetting(string key);
 
+    void SaveOrganizationSetting(string key, string value);
+
+    void DeleteOrganizationSetting(string key);
+
     void AddPostingLog(PostingLog log);
 
     PostingLog? GetLatestVerifiedWhdPostingLog(int workEntryId);

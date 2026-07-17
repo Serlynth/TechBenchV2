@@ -18,6 +18,7 @@ namespace TechBench.ViewModels;
 public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private const int DefaultWhdAutoSyncMinutes = 5;
+    private const int DefaultSharedDataRefreshMinutes = 5;
     private readonly ITechBenchRepository _repository;
     private readonly IClientProvider _clientProvider;
     private readonly ITicketProvider _ticketProvider;
@@ -33,6 +34,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly PostingExecutionCoordinator _postingCoordinator = new();
     private readonly DispatcherTimer _whdAutoSyncTimer = new();
     private readonly DispatcherTimer _sageVerificationTimer = new() { Interval = TimeSpan.FromSeconds(30) };
+    private readonly DispatcherTimer _sharedDataRefreshTimer = new();
     private readonly HashSet<string> _knownWhdTicketKeys = new(StringComparer.OrdinalIgnoreCase);
     private string _currentSection = "Today";
     private string _statusMessage = "Ready";
@@ -105,6 +107,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private string _sageCompanyPath = string.Empty;
     private bool _sageNativeAutoSave;
     private bool _isLightTheme;
+    private string _refreshIntervalMinutesText =
+        DefaultSharedDataRefreshMinutes.ToString();
+    private bool _isLoadingSettings;
+    private bool _settingsHaveUnsavedChanges;
+    private bool _isDisposed;
     private bool _isEntryOperationRunning;
     private string _entryOperationText = string.Empty;
     private bool _isSynchronizingEditorReferences;
@@ -244,12 +251,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         Editor.PropertyChanged += HandleEditorPropertyChanged;
         _whdAutoSyncTimer.Tick += HandleWhdAutoSyncTimerTick;
         _sageVerificationTimer.Tick += HandleSageVerificationTimerTick;
+        _sharedDataRefreshTimer.Tick += HandleSharedDataRefreshTimerTick;
 
         LoadSettings();
         RefreshAll();
         PrimeKnownWhdTicketKeys();
         ConfigureWhdAutoSyncTimer();
         ConfigureSageVerificationTimer();
+        ConfigureSharedDataRefreshTimer();
         RunSearch();
         NewEntry();
         RestoreEditorDraft();
@@ -775,28 +784,54 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public string WhdBaseUrl
     {
         get => _whdBaseUrl;
-        set => SetProperty(ref _whdBaseUrl, value);
+        set
+        {
+            if (SetProperty(ref _whdBaseUrl, value))
+            {
+                MarkSettingsDirty();
+            }
+        }
     }
 
     public string WhdUsername
     {
         get => _whdUsername;
-        set => SetProperty(ref _whdUsername, value);
+        set
+        {
+            if (SetProperty(ref _whdUsername, value))
+            {
+                MarkSettingsDirty();
+            }
+        }
     }
 
     public string WhdApiToken
     {
         get => _whdApiToken;
-        set => SetProperty(ref _whdApiToken, value);
+        set
+        {
+            if (SetProperty(ref _whdApiToken, value))
+            {
+                MarkSettingsDirty();
+            }
+        }
     }
 
     public string SelectedWhdAuthenticationMode
     {
         get => _selectedWhdAuthenticationMode;
-        set => SetProperty(ref _selectedWhdAuthenticationMode, value);
+        set
+        {
+            if (SetProperty(ref _selectedWhdAuthenticationMode, value))
+            {
+                MarkSettingsDirty();
+            }
+        }
     }
 
     public bool CanRunSharedSync => _currentUser.CanRunSharedSync;
+
+    public bool CanManageOrganizationSettings => _currentUser.IsAdmin;
 
     public bool WhdAutoSyncEnabled
     {
@@ -805,6 +840,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _whdAutoSyncEnabled, value))
             {
+                MarkSettingsDirty();
                 ConfigureWhdAutoSyncTimer();
                 OnPropertyChanged(nameof(WhdAutoSyncStatusLabel));
             }
@@ -818,6 +854,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _whdAutoSyncMinutesText, value))
             {
+                MarkSettingsDirty();
                 ConfigureWhdAutoSyncTimer();
                 OnPropertyChanged(nameof(WhdAutoSyncStatusLabel));
             }
@@ -848,13 +885,25 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public string SageEmployeeId
     {
         get => _sageEmployeeId;
-        set => SetProperty(ref _sageEmployeeId, value);
+        set
+        {
+            if (SetProperty(ref _sageEmployeeId, value))
+            {
+                MarkSettingsDirty();
+            }
+        }
     }
 
     public string SageActivityItemId
     {
         get => _sageActivityItemId;
-        set => SetProperty(ref _sageActivityItemId, value);
+        set
+        {
+            if (SetProperty(ref _sageActivityItemId, value))
+            {
+                MarkSettingsDirty();
+            }
+        }
     }
 
     public Client? SelectedSageMappingClient
@@ -881,31 +930,61 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public string SageDsn
     {
         get => _sageDsn;
-        set => SetProperty(ref _sageDsn, value);
+        set
+        {
+            if (SetProperty(ref _sageDsn, value))
+            {
+                MarkSettingsDirty();
+            }
+        }
     }
 
     public string SageUsername
     {
         get => _sageUsername;
-        set => SetProperty(ref _sageUsername, value);
+        set
+        {
+            if (SetProperty(ref _sageUsername, value))
+            {
+                MarkSettingsDirty();
+            }
+        }
     }
 
     public string SagePassword
     {
         get => _sagePassword;
-        set => SetProperty(ref _sagePassword, value);
+        set
+        {
+            if (SetProperty(ref _sagePassword, value))
+            {
+                MarkSettingsDirty();
+            }
+        }
     }
 
     public string SageCompanyPath
     {
         get => _sageCompanyPath;
-        set => SetProperty(ref _sageCompanyPath, value);
+        set
+        {
+            if (SetProperty(ref _sageCompanyPath, value))
+            {
+                MarkSettingsDirty();
+            }
+        }
     }
 
     public bool SageNativeAutoSave
     {
         get => _sageNativeAutoSave;
-        set => SetProperty(ref _sageNativeAutoSave, value);
+        set
+        {
+            if (SetProperty(ref _sageNativeAutoSave, value))
+            {
+                MarkSettingsDirty();
+            }
+        }
     }
 
     public bool IsLightTheme
@@ -915,10 +994,28 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _isLightTheme, value))
             {
+                MarkSettingsDirty();
                 ThemeService.Apply(value ? AppTheme.Light : AppTheme.Dark);
             }
         }
     }
+
+    public string RefreshIntervalMinutesText
+    {
+        get => _refreshIntervalMinutesText;
+        set
+        {
+            if (SetProperty(ref _refreshIntervalMinutesText, value))
+            {
+                MarkSettingsDirty();
+                OnPropertyChanged(nameof(SharedDataRefreshStatusLabel));
+            }
+        }
+    }
+
+    public string SharedDataRefreshStatusLabel =>
+        $"Reload shared clients, tickets, statuses, links, tags, and templates every "
+        + $"{ResolveSharedDataRefreshIntervalMinutes()} minutes.";
 
     private void Navigate(string section)
     {
@@ -990,6 +1087,98 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         RefreshPostingQueue();
         RefreshPostingLogs();
         UpdateTotals();
+    }
+
+    private void MarkSettingsDirty()
+    {
+        if (!_isLoadingSettings)
+        {
+            _settingsHaveUnsavedChanges = true;
+        }
+    }
+
+    internal static int NormalizeSharedDataRefreshIntervalMinutes(
+        string? value,
+        int fallback = DefaultSharedDataRefreshMinutes)
+    {
+        var minutes = int.TryParse(value, out var parsed)
+            ? parsed
+            : fallback;
+        return Math.Clamp(minutes, 1, 120);
+    }
+
+    private int ResolveSharedDataRefreshIntervalMinutes() =>
+        NormalizeSharedDataRefreshIntervalMinutes(
+            RefreshIntervalMinutesText,
+            _localPreferences.RefreshIntervalMinutes);
+
+    private void ConfigureSharedDataRefreshTimer()
+    {
+        _sharedDataRefreshTimer.Stop();
+        _sharedDataRefreshTimer.Interval = TimeSpan.FromMinutes(
+            ResolveSharedDataRefreshIntervalMinutes());
+        if (!_isDisposed)
+        {
+            _sharedDataRefreshTimer.Start();
+        }
+
+        OnPropertyChanged(nameof(SharedDataRefreshStatusLabel));
+    }
+
+    private void HandleSharedDataRefreshTimerTick(object? sender, EventArgs e)
+    {
+        if (_isDisposed
+            || IsEntryOperationRunning
+            || Editor.IsDirty
+            || IsCommonLinkEditorOpen
+            || CurrentSection.Equals("Settings", StringComparison.Ordinal)
+            || _settingsHaveUnsavedChanges
+            || HasPendingTemplateChanges())
+        {
+            return;
+        }
+
+        try
+        {
+            RefreshClients();
+            RefreshTicketStatusOptions();
+            RefreshTicketList();
+            RefreshEditorTickets();
+            RefreshCommonLinks();
+            RefreshTagSuggestions();
+            ReloadNoteTemplates(ManagedNoteTemplate?.Id);
+            ReloadOrganizationSettings();
+        }
+        catch (Exception ex) when (
+            ex is SqlException
+                or InvalidOperationException
+                or TaskCanceledException
+                or TimeoutException)
+        {
+            StatusMessage = $"Shared data refresh will retry later: {ex.Message}";
+        }
+    }
+
+    private void ReloadOrganizationSettings()
+    {
+        var settings = _repository.GetSettings();
+        var wasLoadingSettings = _isLoadingSettings;
+        _isLoadingSettings = true;
+        try
+        {
+            WhdBaseUrl = settings.GetValueOrDefault("Whd.BaseUrl", string.Empty);
+            SelectedWhdAuthenticationMode = ToWhdAuthenticationModeLabel(
+                settings.GetValueOrDefault(
+                    "Whd.AuthenticationMode",
+                    WhdAuthenticationMode.Auto.ToString()));
+            SageActivityItemId = settings.GetValueOrDefault(
+                "Sage.ActivityItemId",
+                string.Empty);
+        }
+        finally
+        {
+            _isLoadingSettings = wasLoadingSettings;
+        }
     }
 
     private void RefreshTagSuggestions()
@@ -3166,39 +3355,77 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void LoadSettings()
     {
-        var settings = _repository.GetSettings();
-        WhdBaseUrl = settings.GetValueOrDefault("Whd.BaseUrl", string.Empty);
-        WhdUsername = settings.GetValueOrDefault("Whd.Username", string.Empty);
-        WhdApiToken = LoadCredentialWithLegacyMigration(settings, "Whd.ApiToken");
-        SelectedWhdAuthenticationMode = ToWhdAuthenticationModeLabel(
-            settings.GetValueOrDefault("Whd.AuthenticationMode", WhdAuthenticationMode.Auto.ToString()));
-        WhdAutoSyncEnabled = _localPreferences.WhdAutoSyncEnabled;
-        WhdAutoSyncMinutesText = _localPreferences.WhdAutoSyncMinutes.ToString();
-        SageEmployeeId = settings.GetValueOrDefault("Sage.EmployeeId", string.Empty);
-        SageActivityItemId = settings.GetValueOrDefault("Sage.ActivityItemId", string.Empty);
-        SageDsn = _localPreferences.SageDsn;
-        SageUsername = settings.GetValueOrDefault("Sage.Username", string.Empty);
-        SagePassword = LoadCredentialWithLegacyMigration(settings, "Sage.Password");
-        SageCompanyPath = _localPreferences.SageCompanyPath;
-        SageNativeAutoSave = _localPreferences.SageNativeAutoSave;
-        IsLightTheme = _localPreferences.Theme.Equals("Light", StringComparison.OrdinalIgnoreCase);
-        ThemeService.Apply(IsLightTheme ? AppTheme.Light : AppTheme.Dark);
+        _isLoadingSettings = true;
+        try
+        {
+            var settings = _repository.GetSettings();
+            WhdBaseUrl = settings.GetValueOrDefault("Whd.BaseUrl", string.Empty);
+            WhdUsername = settings.GetValueOrDefault("Whd.Username", string.Empty);
+            WhdApiToken = LoadCredentialWithLegacyMigration(settings, "Whd.ApiToken");
+            SelectedWhdAuthenticationMode = ToWhdAuthenticationModeLabel(
+                settings.GetValueOrDefault(
+                    "Whd.AuthenticationMode",
+                    WhdAuthenticationMode.Auto.ToString()));
+            WhdAutoSyncEnabled = _localPreferences.WhdAutoSyncEnabled;
+            WhdAutoSyncMinutesText = _localPreferences.WhdAutoSyncMinutes.ToString();
+            SageEmployeeId = settings.GetValueOrDefault("Sage.EmployeeId", string.Empty);
+            SageActivityItemId = settings.GetValueOrDefault(
+                "Sage.ActivityItemId",
+                string.Empty);
+            SageDsn = _localPreferences.SageDsn;
+            SageUsername = settings.GetValueOrDefault("Sage.Username", string.Empty);
+            SagePassword = LoadCredentialWithLegacyMigration(settings, "Sage.Password");
+            SageCompanyPath = _localPreferences.SageCompanyPath;
+            SageNativeAutoSave = _localPreferences.SageNativeAutoSave;
+            RefreshIntervalMinutesText =
+                _localPreferences.RefreshIntervalMinutes.ToString();
+            IsLightTheme = _localPreferences.Theme.Equals(
+                "Light",
+                StringComparison.OrdinalIgnoreCase);
+            ThemeService.Apply(IsLightTheme ? AppTheme.Light : AppTheme.Dark);
+        }
+        finally
+        {
+            _isLoadingSettings = false;
+            _settingsHaveUnsavedChanges = false;
+        }
     }
 
     private void SaveSettings()
     {
-        SaveWhdConnectionSettings();
+        SaveWhdConnectionSettings(saveOrganizationSettings: true);
         _repository.SaveSetting("Sage.EmployeeId", SageEmployeeId.Trim());
         _repository.DeleteSetting("Sage.DefaultCustomerId");
-        _repository.SaveSetting("Sage.ActivityItemId", SageActivityItemId.Trim());
+        if (CanManageOrganizationSettings)
+        {
+            _repository.SaveOrganizationSetting(
+                "Sage.ActivityItemId",
+                SageActivityItemId.Trim());
+        }
+
         if (_currentUser.CanManageClients && SelectedSageMappingClient is not null)
         {
             _repository.SaveClientSageMapping(SelectedSageMappingClient.Id, SageMappedCustomerId.Trim());
         }
         SaveSageConnectionSettings();
         _localPreferences.Theme = IsLightTheme ? "Light" : "Dark";
+        _localPreferences.RefreshIntervalMinutes =
+            ResolveSharedDataRefreshIntervalMinutes();
+        _isLoadingSettings = true;
+        try
+        {
+            RefreshIntervalMinutesText =
+                _localPreferences.RefreshIntervalMinutes.ToString();
+        }
+        finally
+        {
+            _isLoadingSettings = false;
+        }
+
         LocalPreferenceStore.Save(_localPreferences);
+        ConfigureSharedDataRefreshTimer();
         ConfigureSageVerificationTimer();
+        _settingsHaveUnsavedChanges = false;
         StatusMessage = "Settings saved.";
     }
 
@@ -3416,13 +3643,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 || !string.IsNullOrWhiteSpace(WhdUsername));
     }
 
-    private void SaveWhdConnectionSettings()
+    private void SaveWhdConnectionSettings(bool saveOrganizationSettings = false)
     {
-        _repository.SaveSetting("Whd.BaseUrl", WhdBaseUrl.Trim());
         _repository.SaveSetting("Whd.Username", WhdUsername.Trim());
         _credentialStore.SetSecret("Whd.ApiToken", WhdApiToken);
         _repository.DeleteSetting("Whd.ApiToken");
-        _repository.SaveSetting("Whd.AuthenticationMode", ParseWhdAuthenticationMode(SelectedWhdAuthenticationMode).ToString());
+        if (saveOrganizationSettings && CanManageOrganizationSettings)
+        {
+            _repository.SaveOrganizationSetting("Whd.BaseUrl", WhdBaseUrl.Trim());
+            _repository.SaveOrganizationSetting(
+                "Whd.AuthenticationMode",
+                ParseWhdAuthenticationMode(SelectedWhdAuthenticationMode).ToString());
+        }
+
         _localPreferences.WhdAutoSyncEnabled = WhdAutoSyncEnabled;
         _localPreferences.WhdAutoSyncMinutes = ResolveWhdAutoSyncIntervalMinutes();
         LocalPreferenceStore.Save(_localPreferences);
@@ -4124,11 +4357,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _isDisposed = true;
         DisposeNoteFeatures();
         Updates.Dispose();
         _whdAutoSyncTimer.Stop();
         _whdAutoSyncTimer.Tick -= HandleWhdAutoSyncTimerTick;
         _sageVerificationTimer.Stop();
         _sageVerificationTimer.Tick -= HandleSageVerificationTimerTick;
+        _sharedDataRefreshTimer.Stop();
+        _sharedDataRefreshTimer.Tick -= HandleSharedDataRefreshTimerTick;
     }
 }

@@ -2117,13 +2117,14 @@
                                            VerticalAlignment="Center"
                                            Margin="0" />
                                 <Button Grid.Column="1"
-                                        Content="Add Custom Link"
+                                        Content="Add Shared Link"
                                         Command="{Binding NewCommonLinkCommand}"
                                         Style="{StaticResource PrimaryButtonStyle}"
+                                        ToolTip="Shared links are available to every TechBench user and managed by TechBench administrators."
                                         Padding="12,7" />
                             </Grid>
 
-                            <TextBlock Text="No common links saved."
+                            <TextBlock Text="No shared common links saved."
                                        Style="{StaticResource MutedTextStyle}"
                                        HorizontalAlignment="Center"
                                        VerticalAlignment="Center"
@@ -2916,7 +2917,25 @@
                                              Value="{Binding Updates.DownloadProgress, Mode=OneWay}"
                                              Margin="0,0,0,12"
                                              Visibility="{Binding Updates.IsProgressVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                <CheckBox Content="Light theme" IsChecked="{Binding IsLightTheme}" Margin="0,0,0,12" />
+                                 <CheckBox Content="Light theme" IsChecked="{Binding IsLightTheme}" Margin="0,0,0,12" />
+                                <TextBlock Text="Shared data refresh" Style="{StaticResource FieldLabelStyle}" />
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,4">
+                                    <TextBlock Text="Every"
+                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,8,0" />
+                                    <TextBox Text="{Binding RefreshIntervalMinutesText, UpdateSourceTrigger=PropertyChanged}"
+                                             Width="58"
+                                             MaxLength="3"
+                                             Margin="0,0,8,0" />
+                                    <TextBlock Text="minutes (1-120)"
+                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
+                                <TextBlock Text="{Binding SharedDataRefreshStatusLabel}"
+                                           Style="{StaticResource MutedTextStyle}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,12" />
                                 <WrapPanel>
                                     <Button Content="Save Settings"
                                             Command="{Binding SaveSettingsCommand}"
@@ -2941,11 +2960,18 @@
                                 <StackPanel>
                                     <TextBlock Text="Web Help Desk" Style="{StaticResource SectionHeadingStyle}" />
                                     <TextBlock Text="Base URL" Style="{StaticResource FieldLabelStyle}" />
-                                    <TextBox Text="{Binding WhdBaseUrl, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" />
+                                    <TextBox Text="{Binding WhdBaseUrl, UpdateSourceTrigger=PropertyChanged}"
+                                             IsEnabled="{Binding CanManageOrganizationSettings}"
+                                             Margin="0,0,0,10" />
                                     <TextBlock Text="Authentication" Style="{StaticResource FieldLabelStyle}" />
                                     <ComboBox ItemsSource="{Binding WhdAuthenticationModeOptions}"
                                               SelectedItem="{Binding SelectedWhdAuthenticationMode}"
+                                              IsEnabled="{Binding CanManageOrganizationSettings}"
                                               Margin="0,0,0,10" />
+                                    <TextBlock Text="The base URL and authentication type are shared organization settings managed by TechBench Admins."
+                                               Style="{StaticResource MutedTextStyle}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,-4,0,10" />
                                     <TextBlock Text="API username" Style="{StaticResource FieldLabelStyle}" />
                                     <TextBox Text="{Binding WhdUsername, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" />
                                     <TextBlock Text="API key, password, or token" Style="{StaticResource FieldLabelStyle}" />
@@ -3062,7 +3088,12 @@
                                         </StackPanel>
                                         <StackPanel Grid.Row="0" Grid.Column="2">
                                             <TextBlock Text="Activity Item ID" Style="{StaticResource FieldLabelStyle}" />
-                                            <TextBox Text="{Binding SageActivityItemId, UpdateSourceTrigger=PropertyChanged}" />
+                                            <TextBox Text="{Binding SageActivityItemId, UpdateSourceTrigger=PropertyChanged}"
+                                                     IsEnabled="{Binding CanManageOrganizationSettings}" />
+                                            <TextBlock Text="Shared; managed by TechBench Admins."
+                                                       Style="{StaticResource MutedTextStyle}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,4,0,0" />
                                         </StackPanel>
 
                                         <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,10,0,0">
@@ -3106,6 +3137,10 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0">
                                     <TextBlock Text="Note Templates" Style="{StaticResource SectionHeadingStyle}" />
+                                    <TextBlock Text="Organization templates are shared and Admin-managed. Legacy personal templates remain available read-only."
+                                               Style="{StaticResource MutedTextStyle}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,0,0,8" />
                                      <ListBox ItemsSource="{Binding NoteTemplates}"
                                               SelectedItem="{Binding ManagedNoteTemplate}"
                                               DisplayMemberPath="DisplayName"
@@ -3120,7 +3155,7 @@
                                             HorizontalAlignment="Left"
                                             Margin="0,10,0,0" />
                                 </StackPanel>
-                                <Grid Grid.Column="2">
+                                <Grid Grid.Column="2" IsEnabled="{Binding CanEditManagedNoteTemplate}">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />

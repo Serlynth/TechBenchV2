@@ -2,11 +2,11 @@
 
 ## Status
 
-TechBench V2 `2.0.0-alpha.2` implements the completed client-side conversion from the local SQLite design used by TechBench 1.x to a direct WPF-to-SQL Server design.
+TechBench V2 `2.0.0-alpha.3` implements the completed client-side conversion from the local SQLite design used by TechBench 1.x to a direct WPF-to-SQL Server design, including an explicit organization-wide reference-data boundary.
 
 The production WPF runtime now uses the SQL Server repository for every business and operational workflow. Production builds exclude the SQLite packages and legacy local-database implementation. SQLite remains available only to test builds for regression and migration-boundary coverage.
 
-The implementation is still an alpha until the schema-version-2 upgrade and client are exercised against the actual SQL Server 2016 instance with real domain identities. "Implemented" does not mean "approved for production."
+The implementation is still an alpha until the schema-version-3 upgrade and client are exercised against the actual SQL Server 2016 instance with real domain identities. "Implemented" does not mean "approved for production."
 
 ## Fixed boundaries
 
@@ -34,7 +34,7 @@ CSRI-SQL.CSRI.local
     SQL Server 2016
     TechBench database
     compatibility level 130
-    schema version 2
+    schema version 3
 ~~~
 
 The application opens short-lived pooled connections for individual stored-procedure calls. It does not keep a database transaction open during WHD HTTP requests, Sage ODBC queries, or Sage desktop automation.
@@ -61,7 +61,7 @@ At startup the client:
 1. Loads the non-secret SQL endpoint configuration.
 2. Opens an integrated-authentication SQL connection.
 3. Calls `tb_app.GetCurrentUserContext`.
-4. Verifies that the database reports schema version `2`.
+4. Verifies that the database reports schema version `3`.
 5. Receives the caller's Windows SID, login/display name, database instance ID, server UTC time, and effective role flags.
 6. Idempotently ensures the original built-in templates and Common Links exist.
 7. Refuses startup when the database is unreachable, the schema is incompatible, or the caller has no TechBench role.
@@ -105,13 +105,14 @@ The schema-version-2 search implementation uses stored-procedure filtering and r
 The `TechBench` database owns:
 
 - registered users identified by Windows SID
-- clients, aliases, external identities, matching state, and merge audit
+- clients, organization-wide aliases, external identities, matching state, and merge audit
 - tickets and ticket status options
-- work entries, related-entry links, tags, follow-ups, and search/history fields
+- work entries, related-entry links, follow-ups, and search/history fields
+- a canonical organization-wide tag catalog populated from work-entry tags
 - owner-private Personal Notes and their WHD inclusion choice
 - editor recovery drafts keyed by owner SID and device ID
-- organization- and user-scoped templates
-- organization- and user-scoped Common Links
+- organization templates, with read compatibility for legacy personal templates
+- organization-wide Common Links
 - organization and user settings that represent application state
 - posting logs, attempts, outstanding-result state, and posting leases
 - WHD and Sage synchronization leases and runs
@@ -125,7 +126,7 @@ Tables are separated into deployment, data, private, user, operations, audit, se
 
 Ordinary work is owned by the caller's Windows SID. Managers may read approved ordinary team work through manager-enabled procedure paths. Personal Notes are joined and returned only when the current SID owns them; team reads redact the private content.
 
-Drafts, user settings, user templates, user links, and user aliases are similarly scoped by the current SID. Organization-scoped changes require the appropriate administrative role.
+Drafts and user settings are scoped by the current SID. Common Links, canonical tags, customer aliases, external identities, and client matching are organization-wide. Shared template, Common Link, matching, and organization-setting changes require the appropriate administrative role; adding a previously unknown import alias is audited and cannot reassign an existing shared alias without that role.
 
 This milestone enforces those rules through the stored-procedure boundary and the absence of direct table permissions. Future row-level-security policies could provide additional defense in depth, but documentation must not assume a policy that is not deployed.
 
@@ -152,6 +153,8 @@ Local JSON files under `%LOCALAPPDATA%\TechBenchV2` contain no work entries, not
 - update-check and skipped-version state
 - Sage DSN/company-path/native-automation choices
 - the Microsoft admin-link browser preference
+
+The local refresh interval drives a client timer that reloads shared clients, tickets, statuses, matching, links, tags, and templates. It does not create a cache or overwrite an active editor.
 
 `sql-server.json` contains the SQL Server address, database name, timeouts, and certificate-trust choice. It contains no username or password.
 
@@ -193,16 +196,17 @@ The SQL Server 2016 package contains idempotent stages for:
 2. database creation and configuration
 3. baseline schema
 4. schema-version-2 operational storage
-5. security and AD-role mappings
-6. baseline and version-2 stored procedures
-7. procedure grants
-8. baseline and version-2 verification
+5. schema-version-3 shared reference data
+6. security and AD-role mappings
+7. baseline and versioned stored procedures
+8. procedure grants
+9. baseline and versioned verification
 
 `database/sqlserver2016/Deploy-CSRI-Standalone.sql` combines every numbered stage for SSMS SQLCMD Mode and has no external include paths.
 
-Schema version `2` is recorded as migration `SqlServer2016.OperationalStorage.0002`. The alpha.2 client requires exactly schema version 2 and refuses other versions.
+Schema version `2` is recorded as migration `SqlServer2016.OperationalStorage.0002`; schema version `3` adds the organization tag catalog and promotes shared reference/configuration data through `SqlServer2016.SharedReferenceData.0003`. The alpha.3 client requires exactly schema version 3 and refuses other versions.
 
-Because alpha.1 used the schema-version-1 contract, the version-2 database and alpha.2 client are a coordinated cutover. Back up the database, upgrade it, install the matching client, and run smoke tests as one planned operation. Do not leave mixed alpha.1/alpha.2 clients in normal use.
+The schema-version-3 database and alpha.3 client are a coordinated cutover. Back up the database, upgrade it, install the matching client, and run smoke tests as one planned operation. Do not leave mixed alpha clients in normal use.
 
 No TechBench server process needs to be installed or started.
 
@@ -220,21 +224,21 @@ Code-level validation covers:
 Production approval still requires a live SQL Server 2016 exercise. At minimum:
 
 1. Run the complete standalone upgrade on a backed-up `TechBench` database.
-2. Confirm schema version 2 and successful verification output.
+2. Confirm schema version 3 and successful verification output.
 3. Connect as a member of `CSRI\TechBench_Users` and as a member of `CSRI\TechBench_Admins`.
 4. Confirm ordinary users cannot execute administrator-only operations.
-5. Confirm two workstations see shared client, ticket, entry, template, and link changes.
+5. Confirm two workstations see shared client, ticket, matching, alias, tag, template, link, and entry changes after automatic refresh.
 6. Confirm Personal Notes remain invisible to other users and manager views.
 7. Force a rowversion conflict and verify that the client does not overwrite silently.
 8. Exercise WHD/Sage posting attempts and lease expiry/reconciliation.
 9. Exercise WHD/Sage snapshot leases with the expected operator role.
 10. Verify backup, `DBCC CHECKDB`, and restore procedures.
 
-Until those checks pass, alpha.2 is an implementation candidate, not a production release.
+Until those checks pass, alpha.3 is an implementation candidate, not a production release.
 
 ## V1 data migration
 
-Installing alpha.2 does not automatically import V1 data.
+Installing alpha.3 does not automatically import V1 data.
 
 Migration must use a verified copy of a V1 SQLite database, assign each imported work record to an explicit AD SID, preserve original identifiers in legacy mapping tables, and reconcile WHD/Sage identities before name-similarity matching. Counts, foreign keys, ownership, posting flags, links, and sample note content must be verified.
 

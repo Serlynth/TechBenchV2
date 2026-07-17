@@ -10,7 +10,7 @@ namespace TechBench.ViewModels;
 public sealed partial class MainWindowViewModel
 {
     private int _editingCommonLinkId;
-    private string _editingCommonLinkScope = "User";
+    private string _editingCommonLinkScope = "Organization";
     private bool _isCommonLinkEditorOpen;
     private bool _microsoftAdminOpenInChromeIncognito;
     private string _commonLinkName = string.Empty;
@@ -109,7 +109,9 @@ public sealed partial class MainWindowViewModel
 
         _microsoftAdminOpenInChromeIncognito =
             _localPreferences.MicrosoftAdminOpenInChromeIncognito;
-        NewCommonLinkCommand = new RelayCommand(_ => StartNewCommonLink());
+        NewCommonLinkCommand = new RelayCommand(
+            _ => StartNewCommonLink(),
+            _ => _currentUser.CanManageClients);
         EditCommonLinkCommand = new RelayCommand(
             EditCommonLink,
             parameter => parameter is CommonLink { Id: > 0, IsBuiltIn: false } link
@@ -145,7 +147,7 @@ public sealed partial class MainWindowViewModel
     private void StartNewCommonLink()
     {
         _editingCommonLinkId = 0;
-        _editingCommonLinkScope = "User";
+        _editingCommonLinkScope = "Organization";
         CommonLinkName = string.Empty;
         CommonLinkUrl = string.Empty;
         CommonLinkValidationMessage = string.Empty;
@@ -287,7 +289,7 @@ public sealed partial class MainWindowViewModel
     private void CloseCommonLinkEditor()
     {
         _editingCommonLinkId = 0;
-        _editingCommonLinkScope = "User";
+        _editingCommonLinkScope = "Organization";
         IsCommonLinkEditorOpen = false;
         CommonLinkName = string.Empty;
         CommonLinkUrl = string.Empty;

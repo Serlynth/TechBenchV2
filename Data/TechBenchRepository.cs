@@ -1755,6 +1755,15 @@ public sealed class TechBenchRepository : ITechBenchRepository
         command.ExecuteNonQuery();
     }
 
+    // The SQLite repository is retained only for isolated legacy tests. It has
+    // no multi-user scope, so organization-setting operations use its existing
+    // settings table.
+    public void SaveOrganizationSetting(string key, string value) =>
+        SaveSetting(key, value);
+
+    public void DeleteOrganizationSetting(string key) =>
+        DeleteSetting(key);
+
     public void AddPostingLog(PostingLog log)
     {
         using var connection = _connectionFactory.CreateConnection();

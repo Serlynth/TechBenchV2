@@ -99,10 +99,19 @@ public sealed partial class MainWindowViewModel
                 TemplateName = value?.Name ?? string.Empty;
                 TemplateCategory = value?.Category ?? string.Empty;
                 TemplateText = value?.TemplateText ?? string.Empty;
+                OnPropertyChanged(nameof(CanEditManagedNoteTemplate));
                 DeleteNoteTemplateCommand.RaiseCanExecuteChanged();
+                SaveNoteTemplateCommand.RaiseCanExecuteChanged();
             }
         }
     }
+
+    public bool CanEditManagedNoteTemplate =>
+        _currentUser.IsAdmin
+        && (ManagedNoteTemplate is null
+            || ManagedNoteTemplate.ScopeType.Equals(
+                "Organization",
+                StringComparison.OrdinalIgnoreCase));
 
     public string TemplateName
     {
@@ -226,7 +235,9 @@ public sealed partial class MainWindowViewModel
             _ => CancelPendingNoteLink(),
             _ => HasPendingFollowUp);
         ImportGoogleSheetsCommand = new RelayCommand(_ => ImportGoogleSheetsCsv(), _ => !IsEntryOperationRunning);
-        NewNoteTemplateCommand = new RelayCommand(_ => StartNewNoteTemplate());
+        NewNoteTemplateCommand = new RelayCommand(
+            _ => StartNewNoteTemplate(),
+            _ => _currentUser.IsAdmin);
         SaveNoteTemplateCommand = new RelayCommand(_ => SaveManagedNoteTemplate(), _ => CanSaveManagedNoteTemplate());
         DeleteNoteTemplateCommand = new RelayCommand(
             _ => DeleteManagedNoteTemplate(),
@@ -726,7 +737,8 @@ public sealed partial class MainWindowViewModel
 
     private bool CanSaveManagedNoteTemplate()
     {
-        return !string.IsNullOrWhiteSpace(TemplateName)
+        return CanEditManagedNoteTemplate
+            && !string.IsNullOrWhiteSpace(TemplateName)
             && !string.IsNullOrWhiteSpace(TemplateText)
             && (ManagedNoteTemplate is null
                 || CanManageNoteTemplate(ManagedNoteTemplate));
@@ -742,7 +754,7 @@ public sealed partial class MainWindowViewModel
         var template = new NoteTemplate
         {
             Id = ManagedNoteTemplate?.Id ?? 0,
-            ScopeType = ManagedNoteTemplate?.ScopeType ?? "User",
+            ScopeType = ManagedNoteTemplate?.ScopeType ?? "Organization",
             Name = TemplateName.Trim(),
             Category = TemplateCategory.Trim(),
             TemplateText = TemplateText.Trim()
@@ -772,8 +784,21 @@ public sealed partial class MainWindowViewModel
     }
 
     private bool CanManageNoteTemplate(NoteTemplate template) =>
-        template.ScopeType.Equals("User", StringComparison.OrdinalIgnoreCase)
-        || _currentUser.CanManageClients;
+        _currentUser.IsAdmin
+        && template.ScopeType.Equals(
+            "Organization",
+            StringComparison.OrdinalIgnoreCase);
+
+    private bool HasPendingTemplateChanges()
+    {
+        return ManagedNoteTemplate is null
+            ? !string.IsNullOrWhiteSpace(TemplateName)
+              || !string.IsNullOrWhiteSpace(TemplateCategory)
+              || !string.IsNullOrWhiteSpace(TemplateText)
+            : !TemplateName.Equals(ManagedNoteTemplate.Name, StringComparison.Ordinal)
+              || !TemplateCategory.Equals(ManagedNoteTemplate.Category, StringComparison.Ordinal)
+              || !TemplateText.Equals(ManagedNoteTemplate.TemplateText, StringComparison.Ordinal);
+    }
 
     private void ReloadNoteTemplates(int? selectedId = null)
     {
