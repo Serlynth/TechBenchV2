@@ -40,7 +40,12 @@ public sealed class WhdRestClient
         try
         {
             var auth = await ResolveAuthenticationAsync(settings, cancellationToken);
-            var tickets = await GetTicketsPageAsync(settings, auth, page: 1, limit: 1, cancellationToken);
+            var tickets = await GetAuthenticationProbeTicketsPageAsync(
+                settings,
+                auth,
+                page: 1,
+                limit: 1,
+                cancellationToken);
             return WhdSyncResult.Succeeded(
                 $"Connected to Web Help Desk as {settings.Username}. Ticket filter returned {tickets.Count} sample item(s).",
                 tickets);
@@ -51,7 +56,9 @@ public sealed class WhdRestClient
         }
     }
 
-    public async Task<WhdSyncResult> GetMyTicketsAsync(WhdConnectionSettings settings, CancellationToken cancellationToken = default)
+    public async Task<WhdSyncResult> GetOrganizationTicketsAsync(
+        WhdConnectionSettings settings,
+        CancellationToken cancellationToken = default)
     {
         var validationError = Validate(settings);
         if (validationError is not null)
@@ -69,7 +76,12 @@ public sealed class WhdRestClient
 
             for (var page = 1; page <= 100; page++)
             {
-                var batch = await GetTicketsPageAsync(settings, auth, page, PageSize, cancellationToken);
+                var batch = await GetOrganizationTicketsPageAsync(
+                    settings,
+                    auth,
+                    page,
+                    PageSize,
+                    cancellationToken);
                 if (batch.Count == 0)
                 {
                     isComplete = true;
@@ -107,9 +119,9 @@ public sealed class WhdRestClient
             var openTicketCount = tickets.Count(static ticket => !ticket.IsClosed);
             var closedTicketCount = tickets.Count - openTicketCount;
             return WhdSyncResult.Succeeded(
-                $"Synced {openTicketCount} non-closed assigned Web Help Desk ticket(s) for {settings.Username}"
+                $"Synced {openTicketCount} non-closed organization Web Help Desk ticket(s) using the current Admin's WHD credentials"
                 + (closedTicketCount > 0 ? $" and updated {closedTicketCount} closed ticket(s)." : ".")
-                + (isComplete ? string.Empty : " Paging stopped because WHD repeated a page; missing-ticket reconciliation was skipped."),
+                + (isComplete ? string.Empty : " Paging stopped because WHD repeated a page; returned tickets were still updated."),
                 tickets,
                 isComplete);
         }
@@ -604,7 +616,12 @@ public sealed class WhdRestClient
         {
             try
             {
-                await GetTicketsPageAsync(settings, candidate, page: 1, limit: 1, cancellationToken);
+                await GetAuthenticationProbeTicketsPageAsync(
+                    settings,
+                    candidate,
+                    page: 1,
+                    limit: 1,
+                    cancellationToken);
                 _authenticationCache[cacheKey] = candidate;
                 return candidate;
             }
@@ -620,7 +637,7 @@ public sealed class WhdRestClient
                 : $"Authentication failed using {string.Join(", ", failures)}.");
     }
 
-    private async Task<IReadOnlyList<WhdSyncedTicket>> GetTicketsPageAsync(
+    private Task<IReadOnlyList<WhdSyncedTicket>> GetAuthenticationProbeTicketsPageAsync(
         WhdConnectionSettings settings,
         WhdAuthParameters auth,
         int page,
@@ -630,10 +647,35 @@ public sealed class WhdRestClient
         var requestUri = BuildRequestUri(settings.BaseUrl, "Tickets/mine", auth, new Dictionary<string, string>
         {
             ["style"] = "long",
-            ["limit"] = limit.ToString(),
-            ["page"] = page.ToString()
+            ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            ["page"] = page.ToString(CultureInfo.InvariantCulture)
         });
 
+        return GetTicketsPageAsync(requestUri, cancellationToken);
+    }
+
+    private Task<IReadOnlyList<WhdSyncedTicket>> GetOrganizationTicketsPageAsync(
+        WhdConnectionSettings settings,
+        WhdAuthParameters auth,
+        int page,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var requestUri = BuildRequestUri(settings.BaseUrl, "Tickets", auth, new Dictionary<string, string>
+        {
+            ["qualifier"] = "((deleted = null) or (deleted = 0) or (deleted = 1))",
+            ["style"] = "long",
+            ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            ["page"] = page.ToString(CultureInfo.InvariantCulture)
+        });
+
+        return GetTicketsPageAsync(requestUri, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<WhdSyncedTicket>> GetTicketsPageAsync(
+        Uri requestUri,
+        CancellationToken cancellationToken)
+    {
         using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)

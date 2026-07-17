@@ -92,6 +92,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private string _selectedWhdAuthenticationMode = "Auto (detect once)";
     private bool _whdAutoSyncEnabled = true;
     private string _whdAutoSyncMinutesText = DefaultWhdAutoSyncMinutes.ToString();
+    private bool _effectiveWhdAutoSyncEnabled = true;
+    private int _effectiveWhdAutoSyncMinutes = DefaultWhdAutoSyncMinutes;
     private bool _isWhdAutoSyncRunning;
     private bool _isSageVerificationRunning;
     private bool _isSagePostingRunning;
@@ -99,8 +101,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private DateTime? _lastWhdAutoSyncAt;
     private string _sageEmployeeId = string.Empty;
     private string _sageActivityItemId = string.Empty;
-    private Client? _selectedSageMappingClient;
-    private string _sageMappedCustomerId = string.Empty;
     private string _sageDsn = string.Empty;
     private string _sageUsername = string.Empty;
     private string _sagePassword = string.Empty;
@@ -186,9 +186,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         OpenPostingLogEntryCommand = new RelayCommand(OpenPostingLogEntry, parameter => parameter is PostingLog { WorkEntryId: > 0 } || SelectedPostingLog is { WorkEntryId: > 0 });
         ChangeTicketStatusCommand = new AsyncRelayCommand(ChangeTicketStatusAsync, CanChangeTicketStatus);
         SelectEditorClientCommand = new RelayCommand(SelectEditorClient, parameter => parameter is Client);
-        SaveSageCustomerMappingCommand = new RelayCommand(
-            _ => SaveSageCustomerMapping(),
-            _ => _currentUser.CanManageClients && SelectedSageMappingClient is not null);
         ApplyClientMatchCommand = new RelayCommand(_ => ApplyClientMatch(), _ => CanApplyClientMatch());
         SaveSettingsCommand = new RelayCommand(_ => SaveSettings());
         TestWhdConnectionCommand = new AsyncRelayCommand(TestWhdConnectionAsync);
@@ -207,7 +204,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             SyncSageCustomersAsync,
             _ => _currentUser.CanRunSharedSync);
         InitializeNoteFeatures();
+        InitializeV1DatabaseImport();
         InitializeCommonLinks();
+        InitializeAdminFeatures();
 
         StatusFilterOptions.Add("Any");
         StatusFilterOptions.Add("Draft");
@@ -322,7 +321,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public RelayCommand OpenPostingLogEntryCommand { get; }
     public AsyncRelayCommand ChangeTicketStatusCommand { get; }
     public RelayCommand SelectEditorClientCommand { get; }
-    public RelayCommand SaveSageCustomerMappingCommand { get; }
     public RelayCommand ApplyClientMatchCommand { get; }
     public RelayCommand SaveSettingsCommand { get; }
     public AsyncRelayCommand TestWhdConnectionCommand { get; }
@@ -370,6 +368,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 RaiseEntryCommandStates();
                 ApplyClientMatchCommand.RaiseCanExecuteChanged();
                 ImportGoogleSheetsCommand.RaiseCanExecuteChanged();
+                ImportV1DatabaseCommand.RaiseCanExecuteChanged();
                 Updates.RefreshCommandStates();
             }
         }
@@ -831,7 +830,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public bool CanRunSharedSync => _currentUser.CanRunSharedSync;
 
-    public bool CanManageOrganizationSettings => _currentUser.IsAdmin;
+    public bool CanManageOrganizationSettings =>
+        _currentUser.CanManageSharedConfiguration;
 
     public bool WhdAutoSyncEnabled
     {
@@ -841,7 +841,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _whdAutoSyncEnabled, value))
             {
                 MarkSettingsDirty();
-                ConfigureWhdAutoSyncTimer();
                 OnPropertyChanged(nameof(WhdAutoSyncStatusLabel));
             }
         }
@@ -855,7 +854,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _whdAutoSyncMinutesText, value))
             {
                 MarkSettingsDirty();
-                ConfigureWhdAutoSyncTimer();
                 OnPropertyChanged(nameof(WhdAutoSyncStatusLabel));
             }
         }
@@ -870,15 +868,18 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 return "Shared WHD sync is managed by a TechBench administrator.";
             }
 
-            if (!WhdAutoSyncEnabled)
+            var pendingSuffix = HasPendingWhdAutoSyncSchedule()
+                ? " Save Settings to apply the pending schedule change."
+                : string.Empty;
+
+            if (!_effectiveWhdAutoSyncEnabled)
             {
-                return "Auto-sync is off.";
+                return $"Auto-sync is off.{pendingSuffix}";
             }
 
-            var interval = ResolveWhdAutoSyncIntervalMinutes();
             return _lastWhdAutoSyncAt.HasValue
-                ? $"Auto-sync every {interval} min. Last sync: {_lastWhdAutoSyncAt.Value:g}."
-                : $"Auto-sync every {interval} min. Waiting for next sync.";
+                ? $"Auto-sync every {_effectiveWhdAutoSyncMinutes} min. Last sync: {_lastWhdAutoSyncAt.Value:g}.{pendingSuffix}"
+                : $"Auto-sync every {_effectiveWhdAutoSyncMinutes} min. Waiting for next sync.{pendingSuffix}";
         }
     }
 
@@ -904,27 +905,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 MarkSettingsDirty();
             }
         }
-    }
-
-    public Client? SelectedSageMappingClient
-    {
-        get => _selectedSageMappingClient;
-        set
-        {
-            if (SetProperty(ref _selectedSageMappingClient, value))
-            {
-                SageMappedCustomerId = value is null
-                    ? string.Empty
-                    : value.SageCustomerId ?? string.Empty;
-                SaveSageCustomerMappingCommand.RaiseCanExecuteChanged();
-            }
-        }
-    }
-
-    public string SageMappedCustomerId
-    {
-        get => _sageMappedCustomerId;
-        set => SetProperty(ref _sageMappedCustomerId, value);
     }
 
     public string SageDsn
@@ -1034,7 +1014,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Posting Queue" => "Showing entries still pending WHD or Sage posting",
             "Posting History" => "Showing WHD and Sage posting history",
             "Client List" => "Showing synced/imported clients",
-            "Ticket List" => "Showing assigned non-closed tickets",
+            "Ticket List" => "Showing organization non-closed tickets",
             "Common Links" => "Showing commonly used websites",
             _ => $"Showing {section}"
         };
@@ -1146,6 +1126,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             RefreshEditorTickets();
             RefreshCommonLinks();
             RefreshTagSuggestions();
+            RefreshOrganizationTags();
             ReloadNoteTemplates(ManagedNoteTemplate?.Id);
             ReloadOrganizationSettings();
         }
@@ -1174,11 +1155,22 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             SageActivityItemId = settings.GetValueOrDefault(
                 "Sage.ActivityItemId",
                 string.Empty);
+            WhdAutoSyncEnabled = bool.TryParse(
+                settings.GetValueOrDefault("Whd.AutoSyncEnabled", "true"),
+                out var autoSyncEnabled)
+                ? autoSyncEnabled
+                : true;
+            WhdAutoSyncMinutesText = settings.GetValueOrDefault(
+                "Whd.AutoSyncMinutes",
+                DefaultWhdAutoSyncMinutes.ToString());
+            ApplyLoadedWhdAutoSyncSchedule();
         }
         finally
         {
             _isLoadingSettings = wasLoadingSettings;
         }
+
+        ConfigureWhdAutoSyncTimer();
     }
 
     private void RefreshTagSuggestions()
@@ -1201,7 +1193,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var editorClientId = Editor.SelectedClient?.Id;
         var ticketFilterId = TicketClientFilter?.Id;
         var searchClientId = SearchClient?.Id;
-        var sageMappingClientId = SelectedSageMappingClient?.Id;
         var selectedManagedClientId = SelectedManagedClient?.Id;
 
         IReadOnlyList<Client> sharedClients;
@@ -1281,7 +1272,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         TicketClientFilter = ticketFilterId.HasValue ? Clients.FirstOrDefault(client => client.Id == ticketFilterId.Value) : TicketClientFilter;
         SearchClient = searchClientId.HasValue ? Clients.FirstOrDefault(client => client.Id == searchClientId.Value) : SearchClient;
-        SelectedSageMappingClient = sageMappingClientId.HasValue ? Clients.FirstOrDefault(client => client.Id == sageMappingClientId.Value) : SelectedSageMappingClient;
         SelectedManagedClient = selectedManagedClientId.HasValue
             ? ManagedClients.FirstOrDefault(client => client.Id == selectedManagedClientId.Value)
             : SelectedManagedClient;
@@ -3287,27 +3277,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             && SelectedTicketStatus is not null;
     }
 
-    private void SaveSageCustomerMapping()
-    {
-        if (!_currentUser.CanManageClients)
-        {
-            _dialogService.Info(
-                "Shared client mapping",
-                "Your TechBench role does not allow changes to shared client mappings.");
-            return;
-        }
-
-        if (SelectedSageMappingClient is null)
-        {
-            _dialogService.Error("Sage customer mapping", "Select a client before saving a Sage Customer ID mapping.");
-            return;
-        }
-
-        _repository.SaveClientSageMapping(SelectedSageMappingClient.Id, SageMappedCustomerId.Trim());
-        RefreshClients();
-        StatusMessage = $"Saved Sage Customer ID mapping for {SelectedSageMappingClient.Name}.";
-    }
-
     private bool CanApplyClientMatch()
     {
         return _currentUser.CanManageClients
@@ -3366,8 +3335,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 settings.GetValueOrDefault(
                     "Whd.AuthenticationMode",
                     WhdAuthenticationMode.Auto.ToString()));
-            WhdAutoSyncEnabled = _localPreferences.WhdAutoSyncEnabled;
-            WhdAutoSyncMinutesText = _localPreferences.WhdAutoSyncMinutes.ToString();
+            WhdAutoSyncEnabled = bool.TryParse(
+                settings.GetValueOrDefault("Whd.AutoSyncEnabled", "true"),
+                out var autoSyncEnabled)
+                ? autoSyncEnabled
+                : true;
+            WhdAutoSyncMinutesText = settings.GetValueOrDefault(
+                "Whd.AutoSyncMinutes",
+                DefaultWhdAutoSyncMinutes.ToString());
+            ApplyLoadedWhdAutoSyncSchedule();
             SageEmployeeId = settings.GetValueOrDefault("Sage.EmployeeId", string.Empty);
             SageActivityItemId = settings.GetValueOrDefault(
                 "Sage.ActivityItemId",
@@ -3403,10 +3379,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 SageActivityItemId.Trim());
         }
 
-        if (_currentUser.CanManageClients && SelectedSageMappingClient is not null)
-        {
-            _repository.SaveClientSageMapping(SelectedSageMappingClient.Id, SageMappedCustomerId.Trim());
-        }
         SaveSageConnectionSettings();
         _localPreferences.Theme = IsLightTheme ? "Light" : "Dark";
         _localPreferences.RefreshIntervalMinutes =
@@ -3447,6 +3419,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task SyncWhdTicketsNowAsync(object? parameter)
     {
+        if (!EnsureCanRunSharedSync("Web Help Desk ticket sync"))
+        {
+            return;
+        }
+
         SaveWhdConnectionSettings();
 
         if (!HasWhdConnectionFields())
@@ -3462,6 +3439,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task SyncWhdClientsAsync(object? parameter)
     {
+        if (!EnsureCanRunSharedSync("Web Help Desk location sync"))
+        {
+            return;
+        }
+
         SaveWhdConnectionSettings();
 
         if (!HasWhdConnectionFields())
@@ -3491,6 +3473,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task SyncWhdStatusesAsync(object? parameter)
     {
+        if (!EnsureCanRunSharedSync("Web Help Desk status sync"))
+        {
+            return;
+        }
+
         SaveWhdConnectionSettings();
 
         if (!HasWhdConnectionFields())
@@ -3523,7 +3510,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private async Task RunWhdAutoSyncAsync()
     {
         if (!CanRunSharedSync
-            || !WhdAutoSyncEnabled
+            || !_effectiveWhdAutoSyncEnabled
             || _isWhdAutoSyncRunning
             || !HasWhdConnectionFields())
         {
@@ -3541,12 +3528,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _isWhdAutoSyncRunning = true;
-        var operationName = isManual ? "WHD ticket sync" : "WHD auto-sync";
+        var operationName = isManual
+            ? "WHD organization ticket sync"
+            : "WHD organization auto-sync";
         try
         {
             var knownBeforeSync = new HashSet<string>(_knownWhdTicketKeys, StringComparer.OrdinalIgnoreCase);
             StatusMessage = $"{operationName} running...";
-            var result = await _whdRestClient.GetMyTicketsAsync(BuildWhdConnectionSettings());
+            var result = await _whdRestClient.GetOrganizationTicketsAsync(BuildWhdConnectionSettings());
             if (!result.Success)
             {
                 StatusMessage = $"{operationName} failed: {result.Message}";
@@ -3564,8 +3553,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     && !knownBeforeSync.Contains(key))
                 .ToList();
 
-            SaveWhdTickets(result.Tickets, result.IsComplete);
-            UpdateKnownWhdTicketKeys(result.Tickets, replace: result.IsComplete);
+            SaveWhdTickets(result.Tickets);
+            UpdateKnownWhdTicketKeys(result.Tickets, replace: false);
             _lastWhdAutoSyncAt = DateTime.Now;
             RefreshAll();
             StatusMessage = !result.IsComplete
@@ -3594,10 +3583,20 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void SaveWhdTickets(IReadOnlyList<WhdSyncedTicket> whdTickets, bool reconcileMissing)
+    private void SaveWhdTickets(IReadOnlyList<WhdSyncedTicket> whdTickets)
     {
-        var syncedAt = DateTime.Now;
-        _repository.SynchronizeWhdTickets(whdTickets, syncedAt, reconcileMissing);
+        SaveOrganizationWhdTicketSnapshot(_repository, whdTickets, DateTime.Now);
+    }
+
+    internal static void SaveOrganizationWhdTicketSnapshot(
+        ITechBenchRepository repository,
+        IReadOnlyList<WhdSyncedTicket> whdTickets,
+        DateTime syncedAt)
+    {
+        // An organization-wide fetch can omit tickets because of WHD permissions,
+        // paging behavior, or concurrent changes. Only explicit returned state may
+        // close a shared ticket; absence is never authoritative.
+        repository.SynchronizeWhdTickets(whdTickets, syncedAt, reconcileMissing: false);
     }
 
     private int SaveWhdClients(IReadOnlyList<WhdSyncedClient> whdClients, bool reconcileMissing)
@@ -3650,23 +3649,39 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _repository.DeleteSetting("Whd.ApiToken");
         if (saveOrganizationSettings && CanManageOrganizationSettings)
         {
+            var autoSyncMinutes = ResolveWhdAutoSyncIntervalMinutes();
             _repository.SaveOrganizationSetting("Whd.BaseUrl", WhdBaseUrl.Trim());
             _repository.SaveOrganizationSetting(
                 "Whd.AuthenticationMode",
                 ParseWhdAuthenticationMode(SelectedWhdAuthenticationMode).ToString());
+            _repository.SaveOrganizationSetting(
+                "Whd.AutoSyncEnabled",
+                WhdAutoSyncEnabled.ToString());
+            _repository.SaveOrganizationSetting(
+                "Whd.AutoSyncMinutes",
+                autoSyncMinutes.ToString());
+            _effectiveWhdAutoSyncEnabled = WhdAutoSyncEnabled;
+            _effectiveWhdAutoSyncMinutes = autoSyncMinutes;
+            var wasLoadingSettings = _isLoadingSettings;
+            _isLoadingSettings = true;
+            try
+            {
+                WhdAutoSyncMinutesText = autoSyncMinutes.ToString();
+            }
+            finally
+            {
+                _isLoadingSettings = wasLoadingSettings;
+            }
         }
 
-        _localPreferences.WhdAutoSyncEnabled = WhdAutoSyncEnabled;
-        _localPreferences.WhdAutoSyncMinutes = ResolveWhdAutoSyncIntervalMinutes();
-        LocalPreferenceStore.Save(_localPreferences);
         ConfigureWhdAutoSyncTimer();
     }
 
     private void ConfigureWhdAutoSyncTimer()
     {
         _whdAutoSyncTimer.Stop();
-        _whdAutoSyncTimer.Interval = TimeSpan.FromMinutes(ResolveWhdAutoSyncIntervalMinutes());
-        if (CanRunSharedSync && WhdAutoSyncEnabled)
+        _whdAutoSyncTimer.Interval = TimeSpan.FromMinutes(_effectiveWhdAutoSyncMinutes);
+        if (CanRunSharedSync && _effectiveWhdAutoSyncEnabled)
         {
             _whdAutoSyncTimer.Start();
         }
@@ -3682,6 +3697,20 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         return Math.Clamp(minutes, 1, 120);
+    }
+
+    private void ApplyLoadedWhdAutoSyncSchedule()
+    {
+        _effectiveWhdAutoSyncEnabled = WhdAutoSyncEnabled;
+        _effectiveWhdAutoSyncMinutes = ResolveWhdAutoSyncIntervalMinutes();
+        WhdAutoSyncMinutesText = _effectiveWhdAutoSyncMinutes.ToString();
+    }
+
+    private bool HasPendingWhdAutoSyncSchedule()
+    {
+        return WhdAutoSyncEnabled != _effectiveWhdAutoSyncEnabled
+            || !int.TryParse(WhdAutoSyncMinutesText, out var enteredMinutes)
+            || enteredMinutes != _effectiveWhdAutoSyncMinutes;
     }
 
     private void PrimeKnownWhdTicketKeys()
@@ -3779,6 +3808,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task SyncSageCustomersAsync(object? parameter)
     {
+        if (!EnsureCanRunSharedSync("Sage customer sync"))
+        {
+            return;
+        }
+
         SaveSageConnectionSettings();
 
         if (string.IsNullOrWhiteSpace(SageDsn))
@@ -3811,6 +3845,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             + (matchedCount > 0 ? $" Matched {matchedCount} to WHD location(s)." : string.Empty)
             + (staleCount > 0 ? $" Removed or deactivated {staleCount} old Sage customer(s)." : string.Empty);
         _dialogService.Info("Sage customers", StatusMessage);
+    }
+
+    private bool EnsureCanRunSharedSync(string operation)
+    {
+        if (CanRunSharedSync)
+        {
+            return true;
+        }
+
+        var message = $"Only a TechBench Admin may run {operation}.";
+        StatusMessage = message;
+        _dialogService.Info("Shared synchronization", message);
+        return false;
     }
 
     private void SaveSageConnectionSettings()

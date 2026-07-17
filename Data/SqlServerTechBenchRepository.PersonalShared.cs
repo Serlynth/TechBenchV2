@@ -6,6 +6,80 @@ namespace TechBench.Data;
 
 public sealed partial class SqlServerTechBenchRepository
 {
+    public IReadOnlyList<OrganizationTag> GetOrganizationTags() =>
+        GetOrganizationTagsAsync().GetAwaiter().GetResult();
+
+    public Task<IReadOnlyList<OrganizationTag>> GetOrganizationTagsAsync(
+        CancellationToken cancellationToken = default) =>
+        QueryAsync(
+            Procedures.GetOrganizationTags,
+            null,
+            (reader, token) => ReadListAsync(reader, token, ReadOrganizationTag),
+            cancellationToken);
+
+    public int SaveOrganizationTag(OrganizationTag tag) =>
+        SaveOrganizationTagAsync(tag).GetAwaiter().GetResult();
+
+    public async Task<int> SaveOrganizationTagAsync(
+        OrganizationTag tag,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(tag);
+        var saved = await QueryAsync(
+                Procedures.SaveOrganizationTag,
+                command =>
+                {
+                    AddInt(command, "@Id", tag.Id > 0 ? tag.Id : null);
+                    AddRequiredText(command, "@Tag", 1000, tag.Tag);
+                    AddBinary(
+                        command,
+                        "@ExpectedRowVersion",
+                        8,
+                        tag.RowVersion
+                        ?? GetTrackedRowVersion("OrganizationTag", tag.Id));
+                    AddGuid(command, "@RequestId", Guid.NewGuid());
+                },
+                (reader, token) =>
+                    ReadSingleAsync(reader, token, ReadOrganizationTag),
+                cancellationToken)
+            .ConfigureAwait(false)
+            ?? throw new InvalidOperationException(
+                $"{Procedures.SaveOrganizationTag} did not return the saved tag.");
+        tag.Id = saved.Id;
+        tag.Tag = saved.Tag;
+        tag.UpdatedAt = saved.UpdatedAt;
+        tag.RowVersion = saved.RowVersion;
+        return tag.Id;
+    }
+
+    public void DeleteOrganizationTag(OrganizationTag tag) =>
+        DeleteOrganizationTagAsync(tag).GetAwaiter().GetResult();
+
+    public async Task DeleteOrganizationTagAsync(
+        OrganizationTag tag,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(tag);
+        await ExecuteNonQueryAsync(
+                Procedures.DeleteOrganizationTag,
+                command =>
+                {
+                    AddInt(command, "@Id", tag.Id);
+                    AddBinary(
+                        command,
+                        "@ExpectedRowVersion",
+                        8,
+                        tag.RowVersion
+                        ?? GetTrackedRowVersion("OrganizationTag", tag.Id));
+                    AddGuid(command, "@RequestId", Guid.NewGuid());
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+        _rowVersions.TryRemove(
+            BuildRowVersionKey("OrganizationTag", tag.Id),
+            out _);
+    }
+
     public IReadOnlyList<NoteTemplate> GetTemplates() =>
         GetTemplatesAsync().GetAwaiter().GetResult();
 
@@ -619,6 +693,19 @@ public sealed partial class SqlServerTechBenchRepository
         link.RowVersion = GetBytes(reader, "RowVersion");
         TrackRowVersion("CommonLink", link.Id, reader);
         return link;
+    }
+
+    private OrganizationTag ReadOrganizationTag(SqlDataReader reader)
+    {
+        var tag = new OrganizationTag
+        {
+            Id = GetInt32(reader, "Id"),
+            Tag = GetString(reader, "Tag"),
+            UpdatedAt = GetDateTime(reader, "UpdatedAt", DateTime.Now),
+            RowVersion = GetBytes(reader, "RowVersion")
+        };
+        TrackRowVersion("OrganizationTag", tag.Id, reader);
+        return tag;
     }
 
     private static string BuildSettingRowVersionKey(string scopeType, string key) =>

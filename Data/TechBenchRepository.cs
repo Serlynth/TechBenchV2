@@ -476,45 +476,6 @@ public sealed class TechBenchRepository : ITechBenchRepository
         return UpsertSyncedClient(client);
     }
 
-    public void SaveClientSageMapping(int clientId, string sageCustomerId, string? sageCustomerName = null)
-    {
-        var client = GetClient(clientId);
-        if (client is null)
-        {
-            return;
-        }
-
-        var normalizedCustomerId = string.IsNullOrWhiteSpace(sageCustomerId) ? null : sageCustomerId.Trim();
-        if (normalizedCustomerId is not null)
-        {
-            var existingSageClient = GetClients(includeInactive: true)
-                .FirstOrDefault(candidate => candidate.Id != clientId
-                    && string.Equals(
-                        candidate.SageCustomerId?.Trim(),
-                        normalizedCustomerId,
-                        StringComparison.OrdinalIgnoreCase));
-            if (existingSageClient is not null && HasWhdIdentity(client))
-            {
-                MergeClientRecords(clientId, existingSageClient.Id);
-                return;
-            }
-        }
-
-        client.SageCustomerId = normalizedCustomerId;
-        if (!string.IsNullOrWhiteSpace(sageCustomerName))
-        {
-            client.SageCustomerName = sageCustomerName.Trim();
-        }
-        else if (string.IsNullOrWhiteSpace(client.SageCustomerName))
-        {
-            client.SageCustomerName = client.WhdLocationName ?? client.Name;
-        }
-
-        client.Source = MergeClientSources(client.Source, "Sage");
-        client.MatchStatus = string.IsNullOrWhiteSpace(client.SageCustomerId) ? "Unmatched" : "Manual match";
-        SaveClient(client);
-    }
-
     public Client MergeClientRecords(int whdClientId, int sageClientId)
     {
         if (whdClientId <= 0 || sageClientId <= 0 || whdClientId == sageClientId)
@@ -1187,6 +1148,27 @@ public sealed class TechBenchRepository : ITechBenchRepository
         return tags.ToArray();
     }
 
+    public IReadOnlyList<OrganizationTag> GetOrganizationTags() =>
+        GetDistinctTags()
+            .Select((tag, index) => new OrganizationTag
+            {
+                Id = index + 1,
+                Tag = tag
+            })
+            .ToArray();
+
+    public int SaveOrganizationTag(OrganizationTag tag)
+    {
+        ArgumentNullException.ThrowIfNull(tag);
+        tag.Tag = tag.Tag.Trim();
+        tag.Id = tag.Id > 0 ? tag.Id : GetOrganizationTags().Count + 1;
+        tag.UpdatedAt = DateTime.Now;
+        return tag.Id;
+    }
+
+    public void DeleteOrganizationTag(OrganizationTag tag) =>
+        ArgumentNullException.ThrowIfNull(tag);
+
     public WorkEntry? GetWorkEntry(int id)
     {
         using var connection = _connectionFactory.CreateConnection();
@@ -1260,6 +1242,25 @@ public sealed class TechBenchRepository : ITechBenchRepository
         transaction.Commit();
         return count;
     }
+
+    public V1ImportReferenceResolution ResolveV1ImportReferences(
+        V1DatabaseImportPackage package)
+    {
+        ArgumentNullException.ThrowIfNull(package);
+        throw new NotSupportedException(
+            "V1 reference resolution is available only in the SQL Server-backed TechBench V2 client.");
+    }
+
+    public V1DatabaseImportResult ImportV1Database(V1DatabaseImportPackage package)
+    {
+        ArgumentNullException.ThrowIfNull(package);
+        throw new NotSupportedException(
+            "V1 database migration is available only in the SQL Server-backed TechBench V2 client.");
+    }
+
+    public void AbandonV1Import() =>
+        throw new NotSupportedException(
+            "V1 import recovery is available only in the SQL Server-backed TechBench V2 client.");
 
     public void DeleteWorkEntry(int id)
     {
@@ -1623,17 +1624,6 @@ public sealed class TechBenchRepository : ITechBenchRepository
 
         if (link.Id > 0)
         {
-            using (var builtInCommand = connection.CreateCommand())
-            {
-                builtInCommand.CommandText = "SELECT BuiltInKey FROM CommonLinks WHERE Id = $id";
-                builtInCommand.Parameters.AddWithValue("$id", link.Id);
-                if (builtInCommand.ExecuteScalar() is string builtInKey
-                    && !string.IsNullOrWhiteSpace(builtInKey))
-                {
-                    throw new InvalidOperationException("Built-in links cannot be changed.");
-                }
-            }
-
             using var updateCommand = connection.CreateCommand();
             updateCommand.CommandText = """
                 UPDATE CommonLinks
@@ -1653,7 +1643,6 @@ public sealed class TechBenchRepository : ITechBenchRepository
 
             link.Name = link.Name.Trim();
             link.Url = link.Url.Trim();
-            link.BuiltInKey = null;
             link.UpdatedAt = now;
             return link.Id;
         }
@@ -2832,6 +2821,10 @@ public sealed class TechBenchRepository : ITechBenchRepository
     private static void SeedCommonLinks(SqliteConnection connection)
     {
         var now = ToDbDateTime(DateTime.Now);
+        using var markerCommand = connection.CreateCommand();
+        markerCommand.CommandText =
+            "SELECT 1 FROM Settings WHERE Key = 'CommonLinks.AdminEditableDefaultsV2' LIMIT 1";
+        var canonicalizeExistingDefaults = markerCommand.ExecuteScalar() is null;
         var defaults = new[]
         {
             ("watchguard-cloud", "WatchGuard Cloud", "https://cloud.watchguard.com/", 0),
@@ -2848,7 +2841,8 @@ public sealed class TechBenchRepository : ITechBenchRepository
         {
             using var insertCommand = connection.CreateCommand();
             insertCommand.Transaction = transaction;
-            insertCommand.CommandText = """
+            insertCommand.CommandText = canonicalizeExistingDefaults
+                ? """
                 INSERT OR IGNORE INTO CommonLinks
                     (Name, Url, SortOrder, BuiltInKey, CreatedAt, UpdatedAt)
                 VALUES
@@ -2860,11 +2854,13 @@ public sealed class TechBenchRepository : ITechBenchRepository
                     SortOrder = $sortOrder,
                     BuiltInKey = $builtInKey,
                     UpdatedAt = $updatedAt
-                WHERE (BuiltInKey = $builtInKey OR Url = $url COLLATE NOCASE)
-                  AND (Name <> $name
-                       OR Url <> $url COLLATE NOCASE
-                       OR SortOrder <> $sortOrder
-                       OR BuiltInKey IS NULL)
+                WHERE BuiltInKey = $builtInKey OR Url = $url COLLATE NOCASE;
+                """
+                : """
+                INSERT OR IGNORE INTO CommonLinks
+                    (Name, Url, SortOrder, BuiltInKey, CreatedAt, UpdatedAt)
+                VALUES
+                    ($name, $url, $sortOrder, $builtInKey, $createdAt, $updatedAt);
                 """;
             insertCommand.Parameters.AddWithValue("$builtInKey", link.Item1);
             insertCommand.Parameters.AddWithValue("$name", link.Item2);
@@ -2874,6 +2870,19 @@ public sealed class TechBenchRepository : ITechBenchRepository
             insertCommand.Parameters.AddWithValue("$updatedAt", now);
             insertCommand.ExecuteNonQuery();
         }
+
+        if (canonicalizeExistingDefaults)
+        {
+            using var saveMarker = connection.CreateCommand();
+            saveMarker.Transaction = transaction;
+            saveMarker.CommandText = """
+                INSERT INTO Settings (Key, Value)
+                VALUES ('CommonLinks.AdminEditableDefaultsV2', 'true')
+                ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value
+                """;
+            saveMarker.ExecuteNonQuery();
+        }
+
         transaction.Commit();
     }
 

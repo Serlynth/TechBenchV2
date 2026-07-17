@@ -1873,10 +1873,12 @@
                                     <WrapPanel Grid.Column="1" HorizontalAlignment="Right">
                                         <Button Content="Sync WHD Locations"
                                                 Command="{Binding SyncWhdClientsCommand}"
+                                                Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                 MinWidth="150"
                                                 Margin="0,0,8,8" />
                                         <Button Content="Sync Sage Customers"
                                                 Command="{Binding SyncSageCustomersCommand}"
+                                                Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                 Style="{StaticResource PrimaryButtonStyle}"
                                                 MinWidth="152"
                                                 Margin="0,0,0,8" />
@@ -1902,7 +1904,8 @@
                                         BorderThickness="1"
                                         CornerRadius="6"
                                         Padding="12"
-                                        Margin="0,0,0,12">
+                                        Margin="0,0,0,12"
+                                        Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="1.2*" />
@@ -2119,6 +2122,7 @@
                                 <Button Grid.Column="1"
                                         Content="Add Shared Link"
                                         Command="{Binding NewCommonLinkCommand}"
+                                        Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
                                         Style="{StaticResource PrimaryButtonStyle}"
                                         ToolTip="Shared links are available to every TechBench user and managed by TechBench administrators."
                                         Padding="12,7" />
@@ -2282,20 +2286,22 @@
                                                                 MinWidth="68"
                                                                 Padding="10,6"
                                                                 Margin="0,0,7,0" />
-                                                        <StackPanel Orientation="Horizontal"
-                                                                    Visibility="{Binding IsBuiltIn, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
-                                                            <Button Content="Edit"
-                                                                    Command="{Binding DataContext.EditCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                    CommandParameter="{Binding}"
-                                                                    MinWidth="62"
-                                                                    Padding="10,6"
-                                                                    Margin="0,0,7,0" />
-                                                            <Button Content="Remove"
-                                                                    Command="{Binding DataContext.DeleteCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                    CommandParameter="{Binding}"
-                                                                    Style="{StaticResource DangerButtonStyle}"
-                                                                    MinWidth="76"
-                                                                    Padding="10,6" />
+                                                        <StackPanel Visibility="{Binding DataContext.CanManageOrganizationSettings, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <Button Content="Edit"
+                                                                        Command="{Binding DataContext.EditCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                        CommandParameter="{Binding}"
+                                                                        MinWidth="62"
+                                                                        Padding="10,6"
+                                                                        Margin="0,0,7,0" />
+                                                                <Button Content="Remove"
+                                                                        Command="{Binding DataContext.DeleteCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                        CommandParameter="{Binding}"
+                                                                        Style="{StaticResource DangerButtonStyle}"
+                                                                        MinWidth="76"
+                                                                        Padding="10,6"
+                                                                        Visibility="{Binding IsBuiltIn, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                                                            </StackPanel>
                                                         </StackPanel>
                                                     </StackPanel>
                                                     <CheckBox Content="Chrome Incognito"
@@ -2324,7 +2330,9 @@
                         </DockPanel>
                     </Border>
 
-                    <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                    <Border Grid.Column="2"
+                            Style="{StaticResource CardStyle}"
+                            Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <Grid>
                             <StackPanel Visibility="{Binding IsCommonLinkEditorOpen, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
                                 <TextBlock Text="Link Details" Style="{StaticResource SectionHeadingStyle}" />
@@ -2367,6 +2375,17 @@
                                 </Grid>
                             </StackPanel>
                         </Grid>
+                    </Border>
+
+                    <Border Grid.Column="2"
+                            Style="{StaticResource CardStyle}"
+                            Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                        <StackPanel>
+                            <TextBlock Text="Shared Links" Style="{StaticResource SectionHeadingStyle}" />
+                            <TextBlock Text="Common Links are available to everyone and managed by TechBench Admins."
+                                       Style="{StaticResource MutedTextStyle}"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
                     </Border>
                 </Grid>
 
@@ -2977,30 +2996,43 @@
                                     <TextBlock Text="API key, password, or token" Style="{StaticResource FieldLabelStyle}" />
                                     <PasswordBox x:Name="WhdApiTokenPasswordBox"
                                                  PasswordChanged="WhdApiTokenPasswordBox_PasswordChanged"
-                                                 Margin="0,0,0,14" />
+                                                 Margin="0,0,0,8" />
+                                    <TextBlock Text="Shared WHD synchronization uses this Admin's WHD credentials. Configure a WHD Admin identity that can read all organization tickets."
+                                               Style="{StaticResource MutedTextStyle}"
+                                               TextWrapping="Wrap"
+                                               Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                               Margin="0,0,0,14" />
                                     <WrapPanel>
                                         <Button Content="Test Connection"
                                                 Command="{Binding TestWhdConnectionCommand}"
                                                 MinWidth="126"
                                                 Margin="0,0,8,0" />
-                                        <Button Content="Sync Tickets Now"
+                                        <Button Content="Sync Organization Tickets Now"
                                                 Command="{Binding SyncWhdTicketsCommand}"
-                                                MinWidth="136"
+                                                Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                MinWidth="210"
                                                 Margin="0,0,8,0" />
                                         <Button Content="Sync WHD Locations Now"
                                                 Command="{Binding SyncWhdClientsCommand}"
+                                                Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                 MinWidth="172"
                                                 Margin="0,0,8,0" />
                                         <Button Content="Sync Ticket Statuses"
                                                 Command="{Binding SyncWhdStatusesCommand}"
+                                                Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                 MinWidth="150" />
                                     </WrapPanel>
                                     <Border BorderBrush="{DynamicResource BorderBrush}"
                                             BorderThickness="0,1,0,0"
                                             Margin="0,14,0,0"
-                                            Padding="0,14,0,0">
+                                            Padding="0,14,0,0"
+                                            Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
                                         <StackPanel>
-                                            <CheckBox Content="Auto-sync assigned tickets"
+                                            <TextBlock Text="The WHD auto-sync schedule is stored on SQL Server and managed by TechBench Admins."
+                                                       Style="{StaticResource MutedTextStyle}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,0,0,10" />
+                                            <CheckBox Content="Auto-sync organization tickets"
                                                       IsChecked="{Binding WhdAutoSyncEnabled}"
                                                       IsEnabled="{Binding CanRunSharedSync}"
                                                       Margin="0,0,0,10" />
@@ -3066,6 +3098,7 @@
                                                 Margin="0,0,8,8" />
                                         <Button Content="Sync Sage Customers Now"
                                                 Command="{Binding SyncSageCustomersCommand}"
+                                                Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                 Style="{StaticResource PrimaryButtonStyle}"
                                                 MinWidth="178"
                                                 Margin="0,0,8,8" />
@@ -3102,33 +3135,14 @@
                                         </StackPanel>
                                     </Grid>
 
-                                    <Border Background="{DynamicResource PanelAltBackgroundBrush}"
-                                            BorderBrush="{DynamicResource BorderBrush}"
-                                            BorderThickness="1"
-                                            CornerRadius="4"
-                                            Padding="10"
-                                            Margin="0,14,0,14">
-                                        <StackPanel>
-                                            <TextBlock Text="Customer Mapping" FontWeight="SemiBold" Margin="0,0,0,8" />
-                                            <TextBlock Text="TechBench client" Style="{StaticResource FieldLabelStyle}" />
-                                            <ComboBox ItemsSource="{Binding Clients}"
-                                                      SelectedItem="{Binding SelectedSageMappingClient}"
-                                                      ItemTemplate="{StaticResource ClientOptionTemplate}"
-                                                      Margin="0,0,0,10" />
-                                            <TextBlock Text="Sage Customer ID for selected client" Style="{StaticResource FieldLabelStyle}" />
-                                            <TextBox Text="{Binding SageMappedCustomerId, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" />
-                                            <Button Content="Save Customer Mapping"
-                                                    Command="{Binding SaveSageCustomerMappingCommand}"
-                                                    HorizontalAlignment="Left" />
-                                        </StackPanel>
-                                    </Border>
-
                                     <Button Content="Check Sage Desktop" Command="{Binding TestSageConnectionCommand}" />
                                 </StackPanel>
                             </Border>
                         </Grid>
 
-                        <Border Style="{StaticResource CardStyle}" Margin="0,14,0,0">
+                        <Border Style="{StaticResource CardStyle}"
+                                Margin="0,14,0,0"
+                                Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="250" />
@@ -3201,6 +3215,53 @@
                             </Grid>
                         </Border>
 
+                        <Border Style="{StaticResource CardStyle}"
+                                Margin="0,14,0,0"
+                                Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="250" />
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Common Tags" Style="{StaticResource SectionHeadingStyle}" />
+                                    <TextBlock Text="Shared suggestions for every user. Only TechBench Admins can add or remove them."
+                                               Style="{StaticResource MutedTextStyle}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,0,0,8" />
+                                    <ListBox ItemsSource="{Binding ManagedOrganizationTags}"
+                                             SelectedItem="{Binding SelectedOrganizationTag}"
+                                             DisplayMemberPath="Tag"
+                                             Background="{DynamicResource ComboBoxBackgroundBrush}"
+                                             Foreground="{DynamicResource ComboBoxTextBrush}"
+                                             BorderBrush="{DynamicResource ComboBoxBorderBrush}"
+                                             ItemContainerStyle="{StaticResource TicketSelectorItemStyle}"
+                                             MinHeight="130"
+                                             MaxHeight="220" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" VerticalAlignment="Top">
+                                    <TextBlock Text="New shared tag" Style="{StaticResource FieldLabelStyle}" />
+                                    <TextBox Text="{Binding NewOrganizationTag, UpdateSourceTrigger=PropertyChanged}"
+                                             MaxLength="1000"
+                                             Margin="0,0,0,10" />
+                                    <WrapPanel>
+                                        <Button Content="Add Tag"
+                                                Command="{Binding AddOrganizationTagCommand}"
+                                                Style="{StaticResource PrimaryButtonStyle}"
+                                                Margin="0,0,8,0" />
+                                        <Button Content="Remove Selected"
+                                                Command="{Binding DeleteOrganizationTagCommand}"
+                                                Style="{StaticResource DangerButtonStyle}" />
+                                    </WrapPanel>
+                                    <TextBlock Text="Removing a common tag only removes the suggestion; existing work notes keep their tag text."
+                                               Style="{StaticResource MutedTextStyle}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,10,0,0" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
                         <Border Style="{StaticResource CardStyle}" Margin="0,14,0,0">
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -3208,17 +3269,24 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" Margin="0,0,24,0">
-                                    <TextBlock Text="Worklog Import" Style="{StaticResource SectionHeadingStyle}" />
-                                    <TextBlock Text="Google Sheets CSV"
+                                    <TextBlock Text="Personal Data Import" Style="{StaticResource SectionHeadingStyle}" />
+                                    <TextBlock Text="Move your V1 work history, personal notes, posting history, and note links into your SQL account. The source database is opened read-only; shared links, templates, credentials, and organization settings are not imported."
                                                Foreground="{DynamicResource SecondaryTextBrush}"
-                                               FontWeight="SemiBold" />
+                                               TextWrapping="Wrap"
+                                               MaxWidth="760" />
                                 </StackPanel>
-                                <Button Grid.Column="1"
-                                        Content="Import CSV"
-                                        Command="{Binding ImportGoogleSheetsCommand}"
-                                        Style="{StaticResource PrimaryButtonStyle}"
-                                        MinWidth="118"
-                                        VerticalAlignment="Center" />
+                                <StackPanel Grid.Column="1"
+                                            VerticalAlignment="Center">
+                                    <Button Content="Import V1 Database..."
+                                            Command="{Binding ImportV1DatabaseCommand}"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            MinWidth="164"
+                                            Margin="0,0,0,8" />
+                                    <Button Content="Import Google Sheets CSV"
+                                            Command="{Binding ImportGoogleSheetsCommand}"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            MinWidth="164" />
+                                </StackPanel>
                             </Grid>
                         </Border>
                     </StackPanel>

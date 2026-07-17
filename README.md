@@ -4,7 +4,7 @@ TechBench V2 is the multi-user successor to TechBench 1.x. It keeps the existing
 
 The original TechBench workspace is not modified. V1 and V2 have separate product identities, executables, mutex names, settings, credential namespaces, packages, and update feeds.
 
-Current milestone: `2.0.0-alpha.3` - the server-backed client conversion and organization-wide reference-data boundary are implemented. It still requires deployment to the real SQL Server 2016 instance and domain-user smoke testing before it should be treated as production-ready.
+Current milestone: `2.0.0-alpha.5` - the server-backed client, strict administrator-owned shared-data boundary, and owner-scoped V1 migration contract are implemented. It still requires deployment to the real SQL Server 2016 instance and domain-user smoke testing before it should be treated as production-ready.
 
 ## What V2 stores where
 
@@ -15,7 +15,7 @@ SQL Server is the source of truth for:
 - work entries, Personal Notes, links, follow-ups, and search/history
 - editor recovery drafts
 - organization-wide Common Links, shared templates, and the canonical tag catalog
-- organization and user-scoped application settings
+- administrator-managed organization settings, including WHD/Sage defaults and the WHD automatic-sync schedule, plus user-scoped identity settings
 - posting logs, durable posting attempts, and posting leases
 - WHD/Sage synchronization leases and runs
 - import batches, legacy-ID mappings, and audit history
@@ -24,12 +24,12 @@ The workstation keeps only non-business state:
 
 - the SQL Server address and database name, without credentials
 - a generated device ID
-- theme, window position/size/state, refresh intervals, and similar device preferences
-- device-specific Sage/WHD/update/browser options
+- theme, window position/size/state, the shared-data view refresh interval, and similar device preferences
+- device-specific Sage, update, and browser options
 - WHD and Sage secrets protected by Windows Credential Manager
 - installed application/update artifacts and temporary files explicitly created by the user
 
-The production client neither references nor packages SQLite. Test builds retain the legacy SQLite repository only for regression and migration-boundary testing. V2 has no offline business-data store, so the SQL Server must be reachable to use the application.
+The production client packages the SQLite runtime only for the read-only **Import V1 Database...** action. It never creates or uses a local SQLite business-data store, and the legacy local repository/providers remain excluded from production builds. V2 has no offline business-data store or client-side database-backup feature, so SQL Server must be reachable to use the application. SQL Server backup and restore are DBA responsibilities.
 
 ## Deployment model
 
@@ -41,10 +41,10 @@ TechBench V2 WPF client (x86)
     -> Windows Integrated Authentication
     -> encrypted SQL Server connection
     -> CSRI-SQL.CSRI.local
-    -> TechBench database, schema version 3
+    -> TechBench database, schema version 5
 ~~~
 
-WHD API work, Sage ODBC access, and Sage desktop automation still run from the technician workstation. SQL Server stores the durable state and coordinates posting and synchronization across workstations.
+WHD API work, Sage ODBC access, and Sage desktop automation still run from the technician workstation. SQL Server stores the durable state, the organization-wide WHD automatic-sync schedule, and the coordination records used across workstations. Shared WHD ticket synchronization uses an Admin's configured WHD identity to request organization tickets; that WHD identity must have access to the full ticket set. Explicit closed or deleted records update the shared snapshot, but an omitted ticket is never closed by inference.
 
 The V2 client uses short-lived pooled connections and stored procedures. It does not hold a database transaction open while calling WHD or Sage.
 
@@ -61,6 +61,10 @@ The prepared CSRI mapping is:
 
 The database derives the caller's durable owner identity from the Windows SID. Stored procedures enforce owner and role checks. Hiding or disabling a WPF control is only a user-interface convenience and is not the authorization boundary.
 
+Only members of `CSRI\TechBench_Admins` may change organization-wide configuration or run WHD/Sage shared synchronization. Administrator-owned actions include client matching and shared aliases, Common Links, note templates, shared WHD/Sage defaults, the WHD automatic-sync schedule, and manual customer/client snapshot synchronization. Ordinary users can read the resulting shared catalogs and manage their own work, notes, drafts, credentials, and user-specific identifiers.
+
+Settings does not provide a second manual Sage customer-mapping editor. Administrators manage customer matching in the dedicated Client Matching workspace so there is one shared, audited workflow.
+
 Application users receive execution rights on approved stored procedures. They are not granted broad `db_datareader`, `db_datawriter`, `db_owner`, or direct table DML access.
 
 ## Requirements
@@ -74,11 +78,11 @@ Deployment:
 
 - domain-joined or trusted-domain Windows workstations
 - SQL Server 2016 at compatibility level 130
-- the `TechBench` database at schema version 3
+- the `TechBench` database at schema version 5
 - the CSRI Active Directory groups mapped by the database deployment
 - TCP connectivity from workstations to SQL Server
 - TLS 1.2 and a SQL Server certificate trusted by the workstations
-- a tested SQL Server backup, integrity-check, and restore process
+- a DBA-owned, tested SQL Server backup, integrity-check, and restore process
 
 The production client remains x86 because Sage desktop integration requires it.
 
@@ -86,7 +90,7 @@ SQL Server 2016 extended support ended July 14, 2026. Before production use, con
 
 ## Database deployment
 
-The DBA-owned deployment package is in [database/sqlserver2016](database/sqlserver2016). The standalone script creates or upgrades the database and installs the complete schema-version-3 stored-procedure contract:
+The DBA-owned deployment package is in [database/sqlserver2016](database/sqlserver2016). The standalone script creates or upgrades the database and installs the complete schema-version-5 stored-procedure contract:
 
 `database/sqlserver2016/Deploy-CSRI-Standalone.sql`
 
@@ -106,20 +110,21 @@ Application Name=TechBench V2;
 
 No SQL username, `sa` password, or other credential belongs in the client connection configuration.
 
-The desktop application checks the schema version at startup and refuses an incompatible database. Version `2.0.0-alpha.3` requires database schema version `3`.
+The desktop application checks the schema version at startup and refuses an incompatible database. Version `2.0.0-alpha.5` requires database schema version `5`, including the administrator-only shared-configuration boundary and owner-scoped V1 import contract.
 
-### Coordinated alpha.3 upgrade
+### Coordinated alpha.5 upgrade
 
 The database and client must be upgraded as one planned cutover:
 
 1. Back up the `TechBench` database.
-2. Run the complete schema-version-3 standalone deployment and confirm its verification output.
-3. Install the alpha.3 client.
+2. Run the complete schema-version-5 standalone deployment and confirm its verification output.
+3. Install the alpha.5 client.
 4. Test with at least one ordinary domain user and one TechBench administrator.
-5. Verify shared clients, tickets, canonical customer matching, aliases, tags, templates, Common Links, work entries, Personal Note privacy, drafts, posting coordination, synchronization, automatic refresh, and optimistic-concurrency conflicts.
-6. Configure and test ongoing backups before production data entry.
+5. Verify that ordinary users cannot change shared configuration or run shared synchronization, while administrators can manage matching, aliases, templates, Common Links, organization settings, and WHD/Sage synchronization. Use a WHD Admin identity for the shared ticket sync and confirm it can read tickets assigned across technician groups.
+6. Verify shared clients, tickets, canonical customer matching, aliases, tags, templates, Common Links, work entries, Personal Note privacy, drafts, posting coordination, automatic refresh, and optimistic-concurrency conflicts.
+7. Have the DBA configure and test ongoing SQL Server backups before production data entry.
 
-Do not deploy only one side. The alpha.3 client rejects schema versions 1 and 2; earlier alpha clients are not compatible with the completed schema-version-3 contract.
+Do not deploy only one side. The alpha.5 client rejects schema versions 1 through 4; earlier alpha clients do not have the schema-version-5 owner-scoped import contract.
 
 Users newly added to an AD group should sign out of Windows and sign back in before testing so their Windows security token includes the new membership.
 
@@ -131,7 +136,7 @@ dotnet build TechBench.csproj -c Release
 dotnet test TechBench.Tests\TechBench.Tests.csproj -c Release
 ~~~
 
-A production artifact check should also confirm that the output contains no `Microsoft.Data.Sqlite`, `SQLitePCLRaw`, or `e_sqlite3` dependency.
+The release script rejects any packaged `.db`, `.sqlite`, or `.sqlite3` data file and verifies that the read-only V1 importer dependency is present. The packaged SQLite runtime is an import reader only; the production project still excludes the V1 local repository, database-location service, and local client/ticket providers.
 
 Unit and contract tests do not replace the required integration run against the actual SQL Server 2016 instance. Testing only on a newer SQL Server at compatibility level 130 cannot detect every engine-version difference.
 
@@ -139,13 +144,13 @@ Unit and contract tests do not replace the required integration run against the 
 
 - Never point V2 at a live V1 SQLite database.
 - Never place a SQLite database on a network share.
-- Import only from a verified copy of a V1 database.
-- Assign imported work to explicit Windows/AD SIDs.
+- Close TechBench V1, then select its closed local database or a verified copy. The importer rejects active SQLite sidecar files and detects a source file that changes during the read.
+- Let SQL Server derive imported-work ownership from the authenticated Windows/AD SID; the client never supplies an owner SID.
 - Preserve legacy identifiers through the server-side mapping tables.
-- Reconcile WHD and Sage identities before fuzzy client-name matching.
+- Have an Admin run the shared WHD/Sage sync before employee imports. The server resolves source-qualified WHD identities, Sage customer IDs, organization aliases, and exact names directly against the authoritative SQL tables; alias/name matches must be unambiguous and it never performs a fuzzy or capped-list automatic match.
 - Verify counts, relationships, ownership, posting state, and sample note content before cutover.
 - Do not run V1 and V2 as dual writable production systems.
 
-V1 remains untouched and available for rollback or historical reference. Its data is not automatically migrated by installing alpha.3.
+V1 remains untouched and available for rollback or historical reference. Its data is not automatically migrated merely by installing alpha.5; each user uses **Settings > Import V1 Database...**, reviews the preview, and explicitly starts their own import. Work history, Personal Notes, entry tags, follow-up state, posting state/history, and note links move to that user's SQL-owned records. Equivalent legacy link rows may share one canonical SQL relationship. A resumed batch counts mappings first accepted by that same batch as imported, while a later batch skips unchanged mappings. Dependent links and posting logs attach only through work-entry mappings accepted by the current batch, and a successful completion must account for every read item with zero errors. A user may abandon their own stale active V1 batch before restarting. Shared configuration, credentials, editor drafts, active posting attempts, and local caches are intentionally excluded.
 
 For implementation details, see [docs/V2-ARCHITECTURE.md](docs/V2-ARCHITECTURE.md). For the DBA runbook, see [database/sqlserver2016/README-Deploy.md](database/sqlserver2016/README-Deploy.md).

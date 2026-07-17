@@ -40,11 +40,6 @@ public interface ITechBenchRepository
 
     int UpsertSageCustomer(SageCustomer customer, DateTime? syncedAt = null);
 
-    void SaveClientSageMapping(
-        int clientId,
-        string sageCustomerId,
-        string? sageCustomerName = null);
-
     Client MergeClientRecords(int whdClientId, int sageClientId);
 
     int ReconcileExactClientMatches();
@@ -79,6 +74,12 @@ public interface ITechBenchRepository
 
     IReadOnlyList<string> GetDistinctTags();
 
+    IReadOnlyList<OrganizationTag> GetOrganizationTags();
+
+    int SaveOrganizationTag(OrganizationTag tag);
+
+    void DeleteOrganizationTag(OrganizationTag tag);
+
     WorkEntry? GetWorkEntry(int id);
 
     int SaveWorkEntry(WorkEntry entry);
@@ -86,6 +87,13 @@ public interface ITechBenchRepository
     int ImportWorkEntries(
         IEnumerable<WorkEntry> entries,
         IReadOnlyDictionary<string, int>? clientAliases = null);
+
+    V1ImportReferenceResolution ResolveV1ImportReferences(
+        V1DatabaseImportPackage package);
+
+    V1DatabaseImportResult ImportV1Database(V1DatabaseImportPackage package);
+
+    void AbandonV1Import();
 
     void DeleteWorkEntry(int id);
 

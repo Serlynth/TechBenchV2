@@ -7,6 +7,11 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
 DECLARE @FailureCount int = 0;
+DECLARE @InstalledSchemaVersion int =
+(
+    SELECT MAX([SchemaVersion])
+    FROM [tb_deploy].[SchemaMigrations]
+);
 
 IF NOT EXISTS
 (
@@ -20,13 +25,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF
-(
-    SELECT MAX([SchemaVersion])
-    FROM [tb_deploy].[SchemaMigrations]
-) NOT IN (2, 3)
+IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5)
 BEGIN
-    PRINT N'FAIL: V0002 verification supports installed schema version 2 or 3.';
+    PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, or 5.';
     SET @FailureCount += 1;
 END;
 
@@ -524,12 +525,16 @@ BEGIN
     SET @FailureCount += @MissingWorkspaceDefaultTokenCount;
 END;
 
-IF CHARINDEX(
-       N'AND [BuiltInKey] IS NOT NULL',
-       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveCommonLink'))) = 0
-   OR CHARINDEX(
-       N'AND [BuiltInKey] IS NOT NULL',
-       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteCommonLink'))) = 0
+IF @InstalledSchemaVersion < 4
+   AND
+   (
+       CHARINDEX(
+           N'AND [BuiltInKey] IS NOT NULL',
+           OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveCommonLink'))) = 0
+       OR CHARINDEX(
+           N'AND [BuiltInKey] IS NOT NULL',
+           OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteCommonLink'))) = 0
+   )
 BEGIN
     PRINT N'FAIL: Built-in Common Links are not protected from edit/delete.';
     SET @FailureCount += 1;
@@ -598,15 +603,11 @@ DECLARE @ExpectedGrants TABLE
 
 INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
 VALUES
-    (N'tb_role_user', N'tb_app.EnsureWorkspaceDefaults'),
     (N'tb_role_user', N'tb_app.SearchTickets'),
     (N'tb_role_user', N'tb_app.SaveTicket'),
     (N'tb_role_user', N'tb_app.SearchWorkEntries'),
     (N'tb_role_user', N'tb_app.SaveWorkEntry'),
     (N'tb_role_user', N'tb_app.GetEditorDraft'),
-    (N'tb_role_user', N'tb_app.SaveTemplate'),
-    (N'tb_role_user', N'tb_app.SaveCommonLink'),
-    (N'tb_role_user', N'tb_app.SaveClientAlias'),
     (N'tb_role_user', N'tb_app.SaveUserSetting'),
     (N'tb_role_user', N'tb_app.GetPostingLogs'),
     (N'tb_role_user', N'tb_app.BeginPostingAttempt'),
@@ -614,12 +615,36 @@ VALUES
     (N'tb_role_user', N'tb_app.BeginImportBatch'),
     (N'tb_role_manager', N'tb_app.SearchWorkEntries'),
     (N'tb_role_admin', N'tb_app.AdminMergeClients'),
-    (N'tb_role_admin', N'tb_app.AdminSaveOrganizationSetting'),
-    (N'tb_role_sync_operator', N'tb_app.AcquireSyncLease'),
-    (N'tb_role_sync_operator', N'tb_app.SyncApplyClientSnapshot'),
-    (N'tb_role_sync_operator', N'tb_app.SyncApplyTicketSnapshot'),
-    (N'tb_role_sync_operator', N'tb_app.SyncApplyTicketStatusSnapshot'),
-    (N'tb_role_sync_operator', N'tb_app.SyncApplySageCustomerSnapshot');
+    (N'tb_role_admin', N'tb_app.AdminSaveOrganizationSetting');
+
+IF @InstalledSchemaVersion < 4
+BEGIN
+    INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
+    VALUES
+        (N'tb_role_user', N'tb_app.EnsureWorkspaceDefaults'),
+        (N'tb_role_user', N'tb_app.SaveTemplate'),
+        (N'tb_role_user', N'tb_app.SaveCommonLink'),
+        (N'tb_role_user', N'tb_app.SaveClientAlias'),
+        (N'tb_role_sync_operator', N'tb_app.AcquireSyncLease'),
+        (N'tb_role_sync_operator', N'tb_app.SyncApplyClientSnapshot'),
+        (N'tb_role_sync_operator', N'tb_app.SyncApplyTicketSnapshot'),
+        (N'tb_role_sync_operator', N'tb_app.SyncApplyTicketStatusSnapshot'),
+        (N'tb_role_sync_operator', N'tb_app.SyncApplySageCustomerSnapshot');
+END
+ELSE
+BEGIN
+    INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
+    VALUES
+        (N'tb_role_admin', N'tb_app.EnsureWorkspaceDefaults'),
+        (N'tb_role_admin', N'tb_app.SaveTemplate'),
+        (N'tb_role_admin', N'tb_app.SaveCommonLink'),
+        (N'tb_role_admin', N'tb_app.SaveClientAlias'),
+        (N'tb_role_admin', N'tb_app.AcquireSyncLease'),
+        (N'tb_role_admin', N'tb_app.SyncApplyClientSnapshot'),
+        (N'tb_role_admin', N'tb_app.SyncApplyTicketSnapshot'),
+        (N'tb_role_admin', N'tb_app.SyncApplyTicketStatusSnapshot'),
+        (N'tb_role_admin', N'tb_app.SyncApplySageCustomerSnapshot');
+END;
 
 DECLARE @MissingGrantCount int =
 (

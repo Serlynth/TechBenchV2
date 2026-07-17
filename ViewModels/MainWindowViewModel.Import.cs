@@ -35,7 +35,10 @@ public sealed partial class MainWindowViewModel
 
             IsEntryOperationRunning = true;
             EntryOperationText = "Importing worklog notes...";
-            var count = _repository.ImportWorkEntries(entries, importViewModel.BuildAliasMappings());
+            var aliasMappings = _currentUser.CanManageSharedConfiguration
+                ? importViewModel.BuildAliasMappings()
+                : null;
+            var count = _repository.ImportWorkEntries(entries, aliasMappings);
             RefreshAll();
             RunSearch();
             StatusMessage = $"Imported {count} worklog notes from {Path.GetFileName(path)}.";

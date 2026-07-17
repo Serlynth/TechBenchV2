@@ -1,6 +1,7 @@
 using TechBench.Data;
 using TechBench.Models;
 using TechBench.Services;
+using TechBench.ViewModels;
 using Microsoft.Data.Sqlite;
 
 namespace TechBench.Tests;
@@ -620,7 +621,7 @@ public sealed class TechBenchRepositoryTests
     }
 
     [Fact]
-    public void CommonLinksProtectBuiltInsAndSupportCustomLinkLifecycle()
+    public void CommonLinksAllowBuiltInEditsProtectDeletionAndSupportCustomLinkLifecycle()
     {
         WithRepository((repository, _) =>
         {
@@ -675,12 +676,22 @@ public sealed class TechBenchRepositoryTests
                 });
 
             Assert.All(defaults, link => Assert.True(link.IsBuiltIn));
-            Assert.Throws<InvalidOperationException>(() => repository.SaveCommonLink(defaults[0]));
+            defaults[0].Name = "WatchGuard Admin Portal";
+            defaults[0].Url = "https://watchguard.example.com/";
+            repository.SaveCommonLink(defaults[0]);
+            var editedBuiltIn = repository.GetCommonLinks()
+                .Single(link => link.Id == defaults[0].Id);
+            Assert.Equal("WatchGuard Admin Portal", editedBuiltIn.Name);
+            Assert.Equal("https://watchguard.example.com/", editedBuiltIn.Url);
+            Assert.Equal("watchguard-cloud", editedBuiltIn.BuiltInKey);
             Assert.Throws<InvalidOperationException>(() => repository.DeleteCommonLink(defaults[0].Id));
-            var watchGuardUpdatedAt = defaults[0].UpdatedAt;
+            var watchGuardUpdatedAt = editedBuiltIn.UpdatedAt;
             repository.Initialize();
             var initializedLinks = repository.GetCommonLinks();
             Assert.Equal(7, initializedLinks.Count(link => link.IsBuiltIn));
+            Assert.Equal(
+                "WatchGuard Admin Portal",
+                initializedLinks.Single(link => link.BuiltInKey == "watchguard-cloud").Name);
             Assert.Equal(
                 watchGuardUpdatedAt,
                 initializedLinks.Single(link => link.BuiltInKey == "watchguard-cloud").UpdatedAt);
@@ -1101,12 +1112,37 @@ public sealed class TechBenchRepositoryTests
         });
     }
 
-    private static WhdSyncedTicket BuildWhdTicket(string id) => new()
+    [Fact]
+    public void OrganizationTicketSnapshotUpdatesExplicitClosedStateWithoutClosingAnAbsentTicket()
+    {
+        WithRepository((repository, _) =>
+        {
+            var returned = BuildWhdTicket("201");
+            var laterAbsent = BuildWhdTicket("202");
+            MainWindowViewModel.SaveOrganizationWhdTicketSnapshot(
+                repository,
+                [returned, laterAbsent],
+                DateTime.Now);
+
+            var returnedClosed = BuildWhdTicket("201", isClosed: true);
+            MainWindowViewModel.SaveOrganizationWhdTicketSnapshot(
+                repository,
+                [returnedClosed],
+                DateTime.Now);
+
+            var tickets = repository.GetTickets(includeClosed: true);
+            Assert.True(tickets.Single(ticket => ticket.TicketNumber == "201").IsClosed);
+            Assert.False(tickets.Single(ticket => ticket.TicketNumber == "202").IsClosed);
+        });
+    }
+
+    private static WhdSyncedTicket BuildWhdTicket(string id, bool isClosed = false) => new()
     {
         ExternalId = $"WHD-{id}",
         TicketNumber = id,
         Subject = $"Ticket {id}",
-        Status = "Open",
+        Status = isClosed ? "Closed" : "Open",
+        IsClosed = isClosed,
         Client = new WhdSyncedClient
         {
             ExternalId = "WHD-CLIENT-1",

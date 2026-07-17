@@ -103,29 +103,6 @@ public sealed class AppUpdateViewModelTests
     }
 
     [Fact]
-    public async Task DownloadAndInstall_StopsWhenPreparationFails()
-    {
-        var shutDown = false;
-        var service = new FakeAppUpdateService
-        {
-            AvailableUpdate = new AppUpdateRelease("1.1.0", string.Empty)
-        };
-        using var viewModel = CreateViewModel(
-            service,
-            runPreUpdateCheck: () => new UpdatePreparationResult(
-                Succeeded: false,
-                Message: "Backup failed."),
-            shutdownApplication: () => shutDown = true);
-        await viewModel.CheckForUpdatesAsync(userInitiated: true);
-
-        await viewModel.DownloadAndInstallAsync();
-
-        Assert.False(service.ApplyCalled);
-        Assert.False(shutDown);
-        Assert.Equal("Update stopped: Backup failed.", viewModel.StatusText);
-    }
-
-    [Fact]
     public async Task CheckForUpdates_ExplainsLooseExecutableLimitation()
     {
         var service = new FakeAppUpdateService { IsInstalled = false };
@@ -139,16 +116,12 @@ public sealed class AppUpdateViewModelTests
 
     private static AppUpdateViewModel CreateViewModel(
         FakeAppUpdateService service,
-        Func<UpdatePreparationResult>? runPreUpdateCheck = null,
         Action? prepareForRestart = null,
         Action? shutdownApplication = null,
         Action<string>? notifyUpdateAvailable = null)
     {
         return new AppUpdateViewModel(
             service,
-            runPreUpdateCheck ?? (() => new UpdatePreparationResult(
-                Succeeded: true,
-                Message: "Backup created.")),
             prepareForRestart ?? (() => { }),
             shutdownApplication ?? (() => { }),
             () => true,

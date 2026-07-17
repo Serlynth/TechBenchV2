@@ -1656,6 +1656,418 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 23-V0004-AdminOwnedSharedConfig.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+/*
+    V0004 makes every organization-wide setting and reference catalog an
+    Admin-owned boundary. It is additive and upgrades an installed V0003
+    database in place without changing or deleting shared templates or links.
+*/
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.SharedReferenceData.0003'
+      AND [SchemaVersion] = 3
+)
+BEGIN
+    RAISERROR(
+        N'The TechBench V0003 shared-reference schema must be installed before AdminOwnedSharedConfig.0004.',
+        16,
+        1);
+    RETURN;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.AdminOwnedSharedConfig.0004'
+      AND [SchemaVersion] = 4
+)
+BEGIN
+    PRINT N'SqlServer2016.AdminOwnedSharedConfig.0004 is already installed.';
+    RETURN;
+END;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    /*
+        Only per-user external identities remain saveable. Legacy secrets are
+        retained temporarily so the desktop migration can delete them after
+        transferring them to Windows Credential Manager; they cannot be saved
+        again under V0004.
+    */
+    DELETE FROM [tb_user].[UserSettings]
+    WHERE [SettingKey] NOT IN
+    (
+        N'Whd.Username',
+        N'Sage.Username',
+        N'Sage.EmployeeId',
+        N'Whd.ApiToken',
+        N'Sage.Password',
+        N'Sage.DefaultCustomerId'
+    );
+
+    INSERT INTO [tb_deploy].[SchemaMigrations]
+    (
+        [MigrationId],
+        [SchemaVersion],
+        [ReleaseVersion],
+        [ScriptChecksum]
+    )
+    VALUES
+    (
+        N'SqlServer2016.AdminOwnedSharedConfig.0004',
+        4,
+        N'2.0.0-alpha.4',
+        NULL
+    );
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0
+        ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+PRINT N'SqlServer2016.AdminOwnedSharedConfig.0004 installed.';
+GO
+
+-- ============================================================================
+-- END 23-V0004-AdminOwnedSharedConfig.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 24-V0005-TechBenchV1ImportSchema.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+/*
+    V0005 adds the durable identity boundary required for each authenticated
+    user to import one TechBench V1 SQLite history without duplicating a
+    partial or repeated import. Shared catalogs are deliberately untouched.
+*/
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.AdminOwnedSharedConfig.0004'
+      AND [SchemaVersion] = 4
+)
+BEGIN
+    RAISERROR(
+        N'The TechBench V0004 Admin-owned schema must be installed before TechBenchV1Import.0005.',
+        16,
+        1);
+    RETURN;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.TechBenchV1Import.0005'
+      AND [SchemaVersion] = 5
+)
+BEGIN
+    /*
+        Alpha V0005 was deployed internally before reverse link mappings were
+        allowed to converge. Repair that index shape on repeat deployments so
+        an installed database receives the same contract as a clean install.
+    */
+    IF OBJECT_ID(N'tb_ops.LegacyEntityMappings', N'U') IS NULL
+    BEGIN
+        RAISERROR(
+            N'The V0005 migration marker exists but tb_ops.LegacyEntityMappings is missing.',
+            16,
+            1);
+        RETURN;
+    END;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM sys.indexes
+            WHERE [object_id] = OBJECT_ID(N'tb_ops.LegacyEntityMappings')
+              AND [name] = N'UX_LegacyEntityMappings_NewEntity'
+        )
+            DROP INDEX [UX_LegacyEntityMappings_NewEntity]
+                ON [tb_ops].[LegacyEntityMappings];
+
+        IF NOT EXISTS
+        (
+            SELECT 1
+            FROM sys.indexes
+            WHERE [object_id] = OBJECT_ID(N'tb_ops.LegacyEntityMappings')
+              AND [name] = N'IX_LegacyEntityMappings_NewEntity'
+        )
+            CREATE INDEX [IX_LegacyEntityMappings_NewEntity]
+                ON [tb_ops].[LegacyEntityMappings]
+                (
+                    [OwnerWindowsSid],
+                    [SourceSystem],
+                    [EntityType],
+                    [NewEntityId]
+                );
+
+        IF NOT EXISTS
+        (
+            SELECT 1
+            FROM sys.indexes
+            WHERE [object_id] = OBJECT_ID(N'tb_ops.LegacyEntityMappings')
+              AND [name] = N'UX_LegacyEntityMappings_WorkEntryNewEntity'
+        )
+            CREATE UNIQUE INDEX [UX_LegacyEntityMappings_WorkEntryNewEntity]
+                ON [tb_ops].[LegacyEntityMappings]
+                (
+                    [OwnerWindowsSid],
+                    [SourceSystem],
+                    [NewEntityId]
+                )
+                WHERE [EntityType] = N'WorkEntry';
+
+        IF NOT EXISTS
+        (
+            SELECT 1
+            FROM sys.indexes
+            WHERE [object_id] = OBJECT_ID(N'tb_ops.LegacyEntityMappings')
+              AND [name] = N'UX_LegacyEntityMappings_PostingLogNewEntity'
+        )
+            CREATE UNIQUE INDEX [UX_LegacyEntityMappings_PostingLogNewEntity]
+                ON [tb_ops].[LegacyEntityMappings]
+                (
+                    [OwnerWindowsSid],
+                    [SourceSystem],
+                    [NewEntityId]
+                )
+                WHERE [EntityType] = N'PostingLog';
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    PRINT N'SqlServer2016.TechBenchV1Import.0005 is already installed; its reverse mapping indexes are current.';
+    RETURN;
+END;
+
+IF OBJECT_ID(N'tb_ops.LegacyEntityMappings', N'U') IS NOT NULL
+   OR COL_LENGTH(N'tb_ops.ImportBatches', N'ConflictCount') IS NOT NULL
+   OR EXISTS
+   (
+       SELECT 1
+       FROM sys.indexes
+       WHERE [object_id] = OBJECT_ID(N'tb_ops.ImportBatches')
+         AND [name] IN
+         (
+             N'IX_ImportBatches_OwnerSourceFileHash',
+             N'UX_ImportBatches_ActiveTechBenchV1'
+         )
+   )
+BEGIN
+    RAISERROR(
+        N'V0005 import objects already exist without their migration marker. Resolve the partial deployment before continuing.',
+        16,
+        1);
+    RETURN;
+END;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    ALTER TABLE [tb_ops].[ImportBatches]
+        ADD [ConflictCount] int NOT NULL
+            CONSTRAINT [DF_ImportBatches_ConflictCount] DEFAULT (0);
+
+    ALTER TABLE [tb_ops].[ImportBatches]
+        DROP CONSTRAINT [CK_ImportBatches_Counts];
+
+    ALTER TABLE [tb_ops].[ImportBatches]
+        ADD CONSTRAINT [CK_ImportBatches_Counts]
+            CHECK
+            (
+                [ReadCount] >= 0
+                AND [ImportedCount] >= 0
+                AND [SkippedCount] >= 0
+                AND [ConflictCount] >= 0
+                AND [ErrorCount] >= 0
+            );
+
+    CREATE INDEX [IX_ImportBatches_OwnerSourceFileHash]
+        ON [tb_ops].[ImportBatches]
+        (
+            [OwnerWindowsSid],
+            [SourceSystem],
+            [FileHash],
+            [Status]
+        )
+        INCLUDE
+        (
+            [ImportedCount],
+            [SkippedCount],
+            [ConflictCount],
+            [ErrorCount],
+            [CompletedAtUtc]
+        )
+        WHERE [FileHash] IS NOT NULL;
+
+    CREATE UNIQUE INDEX [UX_ImportBatches_ActiveTechBenchV1]
+        ON [tb_ops].[ImportBatches]([OwnerWindowsSid])
+        WHERE [SourceSystem] = N'TechBenchV1'
+          AND [Status] = N'Started';
+
+    CREATE TABLE [tb_ops].[LegacyEntityMappings]
+    (
+        [OwnerWindowsSid] varbinary(85) NOT NULL,
+        [SourceSystem] nvarchar(80) NOT NULL,
+        [EntityType] nvarchar(80) NOT NULL,
+        [LegacyId] bigint NOT NULL,
+        [NewEntityId] bigint NOT NULL,
+        [ContentHash] char(64) NOT NULL,
+        [FirstImportBatchId] uniqueidentifier NOT NULL,
+        [LastSeenImportBatchId] uniqueidentifier NOT NULL,
+        [CreatedAtUtc] datetime2(3) NOT NULL
+            CONSTRAINT [DF_LegacyEntityMappings_CreatedAtUtc]
+                DEFAULT (SYSUTCDATETIME()),
+        [LastSeenAtUtc] datetime2(3) NOT NULL
+            CONSTRAINT [DF_LegacyEntityMappings_LastSeenAtUtc]
+                DEFAULT (SYSUTCDATETIME()),
+        [RowVersion] rowversion NOT NULL,
+        CONSTRAINT [PK_LegacyEntityMappings]
+            PRIMARY KEY CLUSTERED
+            (
+                [OwnerWindowsSid],
+                [SourceSystem],
+                [EntityType],
+                [LegacyId]
+            ),
+        CONSTRAINT [FK_LegacyEntityMappings_Owner]
+            FOREIGN KEY ([OwnerWindowsSid])
+            REFERENCES [tb_security].[Users]([WindowsSid]),
+        CONSTRAINT [FK_LegacyEntityMappings_FirstBatch]
+            FOREIGN KEY ([FirstImportBatchId])
+            REFERENCES [tb_ops].[ImportBatches]([Id]),
+        CONSTRAINT [FK_LegacyEntityMappings_LastSeenBatch]
+            FOREIGN KEY ([LastSeenImportBatchId])
+            REFERENCES [tb_ops].[ImportBatches]([Id]),
+        CONSTRAINT [CK_LegacyEntityMappings_Source]
+            CHECK ([SourceSystem] = N'TechBenchV1'),
+        CONSTRAINT [CK_LegacyEntityMappings_EntityType]
+            CHECK
+            (
+                [EntityType] IN
+                (
+                    N'WorkEntry',
+                    N'WorkEntryLink',
+                    N'PostingLog'
+                )
+            ),
+        CONSTRAINT [CK_LegacyEntityMappings_LegacyId]
+            CHECK ([LegacyId] > 0),
+        CONSTRAINT [CK_LegacyEntityMappings_NewEntityId]
+            CHECK ([NewEntityId] > 0),
+        CONSTRAINT [CK_LegacyEntityMappings_ContentHash]
+            CHECK
+            (
+                LEN([ContentHash]) = 64
+                AND [ContentHash] COLLATE Latin1_General_100_BIN2
+                    NOT LIKE '%[^0-9A-F]%'
+            )
+    );
+
+    /*
+        More than one legacy link row may describe the same equivalent SQL
+        relationship. Keep a fast reverse lookup without forcing those legacy
+        IDs to manufacture duplicate WorkEntryLinks.
+    */
+    CREATE INDEX [IX_LegacyEntityMappings_NewEntity]
+        ON [tb_ops].[LegacyEntityMappings]
+        (
+            [OwnerWindowsSid],
+            [SourceSystem],
+            [EntityType],
+            [NewEntityId]
+        );
+
+    CREATE UNIQUE INDEX [UX_LegacyEntityMappings_WorkEntryNewEntity]
+        ON [tb_ops].[LegacyEntityMappings]
+        (
+            [OwnerWindowsSid],
+            [SourceSystem],
+            [NewEntityId]
+        )
+        WHERE [EntityType] = N'WorkEntry';
+
+    CREATE UNIQUE INDEX [UX_LegacyEntityMappings_PostingLogNewEntity]
+        ON [tb_ops].[LegacyEntityMappings]
+        (
+            [OwnerWindowsSid],
+            [SourceSystem],
+            [NewEntityId]
+        )
+        WHERE [EntityType] = N'PostingLog';
+
+    CREATE INDEX [IX_LegacyEntityMappings_LastSeenBatch]
+        ON [tb_ops].[LegacyEntityMappings]([LastSeenImportBatchId]);
+
+    INSERT INTO [tb_deploy].[SchemaMigrations]
+    (
+        [MigrationId],
+        [SchemaVersion],
+        [ReleaseVersion],
+        [ScriptChecksum]
+    )
+    VALUES
+    (
+        N'SqlServer2016.TechBenchV1Import.0005',
+        5,
+        N'2.0.0-alpha.5',
+        NULL
+    );
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0
+        ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+PRINT N'SqlServer2016.TechBenchV1Import.0005 installed.';
+GO
+
+-- ============================================================================
+-- END 24-V0005-TechBenchV1ImportSchema.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 30-Security.sql
 -- ============================================================================
 
@@ -10478,6 +10890,3471 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 46-V0004-AdminSharedProcedures.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+GO
+
+/*
+    V0004 centralizes organization-wide mutation authority in TechBench_Admins.
+    Existing signatures remain stable for the desktop client.
+*/
+
+IF OBJECT_ID(N'tb_security.GetCurrentAccess', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_security].[GetCurrentAccess];
+GO
+
+CREATE PROCEDURE [tb_security].[GetCurrentAccess]
+    @UserSid varbinary(85) OUTPUT,
+    @IsManager bit OUTPUT,
+    @IsAdmin bit OUTPUT,
+    @IsSyncOperator bit OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @LoginName nvarchar(256);
+    DECLARE @DisplayName nvarchar(160);
+    DECLARE @IsTechnician bit;
+
+    EXEC [tb_security].[EnsureCurrentUser]
+        @UserSid = @UserSid OUTPUT,
+        @LoginName = @LoginName OUTPUT,
+        @DisplayName = @DisplayName OUTPUT,
+        @IsTechnician = @IsTechnician OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    /*
+        The legacy Sync Operator role remains visible in the user context for
+        upgrade compatibility, but it no longer authorizes a shared mutation.
+        Existing sync procedures therefore enforce Admin-only access without
+        changing any public procedure signature.
+    */
+    IF @IsAdmin <> 1
+        SET @IsSyncOperator = 0;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[GetRepositoryCapabilities];
+GO
+
+CREATE PROCEDURE [tb_app].[GetRepositoryCapabilities]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SELECT
+        CONVERT(int, 4) AS [SchemaVersion],
+        CONVERT(bit, 0) AS [FullTextSearchAvailable],
+        CONVERT(bit, 1) AS [SupportsTickets],
+        CONVERT(bit, 1) AS [SupportsWorkEntries],
+        CONVERT(bit, 1) AS [SupportsPrivateNotes],
+        CONVERT(bit, 1) AS [SupportsPostingLeases],
+        CONVERT(bit, 1) AS [SupportsSyncLeases],
+        CONVERT(bit, 1) AS [SupportsImports];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.EnsureWorkspaceDefaults', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[EnsureWorkspaceDefaults];
+GO
+
+CREATE PROCEDURE [tb_app].[EnsureWorkspaceDefaults]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1
+        THROW 51500, N'Only an Admin may initialize shared workspace defaults.', 1;
+
+    DECLARE @NowUtc datetime2(3) = SYSUTCDATETIME();
+    DECLARE @ChangedCount int = 0;
+
+    DECLARE @DefaultLinks TABLE
+    (
+        [BuiltInKey] nvarchar(120) NOT NULL PRIMARY KEY,
+        [Name] nvarchar(160) NOT NULL,
+        [Url] nvarchar(2048) NOT NULL,
+        [UrlHash] binary(32) NOT NULL,
+        [SortOrder] int NOT NULL
+    );
+
+    INSERT INTO @DefaultLinks([BuiltInKey], [Name], [Url], [UrlHash], [SortOrder])
+    VALUES
+        (N'watchguard-cloud', N'WatchGuard Cloud', N'https://cloud.watchguard.com/',
+            CONVERT(binary(32), HASHBYTES(N'SHA2_256', CONVERT(varbinary(8000), N'https://cloud.watchguard.com/'))), 0),
+        (N'microsoft-365-admin', N'Microsoft 365 Admin Center', N'https://admin.microsoft.com/',
+            CONVERT(binary(32), HASHBYTES(N'SHA2_256', CONVERT(varbinary(8000), N'https://admin.microsoft.com/'))), 1),
+        (N'barracuda-cloud-control', N'Barracuda Cloud Control', N'https://login.barracuda.com/',
+            CONVERT(binary(32), HASHBYTES(N'SHA2_256', CONVERT(varbinary(8000), N'https://login.barracuda.com/'))), 2),
+        (N'eset-protect', N'ESET PROTECT Console', N'https://protect.eset.com/',
+            CONVERT(binary(32), HASHBYTES(N'SHA2_256', CONVERT(varbinary(8000), N'https://protect.eset.com/'))), 3),
+        (N'email2phone', N'Email2Phone', N'https://user.email2phone.net/client/#/authentication/signin',
+            CONVERT(binary(32), HASHBYTES(N'SHA2_256', CONVERT(varbinary(8000), N'https://user.email2phone.net/client/#/authentication/signin'))), 4),
+        (N'godaddy-dns', N'GoDaddy', N'https://dcc.godaddy.com/control/portfolio',
+            CONVERT(binary(32), HASHBYTES(N'SHA2_256', CONVERT(varbinary(8000), N'https://dcc.godaddy.com/control/portfolio'))), 10),
+        (N'network-solutions-dns', N'Network Solutions', N'https://www.networksolutions.com/my-account/login',
+            CONVERT(binary(32), HASHBYTES(N'SHA2_256', CONVERT(varbinary(8000), N'https://www.networksolutions.com/my-account/login'))), 11);
+
+    DECLARE @DefaultTemplates TABLE
+    (
+        [Name] nvarchar(160) NOT NULL PRIMARY KEY,
+        [Category] nvarchar(160) NOT NULL,
+        [TemplateText] nvarchar(max) NOT NULL
+    );
+
+    INSERT INTO @DefaultTemplates([Name], [Category], [TemplateText])
+    VALUES
+        (N'Exchange certificate update', N'Microsoft 365',
+            N'Updated Exchange certificate binding, verified mail flow, and confirmed Outlook connectivity.'),
+        (N'VPN troubleshooting', N'Network',
+            N'Investigated VPN connection failure, validated credentials and MFA status, reviewed client logs, and confirmed successful reconnect.'),
+        (N'Microsoft 365 licensing', N'Microsoft 365',
+            N'Reviewed Microsoft 365 license assignment, adjusted user licensing, and confirmed service availability.'),
+        (N'Firewall rule change', N'Network',
+            N'Reviewed requested firewall rule change, validated source and destination scope, applied the rule, and confirmed expected traffic.'),
+        (N'Password reset', N'Help Desk',
+            N'Reset user password, confirmed MFA status, and verified successful sign-in with the user.'),
+        (N'Backup verification', N'Infrastructure',
+            N'Reviewed backup job status, checked warnings or failures, and documented restore-point availability.'),
+        (N'Server reboot/maintenance', N'Infrastructure',
+            N'Performed scheduled server maintenance, rebooted services as needed, and verified post-maintenance availability.');
+
+    DECLARE @DefaultOrganizationSettings TABLE
+    (
+        [SettingKey] nvarchar(200) NOT NULL PRIMARY KEY,
+        [SettingValue] nvarchar(max) NOT NULL
+    );
+
+    INSERT INTO @DefaultOrganizationSettings([SettingKey], [SettingValue])
+    VALUES
+        (N'Whd.AutoSyncEnabled', N'true'),
+        (N'Whd.AutoSyncMinutes', N'5');
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        /*
+            Auto-sync settings are required runtime configuration, so repair a
+            missing row on every Admin initialization without overwriting an
+            existing Admin value.
+        */
+        INSERT INTO [tb_data].[OrganizationSettings]
+        (
+            [SettingKey],
+            [SettingValue],
+            [UpdatedByWindowsSid],
+            [UpdatedAtUtc]
+        )
+        SELECT
+            default_setting.[SettingKey],
+            default_setting.[SettingValue],
+            @UserSid,
+            @NowUtc
+        FROM @DefaultOrganizationSettings AS default_setting
+        WHERE NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[OrganizationSettings] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [SettingKey] = default_setting.[SettingKey]
+        );
+
+        SET @ChangedCount += @@ROWCOUNT;
+
+        DECLARE @InitializeWorkspaceCatalogs bit = 0;
+
+        IF NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[OrganizationSettings] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [SettingKey] = N'WorkspaceDefaults.Initialized'
+        )
+            SET @InitializeWorkspaceCatalogs = 1;
+
+        IF @InitializeWorkspaceCatalogs = 1
+        BEGIN
+            /*
+                The original link/template catalogs are a one-time V0004 seed.
+                Once marked initialized, later Admin rename/delete operations
+                remain authoritative and are never recreated on app startup.
+            */
+            INSERT INTO [tb_data].[CommonLinks]
+            (
+                [ScopeType],
+                [OwnerWindowsSid],
+                [Name],
+                [Url],
+                [UrlHash],
+                [SortOrder],
+                [BuiltInKey],
+                [CreatedByWindowsSid],
+                [UpdatedByWindowsSid],
+                [CreatedAtUtc],
+                [UpdatedAtUtc]
+            )
+            SELECT
+                N'Organization',
+                NULL,
+                default_link.[Name],
+                default_link.[Url],
+                default_link.[UrlHash],
+                default_link.[SortOrder],
+                default_link.[BuiltInKey],
+                @UserSid,
+                @UserSid,
+                @NowUtc,
+                @NowUtc
+            FROM @DefaultLinks AS default_link
+            WHERE NOT EXISTS
+            (
+                SELECT 1
+                FROM [tb_data].[CommonLinks] WITH (UPDLOCK, HOLDLOCK)
+                WHERE [BuiltInKey] = default_link.[BuiltInKey]
+                   OR
+                   (
+                       [ScopeType] = N'Organization'
+                       AND [UrlHash] = default_link.[UrlHash]
+                   )
+            );
+
+            SET @ChangedCount += @@ROWCOUNT;
+
+            /*
+                Template names identify defaults during the one-time seed.
+                Existing organization templates keep their category and text.
+            */
+            INSERT INTO [tb_data].[Templates]
+            (
+                [ScopeType],
+                [OwnerWindowsSid],
+                [Name],
+                [Category],
+                [TemplateText],
+                [CreatedByWindowsSid],
+                [UpdatedByWindowsSid],
+                [CreatedAtUtc],
+                [UpdatedAtUtc]
+            )
+            SELECT
+                N'Organization',
+                NULL,
+                default_template.[Name],
+                default_template.[Category],
+                default_template.[TemplateText],
+                @UserSid,
+                @UserSid,
+                @NowUtc,
+                @NowUtc
+            FROM @DefaultTemplates AS default_template
+            WHERE NOT EXISTS
+            (
+                SELECT 1
+                FROM [tb_data].[Templates] WITH (UPDLOCK, HOLDLOCK)
+                WHERE [ScopeType] = N'Organization'
+                  AND [Name] = default_template.[Name]
+            );
+
+            SET @ChangedCount += @@ROWCOUNT;
+
+            INSERT INTO [tb_data].[OrganizationSettings]
+            (
+                [SettingKey],
+                [SettingValue],
+                [UpdatedByWindowsSid],
+                [UpdatedAtUtc]
+            )
+            VALUES
+            (
+                N'WorkspaceDefaults.Initialized',
+                N'4',
+                @UserSid,
+                @NowUtc
+            );
+
+            SET @ChangedCount += @@ROWCOUNT;
+        END;
+
+        IF @ChangedCount > 0
+        BEGIN
+            EXEC [tb_security].[WriteAuditEvent]
+                @Action = N'WorkspaceDefaultsEnsured',
+                @EntityType = N'WorkspaceDefaults',
+                @EntityId = N'Organization';
+        END;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+GO
+
+/*
+    Built-in links are ordinary Admin-managed catalog rows in V0004. Their key
+    still prevents duplicate defaults; it no longer makes the row immutable.
+*/
+IF OBJECT_ID(N'tb_app.SaveCommonLink', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SaveCommonLink];
+GO
+
+CREATE PROCEDURE [tb_app].[SaveCommonLink]
+    @Id int = NULL,
+    @ScopeType nvarchar(20) = N'Organization',
+    @Name nvarchar(160),
+    @Url nvarchar(2048),
+    @SortOrder int = 0,
+    @BuiltInKey nvarchar(120) = NULL,
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SET @ScopeType =
+        COALESCE(NULLIF(LTRIM(RTRIM(@ScopeType)), N''), N'Organization');
+    SET @Name = NULLIF(LTRIM(RTRIM(@Name)), N'');
+    SET @Url = NULLIF(LTRIM(RTRIM(@Url)), N'');
+    SET @BuiltInKey = NULLIF(LTRIM(RTRIM(@BuiltInKey)), N'');
+
+    IF @ScopeType <> N'Organization'
+        THROW 51300, N'Common Links are organization-scoped in schema version 4.', 1;
+    IF @IsAdmin <> 1
+        THROW 51301, N'Only an Admin may save organization Common Links.', 1;
+    IF @Name IS NULL OR @Url IS NULL
+        THROW 51300, N'Common-link name and URL are required.', 1;
+    IF @Id IS NOT NULL AND @ExpectedRowVersion IS NULL
+        THROW 51302, N'ExpectedRowVersion is required when updating a Common Link.', 1;
+
+    DECLARE @NowUtc datetime2(3) = SYSUTCDATETIME();
+    DECLARE @UrlHash binary(32) =
+        CONVERT(binary(32), HASHBYTES(N'SHA2_256', CONVERT(varbinary(8000), @Url)));
+    DECLARE @Action nvarchar(120);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF @Id IS NULL
+        BEGIN
+            INSERT INTO [tb_data].[CommonLinks]
+            (
+                [ScopeType],
+                [OwnerWindowsSid],
+                [Name],
+                [Url],
+                [UrlHash],
+                [SortOrder],
+                [BuiltInKey],
+                [CreatedByWindowsSid],
+                [UpdatedByWindowsSid],
+                [CreatedAtUtc],
+                [UpdatedAtUtc]
+            )
+            VALUES
+            (
+                N'Organization',
+                NULL,
+                @Name,
+                @Url,
+                @UrlHash,
+                @SortOrder,
+                @BuiltInKey,
+                @UserSid,
+                @UserSid,
+                @NowUtc,
+                @NowUtc
+            );
+
+            SET @Id = CONVERT(int, SCOPE_IDENTITY());
+            SET @Action = N'CommonLinkCreated';
+        END
+        ELSE
+        BEGIN
+            IF NOT EXISTS
+            (
+                SELECT 1
+                FROM [tb_data].[CommonLinks] WITH (UPDLOCK, HOLDLOCK)
+                WHERE [Id] = @Id
+                  AND [ScopeType] = N'Organization'
+            )
+                THROW 51304, N'The organization Common Link does not exist.', 1;
+
+            UPDATE [tb_data].[CommonLinks]
+            SET
+                [ScopeType] = N'Organization',
+                [OwnerWindowsSid] = NULL,
+                [Name] = @Name,
+                [Url] = @Url,
+                [UrlHash] = @UrlHash,
+                [SortOrder] = @SortOrder,
+                [BuiltInKey] = @BuiltInKey,
+                [UpdatedByWindowsSid] = @UserSid,
+                [UpdatedAtUtc] = @NowUtc
+            WHERE [Id] = @Id
+              AND [RowVersion] = @ExpectedRowVersion;
+
+            IF @@ROWCOUNT = 0
+                THROW 51305, N'The Common Link changed after it was loaded.', 1;
+
+            SET @Action = N'CommonLinkUpdated';
+        END;
+
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action = @Action,
+            @EntityType = N'CommonLink',
+            @EntityId = CONVERT(nvarchar(120), @Id),
+            @RequestId = @RequestId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        [Id],
+        [ScopeType],
+        [Name],
+        [Url],
+        [SortOrder],
+        [BuiltInKey],
+        [CreatedAtUtc] AS [CreatedAt],
+        [UpdatedAtUtc] AS [UpdatedAt],
+        [RowVersion]
+    FROM [tb_data].[CommonLinks]
+    WHERE [Id] = @Id;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.DeleteCommonLink', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[DeleteCommonLink];
+GO
+
+CREATE PROCEDURE [tb_app].[DeleteCommonLink]
+    @Id int,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1
+        THROW 51306, N'Only an Admin may delete organization Common Links.', 1;
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [tb_data].[CommonLinks]
+        WHERE [Id] = @Id
+          AND [BuiltInKey] IS NOT NULL
+    )
+        THROW 51303, N'Built-in Common Links may be edited but cannot be removed.', 1;
+
+    DELETE FROM [tb_data].[CommonLinks]
+    WHERE [Id] = @Id
+      AND [ScopeType] = N'Organization'
+      AND [RowVersion] = @ExpectedRowVersion;
+
+    IF @@ROWCOUNT = 0
+        THROW 51307, N'The Common Link was not found or changed after it was loaded.', 1;
+
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action = N'CommonLinkDeleted',
+        @EntityType = N'CommonLink',
+        @EntityId = CONVERT(nvarchar(120), @Id),
+        @RequestId = @RequestId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SaveClientAlias', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SaveClientAlias];
+GO
+
+CREATE PROCEDURE [tb_app].[SaveClientAlias]
+    @Id bigint = NULL,
+    @ScopeType nvarchar(20) = N'Organization',
+    @Alias nvarchar(240),
+    @ClientId int,
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1
+        THROW 51311, N'Only an Admin may save organization client aliases.', 1;
+
+    SET @ScopeType =
+        COALESCE(NULLIF(LTRIM(RTRIM(@ScopeType)), N''), N'Organization');
+    SET @Alias = NULLIF(LTRIM(RTRIM(@Alias)), N'');
+
+    IF @ScopeType <> N'Organization'
+        THROW 51310, N'Client aliases are organization-scoped in schema version 4.', 1;
+    IF @Alias IS NULL
+        THROW 51310, N'Client alias is required.', 1;
+    IF NOT EXISTS (SELECT 1 FROM [tb_data].[Clients] WHERE [Id] = @ClientId)
+        THROW 51310, N'The selected client does not exist.', 1;
+
+    DECLARE @NowUtc datetime2(3) = SYSUTCDATETIME();
+    DECLARE @StoredAlias nvarchar(240);
+    DECLARE @StoredClientId int;
+    DECLARE @StoredRowVersion binary(8);
+    DECLARE @Action nvarchar(120);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF @Id IS NULL
+        BEGIN
+            SELECT
+                @Id = [Id],
+                @StoredAlias = [Alias],
+                @StoredClientId = [ClientId],
+                @StoredRowVersion = [RowVersion]
+            FROM [tb_data].[ClientAliases] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [ScopeType] = N'Organization'
+              AND [Alias] = @Alias;
+
+            IF @Id IS NULL
+            BEGIN
+                INSERT INTO [tb_data].[ClientAliases]
+                (
+                    [ScopeType],
+                    [OwnerWindowsSid],
+                    [Alias],
+                    [ClientId],
+                    [CreatedByWindowsSid],
+                    [UpdatedByWindowsSid],
+                    [CreatedAtUtc],
+                    [UpdatedAtUtc]
+                )
+                VALUES
+                (
+                    N'Organization',
+                    NULL,
+                    @Alias,
+                    @ClientId,
+                    @UserSid,
+                    @UserSid,
+                    @NowUtc,
+                    @NowUtc
+                );
+
+                SET @Id = CONVERT(bigint, SCOPE_IDENTITY());
+                SET @Action = N'ClientAliasCreated';
+            END
+            ELSE IF @StoredClientId <> @ClientId
+            BEGIN
+                UPDATE [tb_data].[ClientAliases]
+                SET
+                    [ClientId] = @ClientId,
+                    [UpdatedByWindowsSid] = @UserSid,
+                    [UpdatedAtUtc] = @NowUtc
+                WHERE [Id] = @Id
+                  AND [RowVersion] = @StoredRowVersion;
+
+                IF @@ROWCOUNT = 0
+                    THROW 51312, N'The client alias changed while it was being saved.', 1;
+
+                SET @Action = N'ClientAliasUpdated';
+            END;
+        END
+        ELSE
+        BEGIN
+            SELECT
+                @StoredAlias = [Alias],
+                @StoredClientId = [ClientId],
+                @StoredRowVersion = [RowVersion]
+            FROM [tb_data].[ClientAliases] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [Id] = @Id
+              AND [ScopeType] = N'Organization';
+
+            IF @StoredAlias IS NULL
+                THROW 51313, N'The organization client alias does not exist.', 1;
+
+            IF @StoredAlias <> @Alias OR @StoredClientId <> @ClientId
+            BEGIN
+                IF @ExpectedRowVersion IS NULL
+                    THROW 51314, N'ExpectedRowVersion is required when changing a client alias.', 1;
+
+                UPDATE [tb_data].[ClientAliases]
+                SET
+                    [Alias] = @Alias,
+                    [ClientId] = @ClientId,
+                    [UpdatedByWindowsSid] = @UserSid,
+                    [UpdatedAtUtc] = @NowUtc
+                WHERE [Id] = @Id
+                  AND [RowVersion] = @ExpectedRowVersion;
+
+                IF @@ROWCOUNT = 0
+                    THROW 51312, N'The client alias changed after it was loaded.', 1;
+
+                SET @Action = N'ClientAliasUpdated';
+            END;
+        END;
+
+        IF @Action IS NOT NULL
+        BEGIN
+            EXEC [tb_security].[WriteAuditEvent]
+                @Action = @Action,
+                @EntityType = N'ClientAlias',
+                @EntityId = CONVERT(nvarchar(120), @Id),
+                @RequestId = @RequestId;
+        END;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        [Id],
+        [ScopeType],
+        [Alias],
+        [ClientId],
+        [UpdatedAtUtc] AS [UpdatedAt],
+        [RowVersion]
+    FROM [tb_data].[ClientAliases]
+    WHERE [Id] = @Id;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SaveUserSetting', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SaveUserSetting];
+GO
+
+CREATE PROCEDURE [tb_app].[SaveUserSetting]
+    @SettingKey nvarchar(200),
+    @SettingValue nvarchar(max),
+    @ExpectedRowVersion binary(8) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SET @SettingKey = NULLIF(LTRIM(RTRIM(@SettingKey)), N'');
+    SET @SettingValue = COALESCE(@SettingValue, N'');
+
+    IF @SettingKey IS NULL
+        THROW 51220, N'SettingKey is required.', 1;
+    IF @SettingKey NOT IN
+       (
+           N'Whd.Username',
+           N'Sage.Username',
+           N'Sage.EmployeeId'
+       )
+        THROW 51510, N'Only approved per-user identity settings may be saved.', 1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM [tb_user].[UserSettings] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [OwnerWindowsSid] = @UserSid
+              AND [SettingKey] = @SettingKey
+        )
+        BEGIN
+            IF @ExpectedRowVersion IS NULL
+                THROW 51221, N'ExpectedRowVersion is required for an existing user setting.', 1;
+
+            UPDATE [tb_user].[UserSettings]
+            SET
+                [SettingValue] = @SettingValue,
+                [UpdatedAtUtc] = SYSUTCDATETIME()
+            WHERE [OwnerWindowsSid] = @UserSid
+              AND [SettingKey] = @SettingKey
+              AND [RowVersion] = @ExpectedRowVersion;
+
+            IF @@ROWCOUNT = 0
+                THROW 51222, N'The user setting changed after it was loaded.', 1;
+        END
+        ELSE
+        BEGIN
+            IF @ExpectedRowVersion IS NOT NULL
+                THROW 51222, N'The user setting changed after it was loaded.', 1;
+
+            INSERT INTO [tb_user].[UserSettings]
+            (
+                [OwnerWindowsSid],
+                [SettingKey],
+                [SettingValue]
+            )
+            VALUES
+            (
+                @UserSid,
+                @SettingKey,
+                @SettingValue
+            );
+        END;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        CONVERT(nvarchar(20), N'User') AS [ScopeType],
+        [SettingKey],
+        [SettingValue],
+        [UpdatedAtUtc] AS [UpdatedAt],
+        [RowVersion]
+    FROM [tb_user].[UserSettings]
+    WHERE [OwnerWindowsSid] = @UserSid
+      AND [SettingKey] = @SettingKey;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.DeleteUserSetting', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[DeleteUserSetting];
+GO
+
+CREATE PROCEDURE [tb_app].[DeleteUserSetting]
+    @SettingKey nvarchar(200),
+    @ExpectedRowVersion binary(8) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SET @SettingKey = NULLIF(LTRIM(RTRIM(@SettingKey)), N'');
+
+    IF @SettingKey IS NULL
+        THROW 51220, N'SettingKey is required.', 1;
+    IF @SettingKey NOT IN
+       (
+           N'Whd.Username',
+           N'Sage.Username',
+           N'Sage.EmployeeId',
+           N'Whd.ApiToken',
+           N'Sage.Password',
+           N'Sage.DefaultCustomerId'
+       )
+        THROW 51511, N'Only approved per-user settings may be deleted.', 1;
+
+    DELETE FROM [tb_user].[UserSettings]
+    WHERE [OwnerWindowsSid] = @UserSid
+      AND [SettingKey] = @SettingKey
+      AND (@ExpectedRowVersion IS NULL OR [RowVersion] = @ExpectedRowVersion);
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminGetOrganizationTags', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminGetOrganizationTags];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminGetOrganizationTags]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1
+        THROW 51520, N'Only an Admin may manage organization tags.', 1;
+
+    SELECT
+        [Id],
+        [Tag],
+        [CreatedAtUtc] AS [UpdatedAt],
+        [RowVersion]
+    FROM [tb_data].[OrganizationTags]
+    ORDER BY [Tag], [Id];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminSaveOrganizationTag', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminSaveOrganizationTag];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminSaveOrganizationTag]
+    @Id int = NULL,
+    @Tag nvarchar(1000),
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1
+        THROW 51520, N'Only an Admin may manage organization tags.', 1;
+
+    SET @Tag = NULLIF(LTRIM(RTRIM(@Tag)), N'');
+    IF @Tag IS NULL
+        THROW 51521, N'Tag is required.', 1;
+    IF @Id IS NOT NULL AND @ExpectedRowVersion IS NULL
+        THROW 51522, N'ExpectedRowVersion is required when updating an organization tag.', 1;
+
+    DECLARE @TagHash binary(32) =
+        CONVERT
+        (
+            binary(32),
+            HASHBYTES
+            (
+                N'SHA2_256',
+                CONVERT(varbinary(2000), UPPER(@Tag))
+            )
+        );
+    DECLARE @Action nvarchar(120);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[OrganizationTags] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [TagHash] = @TagHash
+              AND (@Id IS NULL OR [Id] <> @Id)
+        )
+            THROW 51523, N'An organization tag with the same normalized value already exists.', 1;
+
+        IF @Id IS NULL
+        BEGIN
+            INSERT INTO [tb_data].[OrganizationTags]
+            (
+                [Tag],
+                [TagHash],
+                [CreatedByWindowsSid],
+                [CreatedAtUtc]
+            )
+            VALUES
+            (
+                @Tag,
+                @TagHash,
+                @UserSid,
+                SYSUTCDATETIME()
+            );
+
+            SET @Id = CONVERT(int, SCOPE_IDENTITY());
+            SET @Action = N'OrganizationTagCreated';
+        END
+        ELSE
+        BEGIN
+            UPDATE [tb_data].[OrganizationTags]
+            SET
+                [Tag] = @Tag,
+                [TagHash] = @TagHash
+            WHERE [Id] = @Id
+              AND [RowVersion] = @ExpectedRowVersion;
+
+            IF @@ROWCOUNT = 0
+                THROW 51524, N'The organization tag was not found or changed after it was loaded.', 1;
+
+            SET @Action = N'OrganizationTagUpdated';
+        END;
+
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action = @Action,
+            @EntityType = N'OrganizationTag',
+            @EntityId = CONVERT(nvarchar(120), @Id),
+            @RequestId = @RequestId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        [Id],
+        [Tag],
+        [CreatedAtUtc] AS [UpdatedAt],
+        [RowVersion]
+    FROM [tb_data].[OrganizationTags]
+    WHERE [Id] = @Id;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminDeleteOrganizationTag', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminDeleteOrganizationTag];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminDeleteOrganizationTag]
+    @Id int,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1
+        THROW 51520, N'Only an Admin may manage organization tags.', 1;
+
+    DELETE FROM [tb_data].[OrganizationTags]
+    WHERE [Id] = @Id
+      AND [RowVersion] = @ExpectedRowVersion;
+
+    IF @@ROWCOUNT = 0
+        THROW 51525, N'The organization tag was not found or changed after it was loaded.', 1;
+
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action = N'OrganizationTagDeleted',
+        @EntityType = N'OrganizationTag',
+        @EntityId = CONVERT(nvarchar(120), @Id),
+        @RequestId = @RequestId;
+END;
+GO
+
+/*
+    Work-entry tags remain the user's own comma-separated entry data. Saving a
+    work entry no longer changes the Admin-managed organization tag catalog.
+*/
+IF OBJECT_ID(N'tb_app.SaveWorkEntry', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SaveWorkEntry];
+GO
+
+CREATE PROCEDURE [tb_app].[SaveWorkEntry]
+    @Id int = NULL,
+    @WorkDate date,
+    @ClientId int = NULL,
+    @ManualClientName nvarchar(240) = NULL,
+    @TicketId int = NULL,
+    @TicketNumberText nvarchar(120) = NULL,
+    @HasTimeRange bit = 1,
+    @StartTime time(0) = '00:00',
+    @EndTime time(0) = '00:00',
+    @DurationMinutes int,
+    @Billable bit = 1,
+    @Note nvarchar(max) = N'',
+    @PersonalNote nvarchar(max) = NULL,
+    @IncludePersonalNoteInWhd bit = 0,
+    @Tags nvarchar(1000) = N'',
+    @FollowUpState nvarchar(30) = N'None',
+    @FollowUpDueDate date = NULL,
+    @PostingStatus nvarchar(40) = N'Draft',
+    @LastError nvarchar(max) = NULL,
+    @ExpectedRowVersion binary(8) = NULL,
+    @ExpectedPersonalNoteRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @LoginName nvarchar(256);
+    DECLARE @DisplayName nvarchar(160);
+    DECLARE @IsTechnician bit;
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[EnsureCurrentUser]
+        @UserSid = @UserSid OUTPUT,
+        @LoginName = @LoginName OUTPUT,
+        @DisplayName = @DisplayName OUTPUT,
+        @IsTechnician = @IsTechnician OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SET @ManualClientName = NULLIF(LTRIM(RTRIM(@ManualClientName)), N'');
+    SET @TicketNumberText = NULLIF(LTRIM(RTRIM(@TicketNumberText)), N'');
+    SET @Note = COALESCE(@Note, N'');
+    SET @PersonalNote = NULLIF(LTRIM(RTRIM(@PersonalNote)), N'');
+    SET @Tags = COALESCE(LTRIM(RTRIM(@Tags)), N'');
+    SET @FollowUpState =
+        COALESCE(NULLIF(LTRIM(RTRIM(@FollowUpState)), N''), N'None');
+    SET @PostingStatus =
+        COALESCE(NULLIF(LTRIM(RTRIM(@PostingStatus)), N''), N'Draft');
+    SET @LastError = NULLIF(LTRIM(RTRIM(@LastError)), N'');
+
+    IF @ClientId IS NULL AND @ManualClientName IS NULL
+        THROW 51130, N'A client or manual client name is required.', 1;
+    IF @ClientId IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM [tb_data].[Clients] WHERE [Id] = @ClientId)
+        THROW 51130, N'The selected client does not exist.', 1;
+    IF @TicketId IS NOT NULL
+       AND NOT EXISTS
+       (
+           SELECT 1
+           FROM [tb_data].[Tickets]
+           WHERE [Id] = @TicketId
+             AND (@ClientId IS NULL OR [ClientId] = @ClientId)
+       )
+        THROW 51130, N'The selected ticket does not exist for the selected client.', 1;
+    IF @DurationMinutes < 0 OR @DurationMinutes > 1440
+        THROW 51130, N'DurationMinutes must be between 0 and 1440.', 1;
+    IF @FollowUpState NOT IN (N'None', N'FollowUp', N'Waiting', N'Completed')
+        THROW 51130, N'FollowUpState is invalid.', 1;
+    IF @PostingStatus NOT IN (N'Draft', N'Ready')
+        THROW 51130, N'PostingStatus may be only Draft or Ready in SaveWorkEntry.', 1;
+    IF @Id IS NOT NULL AND @ExpectedRowVersion IS NULL
+        THROW 51131, N'ExpectedRowVersion is required when updating a work entry.', 1;
+
+    DECLARE @NowUtc datetime2(3) = SYSUTCDATETIME();
+    DECLARE @Action nvarchar(120);
+    DECLARE @ExistingWhdPosted bit;
+    DECLARE @ExistingSagePosted bit;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF @Id IS NULL
+        BEGIN
+            INSERT INTO [tb_data].[WorkEntries]
+            (
+                [OwnerWindowsSid],
+                [WorkDate],
+                [ClientId],
+                [ManualClientName],
+                [TicketId],
+                [TicketNumberText],
+                [HasTimeRange],
+                [StartTime],
+                [EndTime],
+                [DurationMinutes],
+                [Billable],
+                [Note],
+                [Tags],
+                [FollowUpState],
+                [FollowUpDueDate],
+                [WhdPosted],
+                [WhdPostedAtUtc],
+                [SagePosted],
+                [SagePostedAtUtc],
+                [SageTicketNumber],
+                [PostingStatus],
+                [LastError],
+                [CreatedByWindowsSid],
+                [UpdatedByWindowsSid],
+                [CreatedAtUtc],
+                [UpdatedAtUtc]
+            )
+            VALUES
+            (
+                @UserSid,
+                @WorkDate,
+                @ClientId,
+                @ManualClientName,
+                @TicketId,
+                @TicketNumberText,
+                @HasTimeRange,
+                @StartTime,
+                @EndTime,
+                @DurationMinutes,
+                @Billable,
+                @Note,
+                @Tags,
+                @FollowUpState,
+                @FollowUpDueDate,
+                0,
+                NULL,
+                0,
+                NULL,
+                NULL,
+                CASE WHEN @LastError IS NOT NULL THEN N'Failed' ELSE @PostingStatus END,
+                @LastError,
+                @UserSid,
+                @UserSid,
+                @NowUtc,
+                @NowUtc
+            );
+
+            SET @Id = CONVERT(int, SCOPE_IDENTITY());
+            SET @Action = N'WorkEntryCreated';
+        END
+        ELSE
+        BEGIN
+            SELECT
+                @ExistingWhdPosted = [WhdPosted],
+                @ExistingSagePosted = [SagePosted]
+            FROM [tb_data].[WorkEntries] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [Id] = @Id
+              AND [OwnerWindowsSid] = @UserSid
+              AND [RowVersion] = @ExpectedRowVersion;
+
+            IF @ExistingWhdPosted IS NULL
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM [tb_data].[WorkEntries] WHERE [Id] = @Id)
+                    THROW 51132, N'The work entry no longer exists.', 1;
+                IF NOT EXISTS
+                (
+                    SELECT 1
+                    FROM [tb_data].[WorkEntries]
+                    WHERE [Id] = @Id
+                      AND [OwnerWindowsSid] = @UserSid
+                )
+                    THROW 51133, N'Only the work-entry owner may update it.', 1;
+                THROW 51134, N'The work entry changed after it was loaded.', 1;
+            END;
+
+            IF @ExistingSagePosted = 1
+                THROW 51137, N'A work entry already posted to Sage cannot be changed.', 1;
+
+            IF EXISTS
+            (
+                SELECT 1
+                FROM [tb_ops].[PostingAttempts] WITH (UPDLOCK, HOLDLOCK)
+                WHERE [WorkEntryId] = @Id
+                  AND [OwnerWindowsSid] = @UserSid
+                  AND [Status] IN (N'Started', N'Unknown')
+            )
+            OR EXISTS
+            (
+                SELECT 1
+                FROM [tb_ops].[PostingLeases] WITH (UPDLOCK, HOLDLOCK)
+                WHERE [WorkEntryId] = @Id
+                  AND [OwnerWindowsSid] = @UserSid
+            )
+                THROW 51139, N'A work entry cannot be changed while an external posting attempt is active.', 1;
+
+            UPDATE [tb_data].[WorkEntries]
+            SET
+                [WorkDate] = @WorkDate,
+                [ClientId] = @ClientId,
+                [ManualClientName] = @ManualClientName,
+                [TicketId] = @TicketId,
+                [TicketNumberText] = @TicketNumberText,
+                [HasTimeRange] = @HasTimeRange,
+                [StartTime] = @StartTime,
+                [EndTime] = @EndTime,
+                [DurationMinutes] = @DurationMinutes,
+                [Billable] = @Billable,
+                [Note] = @Note,
+                [Tags] = @Tags,
+                [FollowUpState] = @FollowUpState,
+                [FollowUpDueDate] = @FollowUpDueDate,
+                [PostingStatus] =
+                    CASE
+                        WHEN @LastError IS NOT NULL THEN N'Failed'
+                        WHEN [WhdPosted] = 1 AND [SagePosted] = 1 THEN N'PostedToBoth'
+                        WHEN [SagePosted] = 1 THEN N'PostedToSage'
+                        WHEN [WhdPosted] = 1 THEN N'PostedToWhd'
+                        ELSE @PostingStatus
+                    END,
+                [LastError] = @LastError,
+                [UpdatedByWindowsSid] = @UserSid,
+                [UpdatedAtUtc] = @NowUtc
+            WHERE [Id] = @Id
+              AND [OwnerWindowsSid] = @UserSid
+              AND [RowVersion] = @ExpectedRowVersion;
+
+            IF @@ROWCOUNT = 0
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM [tb_data].[WorkEntries] WHERE [Id] = @Id)
+                    THROW 51132, N'The work entry no longer exists.', 1;
+                IF NOT EXISTS
+                (
+                    SELECT 1
+                    FROM [tb_data].[WorkEntries]
+                    WHERE [Id] = @Id
+                      AND [OwnerWindowsSid] = @UserSid
+                )
+                    THROW 51133, N'Only the work-entry owner may update it.', 1;
+                THROW 51134, N'The work entry changed after it was loaded.', 1;
+            END;
+
+            SET @Action = N'WorkEntryUpdated';
+        END;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM [tb_private].[WorkEntryPersonalNotes]
+            WHERE [WorkEntryId] = @Id
+              AND [OwnerWindowsSid] = @UserSid
+        )
+        BEGIN
+            IF @ExpectedPersonalNoteRowVersion IS NULL
+                THROW 51135, N'ExpectedPersonalNoteRowVersion is required for an existing personal note.', 1;
+
+            IF @PersonalNote IS NULL AND @IncludePersonalNoteInWhd = 0
+            BEGIN
+                DELETE FROM [tb_private].[WorkEntryPersonalNotes]
+                WHERE [WorkEntryId] = @Id
+                  AND [OwnerWindowsSid] = @UserSid
+                  AND [RowVersion] = @ExpectedPersonalNoteRowVersion;
+            END
+            ELSE
+            BEGIN
+                UPDATE [tb_private].[WorkEntryPersonalNotes]
+                SET
+                    [Note] = COALESCE(@PersonalNote, N''),
+                    [IncludeInWhd] = @IncludePersonalNoteInWhd,
+                    [UpdatedAtUtc] = @NowUtc
+                WHERE [WorkEntryId] = @Id
+                  AND [OwnerWindowsSid] = @UserSid
+                  AND [RowVersion] = @ExpectedPersonalNoteRowVersion;
+            END;
+
+            IF @@ROWCOUNT = 0
+                THROW 51136, N'The personal note changed after it was loaded.', 1;
+        END
+        ELSE
+        BEGIN
+            IF @ExpectedPersonalNoteRowVersion IS NOT NULL
+                THROW 51136, N'The personal note changed after it was loaded.', 1;
+
+            IF @PersonalNote IS NOT NULL OR @IncludePersonalNoteInWhd = 1
+            BEGIN
+                INSERT INTO [tb_private].[WorkEntryPersonalNotes]
+                (
+                    [WorkEntryId],
+                    [OwnerWindowsSid],
+                    [Note],
+                    [IncludeInWhd],
+                    [CreatedAtUtc],
+                    [UpdatedAtUtc]
+                )
+                VALUES
+                (
+                    @Id,
+                    @UserSid,
+                    COALESCE(@PersonalNote, N''),
+                    @IncludePersonalNoteInWhd,
+                    @NowUtc,
+                    @NowUtc
+                );
+            END;
+        END;
+
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action = @Action,
+            @EntityType = N'WorkEntry',
+            @EntityId = CONVERT(nvarchar(120), @Id),
+            @RequestId = @RequestId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        work_entry.[Id],
+        work_entry.[OwnerWindowsSid],
+        work_entry.[WorkDate],
+        work_entry.[ClientId],
+        work_entry.[ManualClientName],
+        work_entry.[TicketId],
+        work_entry.[TicketNumberText],
+        work_entry.[HasTimeRange],
+        work_entry.[StartTime],
+        work_entry.[EndTime],
+        work_entry.[DurationMinutes],
+        work_entry.[Billable],
+        work_entry.[Note],
+        personal_note.[Note] AS [InternalNote],
+        personal_note.[Note] AS [PersonalNote],
+        COALESCE(personal_note.[IncludeInWhd], 0) AS [IncludePersonalNoteInWhd],
+        work_entry.[Tags],
+        work_entry.[FollowUpState],
+        work_entry.[FollowUpDueDate],
+        work_entry.[WhdPosted],
+        work_entry.[WhdPostedAtUtc] AS [WhdPostedAt],
+        work_entry.[SagePosted],
+        work_entry.[SagePostedAtUtc] AS [SagePostedAt],
+        work_entry.[SageTicketNumber],
+        work_entry.[PostingStatus],
+        work_entry.[LastError],
+        work_entry.[CreatedAtUtc] AS [CreatedAt],
+        work_entry.[UpdatedAtUtc] AS [UpdatedAt],
+        client.[Name] AS [ClientName],
+        ticket.[TicketNumber],
+        ticket.[Subject] AS [TicketSubject],
+        work_entry.[RowVersion],
+        personal_note.[RowVersion] AS [PersonalNoteRowVersion]
+    FROM [tb_data].[WorkEntries] AS work_entry
+    LEFT JOIN [tb_data].[Clients] AS client
+        ON client.[Id] = work_entry.[ClientId]
+    LEFT JOIN [tb_data].[Tickets] AS ticket
+        ON ticket.[Id] = work_entry.[TicketId]
+    LEFT JOIN [tb_private].[WorkEntryPersonalNotes] AS personal_note
+        ON personal_note.[WorkEntryId] = work_entry.[Id]
+       AND personal_note.[OwnerWindowsSid] = @UserSid
+    WHERE work_entry.[Id] = @Id;
+END;
+GO
+
+/*
+    These lifecycle procedures previously relied only on the lease owner and
+    their EXECUTE grants. Keep those ownership checks and add an explicit
+    runtime Admin boundary so a future accidental grant cannot restore legacy
+    Sync Operator write authority.
+*/
+IF OBJECT_ID(N'tb_app.ReleaseSyncLease', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[ReleaseSyncLease];
+GO
+
+CREATE PROCEDURE [tb_app].[ReleaseSyncLease]
+    @LeaseId uniqueidentifier,
+    @DeviceId uniqueidentifier
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1
+        THROW 51540, N'Only an Admin may release a synchronization lease.', 1;
+
+    DELETE FROM [tb_ops].[SyncLeases]
+    WHERE [LeaseId] = @LeaseId
+      AND [OwnerWindowsSid] = @UserSid
+      AND [DeviceId] = @DeviceId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.BeginSyncRun', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[BeginSyncRun];
+GO
+
+CREATE PROCEDURE [tb_app].[BeginSyncRun]
+    @Source nvarchar(120),
+    @LeaseId uniqueidentifier,
+    @DeviceId uniqueidentifier
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1
+        THROW 51540, N'Only an Admin may begin a synchronization run.', 1;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_ops].[SyncLeases]
+        WHERE [SourceSystem] = @Source
+          AND [LeaseId] = @LeaseId
+          AND [OwnerWindowsSid] = @UserSid
+          AND [DeviceId] = @DeviceId
+          AND [ExpiresAtUtc] > SYSUTCDATETIME()
+    )
+        THROW 51440, N'The synchronization lease is missing, expired, or owned by another workstation.', 1;
+
+    DECLARE @RunId uniqueidentifier = NEWID();
+
+    INSERT INTO [tb_ops].[SyncRuns]
+    (
+        [Id],
+        [SourceSystem],
+        [LeaseId],
+        [OwnerWindowsSid],
+        [DeviceId],
+        [Status]
+    )
+    VALUES
+    (
+        @RunId,
+        @Source,
+        @LeaseId,
+        @UserSid,
+        @DeviceId,
+        N'Started'
+    );
+
+    SELECT @RunId AS [RunId];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.CompleteSyncRun', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[CompleteSyncRun];
+GO
+
+CREATE PROCEDURE [tb_app].[CompleteSyncRun]
+    @RunId uniqueidentifier,
+    @Succeeded bit,
+    @ItemCount int = 0,
+    @Message nvarchar(max) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1
+        THROW 51540, N'Only an Admin may complete a synchronization run.', 1;
+
+    UPDATE [tb_ops].[SyncRuns]
+    SET
+        [Status] = CASE WHEN @Succeeded = 1 THEN N'Succeeded' ELSE N'Failed' END,
+        [ReadCount] = CASE WHEN @ItemCount < 0 THEN 0 ELSE @ItemCount END,
+        [Message] = COALESCE(@Message, N''),
+        [CompletedAtUtc] = SYSUTCDATETIME()
+    WHERE [Id] = @RunId
+      AND [OwnerWindowsSid] = @UserSid
+      AND [Status] = N'Started';
+
+    IF @@ROWCOUNT = 0
+        THROW 51441, N'The synchronization run is missing, final, or owned by another user.', 1;
+END;
+GO
+
+IF OBJECT_ID(N'tb_security.RenewSyncRunLease', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_security].[RenewSyncRunLease];
+GO
+
+CREATE PROCEDURE [tb_security].[RenewSyncRunLease]
+    @RunId uniqueidentifier,
+    @ExpectedSource nvarchar(40)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1
+        THROW 51540, N'Only an Admin may renew a synchronization run lease.', 1;
+
+    DECLARE @NowUtc datetime2(3) = SYSUTCDATETIME();
+
+    UPDATE sync_lease
+    SET
+        [ExpiresAtUtc] = DATEADD(second, 300, @NowUtc),
+        [UpdatedAtUtc] = @NowUtc
+    FROM [tb_ops].[SyncLeases] AS sync_lease
+    INNER JOIN [tb_ops].[SyncRuns] AS sync_run
+        ON sync_run.[SourceSystem] = sync_lease.[SourceSystem]
+       AND sync_run.[LeaseId] = sync_lease.[LeaseId]
+       AND sync_run.[OwnerWindowsSid] = sync_lease.[OwnerWindowsSid]
+       AND sync_run.[DeviceId] = sync_lease.[DeviceId]
+    WHERE sync_run.[Id] = @RunId
+      AND sync_run.[SourceSystem] = @ExpectedSource
+      AND sync_run.[OwnerWindowsSid] = @UserSid
+      AND sync_run.[Status] = N'Started'
+      AND sync_lease.[ExpiresAtUtc] > @NowUtc;
+
+    IF @@ROWCOUNT = 0
+        THROW 51449, N'The source-specific synchronization lease expired or was replaced.', 1;
+END;
+GO
+
+-- ============================================================================
+-- END 46-V0004-AdminSharedProcedures.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 47-V0005-TechBenchV1ImportProcedures.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+GO
+
+IF OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[GetRepositoryCapabilities];
+GO
+
+CREATE PROCEDURE [tb_app].[GetRepositoryCapabilities]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SELECT
+        CONVERT(int, 5) AS [SchemaVersion],
+        CONVERT(bit, 0) AS [FullTextSearchAvailable],
+        CONVERT(bit, 1) AS [SupportsTickets],
+        CONVERT(bit, 1) AS [SupportsWorkEntries],
+        CONVERT(bit, 1) AS [SupportsPrivateNotes],
+        CONVERT(bit, 1) AS [SupportsPostingLeases],
+        CONVERT(bit, 1) AS [SupportsSyncLeases],
+        CONVERT(bit, 1) AS [SupportsImports],
+        CONVERT(bit, 1) AS [SupportsTechBenchV1Import];
+END;
+GO
+
+/* Reserve the TechBenchV1 source for the file-hash-aware import lifecycle. */
+IF OBJECT_ID(N'tb_app.BeginImportBatch', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[BeginImportBatch];
+GO
+
+CREATE PROCEDURE [tb_app].[BeginImportBatch]
+    @Source nvarchar(120),
+    @ExpectedCount int = 0,
+    @DeviceId uniqueidentifier = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SET @Source = NULLIF(LTRIM(RTRIM(@Source)), N'');
+    IF @Source IS NULL OR LEN(@Source) > 80
+        THROW 51460, N'Import source is required and cannot exceed 80 characters.', 1;
+    IF @Source = N'TechBenchV1'
+        THROW 51603, N'TechBenchV1 is reserved for BeginTechBenchV1Import, which requires file metadata.', 1;
+
+    DECLARE @BatchId uniqueidentifier = NEWID();
+
+    INSERT INTO [tb_ops].[ImportBatches]
+    (
+        [Id],
+        [SourceSystem],
+        [OwnerWindowsSid],
+        [DeviceId],
+        [Status],
+        [ReadCount]
+    )
+    VALUES
+    (
+        @BatchId,
+        @Source,
+        @UserSid,
+        @DeviceId,
+        N'Started',
+        CASE WHEN @ExpectedCount < 0 THEN 0 ELSE @ExpectedCount END
+    );
+
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action = N'ImportBatchStarted',
+        @EntityType = N'ImportBatch',
+        @EntityId = CONVERT(nvarchar(120), @BatchId),
+        @RequestId = @RequestId;
+
+    SELECT @BatchId AS [BatchId], @BatchId AS [ImportBatchId];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.BeginTechBenchV1Import', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[BeginTechBenchV1Import];
+GO
+
+CREATE PROCEDURE [tb_app].[BeginTechBenchV1Import]
+    @FileName nvarchar(500),
+    @FileHash char(64),
+    @ExpectedCount int = 0,
+    @DeviceId uniqueidentifier = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SET @FileName = NULLIF(LTRIM(RTRIM(@FileName)), N'');
+    SET @FileHash = UPPER(LTRIM(RTRIM(@FileHash)));
+    SET @ExpectedCount = CASE WHEN @ExpectedCount < 0 THEN 0 ELSE @ExpectedCount END;
+
+    IF @FileName IS NULL
+        THROW 51600, N'The TechBench V1 database file name is required.', 1;
+    IF @FileHash IS NULL
+       OR LEN(@FileHash) <> 64
+       OR @FileHash COLLATE Latin1_General_100_BIN2 LIKE '%[^0-9A-F]%'
+        THROW 51601, N'FileHash must be a 64-character hexadecimal SHA-256 value.', 1;
+
+    DECLARE @BatchId uniqueidentifier;
+    DECLARE @Status nvarchar(30);
+    DECLARE @ReadCount int;
+    DECLARE @ImportedCount int;
+    DECLARE @SkippedCount int;
+    DECLARE @ConflictCount int;
+    DECLARE @ErrorCount int;
+
+    SELECT TOP (1)
+        @BatchId = [Id],
+        @Status = [Status],
+        @ReadCount = [ReadCount],
+        @ImportedCount = [ImportedCount],
+        @SkippedCount = [SkippedCount],
+        @ConflictCount = [ConflictCount],
+        @ErrorCount = [ErrorCount]
+    FROM [tb_ops].[ImportBatches]
+    WHERE [OwnerWindowsSid] = @UserSid
+      AND [SourceSystem] = N'TechBenchV1'
+      AND [FileHash] = @FileHash
+      AND [Status] = N'Succeeded'
+      AND [ReadCount] = @ExpectedCount
+      AND [ConflictCount] = 0
+      AND [ErrorCount] = 0
+    ORDER BY [CompletedAtUtc] DESC, [StartedAtUtc] DESC;
+
+    IF @BatchId IS NOT NULL
+    BEGIN
+        SELECT
+            @BatchId AS [BatchId],
+            CONVERT(bit, 1) AS [AlreadyImported],
+            CONVERT(bit, 0) AS [Resumed],
+            @Status AS [Status],
+            @ReadCount AS [ReadCount],
+            @ImportedCount AS [ImportedCount],
+            @SkippedCount AS [SkippedCount],
+            @ConflictCount AS [ConflictCount],
+            @ErrorCount AS [ErrorCount];
+        RETURN;
+    END;
+
+    SET @BatchId = NULL;
+    SELECT TOP (1)
+        @BatchId = [Id],
+        @Status = [Status],
+        @ReadCount = [ReadCount],
+        @ImportedCount = [ImportedCount],
+        @SkippedCount = [SkippedCount],
+        @ConflictCount = [ConflictCount],
+        @ErrorCount = [ErrorCount]
+    FROM [tb_ops].[ImportBatches]
+    WHERE [OwnerWindowsSid] = @UserSid
+      AND [SourceSystem] = N'TechBenchV1'
+      AND [FileHash] = @FileHash
+      AND [Status] = N'Started'
+    ORDER BY [StartedAtUtc] DESC;
+
+    IF @BatchId IS NOT NULL
+    BEGIN
+        SELECT
+            @BatchId AS [BatchId],
+            CONVERT(bit, 0) AS [AlreadyImported],
+            CONVERT(bit, 1) AS [Resumed],
+            @Status AS [Status],
+            @ReadCount AS [ReadCount],
+            @ImportedCount AS [ImportedCount],
+            @SkippedCount AS [SkippedCount],
+            @ConflictCount AS [ConflictCount],
+            @ErrorCount AS [ErrorCount];
+        RETURN;
+    END;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [tb_ops].[ImportBatches]
+        WHERE [OwnerWindowsSid] = @UserSid
+          AND [SourceSystem] = N'TechBenchV1'
+          AND [Status] = N'Started'
+    )
+        THROW 51602, N'Another TechBench V1 import for this user is still active. Resume, complete, or abandon that import first.', 1;
+
+    SET @BatchId = NEWID();
+
+    INSERT INTO [tb_ops].[ImportBatches]
+    (
+        [Id],
+        [SourceSystem],
+        [FileName],
+        [FileHash],
+        [OwnerWindowsSid],
+        [DeviceId],
+        [Status],
+        [ReadCount]
+    )
+    VALUES
+    (
+        @BatchId,
+        N'TechBenchV1',
+        @FileName,
+        @FileHash,
+        @UserSid,
+        @DeviceId,
+        N'Started',
+        @ExpectedCount
+    );
+
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action = N'TechBenchV1ImportStarted',
+        @EntityType = N'ImportBatch',
+        @EntityId = CONVERT(nvarchar(120), @BatchId),
+        @RequestId = @RequestId;
+
+    SELECT
+        @BatchId AS [BatchId],
+        CONVERT(bit, 0) AS [AlreadyImported],
+        CONVERT(bit, 0) AS [Resumed],
+        N'Started' AS [Status],
+        @ExpectedCount AS [ReadCount],
+        CONVERT(int, 0) AS [ImportedCount],
+        CONVERT(int, 0) AS [SkippedCount],
+        CONVERT(int, 0) AS [ConflictCount],
+        CONVERT(int, 0) AS [ErrorCount];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.ResolveTechBenchV1Reference', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[ResolveTechBenchV1Reference];
+GO
+
+/*
+    Resolve exact V1 references inside SQL Server without exposing a capped
+    shared-client or ticket list to the importer. External IDs are always
+    source-qualified. Names are accepted only when the exact value identifies
+    one shared client across organization aliases and canonical client names.
+*/
+CREATE PROCEDURE [tb_app].[ResolveTechBenchV1Reference]
+    @ClientSourceSystem nvarchar(40) = NULL,
+    @ClientExternalId nvarchar(500) = NULL,
+    @SageCustomerId nvarchar(120) = NULL,
+    @ClientName nvarchar(240) = NULL,
+    @TicketSourceSystem nvarchar(40) = NULL,
+    @TicketExternalId nvarchar(240) = NULL,
+    @TicketNumber nvarchar(120) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SET @ClientSourceSystem = NULLIF(LTRIM(RTRIM(@ClientSourceSystem)), N'');
+    SET @ClientExternalId = NULLIF(LTRIM(RTRIM(@ClientExternalId)), N'');
+    SET @SageCustomerId = NULLIF(LTRIM(RTRIM(@SageCustomerId)), N'');
+    SET @ClientName = NULLIF(LTRIM(RTRIM(@ClientName)), N'');
+    SET @TicketSourceSystem = NULLIF(LTRIM(RTRIM(@TicketSourceSystem)), N'');
+    SET @TicketExternalId = NULLIF(LTRIM(RTRIM(@TicketExternalId)), N'');
+    SET @TicketNumber = NULLIF(LTRIM(RTRIM(@TicketNumber)), N'');
+
+    /* In V1, Source=Both still stores the WHD location identity in ExternalId. */
+    IF @ClientSourceSystem = N'Both'
+        SET @ClientSourceSystem = N'WHD';
+    IF @TicketSourceSystem = N'Both'
+        SET @TicketSourceSystem = N'WHD';
+
+    DECLARE @ClientResolutionStatus nvarchar(30) = N'NotFound';
+    DECLARE @ResolvedClientId int = NULL;
+    DECLARE @ClientMatchMethod nvarchar(40) = NULL;
+    DECLARE @TicketResolutionStatus nvarchar(30) = N'NotResolved';
+    DECLARE @ResolvedTicketId int = NULL;
+    DECLARE @TicketMatchMethod nvarchar(40) = NULL;
+
+    IF
+    (
+        (@ClientSourceSystem IS NULL AND @ClientExternalId IS NOT NULL)
+        OR (@ClientSourceSystem IS NOT NULL AND @ClientExternalId IS NULL)
+    )
+    BEGIN
+        SET @ClientResolutionStatus = N'InvalidInput';
+    END
+    ELSE
+    BEGIN
+        DECLARE @AuthoritativeClientCandidates TABLE
+        (
+            [ClientId] int NOT NULL,
+            [MatchMethod] nvarchar(40) NOT NULL,
+            PRIMARY KEY ([ClientId], [MatchMethod])
+        );
+
+        IF @ClientSourceSystem IS NOT NULL AND @ClientExternalId IS NOT NULL
+        BEGIN
+            INSERT INTO @AuthoritativeClientCandidates ([ClientId], [MatchMethod])
+            SELECT identity_row.[ClientId], N'ClientExternalIdentity'
+            FROM [tb_data].[ClientExternalIdentities] AS identity_row
+            WHERE identity_row.[SourceSystem] = @ClientSourceSystem
+              AND identity_row.[ExternalId] = @ClientExternalId;
+        END;
+
+        IF @SageCustomerId IS NOT NULL
+        BEGIN
+            INSERT INTO @AuthoritativeClientCandidates ([ClientId], [MatchMethod])
+            SELECT client.[Id], N'SageCustomerId'
+            FROM [tb_data].[Clients] AS client
+            WHERE client.[SageCustomerId] = @SageCustomerId;
+        END;
+
+        DECLARE @AuthoritativeClientCount int;
+        DECLARE @ExternalClientMatchCount int;
+        SELECT @AuthoritativeClientCount = COUNT(DISTINCT [ClientId])
+        FROM @AuthoritativeClientCandidates;
+        SELECT @ExternalClientMatchCount = COUNT(*)
+        FROM @AuthoritativeClientCandidates
+        WHERE [MatchMethod] = N'ClientExternalIdentity';
+
+        IF @AuthoritativeClientCount > 1
+        BEGIN
+            SET @ClientResolutionStatus =
+                CASE
+                    WHEN @ExternalClientMatchCount > 0 AND @SageCustomerId IS NOT NULL
+                        THEN N'Conflict'
+                    ELSE N'Ambiguous'
+                END;
+        END
+        ELSE IF @AuthoritativeClientCount = 1
+        BEGIN
+            SELECT @ResolvedClientId = MIN([ClientId])
+            FROM @AuthoritativeClientCandidates;
+
+            SET @ClientResolutionStatus = N'Matched';
+            SET @ClientMatchMethod =
+                CASE
+                    WHEN EXISTS
+                    (
+                        SELECT 1
+                        FROM @AuthoritativeClientCandidates
+                        WHERE [ClientId] = @ResolvedClientId
+                          AND [MatchMethod] = N'ClientExternalIdentity'
+                    )
+                        THEN N'ClientExternalIdentity'
+                    ELSE N'SageCustomerId'
+                END;
+        END
+        ELSE
+        BEGIN
+            DECLARE @NamedClientCandidates TABLE
+            (
+                [ClientId] int NOT NULL,
+                [MatchMethod] nvarchar(40) NOT NULL,
+                PRIMARY KEY ([ClientId], [MatchMethod])
+            );
+
+            IF @ClientName IS NOT NULL
+            BEGIN
+                INSERT INTO @NamedClientCandidates ([ClientId], [MatchMethod])
+                SELECT alias_row.[ClientId], N'OrganizationAlias'
+                FROM [tb_data].[ClientAliases] AS alias_row
+                WHERE alias_row.[ScopeType] = N'Organization'
+                  AND alias_row.[Alias] = @ClientName;
+
+                INSERT INTO @NamedClientCandidates ([ClientId], [MatchMethod])
+                SELECT client.[Id], N'ClientName'
+                FROM [tb_data].[Clients] AS client
+                WHERE client.[Name] = @ClientName;
+            END;
+
+            DECLARE @NamedClientCount int;
+            SELECT @NamedClientCount = COUNT(DISTINCT [ClientId])
+            FROM @NamedClientCandidates;
+
+            IF @NamedClientCount > 1
+                SET @ClientResolutionStatus = N'Ambiguous';
+            ELSE IF @NamedClientCount = 1
+            BEGIN
+                SELECT @ResolvedClientId = MIN([ClientId])
+                FROM @NamedClientCandidates;
+
+                SET @ClientResolutionStatus = N'Matched';
+                SET @ClientMatchMethod =
+                    CASE
+                        WHEN EXISTS
+                        (
+                            SELECT 1
+                            FROM @NamedClientCandidates
+                            WHERE [ClientId] = @ResolvedClientId
+                              AND [MatchMethod] = N'OrganizationAlias'
+                        )
+                            THEN N'OrganizationAlias'
+                        ELSE N'ClientName'
+                    END;
+            END;
+        END;
+    END;
+
+    IF @ClientResolutionStatus = N'Matched'
+    BEGIN
+        IF
+        (
+            (@TicketSourceSystem IS NULL AND @TicketExternalId IS NOT NULL)
+            OR (@TicketSourceSystem IS NOT NULL AND @TicketExternalId IS NULL)
+        )
+        BEGIN
+            SET @TicketResolutionStatus = N'InvalidInput';
+        END
+        ELSE IF @TicketSourceSystem IS NULL
+             AND @TicketExternalId IS NULL
+             AND @TicketNumber IS NULL
+        BEGIN
+            SET @TicketResolutionStatus = N'NotRequested';
+        END
+        ELSE
+        BEGIN
+            DECLARE @TicketCandidates TABLE
+            (
+                [TicketId] int NOT NULL,
+                [ClientId] int NOT NULL,
+                [MatchMethod] nvarchar(40) NOT NULL,
+                PRIMARY KEY ([TicketId], [MatchMethod])
+            );
+
+            IF @TicketSourceSystem IS NOT NULL AND @TicketExternalId IS NOT NULL
+            BEGIN
+                INSERT INTO @TicketCandidates ([TicketId], [ClientId], [MatchMethod])
+                SELECT ticket.[Id], ticket.[ClientId], N'TicketExternalIdentity'
+                FROM [tb_data].[Tickets] AS ticket
+                WHERE ticket.[Source] = @TicketSourceSystem
+                  AND ticket.[ExternalId] = @TicketExternalId;
+            END;
+
+            IF @TicketNumber IS NOT NULL
+            BEGIN
+                INSERT INTO @TicketCandidates ([TicketId], [ClientId], [MatchMethod])
+                SELECT ticket.[Id], ticket.[ClientId], N'TicketNumber'
+                FROM [tb_data].[Tickets] AS ticket
+                WHERE ticket.[ClientId] = @ResolvedClientId
+                  AND ticket.[TicketNumber] = @TicketNumber;
+            END;
+
+            DECLARE @ExternalTicketOutsideClientCount int;
+            DECLARE @EligibleTicketCount int;
+            DECLARE @ExternalTicketMatchCount int;
+            SELECT @ExternalTicketOutsideClientCount = COUNT(*)
+            FROM @TicketCandidates
+            WHERE [MatchMethod] = N'TicketExternalIdentity'
+              AND [ClientId] <> @ResolvedClientId;
+            SELECT @EligibleTicketCount = COUNT(DISTINCT [TicketId])
+            FROM @TicketCandidates
+            WHERE [ClientId] = @ResolvedClientId;
+            SELECT @ExternalTicketMatchCount = COUNT(*)
+            FROM @TicketCandidates
+            WHERE [MatchMethod] = N'TicketExternalIdentity'
+              AND [ClientId] = @ResolvedClientId;
+
+            IF @ExternalTicketOutsideClientCount > 0
+            BEGIN
+                SET @TicketResolutionStatus = N'Conflict';
+            END
+            ELSE IF @EligibleTicketCount > 1
+            BEGIN
+                SET @TicketResolutionStatus =
+                    CASE
+                        WHEN @ExternalTicketMatchCount > 0 THEN N'Conflict'
+                        ELSE N'Ambiguous'
+                    END;
+            END
+            ELSE IF @EligibleTicketCount = 1
+            BEGIN
+                SELECT @ResolvedTicketId = MIN([TicketId])
+                FROM @TicketCandidates
+                WHERE [ClientId] = @ResolvedClientId;
+
+                SET @TicketResolutionStatus = N'Matched';
+                SET @TicketMatchMethod =
+                    CASE
+                        WHEN EXISTS
+                        (
+                            SELECT 1
+                            FROM @TicketCandidates
+                            WHERE [TicketId] = @ResolvedTicketId
+                              AND [ClientId] = @ResolvedClientId
+                              AND [MatchMethod] = N'TicketExternalIdentity'
+                        )
+                            THEN N'TicketExternalIdentity'
+                        ELSE N'TicketNumber'
+                    END;
+            END
+            ELSE
+            BEGIN
+                SET @TicketResolutionStatus = N'NotFound';
+            END;
+        END;
+    END;
+
+    SELECT
+        @ClientResolutionStatus AS [ClientResolutionStatus],
+        @ResolvedClientId AS [ClientId],
+        @ClientMatchMethod AS [ClientMatchMethod],
+        @TicketResolutionStatus AS [TicketResolutionStatus],
+        @ResolvedTicketId AS [TicketId],
+        @TicketMatchMethod AS [TicketMatchMethod];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.ImportTechBenchV1WorkEntry', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[ImportTechBenchV1WorkEntry];
+GO
+
+CREATE PROCEDURE [tb_app].[ImportTechBenchV1WorkEntry]
+    @BatchId uniqueidentifier,
+    @LegacyId bigint,
+    @ContentHash char(64),
+    @WorkDate date,
+    @ClientId int = NULL,
+    @ManualClientName nvarchar(240) = NULL,
+    @TicketId int = NULL,
+    @TicketNumberText nvarchar(120) = NULL,
+    @HasTimeRange bit = 1,
+    @StartTime time(0) = '00:00',
+    @EndTime time(0) = '00:00',
+    @DurationMinutes int = 0,
+    @Billable bit = 1,
+    @Note nvarchar(max) = N'',
+    @PersonalNote nvarchar(max) = NULL,
+    @IncludePersonalNoteInWhd bit = 0,
+    @Tags nvarchar(1000) = N'',
+    @FollowUpState nvarchar(30) = N'None',
+    @FollowUpDueDate date = NULL,
+    @WhdPosted bit = 0,
+    @WhdPostedAtUtc datetime2(3) = NULL,
+    @SagePosted bit = 0,
+    @SagePostedAtUtc datetime2(3) = NULL,
+    @SageTicketNumber nvarchar(120) = NULL,
+    @LegacyPostingStatus nvarchar(40) = N'Draft',
+    @LastError nvarchar(max) = NULL,
+    @CreatedAtUtc datetime2(3) = NULL,
+    @UpdatedAtUtc datetime2(3) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SET @ContentHash = UPPER(LTRIM(RTRIM(@ContentHash)));
+    SET @ManualClientName = NULLIF(LTRIM(RTRIM(@ManualClientName)), N'');
+    SET @TicketNumberText = NULLIF(LTRIM(RTRIM(@TicketNumberText)), N'');
+    SET @Note = COALESCE(@Note, N'');
+    SET @PersonalNote =
+        CASE
+            WHEN NULLIF(LTRIM(RTRIM(@PersonalNote)), N'') IS NULL THEN NULL
+            ELSE @PersonalNote
+        END;
+    SET @Tags = COALESCE(LTRIM(RTRIM(@Tags)), N'');
+    SET @FollowUpState = COALESCE(NULLIF(LTRIM(RTRIM(@FollowUpState)), N''), N'None');
+    SET @LegacyPostingStatus = COALESCE(NULLIF(LTRIM(RTRIM(@LegacyPostingStatus)), N''), N'Draft');
+    SET @LastError = NULLIF(LTRIM(RTRIM(@LastError)), N'');
+    SET @SageTicketNumber = NULLIF(LTRIM(RTRIM(@SageTicketNumber)), N'');
+
+    IF @LegacyId <= 0
+        THROW 51610, N'LegacyId must be positive.', 1;
+    IF @ContentHash IS NULL
+       OR LEN(@ContentHash) <> 64
+       OR @ContentHash COLLATE Latin1_General_100_BIN2 LIKE '%[^0-9A-F]%'
+        THROW 51611, N'ContentHash must be a 64-character hexadecimal SHA-256 value.', 1;
+    IF @WorkDate IS NULL OR @CreatedAtUtc IS NULL OR @UpdatedAtUtc IS NULL
+        THROW 51612, N'WorkDate, CreatedAtUtc, and UpdatedAtUtc are required.', 1;
+    IF @UpdatedAtUtc < @CreatedAtUtc
+        THROW 51612, N'UpdatedAtUtc cannot precede CreatedAtUtc.', 1;
+    IF @ClientId IS NULL AND @ManualClientName IS NULL
+        THROW 51613, N'A mapped client or legacy manual client name is required.', 1;
+    IF @DurationMinutes < 0 OR @DurationMinutes > 1440
+        THROW 51614, N'DurationMinutes must be between 0 and 1440.', 1;
+    IF @FollowUpState NOT IN (N'None', N'FollowUp', N'Waiting', N'Completed')
+        THROW 51615, N'FollowUpState is invalid.', 1;
+
+    IF @ClientId IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM [tb_data].[Clients] WHERE [Id] = @ClientId)
+        THROW 51616, N'The mapped shared client does not exist.', 1;
+    IF @TicketId IS NOT NULL
+       AND NOT EXISTS
+       (
+           SELECT 1
+           FROM [tb_data].[Tickets]
+           WHERE [Id] = @TicketId
+             AND (@ClientId IS NULL OR [ClientId] = @ClientId)
+       )
+        THROW 51617, N'The mapped shared ticket does not exist for the mapped client.', 1;
+
+    SET @WhdPostedAtUtc =
+        CASE
+            WHEN @WhdPosted = 1
+                THEN COALESCE(@WhdPostedAtUtc, @UpdatedAtUtc, @CreatedAtUtc)
+            ELSE NULL
+        END;
+    SET @SagePostedAtUtc =
+        CASE
+            WHEN @SagePosted = 1
+                THEN COALESCE(@SagePostedAtUtc, @UpdatedAtUtc, @CreatedAtUtc)
+            ELSE NULL
+        END;
+
+    DECLARE @SafePostingStatus nvarchar(40) =
+        CASE
+            WHEN @WhdPosted = 1 AND @SagePosted = 1 THEN N'PostedToBoth'
+            WHEN @SagePosted = 1 THEN N'PostedToSage'
+            WHEN @WhdPosted = 1 THEN N'PostedToWhd'
+            WHEN @LastError IS NOT NULL THEN N'Failed'
+            WHEN @LegacyPostingStatus IN (N'Draft', N'Ready', N'Failed')
+                THEN @LegacyPostingStatus
+            ELSE N'Draft'
+        END;
+
+    DECLARE @ExistingNewEntityId bigint;
+    DECLARE @ExistingContentHash char(64);
+    DECLARE @ExistingFirstImportBatchId uniqueidentifier;
+    DECLARE @NewEntityId bigint;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_ops].[ImportBatches] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [Id] = @BatchId
+              AND [OwnerWindowsSid] = @UserSid
+              AND [SourceSystem] = N'TechBenchV1'
+              AND [Status] = N'Started'
+              AND [FileName] IS NOT NULL
+              AND [FileHash] IS NOT NULL
+        )
+            THROW 51618, N'The TechBench V1 import batch is missing, final, or owned by another user.', 1;
+
+        SELECT
+            @ExistingNewEntityId = [NewEntityId],
+            @ExistingContentHash = [ContentHash],
+            @ExistingFirstImportBatchId = [FirstImportBatchId]
+        FROM [tb_ops].[LegacyEntityMappings] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [OwnerWindowsSid] = @UserSid
+          AND [SourceSystem] = N'TechBenchV1'
+          AND [EntityType] = N'WorkEntry'
+          AND [LegacyId] = @LegacyId;
+
+        IF @ExistingNewEntityId IS NOT NULL
+        BEGIN
+            IF @ExistingContentHash <> @ContentHash
+            BEGIN
+                COMMIT TRANSACTION;
+                SELECT
+                    @LegacyId AS [LegacyId],
+                    @ExistingNewEntityId AS [NewEntityId],
+                    N'Conflict' AS [Outcome],
+                    CONVERT(bit, 0) AS [Imported],
+                    CONVERT(bit, 0) AS [Skipped],
+                    CONVERT(bit, 1) AS [Conflict],
+                    N'The V1 work entry changed after it was previously imported.' AS [Message];
+                RETURN;
+            END;
+
+            IF NOT EXISTS
+            (
+                SELECT 1
+                FROM [tb_data].[WorkEntries]
+                WHERE [Id] = CONVERT(int, @ExistingNewEntityId)
+                  AND [OwnerWindowsSid] = @UserSid
+            )
+            BEGIN
+                COMMIT TRANSACTION;
+                SELECT
+                    @LegacyId AS [LegacyId],
+                    @ExistingNewEntityId AS [NewEntityId],
+                    N'Conflict' AS [Outcome],
+                    CONVERT(bit, 0) AS [Imported],
+                    CONVERT(bit, 0) AS [Skipped],
+                    CONVERT(bit, 1) AS [Conflict],
+                    N'The prior V1 mapping no longer points to a work entry owned by this user.' AS [Message];
+                RETURN;
+            END;
+
+            IF EXISTS
+            (
+                SELECT 1
+                FROM [tb_data].[WorkEntries]
+                WHERE [Id] = CONVERT(int, @ExistingNewEntityId)
+                  AND [OwnerWindowsSid] = @UserSid
+                  AND
+                  (
+                      ISNULL([ClientId], -1) <> ISNULL(@ClientId, -1)
+                      OR ISNULL([TicketId], -1) <> ISNULL(@TicketId, -1)
+                  )
+            )
+            BEGIN
+                COMMIT TRANSACTION;
+                SELECT
+                    @LegacyId AS [LegacyId],
+                    @ExistingNewEntityId AS [NewEntityId],
+                    N'Conflict' AS [Outcome],
+                    CONVERT(bit, 0) AS [Imported],
+                    CONVERT(bit, 0) AS [Skipped],
+                    CONVERT(bit, 1) AS [Conflict],
+                    N'The resolved client or ticket changed after this V1 work entry was first imported.' AS [Message];
+                RETURN;
+            END;
+
+            UPDATE [tb_ops].[LegacyEntityMappings]
+            SET
+                [LastSeenImportBatchId] = @BatchId,
+                [LastSeenAtUtc] = SYSUTCDATETIME()
+            WHERE [OwnerWindowsSid] = @UserSid
+              AND [SourceSystem] = N'TechBenchV1'
+              AND [EntityType] = N'WorkEntry'
+              AND [LegacyId] = @LegacyId;
+
+            COMMIT TRANSACTION;
+            SELECT
+                @LegacyId AS [LegacyId],
+                @ExistingNewEntityId AS [NewEntityId],
+                CASE WHEN @ExistingFirstImportBatchId = @BatchId THEN N'Imported' ELSE N'Skipped' END AS [Outcome],
+                CONVERT(bit, CASE WHEN @ExistingFirstImportBatchId = @BatchId THEN 1 ELSE 0 END) AS [Imported],
+                CONVERT(bit, CASE WHEN @ExistingFirstImportBatchId = @BatchId THEN 0 ELSE 1 END) AS [Skipped],
+                CONVERT(bit, 0) AS [Conflict],
+                CASE
+                    WHEN @ExistingFirstImportBatchId = @BatchId
+                        THEN N'This V1 work entry was imported earlier in the current batch.'
+                    ELSE N'This V1 work entry was already imported by a prior batch.'
+                END AS [Message];
+            RETURN;
+        END;
+
+        INSERT INTO [tb_data].[WorkEntries]
+        (
+            [OwnerWindowsSid],
+            [WorkDate],
+            [ClientId],
+            [ManualClientName],
+            [TicketId],
+            [TicketNumberText],
+            [HasTimeRange],
+            [StartTime],
+            [EndTime],
+            [DurationMinutes],
+            [Billable],
+            [Note],
+            [Tags],
+            [FollowUpState],
+            [FollowUpDueDate],
+            [WhdPosted],
+            [WhdPostedAtUtc],
+            [SagePosted],
+            [SagePostedAtUtc],
+            [SageTicketNumber],
+            [PostingStatus],
+            [LastError],
+            [CreatedByWindowsSid],
+            [UpdatedByWindowsSid],
+            [CreatedAtUtc],
+            [UpdatedAtUtc]
+        )
+        VALUES
+        (
+            @UserSid,
+            @WorkDate,
+            @ClientId,
+            @ManualClientName,
+            @TicketId,
+            @TicketNumberText,
+            @HasTimeRange,
+            @StartTime,
+            @EndTime,
+            @DurationMinutes,
+            @Billable,
+            @Note,
+            @Tags,
+            @FollowUpState,
+            @FollowUpDueDate,
+            @WhdPosted,
+            @WhdPostedAtUtc,
+            @SagePosted,
+            @SagePostedAtUtc,
+            @SageTicketNumber,
+            @SafePostingStatus,
+            @LastError,
+            @UserSid,
+            @UserSid,
+            @CreatedAtUtc,
+            @UpdatedAtUtc
+        );
+
+        SET @NewEntityId = CONVERT(bigint, SCOPE_IDENTITY());
+
+        IF @PersonalNote IS NOT NULL OR @IncludePersonalNoteInWhd = 1
+        BEGIN
+            INSERT INTO [tb_private].[WorkEntryPersonalNotes]
+            (
+                [WorkEntryId],
+                [OwnerWindowsSid],
+                [Note],
+                [IncludeInWhd],
+                [CreatedAtUtc],
+                [UpdatedAtUtc]
+            )
+            VALUES
+            (
+                CONVERT(int, @NewEntityId),
+                @UserSid,
+                COALESCE(@PersonalNote, N''),
+                @IncludePersonalNoteInWhd,
+                @CreatedAtUtc,
+                @UpdatedAtUtc
+            );
+        END;
+
+        INSERT INTO [tb_ops].[LegacyEntityMappings]
+        (
+            [OwnerWindowsSid],
+            [SourceSystem],
+            [EntityType],
+            [LegacyId],
+            [NewEntityId],
+            [ContentHash],
+            [FirstImportBatchId],
+            [LastSeenImportBatchId]
+        )
+        VALUES
+        (
+            @UserSid,
+            N'TechBenchV1',
+            N'WorkEntry',
+            @LegacyId,
+            @NewEntityId,
+            @ContentHash,
+            @BatchId,
+            @BatchId
+        );
+
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action = N'TechBenchV1WorkEntryImported',
+            @EntityType = N'WorkEntry',
+            @EntityId = CONVERT(nvarchar(120), @NewEntityId),
+            @RequestId = @RequestId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        @LegacyId AS [LegacyId],
+        @NewEntityId AS [NewEntityId],
+        N'Imported' AS [Outcome],
+        CONVERT(bit, 1) AS [Imported],
+        CONVERT(bit, 0) AS [Skipped],
+        CONVERT(bit, 0) AS [Conflict],
+        N'The V1 work entry was imported.' AS [Message];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.ImportTechBenchV1WorkEntryLink', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[ImportTechBenchV1WorkEntryLink];
+GO
+
+CREATE PROCEDURE [tb_app].[ImportTechBenchV1WorkEntryLink]
+    @BatchId uniqueidentifier,
+    @LegacyId bigint,
+    @ContentHash char(64),
+    @LegacySourceWorkEntryId bigint,
+    @LegacyTargetWorkEntryId bigint,
+    @LinkType nvarchar(30) = N'Related',
+    @CreatedAtUtc datetime2(3) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SET @ContentHash = UPPER(LTRIM(RTRIM(@ContentHash)));
+    SET @LinkType = COALESCE(NULLIF(LTRIM(RTRIM(@LinkType)), N''), N'Related');
+
+    IF @LegacyId <= 0
+       OR @LegacySourceWorkEntryId <= 0
+       OR @LegacyTargetWorkEntryId <= 0
+        THROW 51620, N'Legacy link and work-entry IDs must be positive.', 1;
+    IF @LegacySourceWorkEntryId = @LegacyTargetWorkEntryId
+        THROW 51620, N'A V1 work-entry link cannot link an entry to itself.', 1;
+    IF @ContentHash IS NULL
+       OR LEN(@ContentHash) <> 64
+       OR @ContentHash COLLATE Latin1_General_100_BIN2 LIKE '%[^0-9A-F]%'
+        THROW 51621, N'ContentHash must be a 64-character hexadecimal SHA-256 value.', 1;
+    IF @LinkType NOT IN (N'Related', N'FollowUpTo')
+        THROW 51622, N'LinkType must be Related or FollowUpTo.', 1;
+    IF @CreatedAtUtc IS NULL
+        THROW 51623, N'CreatedAtUtc is required.', 1;
+
+    DECLARE @ExistingNewEntityId bigint;
+    DECLARE @ExistingContentHash char(64);
+    DECLARE @ExistingFirstImportBatchId uniqueidentifier;
+    DECLARE @SourceWorkEntryId int;
+    DECLARE @TargetWorkEntryId int;
+    DECLARE @NewEntityId bigint;
+    DECLARE @ExistingPairId int;
+    DECLARE @ExistingPairType nvarchar(30);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_ops].[ImportBatches] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [Id] = @BatchId
+              AND [OwnerWindowsSid] = @UserSid
+              AND [SourceSystem] = N'TechBenchV1'
+              AND [Status] = N'Started'
+              AND [FileName] IS NOT NULL
+              AND [FileHash] IS NOT NULL
+        )
+            THROW 51624, N'The TechBench V1 import batch is missing, final, or owned by another user.', 1;
+
+        /* Validate both prerequisites before either a replay or a new link. */
+        SELECT @SourceWorkEntryId = CONVERT(int, [NewEntityId])
+        FROM [tb_ops].[LegacyEntityMappings] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [OwnerWindowsSid] = @UserSid
+          AND [SourceSystem] = N'TechBenchV1'
+          AND [EntityType] = N'WorkEntry'
+          AND [LegacyId] = @LegacySourceWorkEntryId
+          AND [LastSeenImportBatchId] = @BatchId;
+
+        SELECT @TargetWorkEntryId = CONVERT(int, [NewEntityId])
+        FROM [tb_ops].[LegacyEntityMappings] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [OwnerWindowsSid] = @UserSid
+          AND [SourceSystem] = N'TechBenchV1'
+          AND [EntityType] = N'WorkEntry'
+          AND [LegacyId] = @LegacyTargetWorkEntryId
+          AND [LastSeenImportBatchId] = @BatchId;
+
+        IF @SourceWorkEntryId IS NULL OR @TargetWorkEntryId IS NULL
+        BEGIN
+            COMMIT TRANSACTION;
+            SELECT
+                @LegacyId AS [LegacyId],
+                CONVERT(bigint, NULL) AS [NewEntityId],
+                N'Conflict' AS [Outcome],
+                CONVERT(bit, 0) AS [Imported],
+                CONVERT(bit, 0) AS [Skipped],
+                CONVERT(bit, 1) AS [Conflict],
+                N'One or both V1 work entries were not accepted in this import batch, so their link was not attached through a stale mapping.' AS [Message];
+            RETURN;
+        END;
+
+        IF
+        (
+            SELECT COUNT(*)
+            FROM [tb_data].[WorkEntries]
+            WHERE [Id] IN (@SourceWorkEntryId, @TargetWorkEntryId)
+              AND [OwnerWindowsSid] = @UserSid
+        ) <> 2
+            THROW 51626, N'Both mapped work entries must belong to the current user.', 1;
+
+        IF @LinkType = N'Related' AND @SourceWorkEntryId > @TargetWorkEntryId
+        BEGIN
+            DECLARE @SwapWorkEntryId int = @SourceWorkEntryId;
+            SET @SourceWorkEntryId = @TargetWorkEntryId;
+            SET @TargetWorkEntryId = @SwapWorkEntryId;
+        END;
+
+        SELECT
+            @ExistingNewEntityId = [NewEntityId],
+            @ExistingContentHash = [ContentHash],
+            @ExistingFirstImportBatchId = [FirstImportBatchId]
+        FROM [tb_ops].[LegacyEntityMappings] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [OwnerWindowsSid] = @UserSid
+          AND [SourceSystem] = N'TechBenchV1'
+          AND [EntityType] = N'WorkEntryLink'
+          AND [LegacyId] = @LegacyId;
+
+        IF @ExistingNewEntityId IS NOT NULL
+        BEGIN
+            IF @ExistingContentHash <> @ContentHash
+            BEGIN
+                COMMIT TRANSACTION;
+                SELECT
+                    @LegacyId AS [LegacyId],
+                    @ExistingNewEntityId AS [NewEntityId],
+                    N'Conflict' AS [Outcome],
+                    CONVERT(bit, 0) AS [Imported],
+                    CONVERT(bit, 0) AS [Skipped],
+                    CONVERT(bit, 1) AS [Conflict],
+                    N'The V1 work-entry link changed after it was previously imported.' AS [Message];
+                RETURN;
+            END;
+
+            IF NOT EXISTS
+            (
+                SELECT 1
+                FROM [tb_data].[WorkEntryLinks] AS link
+                INNER JOIN [tb_data].[WorkEntries] AS source_entry
+                    ON source_entry.[Id] = link.[SourceWorkEntryId]
+                INNER JOIN [tb_data].[WorkEntries] AS target_entry
+                    ON target_entry.[Id] = link.[TargetWorkEntryId]
+                WHERE link.[Id] = CONVERT(int, @ExistingNewEntityId)
+                  AND source_entry.[OwnerWindowsSid] = @UserSid
+                  AND target_entry.[OwnerWindowsSid] = @UserSid
+                  AND link.[LinkType] = @LinkType
+                  AND
+                  (
+                      (
+                          link.[SourceWorkEntryId] = @SourceWorkEntryId
+                          AND link.[TargetWorkEntryId] = @TargetWorkEntryId
+                      )
+                      OR
+                      (
+                          @LinkType = N'Related'
+                          AND link.[SourceWorkEntryId] = @TargetWorkEntryId
+                          AND link.[TargetWorkEntryId] = @SourceWorkEntryId
+                      )
+                  )
+            )
+            BEGIN
+                COMMIT TRANSACTION;
+                SELECT
+                    @LegacyId AS [LegacyId],
+                    @ExistingNewEntityId AS [NewEntityId],
+                    N'Conflict' AS [Outcome],
+                    CONVERT(bit, 0) AS [Imported],
+                    CONVERT(bit, 0) AS [Skipped],
+                    CONVERT(bit, 1) AS [Conflict],
+                    N'The prior V1 mapping no longer points to a link between this user''s work entries.' AS [Message];
+                RETURN;
+            END;
+
+            UPDATE [tb_ops].[LegacyEntityMappings]
+            SET
+                [LastSeenImportBatchId] = @BatchId,
+                [LastSeenAtUtc] = SYSUTCDATETIME()
+            WHERE [OwnerWindowsSid] = @UserSid
+              AND [SourceSystem] = N'TechBenchV1'
+              AND [EntityType] = N'WorkEntryLink'
+              AND [LegacyId] = @LegacyId;
+
+            COMMIT TRANSACTION;
+            SELECT
+                @LegacyId AS [LegacyId],
+                @ExistingNewEntityId AS [NewEntityId],
+                CASE WHEN @ExistingFirstImportBatchId = @BatchId THEN N'Imported' ELSE N'Skipped' END AS [Outcome],
+                CONVERT(bit, CASE WHEN @ExistingFirstImportBatchId = @BatchId THEN 1 ELSE 0 END) AS [Imported],
+                CONVERT(bit, CASE WHEN @ExistingFirstImportBatchId = @BatchId THEN 0 ELSE 1 END) AS [Skipped],
+                CONVERT(bit, 0) AS [Conflict],
+                CASE
+                    WHEN @ExistingFirstImportBatchId = @BatchId
+                        THEN N'This V1 work-entry link was imported earlier in the current batch.'
+                    ELSE N'This V1 work-entry link was already imported by a prior batch.'
+                END AS [Message];
+            RETURN;
+        END;
+
+        SELECT TOP (1)
+            @ExistingPairId = link.[Id],
+            @ExistingPairType = link.[LinkType]
+        FROM [tb_data].[WorkEntryLinks] AS link WITH (UPDLOCK, HOLDLOCK)
+        WHERE
+        (
+            link.[SourceWorkEntryId] = @SourceWorkEntryId
+            AND link.[TargetWorkEntryId] = @TargetWorkEntryId
+        )
+        OR
+        (
+            @LinkType = N'Related'
+            AND link.[SourceWorkEntryId] = @TargetWorkEntryId
+            AND link.[TargetWorkEntryId] = @SourceWorkEntryId
+        )
+        ORDER BY link.[Id];
+
+        IF @ExistingPairId IS NOT NULL AND @ExistingPairType <> @LinkType
+        BEGIN
+            COMMIT TRANSACTION;
+            SELECT
+                @LegacyId AS [LegacyId],
+                CONVERT(bigint, @ExistingPairId) AS [NewEntityId],
+                N'Conflict' AS [Outcome],
+                CONVERT(bit, 0) AS [Imported],
+                CONVERT(bit, 0) AS [Skipped],
+                CONVERT(bit, 1) AS [Conflict],
+                N'The mapped work entries already have a different relationship type.' AS [Message];
+            RETURN;
+        END;
+
+        IF @ExistingPairId IS NULL
+        BEGIN
+            INSERT INTO [tb_data].[WorkEntryLinks]
+            (
+                [SourceWorkEntryId],
+                [TargetWorkEntryId],
+                [LinkType],
+                [CreatedByWindowsSid],
+                [CreatedAtUtc]
+            )
+            VALUES
+            (
+                @SourceWorkEntryId,
+                @TargetWorkEntryId,
+                @LinkType,
+                @UserSid,
+                @CreatedAtUtc
+            );
+            SET @NewEntityId = CONVERT(bigint, SCOPE_IDENTITY());
+        END
+        ELSE
+        BEGIN
+            SET @NewEntityId = CONVERT(bigint, @ExistingPairId);
+        END;
+
+        INSERT INTO [tb_ops].[LegacyEntityMappings]
+        (
+            [OwnerWindowsSid],
+            [SourceSystem],
+            [EntityType],
+            [LegacyId],
+            [NewEntityId],
+            [ContentHash],
+            [FirstImportBatchId],
+            [LastSeenImportBatchId]
+        )
+        VALUES
+        (
+            @UserSid,
+            N'TechBenchV1',
+            N'WorkEntryLink',
+            @LegacyId,
+            @NewEntityId,
+            @ContentHash,
+            @BatchId,
+            @BatchId
+        );
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        @LegacyId AS [LegacyId],
+        @NewEntityId AS [NewEntityId],
+        N'Imported' AS [Outcome],
+        CONVERT(bit, 1) AS [Imported],
+        CONVERT(bit, 0) AS [Skipped],
+        CONVERT(bit, 0) AS [Conflict],
+        CASE
+            WHEN @ExistingPairId IS NULL THEN N'The V1 work-entry link was imported.'
+            ELSE N'The V1 work-entry link was imported by mapping it to an equivalent owned relationship.'
+        END AS [Message];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.ImportTechBenchV1PostingLog', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[ImportTechBenchV1PostingLog];
+GO
+
+CREATE PROCEDURE [tb_app].[ImportTechBenchV1PostingLog]
+    @BatchId uniqueidentifier,
+    @LegacyId bigint,
+    @ContentHash char(64),
+    @LegacyWorkEntryId bigint,
+    @Destination nvarchar(40),
+    @Payload nvarchar(max) = N'',
+    @Success bit = 0,
+    @Message nvarchar(max) = N'',
+    @ExternalReference nvarchar(500) = NULL,
+    @CreatedAtUtc datetime2(3) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SET @ContentHash = UPPER(LTRIM(RTRIM(@ContentHash)));
+    SET @Destination = NULLIF(LTRIM(RTRIM(@Destination)), N'');
+    SET @Payload = COALESCE(@Payload, N'');
+    SET @Message = COALESCE(@Message, N'');
+    SET @ExternalReference = NULLIF(LTRIM(RTRIM(@ExternalReference)), N'');
+
+    IF @LegacyId <= 0 OR @LegacyWorkEntryId <= 0
+        THROW 51630, N'Legacy posting-log and work-entry IDs must be positive.', 1;
+    IF @ContentHash IS NULL
+       OR LEN(@ContentHash) <> 64
+       OR @ContentHash COLLATE Latin1_General_100_BIN2 LIKE '%[^0-9A-F]%'
+        THROW 51631, N'ContentHash must be a 64-character hexadecimal SHA-256 value.', 1;
+    IF @Destination NOT IN (N'WHD', N'Sage')
+        THROW 51632, N'Destination must be WHD or Sage.', 1;
+    IF @CreatedAtUtc IS NULL
+        THROW 51633, N'CreatedAtUtc is required.', 1;
+
+    DECLARE @ExistingNewEntityId bigint;
+    DECLARE @ExistingContentHash char(64);
+    DECLARE @ExistingFirstImportBatchId uniqueidentifier;
+    DECLARE @WorkEntryId int;
+    DECLARE @NewEntityId bigint;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_ops].[ImportBatches] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [Id] = @BatchId
+              AND [OwnerWindowsSid] = @UserSid
+              AND [SourceSystem] = N'TechBenchV1'
+              AND [Status] = N'Started'
+              AND [FileName] IS NOT NULL
+              AND [FileHash] IS NOT NULL
+        )
+            THROW 51634, N'The TechBench V1 import batch is missing, final, or owned by another user.', 1;
+
+        /* Validate the prerequisite before either a replay or a new log. */
+        SELECT @WorkEntryId = CONVERT(int, [NewEntityId])
+        FROM [tb_ops].[LegacyEntityMappings] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [OwnerWindowsSid] = @UserSid
+          AND [SourceSystem] = N'TechBenchV1'
+          AND [EntityType] = N'WorkEntry'
+          AND [LegacyId] = @LegacyWorkEntryId
+          AND [LastSeenImportBatchId] = @BatchId;
+
+        IF @WorkEntryId IS NULL
+        BEGIN
+            COMMIT TRANSACTION;
+            SELECT
+                @LegacyId AS [LegacyId],
+                CONVERT(bigint, NULL) AS [NewEntityId],
+                N'Conflict' AS [Outcome],
+                CONVERT(bit, 0) AS [Imported],
+                CONVERT(bit, 0) AS [Skipped],
+                CONVERT(bit, 1) AS [Conflict],
+                N'The V1 work entry was not accepted in this import batch, so its posting log was not attached through a stale mapping.' AS [Message];
+            RETURN;
+        END;
+        IF NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[WorkEntries]
+            WHERE [Id] = @WorkEntryId
+              AND [OwnerWindowsSid] = @UserSid
+        )
+            THROW 51636, N'The mapped work entry is not owned by the current user.', 1;
+
+        SELECT
+            @ExistingNewEntityId = [NewEntityId],
+            @ExistingContentHash = [ContentHash],
+            @ExistingFirstImportBatchId = [FirstImportBatchId]
+        FROM [tb_ops].[LegacyEntityMappings] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [OwnerWindowsSid] = @UserSid
+          AND [SourceSystem] = N'TechBenchV1'
+          AND [EntityType] = N'PostingLog'
+          AND [LegacyId] = @LegacyId;
+
+        IF @ExistingNewEntityId IS NOT NULL
+        BEGIN
+            IF @ExistingContentHash <> @ContentHash
+            BEGIN
+                COMMIT TRANSACTION;
+                SELECT
+                    @LegacyId AS [LegacyId],
+                    @ExistingNewEntityId AS [NewEntityId],
+                    N'Conflict' AS [Outcome],
+                    CONVERT(bit, 0) AS [Imported],
+                    CONVERT(bit, 0) AS [Skipped],
+                    CONVERT(bit, 1) AS [Conflict],
+                    N'The V1 posting log changed after it was previously imported.' AS [Message];
+                RETURN;
+            END;
+
+            IF NOT EXISTS
+            (
+                SELECT 1
+                FROM [tb_ops].[PostingLogs]
+                WHERE [Id] = @ExistingNewEntityId
+                  AND [OwnerWindowsSid] = @UserSid
+                  AND [WorkEntryId] = @WorkEntryId
+            )
+            BEGIN
+                COMMIT TRANSACTION;
+                SELECT
+                    @LegacyId AS [LegacyId],
+                    @ExistingNewEntityId AS [NewEntityId],
+                    N'Conflict' AS [Outcome],
+                    CONVERT(bit, 0) AS [Imported],
+                    CONVERT(bit, 0) AS [Skipped],
+                    CONVERT(bit, 1) AS [Conflict],
+                    N'The prior V1 mapping no longer points to a posting log owned by this user.' AS [Message];
+                RETURN;
+            END;
+
+            IF @Success = 1
+            BEGIN
+                UPDATE [tb_data].[WorkEntries]
+                SET
+                    [WhdPosted] =
+                        CASE WHEN @Destination = N'WHD' THEN CONVERT(bit, 1) ELSE [WhdPosted] END,
+                    [WhdPostedAtUtc] =
+                        CASE
+                            WHEN @Destination = N'WHD'
+                                THEN COALESCE([WhdPostedAtUtc], @CreatedAtUtc)
+                            ELSE [WhdPostedAtUtc]
+                        END,
+                    [SagePosted] =
+                        CASE WHEN @Destination = N'Sage' THEN CONVERT(bit, 1) ELSE [SagePosted] END,
+                    [SagePostedAtUtc] =
+                        CASE
+                            WHEN @Destination = N'Sage'
+                                THEN COALESCE([SagePostedAtUtc], @CreatedAtUtc)
+                            ELSE [SagePostedAtUtc]
+                        END,
+                    [PostingStatus] =
+                        CASE
+                            WHEN
+                                (@Destination = N'WHD' OR [WhdPosted] = 1)
+                                AND (@Destination = N'Sage' OR [SagePosted] = 1)
+                                THEN N'PostedToBoth'
+                            WHEN @Destination = N'Sage' OR [SagePosted] = 1
+                                THEN N'PostedToSage'
+                            ELSE N'PostedToWhd'
+                        END
+                WHERE [Id] = @WorkEntryId
+                  AND [OwnerWindowsSid] = @UserSid;
+
+                IF @@ROWCOUNT = 0
+                    THROW 51636, N'The mapped posting-log work entry is not owned by the current user.', 1;
+            END;
+
+            UPDATE [tb_ops].[LegacyEntityMappings]
+            SET
+                [LastSeenImportBatchId] = @BatchId,
+                [LastSeenAtUtc] = SYSUTCDATETIME()
+            WHERE [OwnerWindowsSid] = @UserSid
+              AND [SourceSystem] = N'TechBenchV1'
+              AND [EntityType] = N'PostingLog'
+              AND [LegacyId] = @LegacyId;
+
+            COMMIT TRANSACTION;
+            SELECT
+                @LegacyId AS [LegacyId],
+                @ExistingNewEntityId AS [NewEntityId],
+                CASE WHEN @ExistingFirstImportBatchId = @BatchId THEN N'Imported' ELSE N'Skipped' END AS [Outcome],
+                CONVERT(bit, CASE WHEN @ExistingFirstImportBatchId = @BatchId THEN 1 ELSE 0 END) AS [Imported],
+                CONVERT(bit, CASE WHEN @ExistingFirstImportBatchId = @BatchId THEN 0 ELSE 1 END) AS [Skipped],
+                CONVERT(bit, 0) AS [Conflict],
+                CASE
+                    WHEN @ExistingFirstImportBatchId = @BatchId
+                        THEN N'This V1 posting log was imported earlier in the current batch.'
+                    ELSE N'This V1 posting log was already imported by a prior batch.'
+                END AS [Message];
+            RETURN;
+        END;
+
+        INSERT INTO [tb_ops].[PostingLogs]
+        (
+            [WorkEntryId],
+            [OwnerWindowsSid],
+            [Destination],
+            [Payload],
+            [Success],
+            [Message],
+            [ExternalReference],
+            [RequestId],
+            [CreatedAtUtc]
+        )
+        VALUES
+        (
+            @WorkEntryId,
+            @UserSid,
+            @Destination,
+            @Payload,
+            @Success,
+            @Message,
+            @ExternalReference,
+            COALESCE(@RequestId, NEWID()),
+            @CreatedAtUtc
+        );
+
+        SET @NewEntityId = CONVERT(bigint, SCOPE_IDENTITY());
+
+        INSERT INTO [tb_ops].[LegacyEntityMappings]
+        (
+            [OwnerWindowsSid],
+            [SourceSystem],
+            [EntityType],
+            [LegacyId],
+            [NewEntityId],
+            [ContentHash],
+            [FirstImportBatchId],
+            [LastSeenImportBatchId]
+        )
+        VALUES
+        (
+            @UserSid,
+            N'TechBenchV1',
+            N'PostingLog',
+            @LegacyId,
+            @NewEntityId,
+            @ContentHash,
+            @BatchId,
+            @BatchId
+        );
+
+        IF @Success = 1
+        BEGIN
+            /*
+                A durable V1 success log is stronger evidence than a stale
+                local posted flag. Reconcile conservatively so the imported
+                item cannot be posted to the same destination a second time.
+                Preserve UpdatedAtUtc: importing history is not a user edit.
+            */
+            UPDATE [tb_data].[WorkEntries]
+            SET
+                [WhdPosted] =
+                    CASE WHEN @Destination = N'WHD' THEN CONVERT(bit, 1) ELSE [WhdPosted] END,
+                [WhdPostedAtUtc] =
+                    CASE
+                        WHEN @Destination = N'WHD'
+                            THEN COALESCE([WhdPostedAtUtc], @CreatedAtUtc)
+                        ELSE [WhdPostedAtUtc]
+                    END,
+                [SagePosted] =
+                    CASE WHEN @Destination = N'Sage' THEN CONVERT(bit, 1) ELSE [SagePosted] END,
+                [SagePostedAtUtc] =
+                    CASE
+                        WHEN @Destination = N'Sage'
+                            THEN COALESCE([SagePostedAtUtc], @CreatedAtUtc)
+                        ELSE [SagePostedAtUtc]
+                    END,
+                [PostingStatus] =
+                    CASE
+                        WHEN
+                            (@Destination = N'WHD' OR [WhdPosted] = 1)
+                            AND (@Destination = N'Sage' OR [SagePosted] = 1)
+                            THEN N'PostedToBoth'
+                        WHEN @Destination = N'Sage' OR [SagePosted] = 1
+                            THEN N'PostedToSage'
+                        ELSE N'PostedToWhd'
+                    END
+            WHERE [Id] = @WorkEntryId
+              AND [OwnerWindowsSid] = @UserSid;
+
+            IF @@ROWCOUNT = 0
+                THROW 51636, N'The mapped posting-log work entry is not owned by the current user.', 1;
+        END;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        @LegacyId AS [LegacyId],
+        @NewEntityId AS [NewEntityId],
+        N'Imported' AS [Outcome],
+        CONVERT(bit, 1) AS [Imported],
+        CONVERT(bit, 0) AS [Skipped],
+        CONVERT(bit, 0) AS [Conflict],
+        N'The V1 posting log was imported.' AS [Message];
+END;
+GO
+
+/* Generic imports cannot bypass the V1 outcome-count completion contract. */
+IF OBJECT_ID(N'tb_app.CompleteImportBatch', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[CompleteImportBatch];
+GO
+
+CREATE PROCEDURE [tb_app].[CompleteImportBatch]
+    @BatchId uniqueidentifier,
+    @Succeeded bit,
+    @ImportedCount int,
+    @Message nvarchar(max) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [tb_ops].[ImportBatches]
+        WHERE [Id] = @BatchId
+          AND [OwnerWindowsSid] = @UserSid
+          AND [SourceSystem] = N'TechBenchV1'
+          AND [Status] = N'Started'
+    )
+        THROW 51643, N'TechBench V1 imports must be completed with CompleteTechBenchV1Import.', 1;
+
+    UPDATE [tb_ops].[ImportBatches]
+    SET
+        [Status] = CASE WHEN @Succeeded = 1 THEN N'Succeeded' ELSE N'Failed' END,
+        [ImportedCount] = CASE WHEN @ImportedCount < 0 THEN 0 ELSE @ImportedCount END,
+        [Message] = COALESCE(@Message, N''),
+        [CompletedAtUtc] = SYSUTCDATETIME()
+    WHERE [Id] = @BatchId
+      AND [OwnerWindowsSid] = @UserSid
+      AND [SourceSystem] <> N'TechBenchV1'
+      AND [Status] = N'Started';
+
+    IF @@ROWCOUNT = 0
+        THROW 51463, N'The import batch is missing, final, or owned by another user.', 1;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.CompleteTechBenchV1Import', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[CompleteTechBenchV1Import];
+GO
+
+CREATE PROCEDURE [tb_app].[CompleteTechBenchV1Import]
+    @BatchId uniqueidentifier,
+    @Succeeded bit,
+    @ReadCount int,
+    @ImportedCount int,
+    @SkippedCount int,
+    @ConflictCount int,
+    @ErrorCount int,
+    @Message nvarchar(max) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    IF @ReadCount < 0
+       OR @ImportedCount < 0
+       OR @SkippedCount < 0
+       OR @ConflictCount < 0
+       OR @ErrorCount < 0
+        THROW 51640, N'Import completion counts cannot be negative.', 1;
+    DECLARE @OutcomeCount bigint =
+        CONVERT(bigint, @ImportedCount)
+        + CONVERT(bigint, @SkippedCount)
+        + CONVERT(bigint, @ConflictCount)
+        + CONVERT(bigint, @ErrorCount);
+
+    IF @OutcomeCount > CONVERT(bigint, @ReadCount)
+        THROW 51641, N'Import outcome counts cannot exceed ReadCount.', 1;
+    IF @Succeeded = 1 AND @ErrorCount <> 0
+        THROW 51644, N'A successful import cannot contain errors.', 1;
+    IF @Succeeded = 1 AND @OutcomeCount <> CONVERT(bigint, @ReadCount)
+        THROW 51645, N'A successful import must account for every read item exactly once.', 1;
+
+    UPDATE [tb_ops].[ImportBatches]
+    SET
+        [Status] = CASE WHEN @Succeeded = 1 THEN N'Succeeded' ELSE N'Failed' END,
+        [ReadCount] = @ReadCount,
+        [ImportedCount] = @ImportedCount,
+        [SkippedCount] = @SkippedCount,
+        [ConflictCount] = @ConflictCount,
+        [ErrorCount] = @ErrorCount,
+        [Message] = COALESCE(@Message, N''),
+        [CompletedAtUtc] = SYSUTCDATETIME()
+    WHERE [Id] = @BatchId
+      AND [OwnerWindowsSid] = @UserSid
+      AND [SourceSystem] = N'TechBenchV1'
+      AND [Status] = N'Started'
+      AND [FileName] IS NOT NULL
+      AND [FileHash] IS NOT NULL;
+
+    IF @@ROWCOUNT = 0
+        THROW 51642, N'The TechBench V1 import batch is missing, final, or owned by another user.', 1;
+
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action = N'TechBenchV1ImportCompleted',
+        @EntityType = N'ImportBatch',
+        @EntityId = CONVERT(nvarchar(120), @BatchId),
+        @RequestId = @RequestId;
+
+    SELECT
+        [Id] AS [BatchId],
+        [Status],
+        [ReadCount],
+        [ImportedCount],
+        [SkippedCount],
+        [ConflictCount],
+        [ErrorCount],
+        [Message],
+        [StartedAtUtc],
+        [CompletedAtUtc]
+    FROM [tb_ops].[ImportBatches]
+    WHERE [Id] = @BatchId
+      AND [OwnerWindowsSid] = @UserSid;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AbandonTechBenchV1Import', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AbandonTechBenchV1Import];
+GO
+
+CREATE PROCEDURE [tb_app].[AbandonTechBenchV1Import]
+    @BatchId uniqueidentifier = NULL,
+    @Message nvarchar(max) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SET @Message = COALESCE(
+        NULLIF(LTRIM(RTRIM(@Message)), N''),
+        N'Abandoned by the user to recover a stale TechBench V1 import batch.');
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF @BatchId IS NULL
+        BEGIN
+            /* The filtered unique index permits only one active V1 batch per owner. */
+            SELECT @BatchId = [Id]
+            FROM [tb_ops].[ImportBatches] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [OwnerWindowsSid] = @UserSid
+              AND [SourceSystem] = N'TechBenchV1'
+              AND [Status] = N'Started';
+        END;
+
+        UPDATE [tb_ops].[ImportBatches]
+        SET
+            [Status] = N'Abandoned',
+            [Message] = @Message,
+            [CompletedAtUtc] = SYSUTCDATETIME()
+        WHERE [Id] = @BatchId
+          AND [OwnerWindowsSid] = @UserSid
+          AND [SourceSystem] = N'TechBenchV1'
+          AND [Status] = N'Started';
+
+        IF @@ROWCOUNT = 0
+            THROW 51646, N'The TechBench V1 import batch is missing, final, or owned by another user.', 1;
+
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action = N'TechBenchV1ImportAbandoned',
+            @EntityType = N'ImportBatch',
+            @EntityId = CONVERT(nvarchar(120), @BatchId),
+            @RequestId = @RequestId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        [Id] AS [BatchId],
+        [Status],
+        [ReadCount],
+        [ImportedCount],
+        [SkippedCount],
+        [ConflictCount],
+        [ErrorCount],
+        [Message],
+        [StartedAtUtc],
+        [CompletedAtUtc]
+    FROM [tb_ops].[ImportBatches]
+    WHERE [Id] = @BatchId
+      AND [OwnerWindowsSid] = @UserSid;
+END;
+GO
+
+/* Include the V0005 conflict count in the existing per-user import history. */
+IF OBJECT_ID(N'tb_app.GetImportBatches', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[GetImportBatches];
+GO
+
+CREATE PROCEDURE [tb_app].[GetImportBatches]
+    @IncludeAllUsers bit = 0,
+    @Limit int = 100
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    IF @IncludeAllUsers = 1 AND @IsManager <> 1 AND @IsAdmin <> 1
+        THROW 51464, N'Only a Manager or Admin may read other users'' imports.', 1;
+
+    SET @Limit =
+        CASE WHEN @Limit < 1 THEN 1 WHEN @Limit > 1000 THEN 1000 ELSE @Limit END;
+
+    SELECT TOP (@Limit)
+        [Id] AS [BatchId],
+        [SourceSystem] AS [Source],
+        [FileName],
+        [FileHash],
+        [Status],
+        [ReadCount],
+        [ImportedCount],
+        [SkippedCount],
+        [ConflictCount],
+        [ErrorCount],
+        [Message],
+        [StartedAtUtc],
+        [CompletedAtUtc],
+        [RowVersion]
+    FROM [tb_ops].[ImportBatches]
+    WHERE @IncludeAllUsers = 1 OR [OwnerWindowsSid] = @UserSid
+    ORDER BY [StartedAtUtc] DESC;
+END;
+GO
+
+PRINT N'TechBench V0005 owner-scoped TechBench V1 import procedures created.';
+GO
+
+-- ============================================================================
+-- END 47-V0005-TechBenchV1ImportProcedures.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 50-Grants.sql
 -- ============================================================================
 
@@ -10705,6 +14582,282 @@ GO
 
 -- ============================================================================
 -- END 51-V0002-OperationalGrants.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 52-V0004-AdminSharedGrants.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+/*
+    Remove legacy shared-mutation authority from non-Admin roles. Admin users
+    are also members of tb_role_user, so these revokes are paired with explicit
+    tb_role_admin grants below.
+*/
+REVOKE EXECUTE ON OBJECT::[tb_app].[EnsureWorkspaceDefaults]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SaveTemplate]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[DeleteTemplate]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminSaveTemplate]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminDeleteTemplate]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SaveCommonLink]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[DeleteCommonLink]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminSaveCommonLink]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminDeleteCommonLink]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SaveClientAlias]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[DeleteClientAlias]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminSaveClientAlias]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminDeleteClientAlias]
+    FROM [tb_role_user];
+
+REVOKE EXECUTE ON OBJECT::[tb_app].[EnsureWorkspaceDefaults]
+    FROM [tb_role_manager];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SaveTemplate]
+    FROM [tb_role_manager];
+REVOKE EXECUTE ON OBJECT::[tb_app].[DeleteTemplate]
+    FROM [tb_role_manager];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SaveCommonLink]
+    FROM [tb_role_manager];
+REVOKE EXECUTE ON OBJECT::[tb_app].[DeleteCommonLink]
+    FROM [tb_role_manager];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SaveClientAlias]
+    FROM [tb_role_manager];
+REVOKE EXECUTE ON OBJECT::[tb_app].[DeleteClientAlias]
+    FROM [tb_role_manager];
+
+REVOKE EXECUTE ON OBJECT::[tb_app].[EnsureWorkspaceDefaults]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SaveTemplate]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[DeleteTemplate]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SaveCommonLink]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[DeleteCommonLink]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SaveClientAlias]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[DeleteClientAlias]
+    FROM [tb_role_sync_operator];
+
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminSaveOrganizationSetting]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminDeleteOrganizationSetting]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminSaveExternalMapping]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminMergeClients]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[ReconcileClientMatches]
+    FROM [tb_role_user];
+
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminSaveOrganizationSetting]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminDeleteOrganizationSetting]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminSaveExternalMapping]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminMergeClients]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[ReconcileClientMatches]
+    FROM [tb_role_sync_operator];
+
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncUpsertClient]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncUpsertSageCustomer]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncRemoveStaleSageCustomers]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncUpsertClientExternalIdentity]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncUpsertTicketStatusOption]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncUpsertTicket]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AcquireSyncLease]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[ReleaseSyncLease]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[BeginSyncRun]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[CompleteSyncRun]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncApplyClientSnapshot]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncApplyTicketSnapshot]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncApplyTicketStatusSnapshot]
+    FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncApplySageCustomerSnapshot]
+    FROM [tb_role_sync_operator];
+
+/* Read/use contracts remain available to every normal TechBench user. */
+GRANT EXECUTE ON OBJECT::[tb_app].[GetRepositoryCapabilities]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetTemplates]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetCommonLinks]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetClientAliases]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetDistinctTags]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetSettings]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[SaveUserSetting]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[DeleteUserSetting]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[SaveWorkEntry]
+    TO [tb_role_user];
+
+/* Organization configuration and shared reference catalogs are Admin-owned. */
+GRANT EXECUTE ON OBJECT::[tb_app].[EnsureWorkspaceDefaults]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[SaveTemplate]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[DeleteTemplate]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminSaveTemplate]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminDeleteTemplate]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[SaveCommonLink]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[DeleteCommonLink]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminSaveCommonLink]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminDeleteCommonLink]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientAlias]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[DeleteClientAlias]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminSaveClientAlias]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminDeleteClientAlias]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetOrganizationTags]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminSaveOrganizationTag]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminDeleteOrganizationTag]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminSaveOrganizationSetting]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminDeleteOrganizationSetting]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminSaveExternalMapping]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminMergeClients]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[ReconcileClientMatches]
+    TO [tb_role_admin];
+
+/* Shared synchronization is now an Admin action, including Sage sync. */
+GRANT EXECUTE ON OBJECT::[tb_app].[SyncUpsertClient]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[SyncUpsertSageCustomer]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[SyncRemoveStaleSageCustomers]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[SyncUpsertClientExternalIdentity]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[SyncUpsertTicketStatusOption]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[SyncUpsertTicket]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AcquireSyncLease]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[ReleaseSyncLease]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[BeginSyncRun]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[CompleteSyncRun]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetSyncRuns]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[SyncApplyClientSnapshot]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[SyncApplyTicketSnapshot]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[SyncApplyTicketStatusSnapshot]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[SyncApplySageCustomerSnapshot]
+    TO [tb_role_admin];
+
+/* A legacy sync operator may inspect history but cannot initiate or apply sync. */
+GRANT EXECUTE ON OBJECT::[tb_app].[GetSyncRuns]
+    TO [tb_role_sync_operator];
+
+PRINT N'TechBench V0004 Admin-owned shared-configuration grants applied.';
+GO
+
+-- ============================================================================
+-- END 52-V0004-AdminSharedGrants.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 53-V0005-TechBenchV1ImportGrants.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+/*
+    Every normal TechBench user may migrate their own V1 history. Each
+    procedure derives ownership from ORIGINAL_LOGIN and exposes no owner
+    override. No application role receives direct access to import tables.
+*/
+GRANT EXECUTE ON OBJECT::[tb_app].[BeginTechBenchV1Import]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[ResolveTechBenchV1Reference]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[ImportTechBenchV1WorkEntry]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[ImportTechBenchV1WorkEntryLink]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[ImportTechBenchV1PostingLog]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[CompleteTechBenchV1Import]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[AbandonTechBenchV1Import]
+    TO [tb_role_user];
+
+GRANT EXECUTE ON OBJECT::[tb_app].[GetRepositoryCapabilities]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetImportBatches]
+    TO [tb_role_user];
+
+PRINT N'TechBench V0005 owner-scoped TechBench V1 import grants applied.';
+GO
+
+-- ============================================================================
+-- END 53-V0005-TechBenchV1ImportGrants.sql
 -- ============================================================================
 
 -- ============================================================================
@@ -11119,6 +15272,11 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
 DECLARE @FailureCount int = 0;
+DECLARE @InstalledSchemaVersion int =
+(
+    SELECT MAX([SchemaVersion])
+    FROM [tb_deploy].[SchemaMigrations]
+);
 
 IF NOT EXISTS
 (
@@ -11132,13 +15290,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF
-(
-    SELECT MAX([SchemaVersion])
-    FROM [tb_deploy].[SchemaMigrations]
-) NOT IN (2, 3)
+IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5)
 BEGIN
-    PRINT N'FAIL: V0002 verification supports installed schema version 2 or 3.';
+    PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, or 5.';
     SET @FailureCount += 1;
 END;
 
@@ -11636,12 +15790,16 @@ BEGIN
     SET @FailureCount += @MissingWorkspaceDefaultTokenCount;
 END;
 
-IF CHARINDEX(
-       N'AND [BuiltInKey] IS NOT NULL',
-       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveCommonLink'))) = 0
-   OR CHARINDEX(
-       N'AND [BuiltInKey] IS NOT NULL',
-       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteCommonLink'))) = 0
+IF @InstalledSchemaVersion < 4
+   AND
+   (
+       CHARINDEX(
+           N'AND [BuiltInKey] IS NOT NULL',
+           OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveCommonLink'))) = 0
+       OR CHARINDEX(
+           N'AND [BuiltInKey] IS NOT NULL',
+           OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteCommonLink'))) = 0
+   )
 BEGIN
     PRINT N'FAIL: Built-in Common Links are not protected from edit/delete.';
     SET @FailureCount += 1;
@@ -11710,15 +15868,11 @@ DECLARE @ExpectedGrants TABLE
 
 INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
 VALUES
-    (N'tb_role_user', N'tb_app.EnsureWorkspaceDefaults'),
     (N'tb_role_user', N'tb_app.SearchTickets'),
     (N'tb_role_user', N'tb_app.SaveTicket'),
     (N'tb_role_user', N'tb_app.SearchWorkEntries'),
     (N'tb_role_user', N'tb_app.SaveWorkEntry'),
     (N'tb_role_user', N'tb_app.GetEditorDraft'),
-    (N'tb_role_user', N'tb_app.SaveTemplate'),
-    (N'tb_role_user', N'tb_app.SaveCommonLink'),
-    (N'tb_role_user', N'tb_app.SaveClientAlias'),
     (N'tb_role_user', N'tb_app.SaveUserSetting'),
     (N'tb_role_user', N'tb_app.GetPostingLogs'),
     (N'tb_role_user', N'tb_app.BeginPostingAttempt'),
@@ -11726,12 +15880,36 @@ VALUES
     (N'tb_role_user', N'tb_app.BeginImportBatch'),
     (N'tb_role_manager', N'tb_app.SearchWorkEntries'),
     (N'tb_role_admin', N'tb_app.AdminMergeClients'),
-    (N'tb_role_admin', N'tb_app.AdminSaveOrganizationSetting'),
-    (N'tb_role_sync_operator', N'tb_app.AcquireSyncLease'),
-    (N'tb_role_sync_operator', N'tb_app.SyncApplyClientSnapshot'),
-    (N'tb_role_sync_operator', N'tb_app.SyncApplyTicketSnapshot'),
-    (N'tb_role_sync_operator', N'tb_app.SyncApplyTicketStatusSnapshot'),
-    (N'tb_role_sync_operator', N'tb_app.SyncApplySageCustomerSnapshot');
+    (N'tb_role_admin', N'tb_app.AdminSaveOrganizationSetting');
+
+IF @InstalledSchemaVersion < 4
+BEGIN
+    INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
+    VALUES
+        (N'tb_role_user', N'tb_app.EnsureWorkspaceDefaults'),
+        (N'tb_role_user', N'tb_app.SaveTemplate'),
+        (N'tb_role_user', N'tb_app.SaveCommonLink'),
+        (N'tb_role_user', N'tb_app.SaveClientAlias'),
+        (N'tb_role_sync_operator', N'tb_app.AcquireSyncLease'),
+        (N'tb_role_sync_operator', N'tb_app.SyncApplyClientSnapshot'),
+        (N'tb_role_sync_operator', N'tb_app.SyncApplyTicketSnapshot'),
+        (N'tb_role_sync_operator', N'tb_app.SyncApplyTicketStatusSnapshot'),
+        (N'tb_role_sync_operator', N'tb_app.SyncApplySageCustomerSnapshot');
+END
+ELSE
+BEGIN
+    INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
+    VALUES
+        (N'tb_role_admin', N'tb_app.EnsureWorkspaceDefaults'),
+        (N'tb_role_admin', N'tb_app.SaveTemplate'),
+        (N'tb_role_admin', N'tb_app.SaveCommonLink'),
+        (N'tb_role_admin', N'tb_app.SaveClientAlias'),
+        (N'tb_role_admin', N'tb_app.AcquireSyncLease'),
+        (N'tb_role_admin', N'tb_app.SyncApplyClientSnapshot'),
+        (N'tb_role_admin', N'tb_app.SyncApplyTicketSnapshot'),
+        (N'tb_role_admin', N'tb_app.SyncApplyTicketStatusSnapshot'),
+        (N'tb_role_admin', N'tb_app.SyncApplySageCustomerSnapshot');
+END;
 
 DECLARE @MissingGrantCount int =
 (
@@ -11832,6 +16010,11 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
 DECLARE @FailureCount int = 0;
+DECLARE @InstalledSchemaVersion int =
+(
+    SELECT MAX([SchemaVersion])
+    FROM [tb_deploy].[SchemaMigrations]
+);
 
 IF NOT EXISTS
 (
@@ -11846,13 +16029,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF
-(
-    SELECT MAX([SchemaVersion])
-    FROM [tb_deploy].[SchemaMigrations]
-) <> 3
+IF @InstalledSchemaVersion NOT IN (3, 4, 5)
 BEGIN
-    PRINT N'FAIL: The installed TechBench schema version is not 3.';
+    PRINT N'FAIL: V0003 verification supports installed schema version 3, 4, or 5.';
     SET @FailureCount += 1;
 END;
 
@@ -11919,7 +16098,8 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF OBJECT_ID(N'tb_data.OrganizationTags', N'U') IS NOT NULL
+IF @InstalledSchemaVersion = 3
+   AND OBJECT_ID(N'tb_data.OrganizationTags', N'U') IS NOT NULL
    AND EXISTS
    (
        SELECT 1
@@ -11933,7 +16113,8 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF OBJECT_ID(N'tb_data.OrganizationTags', N'U') IS NOT NULL
+IF @InstalledSchemaVersion = 3
+   AND OBJECT_ID(N'tb_data.OrganizationTags', N'U') IS NOT NULL
    AND EXISTS
    (
        SELECT 1
@@ -11979,12 +16160,24 @@ BEGIN
 END;
 
 IF @SaveWorkEntryDefinition IS NULL
-   OR CHARINDEX(N'[tb_data].[OrganizationTags]', @SaveWorkEntryDefinition) = 0
-   OR CHARINDEX(N'UPDLOCK', @SaveWorkEntryDefinition) = 0
-   OR CHARINDEX(N'HOLDLOCK', @SaveWorkEntryDefinition) = 0
-   OR CHARINDEX(N'MERGE', @SaveWorkEntryDefinition) > 0
+   OR
+   (
+       @InstalledSchemaVersion = 3
+       AND
+       (
+           CHARINDEX(N'[tb_data].[OrganizationTags]', @SaveWorkEntryDefinition) = 0
+           OR CHARINDEX(N'UPDLOCK', @SaveWorkEntryDefinition) = 0
+           OR CHARINDEX(N'HOLDLOCK', @SaveWorkEntryDefinition) = 0
+           OR CHARINDEX(N'MERGE', @SaveWorkEntryDefinition) > 0
+       )
+   )
+   OR
+   (
+       @InstalledSchemaVersion >= 4
+       AND CHARINDEX(N'[tb_data].[OrganizationTags]', @SaveWorkEntryDefinition) > 0
+   )
 BEGIN
-    PRINT N'FAIL: SaveWorkEntry does not transaction-safely publish canonical tags without MERGE.';
+    PRINT N'FAIL: SaveWorkEntry does not implement the installed schema version tag-catalog boundary.';
     SET @FailureCount += 1;
 END;
 
@@ -12127,15 +16320,19 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF CHARINDEX(
-       N'Whd.BaseUrl',
-       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
-   OR CHARINDEX(
-       N'Whd.AuthenticationMode',
-       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
-   OR CHARINDEX(
-       N'Sage.ActivityItemId',
-       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
+IF @InstalledSchemaVersion = 3
+   AND
+   (
+       CHARINDEX(
+           N'Whd.BaseUrl',
+           OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
+       OR CHARINDEX(
+           N'Whd.AuthenticationMode',
+           OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
+       OR CHARINDEX(
+           N'Sage.ActivityItemId',
+           OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
+   )
 BEGIN
     PRINT N'FAIL: SaveUserSetting does not protect organization-scoped keys.';
     SET @FailureCount += 1;
@@ -12162,10 +16359,10 @@ BEGIN
 END;
 
 IF CHARINDEX(
-       N'CONVERT(int, 3)',
+       N'CONVERT(int, ' + CONVERT(nvarchar(10), @InstalledSchemaVersion) + N')',
        OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'))) = 0
 BEGIN
-    PRINT N'FAIL: GetRepositoryCapabilities does not report schema version 3.';
+    PRINT N'FAIL: GetRepositoryCapabilities does not report the installed schema version.';
     SET @FailureCount += 1;
 END;
 
@@ -12182,15 +16379,30 @@ VALUES
     (N'tb_role_user', N'tb_app.GetDistinctTags'),
     (N'tb_role_user', N'tb_app.SaveWorkEntry'),
     (N'tb_role_user', N'tb_app.GetCommonLinks'),
-    (N'tb_role_user', N'tb_app.SaveCommonLink'),
-    (N'tb_role_user', N'tb_app.DeleteCommonLink'),
     (N'tb_role_user', N'tb_app.GetClientAliases'),
-    (N'tb_role_user', N'tb_app.SaveClientAlias'),
-    (N'tb_role_user', N'tb_app.DeleteClientAlias'),
     (N'tb_role_user', N'tb_app.SaveUserSetting'),
     (N'tb_role_user', N'tb_app.DeleteUserSetting'),
     (N'tb_role_admin', N'tb_app.AdminSaveOrganizationSetting'),
     (N'tb_role_admin', N'tb_app.AdminDeleteOrganizationSetting');
+
+IF @InstalledSchemaVersion = 3
+BEGIN
+    INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
+    VALUES
+        (N'tb_role_user', N'tb_app.SaveCommonLink'),
+        (N'tb_role_user', N'tb_app.DeleteCommonLink'),
+        (N'tb_role_user', N'tb_app.SaveClientAlias'),
+        (N'tb_role_user', N'tb_app.DeleteClientAlias');
+END
+ELSE
+BEGIN
+    INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
+    VALUES
+        (N'tb_role_admin', N'tb_app.SaveCommonLink'),
+        (N'tb_role_admin', N'tb_app.DeleteCommonLink'),
+        (N'tb_role_admin', N'tb_app.SaveClientAlias'),
+        (N'tb_role_admin', N'tb_app.DeleteClientAlias');
+END;
 
 DECLARE @MissingGrantCount int =
 (
@@ -12269,6 +16481,1916 @@ GO
 
 -- ============================================================================
 -- END 92-V0003-SharedReferenceVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 93-V0004-AdminSharedVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @FailureCount int = 0;
+DECLARE @InstalledSchemaVersion int =
+(
+    SELECT MAX([SchemaVersion])
+    FROM [tb_deploy].[SchemaMigrations]
+);
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.AdminOwnedSharedConfig.0004'
+      AND [SchemaVersion] = 4
+      AND [ReleaseVersion] = N'2.0.0-alpha.4'
+)
+BEGIN
+    PRINT N'FAIL: AdminOwnedSharedConfig.0004 migration marker is missing or invalid.';
+    SET @FailureCount += 1;
+END;
+
+IF @InstalledSchemaVersion NOT IN (4, 5)
+BEGIN
+    PRINT N'FAIL: V0004 verification supports installed schema version 4 or 5.';
+    SET @FailureCount += 1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM [tb_user].[UserSettings]
+    WHERE [SettingKey] NOT IN
+    (
+        N'Whd.Username',
+        N'Sage.Username',
+        N'Sage.EmployeeId',
+        N'Whd.ApiToken',
+        N'Sage.Password',
+        N'Sage.DefaultCustomerId'
+    )
+)
+BEGIN
+    PRINT N'FAIL: An unauthorized setting remains in per-user SQL storage.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @GetCurrentAccessDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_security.GetCurrentAccess'));
+
+IF @GetCurrentAccessDefinition IS NULL
+   OR CHARINDEX(N'IF @IsAdmin <> 1', @GetCurrentAccessDefinition) = 0
+   OR CHARINDEX(N'SET @IsSyncOperator = 0', @GetCurrentAccessDefinition) = 0
+BEGIN
+    PRINT N'FAIL: GetCurrentAccess does not mask legacy Sync Operator mutation authority for non-Admins.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @AdminCheckedSyncLifecycle TABLE
+(
+    [ObjectName] nvarchar(300) NOT NULL PRIMARY KEY
+);
+
+INSERT INTO @AdminCheckedSyncLifecycle([ObjectName])
+VALUES
+    (N'tb_app.ReleaseSyncLease'),
+    (N'tb_app.BeginSyncRun'),
+    (N'tb_app.CompleteSyncRun'),
+    (N'tb_security.RenewSyncRunLease');
+
+DECLARE @MissingSyncRuntimeAdminCheckCount int =
+(
+    SELECT COUNT(*)
+    FROM @AdminCheckedSyncLifecycle AS sync_procedure
+    WHERE CHARINDEX(
+              N'IF @IsAdmin <> 1',
+              OBJECT_DEFINITION(OBJECT_ID(sync_procedure.[ObjectName]))) = 0
+);
+
+IF @MissingSyncRuntimeAdminCheckCount > 0
+BEGIN
+    PRINT N'FAIL: A synchronization lifecycle procedure lacks its runtime Admin check.';
+    SET @FailureCount += @MissingSyncRuntimeAdminCheckCount;
+END;
+
+DECLARE @SnapshotRuntimeContracts TABLE
+(
+    [ObjectName] nvarchar(300) NOT NULL PRIMARY KEY
+);
+
+INSERT INTO @SnapshotRuntimeContracts([ObjectName])
+VALUES
+    (N'tb_app.SyncApplyClientSnapshot'),
+    (N'tb_app.SyncApplyTicketSnapshot'),
+    (N'tb_app.SyncApplyTicketStatusSnapshot'),
+    (N'tb_app.SyncApplySageCustomerSnapshot');
+
+DECLARE @MissingSnapshotRuntimeContractCount int =
+(
+    SELECT COUNT(*)
+    FROM @SnapshotRuntimeContracts AS snapshot_procedure
+    WHERE CHARINDEX(
+              N'[tb_security].[RenewSyncRunLease]',
+              OBJECT_DEFINITION(OBJECT_ID(snapshot_procedure.[ObjectName]))) = 0
+);
+
+IF @MissingSnapshotRuntimeContractCount > 0
+BEGIN
+    PRINT N'FAIL: A snapshot sync procedure bypasses the Admin-checked lease renewal boundary.';
+    SET @FailureCount += @MissingSnapshotRuntimeContractCount;
+END;
+
+IF CHARINDEX(
+       N'CONVERT(int, ' + CONVERT(nvarchar(10), @InstalledSchemaVersion) + N')',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'))) = 0
+BEGIN
+    PRINT N'FAIL: GetRepositoryCapabilities does not report the installed schema version.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @EnsureDefaultsDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.EnsureWorkspaceDefaults'));
+DECLARE @CatalogGatePosition int =
+    CHARINDEX(N'IF @InitializeWorkspaceCatalogs = 1', @EnsureDefaultsDefinition);
+DECLARE @AutoDefaultsInsertPosition int =
+    CHARINDEX(
+        N'FROM @DefaultOrganizationSettings AS default_setting',
+        @EnsureDefaultsDefinition);
+DECLARE @CommonLinkSeedPosition int =
+    CHARINDEX(N'INSERT INTO [tb_data].[CommonLinks]', @EnsureDefaultsDefinition);
+DECLARE @TemplateSeedPosition int =
+    CHARINDEX(N'INSERT INTO [tb_data].[Templates]', @EnsureDefaultsDefinition);
+DECLARE @FirstOrganizationSettingInsertPosition int =
+    CHARINDEX(
+        N'INSERT INTO [tb_data].[OrganizationSettings]',
+        @EnsureDefaultsDefinition);
+DECLARE @SecondOrganizationSettingInsertPosition int =
+    CHARINDEX(
+        N'INSERT INTO [tb_data].[OrganizationSettings]',
+        @EnsureDefaultsDefinition,
+        @FirstOrganizationSettingInsertPosition + 1);
+DECLARE @MarkerLookupPosition int =
+    CHARINDEX(N'WorkspaceDefaults.Initialized', @EnsureDefaultsDefinition);
+DECLARE @MarkerInsertPosition int =
+    CHARINDEX(
+        N'WorkspaceDefaults.Initialized',
+        @EnsureDefaultsDefinition,
+        @MarkerLookupPosition + 1);
+DECLARE @MarkerActorPosition int =
+    CHARINDEX(N'@UserSid', @EnsureDefaultsDefinition, @MarkerInsertPosition);
+
+IF @EnsureDefaultsDefinition IS NULL
+   OR CHARINDEX(N'@IsAdmin <> 1', @EnsureDefaultsDefinition) = 0
+   OR CHARINDEX(N'WHERE NOT EXISTS', @EnsureDefaultsDefinition) = 0
+   OR CHARINDEX(N'UPDATE [tb_data].[CommonLinks]', @EnsureDefaultsDefinition) > 0
+   OR CHARINDEX(N'UPDATE [tb_data].[Templates]', @EnsureDefaultsDefinition) > 0
+   OR CHARINDEX(N'UPDATE [tb_data].[OrganizationSettings]', @EnsureDefaultsDefinition) > 0
+   OR CHARINDEX(N'[tb_data].[OrganizationSettings]', @EnsureDefaultsDefinition) = 0
+   OR CHARINDEX(N'Whd.AutoSyncEnabled'', N''true', @EnsureDefaultsDefinition) = 0
+   OR CHARINDEX(N'Whd.AutoSyncMinutes'', N''5', @EnsureDefaultsDefinition) = 0
+   OR @CatalogGatePosition = 0
+   OR @AutoDefaultsInsertPosition = 0
+   OR @FirstOrganizationSettingInsertPosition = 0
+   OR @SecondOrganizationSettingInsertPosition = 0
+   OR @AutoDefaultsInsertPosition >= @CatalogGatePosition
+   OR @FirstOrganizationSettingInsertPosition >= @CatalogGatePosition
+   OR @CommonLinkSeedPosition <= @CatalogGatePosition
+   OR @TemplateSeedPosition <= @CatalogGatePosition
+   OR @SecondOrganizationSettingInsertPosition <= @CatalogGatePosition
+   OR @MarkerLookupPosition <= @AutoDefaultsInsertPosition
+   OR @MarkerLookupPosition >= @CatalogGatePosition
+   OR @MarkerInsertPosition <= @CatalogGatePosition
+   OR CHARINDEX(N'N''4''', @EnsureDefaultsDefinition, @MarkerInsertPosition) = 0
+   OR @MarkerActorPosition <= @MarkerInsertPosition
+   OR @MarkerActorPosition > @MarkerInsertPosition + 300
+BEGIN
+    PRINT N'FAIL: EnsureWorkspaceDefaults does not enforce one-time catalog seeding plus recurring insert-missing auto-sync defaults.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @WorkspaceDefaultTokens TABLE
+(
+    [Token] nvarchar(200) NOT NULL PRIMARY KEY
+);
+
+INSERT INTO @WorkspaceDefaultTokens([Token])
+VALUES
+    (N'watchguard-cloud'),
+    (N'microsoft-365-admin'),
+    (N'barracuda-cloud-control'),
+    (N'eset-protect'),
+    (N'email2phone'),
+    (N'godaddy-dns'),
+    (N'network-solutions-dns'),
+    (N'Exchange certificate update'),
+    (N'VPN troubleshooting'),
+    (N'Microsoft 365 licensing'),
+    (N'Firewall rule change'),
+    (N'Password reset'),
+    (N'Backup verification'),
+    (N'Server reboot/maintenance');
+
+DECLARE @MissingWorkspaceDefaultTokenCount int =
+(
+    SELECT COUNT(*)
+    FROM @WorkspaceDefaultTokens AS expected_default
+    WHERE CHARINDEX(expected_default.[Token], @EnsureDefaultsDefinition) = 0
+);
+
+IF @MissingWorkspaceDefaultTokenCount > 0
+BEGIN
+    PRINT N'FAIL: EnsureWorkspaceDefaults is missing one or more required shared defaults.';
+    SET @FailureCount += @MissingWorkspaceDefaultTokenCount;
+END;
+
+DECLARE @SaveCommonLinkDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveCommonLink'));
+DECLARE @DeleteCommonLinkDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteCommonLink'));
+
+IF @SaveCommonLinkDefinition IS NULL
+   OR CHARINDEX(N'@IsAdmin <> 1', @SaveCommonLinkDefinition) = 0
+   OR CHARINDEX(N'schema version 4', @SaveCommonLinkDefinition) = 0
+   OR CHARINDEX(N'Built-in Common Links cannot be changed', @SaveCommonLinkDefinition) > 0
+   OR @DeleteCommonLinkDefinition IS NULL
+   OR CHARINDEX(N'@IsAdmin <> 1', @DeleteCommonLinkDefinition) = 0
+   OR CHARINDEX(N'AND [BuiltInKey] IS NOT NULL', @DeleteCommonLinkDefinition) = 0
+BEGIN
+    PRINT N'FAIL: Common Links are not Admin-managed, editable, and protected from built-in deletion.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @SaveClientAliasDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveClientAlias'));
+DECLARE @DeleteClientAliasDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteClientAlias'));
+
+IF @SaveClientAliasDefinition IS NULL
+   OR CHARINDEX(N'@IsAdmin <> 1', @SaveClientAliasDefinition) = 0
+   OR CHARINDEX(N'UPDLOCK', @SaveClientAliasDefinition) = 0
+   OR CHARINDEX(N'HOLDLOCK', @SaveClientAliasDefinition) = 0
+   OR @DeleteClientAliasDefinition IS NULL
+   OR CHARINDEX(N'@IsAdmin <> 1', @DeleteClientAliasDefinition) = 0
+BEGIN
+    PRINT N'FAIL: Client-alias create, change, and delete are not Admin-only.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @SaveUserSettingDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'));
+DECLARE @DeleteUserSettingDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteUserSetting'));
+
+IF @SaveUserSettingDefinition IS NULL
+   OR CHARINDEX(N'@SettingKey NOT IN', @SaveUserSettingDefinition) = 0
+   OR CHARINDEX(N'Whd.Username', @SaveUserSettingDefinition) = 0
+   OR CHARINDEX(N'Sage.Username', @SaveUserSettingDefinition) = 0
+   OR CHARINDEX(N'Sage.EmployeeId', @SaveUserSettingDefinition) = 0
+   OR CHARINDEX(N'Whd.ApiToken', @SaveUserSettingDefinition) > 0
+   OR CHARINDEX(N'Sage.Password', @SaveUserSettingDefinition) > 0
+   OR CHARINDEX(N'Sage.DefaultCustomerId', @SaveUserSettingDefinition) > 0
+BEGIN
+    PRINT N'FAIL: SaveUserSetting does not enforce the V0004 identity-setting allowlist.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @DeletableUserSettingTokens TABLE
+(
+    [Token] nvarchar(200) NOT NULL PRIMARY KEY
+);
+
+INSERT INTO @DeletableUserSettingTokens([Token])
+VALUES
+    (N'Whd.Username'),
+    (N'Sage.Username'),
+    (N'Sage.EmployeeId'),
+    (N'Whd.ApiToken'),
+    (N'Sage.Password'),
+    (N'Sage.DefaultCustomerId');
+
+IF @DeleteUserSettingDefinition IS NULL
+   OR CHARINDEX(N'@SettingKey NOT IN', @DeleteUserSettingDefinition) = 0
+BEGIN
+    PRINT N'FAIL: DeleteUserSetting does not enforce an allowlist.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @MissingDeletableSettingTokenCount int =
+(
+    SELECT COUNT(*)
+    FROM @DeletableUserSettingTokens AS expected_key
+    WHERE CHARINDEX(expected_key.[Token], @DeleteUserSettingDefinition) = 0
+);
+
+IF @MissingDeletableSettingTokenCount > 0
+BEGIN
+    PRINT N'FAIL: DeleteUserSetting cannot remove every approved identity or legacy migration key.';
+    SET @FailureCount += @MissingDeletableSettingTokenCount;
+END;
+
+DECLARE @SaveWorkEntryDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveWorkEntry'));
+
+IF @SaveWorkEntryDefinition IS NULL
+   OR CHARINDEX(N'[tb_data].[WorkEntries]', @SaveWorkEntryDefinition) = 0
+   OR CHARINDEX(N'[tb_data].[OrganizationTags]', @SaveWorkEntryDefinition) > 0
+BEGIN
+    PRINT N'FAIL: SaveWorkEntry still publishes into the Admin-managed organization-tag catalog.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @RequiredV4Procedures TABLE
+(
+    [ObjectName] nvarchar(300) NOT NULL PRIMARY KEY
+);
+
+INSERT INTO @RequiredV4Procedures([ObjectName])
+VALUES
+    (N'tb_app.AdminGetOrganizationTags'),
+    (N'tb_app.AdminSaveOrganizationTag'),
+    (N'tb_app.AdminDeleteOrganizationTag');
+
+DECLARE @MissingV4ProcedureCount int =
+(
+    SELECT COUNT(*)
+    FROM @RequiredV4Procedures AS required_procedure
+    WHERE OBJECT_ID(required_procedure.[ObjectName], N'P') IS NULL
+);
+
+IF @MissingV4ProcedureCount > 0
+BEGIN
+    PRINT N'FAIL: One or more V0004 organization-tag Admin procedures are missing.';
+    SET @FailureCount += @MissingV4ProcedureCount;
+END;
+
+DECLARE @AdminGetTagsDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminGetOrganizationTags'));
+DECLARE @AdminSaveTagDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminSaveOrganizationTag'));
+DECLARE @AdminDeleteTagDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminDeleteOrganizationTag'));
+
+IF @AdminGetTagsDefinition IS NULL
+   OR CHARINDEX(N'@IsAdmin <> 1', @AdminGetTagsDefinition) = 0
+   OR CHARINDEX(N'[CreatedAtUtc] AS [UpdatedAt]', @AdminGetTagsDefinition) = 0
+   OR CHARINDEX(N'[RowVersion]', @AdminGetTagsDefinition) = 0
+BEGIN
+    PRINT N'FAIL: AdminGetOrganizationTags does not enforce Admin access or return its concurrency contract.';
+    SET @FailureCount += 1;
+END;
+
+IF @AdminSaveTagDefinition IS NULL
+   OR CHARINDEX(N'@IsAdmin <> 1', @AdminSaveTagDefinition) = 0
+   OR CHARINDEX(N'@ExpectedRowVersion binary(8) = NULL', @AdminSaveTagDefinition) = 0
+   OR CHARINDEX(N'@RequestId uniqueidentifier = NULL', @AdminSaveTagDefinition) = 0
+   OR CHARINDEX(N'SHA2_256', @AdminSaveTagDefinition) = 0
+   OR CHARINDEX(N'UPDLOCK', @AdminSaveTagDefinition) = 0
+   OR CHARINDEX(N'HOLDLOCK', @AdminSaveTagDefinition) = 0
+   OR CHARINDEX(N'[RowVersion] = @ExpectedRowVersion', @AdminSaveTagDefinition) = 0
+BEGIN
+    PRINT N'FAIL: AdminSaveOrganizationTag does not enforce the Admin/concurrency/canonical-hash contract.';
+    SET @FailureCount += 1;
+END;
+
+IF @AdminDeleteTagDefinition IS NULL
+   OR CHARINDEX(N'@IsAdmin <> 1', @AdminDeleteTagDefinition) = 0
+   OR CHARINDEX(N'@ExpectedRowVersion binary(8)', @AdminDeleteTagDefinition) = 0
+   OR CHARINDEX(N'@RequestId uniqueidentifier = NULL', @AdminDeleteTagDefinition) = 0
+   OR CHARINDEX(N'[RowVersion] = @ExpectedRowVersion', @AdminDeleteTagDefinition) = 0
+BEGIN
+    PRINT N'FAIL: AdminDeleteOrganizationTag does not enforce the Admin/concurrency contract.';
+    SET @FailureCount += 1;
+END;
+
+IF
+(
+    SELECT COUNT(*)
+    FROM sys.parameters
+    WHERE [object_id] = OBJECT_ID(N'tb_app.AdminSaveOrganizationTag')
+) <> 4
+   OR NOT EXISTS
+   (
+       SELECT 1
+       FROM sys.parameters
+       WHERE [object_id] = OBJECT_ID(N'tb_app.AdminSaveOrganizationTag')
+         AND [parameter_id] = 1
+         AND [name] = N'@Id'
+         AND TYPE_NAME([user_type_id]) = N'int'
+   )
+   OR NOT EXISTS
+   (
+       SELECT 1
+       FROM sys.parameters
+       WHERE [object_id] = OBJECT_ID(N'tb_app.AdminSaveOrganizationTag')
+         AND [parameter_id] = 2
+         AND [name] = N'@Tag'
+         AND TYPE_NAME([user_type_id]) = N'nvarchar'
+         AND [max_length] = 2000
+   )
+   OR NOT EXISTS
+   (
+       SELECT 1
+       FROM sys.parameters
+       WHERE [object_id] = OBJECT_ID(N'tb_app.AdminSaveOrganizationTag')
+         AND [parameter_id] = 3
+         AND [name] = N'@ExpectedRowVersion'
+         AND TYPE_NAME([user_type_id]) = N'binary'
+         AND [max_length] = 8
+   )
+   OR NOT EXISTS
+   (
+       SELECT 1
+       FROM sys.parameters
+       WHERE [object_id] = OBJECT_ID(N'tb_app.AdminSaveOrganizationTag')
+         AND [parameter_id] = 4
+         AND [name] = N'@RequestId'
+         AND TYPE_NAME([user_type_id]) = N'uniqueidentifier'
+   )
+BEGIN
+    PRINT N'FAIL: AdminSaveOrganizationTag parameter metadata does not match the desktop contract.';
+    SET @FailureCount += 1;
+END;
+
+IF
+(
+    SELECT COUNT(*)
+    FROM sys.parameters
+    WHERE [object_id] = OBJECT_ID(N'tb_app.AdminDeleteOrganizationTag')
+) <> 3
+   OR NOT EXISTS
+   (
+       SELECT 1
+       FROM sys.parameters
+       WHERE [object_id] = OBJECT_ID(N'tb_app.AdminDeleteOrganizationTag')
+         AND [parameter_id] = 1
+         AND [name] = N'@Id'
+         AND TYPE_NAME([user_type_id]) = N'int'
+   )
+   OR NOT EXISTS
+   (
+       SELECT 1
+       FROM sys.parameters
+       WHERE [object_id] = OBJECT_ID(N'tb_app.AdminDeleteOrganizationTag')
+         AND [parameter_id] = 2
+         AND [name] = N'@ExpectedRowVersion'
+         AND TYPE_NAME([user_type_id]) = N'binary'
+         AND [max_length] = 8
+   )
+   OR NOT EXISTS
+   (
+       SELECT 1
+       FROM sys.parameters
+       WHERE [object_id] = OBJECT_ID(N'tb_app.AdminDeleteOrganizationTag')
+         AND [parameter_id] = 3
+         AND [name] = N'@RequestId'
+         AND TYPE_NAME([user_type_id]) = N'uniqueidentifier'
+   )
+BEGIN
+    PRINT N'FAIL: AdminDeleteOrganizationTag parameter metadata does not match the desktop contract.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @ExpectedGrants TABLE
+(
+    [RoleName] sysname NOT NULL,
+    [ObjectName] nvarchar(300) NOT NULL,
+    PRIMARY KEY ([RoleName], [ObjectName])
+);
+
+INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
+VALUES
+    (N'tb_role_user', N'tb_app.GetRepositoryCapabilities'),
+    (N'tb_role_user', N'tb_app.GetTemplates'),
+    (N'tb_role_user', N'tb_app.GetCommonLinks'),
+    (N'tb_role_user', N'tb_app.GetClientAliases'),
+    (N'tb_role_user', N'tb_app.GetDistinctTags'),
+    (N'tb_role_user', N'tb_app.GetSettings'),
+    (N'tb_role_user', N'tb_app.SaveUserSetting'),
+    (N'tb_role_user', N'tb_app.DeleteUserSetting'),
+    (N'tb_role_user', N'tb_app.SaveWorkEntry'),
+    (N'tb_role_admin', N'tb_app.EnsureWorkspaceDefaults'),
+    (N'tb_role_admin', N'tb_app.SaveTemplate'),
+    (N'tb_role_admin', N'tb_app.DeleteTemplate'),
+    (N'tb_role_admin', N'tb_app.SaveCommonLink'),
+    (N'tb_role_admin', N'tb_app.DeleteCommonLink'),
+    (N'tb_role_admin', N'tb_app.SaveClientAlias'),
+    (N'tb_role_admin', N'tb_app.DeleteClientAlias'),
+    (N'tb_role_admin', N'tb_app.AdminGetOrganizationTags'),
+    (N'tb_role_admin', N'tb_app.AdminSaveOrganizationTag'),
+    (N'tb_role_admin', N'tb_app.AdminDeleteOrganizationTag'),
+    (N'tb_role_admin', N'tb_app.AdminSaveOrganizationSetting'),
+    (N'tb_role_admin', N'tb_app.AdminDeleteOrganizationSetting'),
+    (N'tb_role_admin', N'tb_app.AdminSaveExternalMapping'),
+    (N'tb_role_admin', N'tb_app.AdminMergeClients'),
+    (N'tb_role_admin', N'tb_app.ReconcileClientMatches'),
+    (N'tb_role_admin', N'tb_app.AcquireSyncLease'),
+    (N'tb_role_admin', N'tb_app.ReleaseSyncLease'),
+    (N'tb_role_admin', N'tb_app.BeginSyncRun'),
+    (N'tb_role_admin', N'tb_app.CompleteSyncRun'),
+    (N'tb_role_admin', N'tb_app.SyncApplyClientSnapshot'),
+    (N'tb_role_admin', N'tb_app.SyncApplyTicketSnapshot'),
+    (N'tb_role_admin', N'tb_app.SyncApplyTicketStatusSnapshot'),
+    (N'tb_role_admin', N'tb_app.SyncApplySageCustomerSnapshot'),
+    (N'tb_role_admin', N'tb_app.SyncUpsertClient'),
+    (N'tb_role_admin', N'tb_app.SyncUpsertSageCustomer'),
+    (N'tb_role_admin', N'tb_app.SyncRemoveStaleSageCustomers'),
+    (N'tb_role_admin', N'tb_app.SyncUpsertClientExternalIdentity'),
+    (N'tb_role_admin', N'tb_app.SyncUpsertTicketStatusOption'),
+    (N'tb_role_admin', N'tb_app.SyncUpsertTicket'),
+    (N'tb_role_sync_operator', N'tb_app.GetSyncRuns');
+
+DECLARE @MissingGrantCount int =
+(
+    SELECT COUNT(*)
+    FROM @ExpectedGrants AS expected_grant
+    WHERE NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.database_permissions AS permission
+        INNER JOIN sys.database_principals AS grantee
+            ON grantee.[principal_id] = permission.[grantee_principal_id]
+        WHERE grantee.[name] = expected_grant.[RoleName]
+          AND permission.[class] = 1
+          AND permission.[major_id] = OBJECT_ID(expected_grant.[ObjectName])
+          AND permission.[permission_name] = N'EXECUTE'
+          AND permission.[state] IN (N'G', N'W')
+    )
+);
+
+IF @MissingGrantCount > 0
+BEGIN
+    PRINT N'FAIL: One or more required V0004 procedure grants are missing.';
+    SET @FailureCount += @MissingGrantCount;
+END;
+
+DECLARE @SharedMutationProcedures TABLE
+(
+    [ObjectName] nvarchar(300) NOT NULL PRIMARY KEY
+);
+
+INSERT INTO @SharedMutationProcedures([ObjectName])
+VALUES
+    (N'tb_app.EnsureWorkspaceDefaults'),
+    (N'tb_app.SaveTemplate'),
+    (N'tb_app.DeleteTemplate'),
+    (N'tb_app.AdminSaveTemplate'),
+    (N'tb_app.AdminDeleteTemplate'),
+    (N'tb_app.SaveCommonLink'),
+    (N'tb_app.DeleteCommonLink'),
+    (N'tb_app.AdminSaveCommonLink'),
+    (N'tb_app.AdminDeleteCommonLink'),
+    (N'tb_app.SaveClientAlias'),
+    (N'tb_app.DeleteClientAlias'),
+    (N'tb_app.AdminSaveClientAlias'),
+    (N'tb_app.AdminDeleteClientAlias'),
+    (N'tb_app.AdminGetOrganizationTags'),
+    (N'tb_app.AdminSaveOrganizationTag'),
+    (N'tb_app.AdminDeleteOrganizationTag'),
+    (N'tb_app.AdminSaveOrganizationSetting'),
+    (N'tb_app.AdminDeleteOrganizationSetting'),
+    (N'tb_app.AdminSaveExternalMapping'),
+    (N'tb_app.AdminMergeClients'),
+    (N'tb_app.ReconcileClientMatches'),
+    (N'tb_app.SyncUpsertClient'),
+    (N'tb_app.SyncUpsertSageCustomer'),
+    (N'tb_app.SyncRemoveStaleSageCustomers'),
+    (N'tb_app.SyncUpsertClientExternalIdentity'),
+    (N'tb_app.SyncUpsertTicketStatusOption'),
+    (N'tb_app.SyncUpsertTicket'),
+    (N'tb_app.AcquireSyncLease'),
+    (N'tb_app.ReleaseSyncLease'),
+    (N'tb_app.BeginSyncRun'),
+    (N'tb_app.CompleteSyncRun'),
+    (N'tb_app.SyncApplyClientSnapshot'),
+    (N'tb_app.SyncApplyTicketSnapshot'),
+    (N'tb_app.SyncApplyTicketStatusSnapshot'),
+    (N'tb_app.SyncApplySageCustomerSnapshot');
+
+DECLARE @ForbiddenMutationGrantCount int =
+(
+    SELECT COUNT(*)
+    FROM @SharedMutationProcedures AS shared_procedure
+    INNER JOIN sys.database_permissions AS permission
+        ON permission.[class] = 1
+       AND permission.[major_id] = OBJECT_ID(shared_procedure.[ObjectName])
+       AND permission.[permission_name] = N'EXECUTE'
+       AND permission.[state] IN (N'G', N'W')
+    INNER JOIN sys.database_principals AS grantee
+        ON grantee.[principal_id] = permission.[grantee_principal_id]
+    WHERE grantee.[name] IN
+    (
+        N'tb_role_user',
+        N'tb_role_manager',
+        N'tb_role_sync_operator'
+    )
+);
+
+IF @ForbiddenMutationGrantCount > 0
+BEGIN
+    PRINT N'FAIL: A non-Admin role retains a shared-configuration or sync mutation grant.';
+    SET @FailureCount += @ForbiddenMutationGrantCount;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions AS permission
+    INNER JOIN sys.database_principals AS grantee
+        ON grantee.[principal_id] = permission.[grantee_principal_id]
+    LEFT JOIN sys.objects AS secured_object
+        ON permission.[class] = 1
+       AND secured_object.[object_id] = permission.[major_id]
+    LEFT JOIN sys.schemas AS secured_schema
+        ON
+        (
+            permission.[class] = 3
+            AND secured_schema.[schema_id] = permission.[major_id]
+        )
+        OR
+        (
+            permission.[class] = 1
+            AND secured_schema.[schema_id] = secured_object.[schema_id]
+        )
+    WHERE grantee.[name] IN
+    (
+        N'tb_role_user',
+        N'tb_role_manager',
+        N'tb_role_admin',
+        N'tb_role_sync_operator'
+    )
+      AND secured_schema.[name] IN
+      (
+          N'tb_data',
+          N'tb_private',
+          N'tb_user',
+          N'tb_ops',
+          N'tb_security',
+          N'tb_audit'
+      )
+      AND permission.[permission_name] IN
+      (
+          N'SELECT', N'INSERT', N'UPDATE', N'DELETE', N'CONTROL', N'ALTER'
+      )
+      AND permission.[state] IN (N'G', N'W')
+)
+BEGIN
+    PRINT N'FAIL: An application role has direct table/schema data permission.';
+    SET @FailureCount += 1;
+END;
+
+IF @FailureCount > 0
+BEGIN
+    RAISERROR(
+        N'TechBench V0004 Admin-owned shared-configuration verification failed with %d issue(s).',
+        16,
+        1,
+        @FailureCount);
+    RETURN;
+END;
+
+PRINT N'TechBench V0004 Admin-owned shared-configuration verification passed.';
+
+SELECT
+    DB_NAME() AS [DatabaseName],
+    MAX([SchemaVersion]) AS [SchemaVersion],
+    MAX
+    (
+        CASE
+            WHEN [MigrationId] = N'SqlServer2016.AdminOwnedSharedConfig.0004'
+                THEN [AppliedAtUtc]
+        END
+    ) AS [AdminOwnedSharedConfigAppliedAtUtc]
+FROM [tb_deploy].[SchemaMigrations];
+GO
+
+-- ============================================================================
+-- END 93-V0004-AdminSharedVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 94-V0005-TechBenchV1ImportVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @FailureCount int = 0;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.TechBenchV1Import.0005'
+      AND [SchemaVersion] = 5
+      AND [ReleaseVersion] = N'2.0.0-alpha.5'
+)
+BEGIN
+    PRINT N'FAIL: TechBenchV1Import.0005 migration marker is missing or invalid.';
+    SET @FailureCount += 1;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [object_id] = OBJECT_ID(N'tb_ops.ImportBatches')
+      AND [name] = N'UX_ImportBatches_ActiveTechBenchV1'
+      AND [is_unique] = 1
+      AND [has_filter] = 1
+)
+BEGIN
+    PRINT N'FAIL: ImportBatches does not prevent concurrent active V1 imports for one owner.';
+    SET @FailureCount += 1;
+END;
+
+IF
+(
+    SELECT MAX([SchemaVersion])
+    FROM [tb_deploy].[SchemaMigrations]
+) <> 5
+BEGIN
+    PRINT N'FAIL: The installed TechBench schema version is not 5.';
+    SET @FailureCount += 1;
+END;
+
+IF OBJECT_ID(N'tb_ops.LegacyEntityMappings', N'U') IS NULL
+BEGIN
+    PRINT N'FAIL: tb_ops.LegacyEntityMappings is missing.';
+    SET @FailureCount += 1;
+END;
+
+IF COL_LENGTH(N'tb_ops.ImportBatches', N'ConflictCount') IS NULL
+BEGIN
+    PRINT N'FAIL: ImportBatches.ConflictCount is missing.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @RequiredMappingColumns TABLE
+(
+    [ColumnName] sysname NOT NULL PRIMARY KEY
+);
+
+INSERT INTO @RequiredMappingColumns([ColumnName])
+VALUES
+    (N'OwnerWindowsSid'),
+    (N'SourceSystem'),
+    (N'EntityType'),
+    (N'LegacyId'),
+    (N'NewEntityId'),
+    (N'ContentHash'),
+    (N'FirstImportBatchId'),
+    (N'LastSeenImportBatchId'),
+    (N'CreatedAtUtc'),
+    (N'LastSeenAtUtc'),
+    (N'RowVersion');
+
+DECLARE @MissingMappingColumnCount int =
+(
+    SELECT COUNT(*)
+    FROM @RequiredMappingColumns AS required_column
+    WHERE NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.columns AS actual_column
+        WHERE actual_column.[object_id] =
+            OBJECT_ID(N'tb_ops.LegacyEntityMappings')
+          AND actual_column.[name] = required_column.[ColumnName]
+    )
+);
+
+IF @MissingMappingColumnCount > 0
+BEGIN
+    PRINT N'FAIL: LegacyEntityMappings is missing one or more required columns.';
+    SET @FailureCount += @MissingMappingColumnCount;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [object_id] = OBJECT_ID(N'tb_ops.LegacyEntityMappings')
+      AND [name] = N'PK_LegacyEntityMappings'
+      AND [is_primary_key] = 1
+      AND [is_unique] = 1
+)
+BEGIN
+    PRINT N'FAIL: LegacyEntityMappings lacks its owner/source/entity/legacy primary key.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @ExpectedPrimaryKeyColumns TABLE
+(
+    [KeyOrdinal] int NOT NULL PRIMARY KEY,
+    [ColumnName] sysname NOT NULL
+);
+
+INSERT INTO @ExpectedPrimaryKeyColumns([KeyOrdinal], [ColumnName])
+VALUES
+    (1, N'OwnerWindowsSid'),
+    (2, N'SourceSystem'),
+    (3, N'EntityType'),
+    (4, N'LegacyId');
+
+DECLARE @WrongPrimaryKeyColumnCount int =
+(
+    SELECT COUNT(*)
+    FROM @ExpectedPrimaryKeyColumns AS expected_column
+    WHERE NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.indexes AS primary_index
+        INNER JOIN sys.index_columns AS index_column
+            ON index_column.[object_id] = primary_index.[object_id]
+           AND index_column.[index_id] = primary_index.[index_id]
+        INNER JOIN sys.columns AS actual_column
+            ON actual_column.[object_id] = index_column.[object_id]
+           AND actual_column.[column_id] = index_column.[column_id]
+        WHERE primary_index.[object_id] =
+            OBJECT_ID(N'tb_ops.LegacyEntityMappings')
+          AND primary_index.[name] = N'PK_LegacyEntityMappings'
+          AND index_column.[key_ordinal] = expected_column.[KeyOrdinal]
+          AND actual_column.[name] = expected_column.[ColumnName]
+    )
+);
+
+IF @WrongPrimaryKeyColumnCount > 0
+BEGIN
+    PRINT N'FAIL: LegacyEntityMappings primary-key order does not enforce owner-scoped idempotency.';
+    SET @FailureCount += @WrongPrimaryKeyColumnCount;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [object_id] = OBJECT_ID(N'tb_ops.LegacyEntityMappings')
+      AND [name] = N'IX_LegacyEntityMappings_NewEntity'
+      AND [is_unique] = 0
+      AND [has_filter] = 0
+)
+BEGIN
+    PRINT N'FAIL: LegacyEntityMappings lacks its nonunique reverse-entity lookup index.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @ExpectedReverseLookupColumns TABLE
+(
+    [KeyOrdinal] int NOT NULL PRIMARY KEY,
+    [ColumnName] sysname NOT NULL
+);
+
+INSERT INTO @ExpectedReverseLookupColumns([KeyOrdinal], [ColumnName])
+VALUES
+    (1, N'OwnerWindowsSid'),
+    (2, N'SourceSystem'),
+    (3, N'EntityType'),
+    (4, N'NewEntityId');
+
+IF
+(
+    SELECT COUNT(*)
+    FROM @ExpectedReverseLookupColumns AS expected_column
+    WHERE NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.indexes AS reverse_index
+        INNER JOIN sys.index_columns AS index_column
+            ON index_column.[object_id] = reverse_index.[object_id]
+           AND index_column.[index_id] = reverse_index.[index_id]
+        INNER JOIN sys.columns AS actual_column
+            ON actual_column.[object_id] = index_column.[object_id]
+           AND actual_column.[column_id] = index_column.[column_id]
+        WHERE reverse_index.[object_id] =
+            OBJECT_ID(N'tb_ops.LegacyEntityMappings')
+          AND reverse_index.[name] = N'IX_LegacyEntityMappings_NewEntity'
+          AND index_column.[key_ordinal] = expected_column.[KeyOrdinal]
+          AND actual_column.[name] = expected_column.[ColumnName]
+    )
+) > 0
+OR
+(
+    SELECT COUNT(*)
+    FROM sys.indexes AS reverse_index
+    INNER JOIN sys.index_columns AS index_column
+        ON index_column.[object_id] = reverse_index.[object_id]
+       AND index_column.[index_id] = reverse_index.[index_id]
+    WHERE reverse_index.[object_id] =
+        OBJECT_ID(N'tb_ops.LegacyEntityMappings')
+      AND reverse_index.[name] = N'IX_LegacyEntityMappings_NewEntity'
+      AND index_column.[key_ordinal] > 0
+) <> 4
+BEGIN
+    PRINT N'FAIL: LegacyEntityMappings reverse-entity lookup has the wrong key shape.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @ExpectedEntityUniquenessIndexes TABLE
+(
+    [IndexName] sysname NOT NULL PRIMARY KEY,
+    [EntityType] nvarchar(40) NOT NULL
+);
+
+INSERT INTO @ExpectedEntityUniquenessIndexes([IndexName], [EntityType])
+VALUES
+    (N'UX_LegacyEntityMappings_WorkEntryNewEntity', N'WorkEntry'),
+    (N'UX_LegacyEntityMappings_PostingLogNewEntity', N'PostingLog');
+
+DECLARE @MissingEntityUniquenessIndexCount int =
+(
+    SELECT COUNT(*)
+    FROM @ExpectedEntityUniquenessIndexes AS expected_index
+    WHERE NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.indexes AS actual_index
+        WHERE actual_index.[object_id] =
+            OBJECT_ID(N'tb_ops.LegacyEntityMappings')
+          AND actual_index.[name] = expected_index.[IndexName]
+          AND actual_index.[is_unique] = 1
+          AND actual_index.[has_filter] = 1
+          AND CHARINDEX(
+                  N'[EntityType]',
+                  actual_index.[filter_definition]) > 0
+          AND CHARINDEX(
+                  N'N''' + expected_index.[EntityType] + N'''',
+                  actual_index.[filter_definition]) > 0
+    )
+);
+
+IF @MissingEntityUniquenessIndexCount > 0
+BEGIN
+    PRINT N'FAIL: LegacyEntityMappings lacks filtered WorkEntry/PostingLog reverse uniqueness.';
+    SET @FailureCount += @MissingEntityUniquenessIndexCount;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM @ExpectedEntityUniquenessIndexes AS expected_index
+    INNER JOIN sys.indexes AS actual_index
+        ON actual_index.[object_id] =
+            OBJECT_ID(N'tb_ops.LegacyEntityMappings')
+       AND actual_index.[name] = expected_index.[IndexName]
+    WHERE
+    (
+        SELECT COUNT(*)
+        FROM sys.index_columns AS index_column
+        WHERE index_column.[object_id] = actual_index.[object_id]
+          AND index_column.[index_id] = actual_index.[index_id]
+          AND index_column.[key_ordinal] > 0
+    ) <> 3
+    OR NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.index_columns AS index_column
+        INNER JOIN sys.columns AS actual_column
+            ON actual_column.[object_id] = index_column.[object_id]
+           AND actual_column.[column_id] = index_column.[column_id]
+        WHERE index_column.[object_id] = actual_index.[object_id]
+          AND index_column.[index_id] = actual_index.[index_id]
+          AND index_column.[key_ordinal] = 1
+          AND actual_column.[name] = N'OwnerWindowsSid'
+    )
+    OR NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.index_columns AS index_column
+        INNER JOIN sys.columns AS actual_column
+            ON actual_column.[object_id] = index_column.[object_id]
+           AND actual_column.[column_id] = index_column.[column_id]
+        WHERE index_column.[object_id] = actual_index.[object_id]
+          AND index_column.[index_id] = actual_index.[index_id]
+          AND index_column.[key_ordinal] = 2
+          AND actual_column.[name] = N'SourceSystem'
+    )
+    OR NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.index_columns AS index_column
+        INNER JOIN sys.columns AS actual_column
+            ON actual_column.[object_id] = index_column.[object_id]
+           AND actual_column.[column_id] = index_column.[column_id]
+        WHERE index_column.[object_id] = actual_index.[object_id]
+          AND index_column.[index_id] = actual_index.[index_id]
+          AND index_column.[key_ordinal] = 3
+          AND actual_column.[name] = N'NewEntityId'
+    )
+)
+BEGIN
+    PRINT N'FAIL: A filtered LegacyEntityMappings reverse-uniqueness index has the wrong key shape.';
+    SET @FailureCount += 1;
+END;
+
+/*
+    A unique reverse index that applies to WorkEntryLink would reject two
+    distinct legacy link IDs that describe the same canonical relationship.
+*/
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.indexes AS unique_index
+    WHERE unique_index.[object_id] =
+        OBJECT_ID(N'tb_ops.LegacyEntityMappings')
+      AND unique_index.[is_unique] = 1
+      AND EXISTS
+      (
+          SELECT 1
+          FROM sys.index_columns AS index_column
+          INNER JOIN sys.columns AS indexed_column
+              ON indexed_column.[object_id] = index_column.[object_id]
+             AND indexed_column.[column_id] = index_column.[column_id]
+          WHERE index_column.[object_id] = unique_index.[object_id]
+            AND index_column.[index_id] = unique_index.[index_id]
+            AND index_column.[key_ordinal] > 0
+            AND indexed_column.[name] = N'NewEntityId'
+      )
+      AND NOT EXISTS
+      (
+          SELECT 1
+          FROM sys.index_columns AS index_column
+          INNER JOIN sys.columns AS indexed_column
+              ON indexed_column.[object_id] = index_column.[object_id]
+             AND indexed_column.[column_id] = index_column.[column_id]
+          WHERE index_column.[object_id] = unique_index.[object_id]
+            AND index_column.[index_id] = unique_index.[index_id]
+            AND index_column.[key_ordinal] > 0
+            AND indexed_column.[name] = N'LegacyId'
+      )
+      AND
+      (
+          unique_index.[has_filter] = 0
+          OR REPLACE(
+                 REPLACE(
+                     REPLACE(unique_index.[filter_definition], N' ', N''),
+                     N'(',
+                     N''),
+                 N')',
+                 N'') IN
+             (
+                 N'[EntityType]=N''WorkEntryLink''',
+                 N'N''WorkEntryLink''=[EntityType]'
+             )
+      )
+)
+BEGIN
+    PRINT N'FAIL: A unique reverse mapping still prevents multiple V1 link IDs from sharing one SQL relationship.';
+    SET @FailureCount += 1;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [object_id] = OBJECT_ID(N'tb_ops.ImportBatches')
+      AND [name] = N'IX_ImportBatches_OwnerSourceFileHash'
+)
+BEGIN
+    PRINT N'FAIL: ImportBatches lacks the owner/source/file-hash lookup index.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @RequiredProcedures TABLE
+(
+    [ObjectName] nvarchar(300) NOT NULL PRIMARY KEY
+);
+
+INSERT INTO @RequiredProcedures([ObjectName])
+VALUES
+    (N'tb_app.BeginTechBenchV1Import'),
+    (N'tb_app.ImportTechBenchV1WorkEntry'),
+    (N'tb_app.ImportTechBenchV1WorkEntryLink'),
+    (N'tb_app.ImportTechBenchV1PostingLog'),
+    (N'tb_app.CompleteTechBenchV1Import'),
+    (N'tb_app.AbandonTechBenchV1Import'),
+    (N'tb_app.ResolveTechBenchV1Reference');
+
+DECLARE @MissingProcedureCount int =
+(
+    SELECT COUNT(*)
+    FROM @RequiredProcedures AS required_procedure
+    WHERE OBJECT_ID(required_procedure.[ObjectName], N'P') IS NULL
+);
+
+IF @MissingProcedureCount > 0
+BEGIN
+    PRINT N'FAIL: One or more TechBench V1 import procedures are missing.';
+    SET @FailureCount += @MissingProcedureCount;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM @RequiredProcedures AS import_procedure
+    INNER JOIN sys.parameters AS procedure_parameter
+        ON procedure_parameter.[object_id] = OBJECT_ID(import_procedure.[ObjectName])
+    WHERE procedure_parameter.[name] IN
+    (
+        N'@OwnerWindowsSid',
+        N'@UserSid',
+        N'@LoginName',
+        N'@OwnerLoginName'
+    )
+)
+BEGIN
+    PRINT N'FAIL: A TechBench V1 import procedure accepts a client-supplied owner identity.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @BeginDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.BeginTechBenchV1Import'));
+DECLARE @WorkEntryDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.ImportTechBenchV1WorkEntry'));
+DECLARE @LinkDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.ImportTechBenchV1WorkEntryLink'));
+DECLARE @PostingLogDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.ImportTechBenchV1PostingLog'));
+DECLARE @CompleteDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.CompleteTechBenchV1Import'));
+DECLARE @AbandonDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AbandonTechBenchV1Import'));
+DECLARE @ResolverDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.ResolveTechBenchV1Reference'));
+
+DECLARE @LinkSourcePrerequisitePosition int =
+    COALESCE(CHARINDEX(
+        N'SELECT @SourceWorkEntryId = CONVERT(int, [NewEntityId])',
+        @LinkDefinition), 0);
+DECLARE @LinkSourceCurrentBatchPosition int =
+    COALESCE(CHARINDEX(
+        N'AND [LastSeenImportBatchId] = @BatchId',
+        @LinkDefinition,
+        @LinkSourcePrerequisitePosition), 0);
+DECLARE @LinkTargetPrerequisitePosition int =
+    COALESCE(CHARINDEX(
+        N'SELECT @TargetWorkEntryId = CONVERT(int, [NewEntityId])',
+        @LinkDefinition), 0);
+DECLARE @LinkTargetCurrentBatchPosition int =
+    COALESCE(CHARINDEX(
+        N'AND [LastSeenImportBatchId] = @BatchId',
+        @LinkDefinition,
+        @LinkTargetPrerequisitePosition), 0);
+DECLARE @LinkExistingMappingBranchPosition int =
+    COALESCE(CHARINDEX(
+        N'IF @ExistingNewEntityId IS NOT NULL',
+        @LinkDefinition), 0);
+DECLARE @LinkExistingMappingUpdatePosition int =
+    COALESCE(CHARINDEX(
+        N'UPDATE [tb_ops].[LegacyEntityMappings]',
+        @LinkDefinition,
+        @LinkExistingMappingBranchPosition), 0);
+
+DECLARE @PostingPrerequisitePosition int =
+    COALESCE(CHARINDEX(
+        N'SELECT @WorkEntryId = CONVERT(int, [NewEntityId])',
+        @PostingLogDefinition), 0);
+DECLARE @PostingCurrentBatchPosition int =
+    COALESCE(CHARINDEX(
+        N'AND [LastSeenImportBatchId] = @BatchId',
+        @PostingLogDefinition,
+        @PostingPrerequisitePosition), 0);
+DECLARE @PostingExistingMappingBranchPosition int =
+    COALESCE(CHARINDEX(
+        N'IF @ExistingNewEntityId IS NOT NULL',
+        @PostingLogDefinition), 0);
+DECLARE @PostingExistingReconcilePosition int =
+    COALESCE(CHARINDEX(
+        N'IF @Success = 1',
+        @PostingLogDefinition,
+        @PostingExistingMappingBranchPosition), 0);
+
+IF @BeginDefinition IS NULL
+   OR CHARINDEX(N'[tb_security].[GetCurrentAccess]', @BeginDefinition) = 0
+   OR CHARINDEX(N'[OwnerWindowsSid] = @UserSid', @BeginDefinition) = 0
+   OR CHARINDEX(N'[FileHash] = @FileHash', @BeginDefinition) = 0
+   OR CHARINDEX(N'[ReadCount] = @ExpectedCount', @BeginDefinition) = 0
+   OR CHARINDEX(N'[ConflictCount] = 0', @BeginDefinition) = 0
+   OR CHARINDEX(N'[ErrorCount] = 0', @BeginDefinition) = 0
+BEGIN
+    PRINT N'FAIL: BeginTechBenchV1Import lacks its authenticated owner/file-hash resume contract.';
+    SET @FailureCount += 1;
+END;
+
+IF @WorkEntryDefinition IS NULL
+   OR CHARINDEX(N'[tb_security].[GetCurrentAccess]', @WorkEntryDefinition) = 0
+   OR CHARINDEX(N'[OwnerWindowsSid] = @UserSid', @WorkEntryDefinition) = 0
+   OR CHARINDEX(N'[FileName] IS NOT NULL', @WorkEntryDefinition) = 0
+   OR CHARINDEX(N'[FileHash] IS NOT NULL', @WorkEntryDefinition) = 0
+   OR CHARINDEX(N'WITH (UPDLOCK, HOLDLOCK)', @WorkEntryDefinition) = 0
+   OR CHARINDEX(N'[tb_ops].[LegacyEntityMappings]', @WorkEntryDefinition) = 0
+   OR CHARINDEX(N'N''Conflict''', @WorkEntryDefinition) = 0
+   OR CHARINDEX(N'INSERT INTO [tb_data].[WorkEntries]', @WorkEntryDefinition) = 0
+   OR CHARINDEX(N'INSERT INTO [tb_private].[WorkEntryPersonalNotes]', @WorkEntryDefinition) = 0
+   OR CHARINDEX(N'@WhdPostedAtUtc', @WorkEntryDefinition) = 0
+   OR CHARINDEX(N'@SagePostedAtUtc', @WorkEntryDefinition) = 0
+   OR CHARINDEX(N'@SageTicketNumber', @WorkEntryDefinition) = 0
+   OR CHARINDEX(N'@CreatedAtUtc', @WorkEntryDefinition) = 0
+   OR CHARINDEX(N'@UpdatedAtUtc', @WorkEntryDefinition) = 0
+   OR CHARINDEX(N'N''PostedToBoth''', @WorkEntryDefinition) = 0
+BEGIN
+    PRINT N'FAIL: ImportTechBenchV1WorkEntry lacks its owner/idempotency/private-note/posting-state contract.';
+    SET @FailureCount += 1;
+END;
+
+IF @WorkEntryDefinition IS NULL
+   OR CHARINDEX(
+          N'ISNULL([ClientId], -1) <> ISNULL(@ClientId, -1)',
+          @WorkEntryDefinition) = 0
+   OR CHARINDEX(
+          N'ISNULL([TicketId], -1) <> ISNULL(@TicketId, -1)',
+          @WorkEntryDefinition) = 0
+   OR CHARINDEX(
+          N'The resolved client or ticket changed',
+          @WorkEntryDefinition) = 0
+BEGIN
+    PRINT N'FAIL: ImportTechBenchV1WorkEntry can silently reuse a legacy mapping after its resolved client or ticket changes.';
+    SET @FailureCount += 1;
+END;
+
+IF @WorkEntryDefinition IS NULL
+   OR CHARINDEX(
+          N'@ExistingFirstImportBatchId = [FirstImportBatchId]',
+          @WorkEntryDefinition) = 0
+   OR CHARINDEX(
+          N'@ExistingFirstImportBatchId = @BatchId',
+          @WorkEntryDefinition) = 0
+   OR CHARINDEX(
+          N'CASE WHEN @ExistingFirstImportBatchId = @BatchId THEN N''Imported'' ELSE N''Skipped'' END AS [Outcome]',
+          @WorkEntryDefinition) = 0
+BEGIN
+    PRINT N'FAIL: ImportTechBenchV1WorkEntry does not distinguish a same-batch replay from a prior-batch retry.';
+    SET @FailureCount += 1;
+END;
+
+IF @LinkDefinition IS NULL
+   OR CHARINDEX(N'[tb_security].[GetCurrentAccess]', @LinkDefinition) = 0
+   OR CHARINDEX(N'[OwnerWindowsSid] = @UserSid', @LinkDefinition) = 0
+   OR CHARINDEX(N'[FileName] IS NOT NULL', @LinkDefinition) = 0
+   OR CHARINDEX(N'[FileHash] IS NOT NULL', @LinkDefinition) = 0
+   OR CHARINDEX(N'[EntityType] = N''WorkEntry''', @LinkDefinition) = 0
+   OR CHARINDEX(N'INSERT INTO [tb_data].[WorkEntryLinks]', @LinkDefinition) = 0
+   OR CHARINDEX(N'@LinkType = N''Related''', @LinkDefinition) = 0
+   OR CHARINDEX(N'N''Conflict''', @LinkDefinition) = 0
+BEGIN
+    PRINT N'FAIL: ImportTechBenchV1WorkEntryLink lacks its mapped-owner/idempotency contract.';
+    SET @FailureCount += 1;
+END;
+
+IF @LinkSourcePrerequisitePosition = 0
+   OR @LinkSourceCurrentBatchPosition <= @LinkSourcePrerequisitePosition
+   OR @LinkTargetPrerequisitePosition <= @LinkSourceCurrentBatchPosition
+   OR @LinkTargetCurrentBatchPosition <= @LinkTargetPrerequisitePosition
+   OR @LinkExistingMappingBranchPosition <= @LinkTargetCurrentBatchPosition
+BEGIN
+    PRINT N'FAIL: ImportTechBenchV1WorkEntryLink does not validate both current-batch prerequisites before its existing-mapping replay branch.';
+    SET @FailureCount += 1;
+END;
+
+IF @LinkExistingMappingBranchPosition = 0
+   OR @LinkExistingMappingUpdatePosition <= @LinkExistingMappingBranchPosition
+   OR CHARINDEX(
+          N'link.[Id] = CONVERT(int, @ExistingNewEntityId)',
+          @LinkDefinition,
+          @LinkExistingMappingBranchPosition) NOT BETWEEN
+              @LinkExistingMappingBranchPosition
+              AND @LinkExistingMappingUpdatePosition
+   OR CHARINDEX(
+          N'link.[LinkType] = @LinkType',
+          @LinkDefinition,
+          @LinkExistingMappingBranchPosition) NOT BETWEEN
+              @LinkExistingMappingBranchPosition
+              AND @LinkExistingMappingUpdatePosition
+   OR CHARINDEX(
+          N'link.[SourceWorkEntryId] = @SourceWorkEntryId',
+          @LinkDefinition,
+          @LinkExistingMappingBranchPosition) NOT BETWEEN
+              @LinkExistingMappingBranchPosition
+              AND @LinkExistingMappingUpdatePosition
+   OR CHARINDEX(
+          N'link.[TargetWorkEntryId] = @TargetWorkEntryId',
+          @LinkDefinition,
+          @LinkExistingMappingBranchPosition) NOT BETWEEN
+              @LinkExistingMappingBranchPosition
+              AND @LinkExistingMappingUpdatePosition
+   OR CHARINDEX(
+          N'@LinkType = N''Related''',
+          @LinkDefinition,
+          @LinkExistingMappingBranchPosition) NOT BETWEEN
+              @LinkExistingMappingBranchPosition
+              AND @LinkExistingMappingUpdatePosition
+   OR CHARINDEX(
+          N'link.[SourceWorkEntryId] = @TargetWorkEntryId',
+          @LinkDefinition,
+          @LinkExistingMappingBranchPosition) NOT BETWEEN
+              @LinkExistingMappingBranchPosition
+              AND @LinkExistingMappingUpdatePosition
+   OR CHARINDEX(
+          N'link.[TargetWorkEntryId] = @SourceWorkEntryId',
+          @LinkDefinition,
+          @LinkExistingMappingBranchPosition) NOT BETWEEN
+              @LinkExistingMappingBranchPosition
+              AND @LinkExistingMappingUpdatePosition
+BEGIN
+    PRINT N'FAIL: ImportTechBenchV1WorkEntryLink does not validate an existing mapping against link type and mapped source/target SQL IDs.';
+    SET @FailureCount += 1;
+END;
+
+IF @LinkDefinition IS NULL
+   OR
+   (
+       LEN(@LinkDefinition)
+       - LEN(REPLACE(
+                 @LinkDefinition,
+                 N'AND [LastSeenImportBatchId] = @BatchId',
+                 N''))
+   ) / LEN(N'AND [LastSeenImportBatchId] = @BatchId') < 2
+   OR CHARINDEX(
+          N'@ExistingFirstImportBatchId = [FirstImportBatchId]',
+          @LinkDefinition) = 0
+   OR CHARINDEX(
+          N'@ExistingFirstImportBatchId = @BatchId',
+          @LinkDefinition) = 0
+   OR CHARINDEX(
+          N'CONVERT(bigint, NULL) AS [NewEntityId]',
+          @LinkDefinition) = 0
+   OR CHARINDEX(N'stale mapping', @LinkDefinition) = 0
+   OR CHARINDEX(
+          N'CASE WHEN @ExistingFirstImportBatchId = @BatchId THEN N''Imported'' ELSE N''Skipped'' END AS [Outcome]',
+          @LinkDefinition) = 0
+BEGIN
+    PRINT N'FAIL: ImportTechBenchV1WorkEntryLink can reuse stale prerequisites or misclassify a resumed same-batch mapping.';
+    SET @FailureCount += 1;
+END;
+
+IF @PostingLogDefinition IS NULL
+   OR CHARINDEX(N'[tb_security].[GetCurrentAccess]', @PostingLogDefinition) = 0
+   OR CHARINDEX(N'[OwnerWindowsSid] = @UserSid', @PostingLogDefinition) = 0
+   OR CHARINDEX(N'[FileName] IS NOT NULL', @PostingLogDefinition) = 0
+   OR CHARINDEX(N'[FileHash] IS NOT NULL', @PostingLogDefinition) = 0
+   OR CHARINDEX(N'[EntityType] = N''WorkEntry''', @PostingLogDefinition) = 0
+   OR CHARINDEX(N'INSERT INTO [tb_ops].[PostingLogs]', @PostingLogDefinition) = 0
+   OR CHARINDEX(N'N''Conflict''', @PostingLogDefinition) = 0
+BEGIN
+    PRINT N'FAIL: ImportTechBenchV1PostingLog lacks its mapped-owner/idempotency contract.';
+    SET @FailureCount += 1;
+END;
+
+IF @PostingPrerequisitePosition = 0
+   OR @PostingCurrentBatchPosition <= @PostingPrerequisitePosition
+   OR @PostingExistingMappingBranchPosition <= @PostingCurrentBatchPosition
+BEGIN
+    PRINT N'FAIL: ImportTechBenchV1PostingLog does not validate its current-batch work-entry prerequisite before its existing-mapping replay branch.';
+    SET @FailureCount += 1;
+END;
+
+IF @PostingExistingMappingBranchPosition = 0
+   OR @PostingExistingReconcilePosition <= @PostingExistingMappingBranchPosition
+   OR CHARINDEX(
+          N'[Id] = @ExistingNewEntityId',
+          @PostingLogDefinition,
+          @PostingExistingMappingBranchPosition) NOT BETWEEN
+              @PostingExistingMappingBranchPosition
+              AND @PostingExistingReconcilePosition
+   OR CHARINDEX(
+          N'[WorkEntryId] = @WorkEntryId',
+          @PostingLogDefinition,
+          @PostingExistingMappingBranchPosition) NOT BETWEEN
+              @PostingExistingMappingBranchPosition
+              AND @PostingExistingReconcilePosition
+BEGIN
+    PRINT N'FAIL: ImportTechBenchV1PostingLog does not validate an existing posting-log mapping against the current mapped work-entry SQL ID.';
+    SET @FailureCount += 1;
+END;
+
+IF @PostingLogDefinition IS NULL
+   OR CHARINDEX(
+          N'AND [LastSeenImportBatchId] = @BatchId',
+          @PostingLogDefinition) = 0
+   OR CHARINDEX(
+          N'@ExistingFirstImportBatchId = [FirstImportBatchId]',
+          @PostingLogDefinition) = 0
+   OR CHARINDEX(
+          N'@ExistingFirstImportBatchId = @BatchId',
+          @PostingLogDefinition) = 0
+   OR CHARINDEX(
+          N'CONVERT(bigint, NULL) AS [NewEntityId]',
+          @PostingLogDefinition) = 0
+   OR CHARINDEX(N'stale mapping', @PostingLogDefinition) = 0
+   OR CHARINDEX(
+          N'CASE WHEN @ExistingFirstImportBatchId = @BatchId THEN N''Imported'' ELSE N''Skipped'' END AS [Outcome]',
+          @PostingLogDefinition) = 0
+BEGIN
+    PRINT N'FAIL: ImportTechBenchV1PostingLog can reuse a stale prerequisite or misclassify a resumed same-batch mapping.';
+    SET @FailureCount += 1;
+END;
+
+IF @PostingLogDefinition IS NULL
+   OR CHARINDEX(N'IF @Success = 1', @PostingLogDefinition) = 0
+   OR CHARINDEX(
+          N'UPDATE [tb_data].[WorkEntries]',
+          @PostingLogDefinition) = 0
+   OR CHARINDEX(N'[WhdPosted] =', @PostingLogDefinition) = 0
+   OR CHARINDEX(N'[WhdPostedAtUtc] =', @PostingLogDefinition) = 0
+   OR CHARINDEX(N'[SagePosted] =', @PostingLogDefinition) = 0
+   OR CHARINDEX(N'[SagePostedAtUtc] =', @PostingLogDefinition) = 0
+   OR CHARINDEX(N'[PostingStatus] =', @PostingLogDefinition) = 0
+   OR CHARINDEX(N'@CreatedAtUtc', @PostingLogDefinition) = 0
+   OR CHARINDEX(
+          N'CASE WHEN @Destination = N''WHD'' THEN CONVERT(bit, 1) ELSE [WhdPosted] END',
+          @PostingLogDefinition) = 0
+   OR CHARINDEX(
+          N'CASE WHEN @Destination = N''Sage'' THEN CONVERT(bit, 1) ELSE [SagePosted] END',
+          @PostingLogDefinition) = 0
+   OR CHARINDEX(N'N''PostedToWhd''', @PostingLogDefinition) = 0
+   OR CHARINDEX(N'N''PostedToSage''', @PostingLogDefinition) = 0
+   OR CHARINDEX(N'N''PostedToBoth''', @PostingLogDefinition) = 0
+   OR CHARINDEX(
+          N'COALESCE([WhdPostedAtUtc], @CreatedAtUtc)',
+          @PostingLogDefinition) = 0
+   OR CHARINDEX(
+          N'COALESCE([SagePostedAtUtc], @CreatedAtUtc)',
+          @PostingLogDefinition) = 0
+BEGIN
+    PRINT N'FAIL: A successful imported posting log does not conservatively reconcile the mapped work-entry posting state.';
+    SET @FailureCount += 1;
+END;
+
+IF @PostingLogDefinition IS NULL
+   OR
+   (
+       LEN(@PostingLogDefinition)
+       - LEN(REPLACE(
+                 @PostingLogDefinition,
+                 N'IF @Success = 1',
+                 N''))
+   ) / LEN(N'IF @Success = 1') < 2
+   OR
+   (
+       LEN(@PostingLogDefinition)
+       - LEN(REPLACE(
+                 @PostingLogDefinition,
+                 N'UPDATE [tb_data].[WorkEntries]',
+                 N''))
+   ) / LEN(N'UPDATE [tb_data].[WorkEntries]') < 2
+BEGIN
+    PRINT N'FAIL: ImportTechBenchV1PostingLog does not reconcile successful logs on both first import and idempotent replay paths.';
+    SET @FailureCount += 1;
+END;
+
+IF @CompleteDefinition IS NULL
+   OR CHARINDEX(N'[tb_security].[GetCurrentAccess]', @CompleteDefinition) = 0
+   OR CHARINDEX(N'[OwnerWindowsSid] = @UserSid', @CompleteDefinition) = 0
+   OR CHARINDEX(N'[FileName] IS NOT NULL', @CompleteDefinition) = 0
+   OR CHARINDEX(N'[FileHash] IS NOT NULL', @CompleteDefinition) = 0
+   OR CHARINDEX(N'[ImportedCount] = @ImportedCount', @CompleteDefinition) = 0
+   OR CHARINDEX(N'[SkippedCount] = @SkippedCount', @CompleteDefinition) = 0
+   OR CHARINDEX(N'[ConflictCount] = @ConflictCount', @CompleteDefinition) = 0
+   OR CHARINDEX(N'[ErrorCount] = @ErrorCount', @CompleteDefinition) = 0
+   OR CHARINDEX(N'CONVERT(bigint, @ImportedCount)', @CompleteDefinition) = 0
+   OR CHARINDEX(N'CONVERT(bigint, @SkippedCount)', @CompleteDefinition) = 0
+   OR CHARINDEX(N'CONVERT(bigint, @ConflictCount)', @CompleteDefinition) = 0
+   OR CHARINDEX(N'CONVERT(bigint, @ErrorCount)', @CompleteDefinition) = 0
+   OR CHARINDEX(N'@Succeeded = 1 AND @ErrorCount <> 0', @CompleteDefinition) = 0
+   OR CHARINDEX(
+          N'@Succeeded = 1 AND @OutcomeCount <> CONVERT(bigint, @ReadCount)',
+          @CompleteDefinition) = 0
+BEGIN
+    PRINT N'FAIL: CompleteTechBenchV1Import lacks its authenticated exact successful-outcome contract.';
+    SET @FailureCount += 1;
+END;
+
+IF @AbandonDefinition IS NULL
+   OR CHARINDEX(N'@BatchId uniqueidentifier = NULL', @AbandonDefinition) = 0
+   OR CHARINDEX(N'[tb_security].[GetCurrentAccess]', @AbandonDefinition) = 0
+   OR CHARINDEX(N'@BatchId IS NULL', @AbandonDefinition) = 0
+   OR CHARINDEX(N'WITH (UPDLOCK, HOLDLOCK)', @AbandonDefinition) = 0
+   OR CHARINDEX(N'[OwnerWindowsSid] = @UserSid', @AbandonDefinition) = 0
+   OR CHARINDEX(N'[SourceSystem] = N''TechBenchV1''', @AbandonDefinition) = 0
+   OR CHARINDEX(N'[Status] = N''Started''', @AbandonDefinition) = 0
+   OR CHARINDEX(N'[Status] = N''Abandoned''', @AbandonDefinition) = 0
+   OR CHARINDEX(N'N''TechBenchV1ImportAbandoned''', @AbandonDefinition) = 0
+   OR CHARINDEX(N'BEGIN TRANSACTION', @AbandonDefinition) = 0
+BEGIN
+    PRINT N'FAIL: AbandonTechBenchV1Import lacks nullable current-batch recovery, owner scope, or audit atomicity.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @ExpectedResolverParameters TABLE
+(
+    [ParameterId] int NOT NULL PRIMARY KEY,
+    [ParameterName] sysname NOT NULL,
+    [MaxLength] smallint NOT NULL
+);
+
+INSERT INTO @ExpectedResolverParameters
+(
+    [ParameterId],
+    [ParameterName],
+    [MaxLength]
+)
+VALUES
+    (1, N'@ClientSourceSystem', 80),
+    (2, N'@ClientExternalId', 1000),
+    (3, N'@SageCustomerId', 240),
+    (4, N'@ClientName', 480),
+    (5, N'@TicketSourceSystem', 80),
+    (6, N'@TicketExternalId', 480),
+    (7, N'@TicketNumber', 240);
+
+DECLARE @InvalidResolverParameterCount int =
+(
+    SELECT COUNT(*)
+    FROM @ExpectedResolverParameters AS expected_parameter
+    WHERE NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.parameters AS actual_parameter
+        INNER JOIN sys.types AS parameter_type
+            ON parameter_type.[user_type_id] = actual_parameter.[user_type_id]
+        WHERE actual_parameter.[object_id] =
+            OBJECT_ID(N'tb_app.ResolveTechBenchV1Reference')
+          AND actual_parameter.[parameter_id] = expected_parameter.[ParameterId]
+          AND actual_parameter.[name] = expected_parameter.[ParameterName]
+          AND parameter_type.[name] = N'nvarchar'
+          AND actual_parameter.[max_length] = expected_parameter.[MaxLength]
+          AND actual_parameter.[is_output] = 0
+    )
+);
+
+IF @InvalidResolverParameterCount > 0
+   OR
+   (
+       SELECT COUNT(*)
+       FROM sys.parameters
+       WHERE [object_id] =
+           OBJECT_ID(N'tb_app.ResolveTechBenchV1Reference')
+         AND [parameter_id] > 0
+   ) <> 7
+BEGIN
+    PRINT N'FAIL: ResolveTechBenchV1Reference does not expose the expected seven optional exact-reference inputs.';
+    SET @FailureCount += CASE
+        WHEN @InvalidResolverParameterCount > 0
+            THEN @InvalidResolverParameterCount
+        ELSE 1
+    END;
+END;
+
+IF @ResolverDefinition IS NULL
+   OR CHARINDEX(
+          N'@ClientSourceSystem nvarchar(40) = NULL',
+          @ResolverDefinition) = 0
+   OR CHARINDEX(
+          N'@ClientExternalId nvarchar(500) = NULL',
+          @ResolverDefinition) = 0
+   OR CHARINDEX(
+          N'@SageCustomerId nvarchar(120) = NULL',
+          @ResolverDefinition) = 0
+   OR CHARINDEX(N'@ClientName nvarchar(240) = NULL', @ResolverDefinition) = 0
+   OR CHARINDEX(
+          N'@TicketSourceSystem nvarchar(40) = NULL',
+          @ResolverDefinition) = 0
+   OR CHARINDEX(
+          N'@TicketExternalId nvarchar(240) = NULL',
+          @ResolverDefinition) = 0
+   OR CHARINDEX(N'@TicketNumber nvarchar(120) = NULL', @ResolverDefinition) = 0
+BEGIN
+    PRINT N'FAIL: ResolveTechBenchV1Reference inputs are not all optional with the expected SQL contract.';
+    SET @FailureCount += 1;
+END;
+
+IF @ResolverDefinition IS NULL
+   OR CHARINDEX(N'[tb_security].[GetCurrentAccess]', @ResolverDefinition) = 0
+   OR CHARINDEX(N'[tb_data].[ClientExternalIdentities]', @ResolverDefinition) = 0
+   OR CHARINDEX(N'[tb_data].[Clients]', @ResolverDefinition) = 0
+   OR CHARINDEX(N'[tb_data].[ClientAliases]', @ResolverDefinition) = 0
+   OR CHARINDEX(N'[tb_data].[Tickets]', @ResolverDefinition) = 0
+   OR CHARINDEX(N'[ScopeType] = N''Organization''', @ResolverDefinition) = 0
+   OR CHARINDEX(N'[ClientResolutionStatus]', @ResolverDefinition) = 0
+   OR CHARINDEX(N'[ClientId]', @ResolverDefinition) = 0
+   OR CHARINDEX(N'[ClientMatchMethod]', @ResolverDefinition) = 0
+   OR CHARINDEX(N'[TicketResolutionStatus]', @ResolverDefinition) = 0
+   OR CHARINDEX(N'[TicketId]', @ResolverDefinition) = 0
+   OR CHARINDEX(N'[TicketMatchMethod]', @ResolverDefinition) = 0
+   OR CHARINDEX(N'N''Matched''', @ResolverDefinition) = 0
+   OR CHARINDEX(N'N''NotFound''', @ResolverDefinition) = 0
+   OR CHARINDEX(N'N''Ambiguous''', @ResolverDefinition) = 0
+   OR CHARINDEX(N'N''Conflict''', @ResolverDefinition) = 0
+   OR CHARINDEX(N'N''NotResolved''', @ResolverDefinition) = 0
+BEGIN
+    PRINT N'FAIL: ResolveTechBenchV1Reference lacks its authenticated direct-table, unambiguous status/result contract.';
+    SET @FailureCount += 1;
+END;
+
+IF @ResolverDefinition IS NULL
+   OR CHARINDEX(
+          N'IF @ClientSourceSystem = N''Both''',
+          @ResolverDefinition) = 0
+   OR CHARINDEX(
+          N'SET @ClientSourceSystem = N''WHD''',
+          @ResolverDefinition) = 0
+   OR CHARINDEX(
+          N'IF @TicketSourceSystem = N''Both''',
+          @ResolverDefinition) = 0
+   OR CHARINDEX(
+          N'SET @TicketSourceSystem = N''WHD''',
+          @ResolverDefinition) = 0
+   OR CHARINDEX(
+          N'identity_row.[SourceSystem] = @ClientSourceSystem',
+          @ResolverDefinition) = 0
+   OR CHARINDEX(
+          N'identity_row.[ExternalId] = @ClientExternalId',
+          @ResolverDefinition) = 0
+   OR CHARINDEX(
+          N'client.[SageCustomerId] = @SageCustomerId',
+          @ResolverDefinition) = 0
+   OR CHARINDEX(
+          N'alias_row.[ScopeType] = N''Organization''',
+          @ResolverDefinition) = 0
+   OR CHARINDEX(
+          N'alias_row.[Alias] = @ClientName',
+          @ResolverDefinition) = 0
+   OR CHARINDEX(N'client.[Name] = @ClientName', @ResolverDefinition) = 0
+   OR CHARINDEX(
+          N'ticket.[Source] = @TicketSourceSystem',
+          @ResolverDefinition) = 0
+   OR CHARINDEX(
+          N'ticket.[ExternalId] = @TicketExternalId',
+          @ResolverDefinition) = 0
+   OR CHARINDEX(
+          N'ticket.[ClientId] = @ResolvedClientId',
+          @ResolverDefinition) = 0
+   OR CHARINDEX(
+          N'ticket.[TicketNumber] = @TicketNumber',
+          @ResolverDefinition) = 0
+   OR CHARINDEX(N'COUNT(DISTINCT [ClientId])', @ResolverDefinition) = 0
+   OR CHARINDEX(N'COUNT(DISTINCT [TicketId])', @ResolverDefinition) = 0
+   OR CHARINDEX(N'N''ClientExternalIdentity''', @ResolverDefinition) = 0
+   OR CHARINDEX(N'N''SageCustomerId''', @ResolverDefinition) = 0
+   OR CHARINDEX(N'N''OrganizationAlias''', @ResolverDefinition) = 0
+   OR CHARINDEX(N'N''ClientName''', @ResolverDefinition) = 0
+   OR CHARINDEX(N'N''TicketExternalIdentity''', @ResolverDefinition) = 0
+   OR CHARINDEX(N'N''TicketNumber''', @ResolverDefinition) = 0
+BEGIN
+    PRINT N'FAIL: ResolveTechBenchV1Reference lacks exact source qualification, V1 Both-to-WHD normalization, or unambiguous fallback matching.';
+    SET @FailureCount += 1;
+END;
+
+IF @ResolverDefinition IS NOT NULL
+   AND
+   (
+       (
+           LEN(@ResolverDefinition)
+           - LEN(REPLACE(
+                     @ResolverDefinition,
+                     N'identity_row.[ExternalId] = @ClientExternalId',
+                     N''))
+       ) / LEN(N'identity_row.[ExternalId] = @ClientExternalId') <> 1
+       OR
+       (
+           LEN(@ResolverDefinition)
+           - LEN(REPLACE(
+                     @ResolverDefinition,
+                     N'ticket.[ExternalId] = @TicketExternalId',
+                     N''))
+       ) / LEN(N'ticket.[ExternalId] = @TicketExternalId') <> 1
+   )
+BEGIN
+    PRINT N'FAIL: ResolveTechBenchV1Reference contains an unexpected additional external-ID lookup path.';
+    SET @FailureCount += 1;
+END;
+
+IF @ResolverDefinition IS NOT NULL
+   AND
+   (
+       CHARINDEX(N' LIKE ', UPPER(@ResolverDefinition)) > 0
+       OR CHARINDEX(N'SOUNDEX(', UPPER(@ResolverDefinition)) > 0
+       OR CHARINDEX(N'DIFFERENCE(', UPPER(@ResolverDefinition)) > 0
+       OR CHARINDEX(N'TOP (', UPPER(@ResolverDefinition)) > 0
+       OR CHARINDEX(N'TOP(', UPPER(@ResolverDefinition)) > 0
+       OR CHARINDEX(N'@LIMIT', UPPER(@ResolverDefinition)) > 0
+       OR CHARINDEX(N'OFFSET ', UPPER(@ResolverDefinition)) > 0
+       OR CHARINDEX(N'FETCH NEXT', UPPER(@ResolverDefinition)) > 0
+       OR CHARINDEX(N'[TB_APP].[SEARCHCLIENTS]', UPPER(@ResolverDefinition)) > 0
+       OR CHARINDEX(N'[TB_APP].[GETTICKETS]', UPPER(@ResolverDefinition)) > 0
+   )
+BEGIN
+    PRINT N'FAIL: ResolveTechBenchV1Reference uses fuzzy, capped, paged, or list-procedure lookup behavior.';
+    SET @FailureCount += 1;
+END;
+
+IF @ResolverDefinition IS NOT NULL
+   AND
+   (
+       CHARINDEX(
+           N'INSERT INTO [tb_data].[ClientExternalIdentities]',
+           @ResolverDefinition) > 0
+       OR CHARINDEX(
+              N'UPDATE [tb_data].[ClientExternalIdentities]',
+              @ResolverDefinition) > 0
+       OR CHARINDEX(
+              N'DELETE FROM [tb_data].[ClientExternalIdentities]',
+              @ResolverDefinition) > 0
+       OR CHARINDEX(N'INSERT INTO [tb_data].[Clients]', @ResolverDefinition) > 0
+       OR CHARINDEX(N'UPDATE [tb_data].[Clients]', @ResolverDefinition) > 0
+       OR CHARINDEX(N'DELETE FROM [tb_data].[Clients]', @ResolverDefinition) > 0
+       OR CHARINDEX(N'INSERT INTO [tb_data].[ClientAliases]', @ResolverDefinition) > 0
+       OR CHARINDEX(N'UPDATE [tb_data].[ClientAliases]', @ResolverDefinition) > 0
+       OR CHARINDEX(N'DELETE FROM [tb_data].[ClientAliases]', @ResolverDefinition) > 0
+       OR CHARINDEX(N'INSERT INTO [tb_data].[Tickets]', @ResolverDefinition) > 0
+       OR CHARINDEX(N'UPDATE [tb_data].[Tickets]', @ResolverDefinition) > 0
+       OR CHARINDEX(N'DELETE FROM [tb_data].[Tickets]', @ResolverDefinition) > 0
+   )
+BEGIN
+    PRINT N'FAIL: ResolveTechBenchV1Reference is not read-only over authoritative shared tables.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(
+       N'IF @Source = N''TechBenchV1''',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.BeginImportBatch'))) = 0
+   OR CHARINDEX(
+       N'[SourceSystem] = N''TechBenchV1''',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.CompleteImportBatch'))) = 0
+   OR CHARINDEX(
+       N'CompleteTechBenchV1Import',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.CompleteImportBatch'))) = 0
+BEGIN
+    PRINT N'FAIL: Generic import lifecycle procedures can bypass the V1 file/count contract.';
+    SET @FailureCount += 1;
+END;
+
+/* Import procedures may read shared clients/tickets, but never mutate catalogs. */
+DECLARE @ImportMutationDefinitions TABLE
+(
+    [DefinitionText] nvarchar(max) NULL
+);
+
+INSERT INTO @ImportMutationDefinitions([DefinitionText])
+VALUES
+    (@BeginDefinition),
+    (@WorkEntryDefinition),
+    (@LinkDefinition),
+    (@PostingLogDefinition),
+    (@CompleteDefinition);
+
+IF EXISTS
+(
+    SELECT 1
+    FROM @ImportMutationDefinitions
+    WHERE CHARINDEX(N'INSERT INTO [tb_data].[Clients]', [DefinitionText]) > 0
+       OR CHARINDEX(N'UPDATE [tb_data].[Clients]', [DefinitionText]) > 0
+       OR CHARINDEX(N'DELETE FROM [tb_data].[Clients]', [DefinitionText]) > 0
+       OR CHARINDEX(N'INSERT INTO [tb_data].[Tickets]', [DefinitionText]) > 0
+       OR CHARINDEX(N'UPDATE [tb_data].[Tickets]', [DefinitionText]) > 0
+       OR CHARINDEX(N'DELETE FROM [tb_data].[Tickets]', [DefinitionText]) > 0
+       OR CHARINDEX(N'[tb_data].[ClientAliases]', [DefinitionText]) > 0
+       OR CHARINDEX(N'[tb_data].[CommonLinks]', [DefinitionText]) > 0
+       OR CHARINDEX(N'[tb_data].[Templates]', [DefinitionText]) > 0
+       OR CHARINDEX(N'[tb_data].[OrganizationTags]', [DefinitionText]) > 0
+       OR CHARINDEX(N'[tb_data].[OrganizationSettings]', [DefinitionText]) > 0
+)
+BEGIN
+    PRINT N'FAIL: A TechBench V1 import procedure can mutate shared catalog/configuration data.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @ExpectedGrants TABLE
+(
+    [RoleName] sysname NOT NULL,
+    [ObjectName] nvarchar(300) NOT NULL,
+    PRIMARY KEY ([RoleName], [ObjectName])
+);
+
+INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
+SELECT N'tb_role_user', [ObjectName]
+FROM @RequiredProcedures;
+
+DECLARE @MissingGrantCount int =
+(
+    SELECT COUNT(*)
+    FROM @ExpectedGrants AS expected_grant
+    WHERE NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.database_permissions AS permission
+        INNER JOIN sys.database_principals AS grantee
+            ON grantee.[principal_id] = permission.[grantee_principal_id]
+        WHERE grantee.[name] = expected_grant.[RoleName]
+          AND permission.[class] = 1
+          AND permission.[major_id] = OBJECT_ID(expected_grant.[ObjectName])
+          AND permission.[permission_name] = N'EXECUTE'
+          AND permission.[state] IN (N'G', N'W')
+    )
+);
+
+IF @MissingGrantCount > 0
+BEGIN
+    PRINT N'FAIL: tb_role_user is missing one or more V1 import procedure grants.';
+    SET @FailureCount += @MissingGrantCount;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions AS permission
+    INNER JOIN sys.database_principals AS grantee
+        ON grantee.[principal_id] = permission.[grantee_principal_id]
+    LEFT JOIN sys.objects AS secured_object
+        ON permission.[class] = 1
+       AND secured_object.[object_id] = permission.[major_id]
+    LEFT JOIN sys.schemas AS secured_schema
+        ON
+        (
+            permission.[class] = 3
+            AND secured_schema.[schema_id] = permission.[major_id]
+        )
+        OR
+        (
+            permission.[class] = 1
+            AND secured_schema.[schema_id] = secured_object.[schema_id]
+        )
+    WHERE grantee.[name] IN
+    (
+        N'tb_role_user',
+        N'tb_role_manager',
+        N'tb_role_admin',
+        N'tb_role_sync_operator'
+    )
+      AND secured_schema.[name] IN
+      (
+          N'tb_data',
+          N'tb_private',
+          N'tb_user',
+          N'tb_ops',
+          N'tb_security',
+          N'tb_audit'
+      )
+      AND permission.[permission_name] IN
+      (
+          N'SELECT', N'INSERT', N'UPDATE', N'DELETE', N'CONTROL', N'ALTER'
+      )
+      AND permission.[state] IN (N'G', N'W')
+)
+BEGIN
+    PRINT N'FAIL: An application role has direct table/schema data permission.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(
+       N'CONVERT(int, 5)',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'))) = 0
+   OR CHARINDEX(
+       N'[SupportsTechBenchV1Import]',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'))) = 0
+BEGIN
+    PRINT N'FAIL: GetRepositoryCapabilities does not report schema version 5 and V1 import support.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(
+       N'[ConflictCount]',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetImportBatches'))) = 0
+BEGIN
+    PRINT N'FAIL: GetImportBatches does not return V0005 conflict counts.';
+    SET @FailureCount += 1;
+END;
+
+IF @FailureCount > 0
+BEGIN
+    RAISERROR(
+        N'TechBench V0005 owner-scoped V1 import verification failed with %d issue(s).',
+        16,
+        1,
+        @FailureCount);
+    RETURN;
+END;
+
+PRINT N'TechBench V0005 owner-scoped V1 import verification passed.';
+
+SELECT
+    DB_NAME() AS [DatabaseName],
+    MAX([SchemaVersion]) AS [SchemaVersion],
+    MAX
+    (
+        CASE
+            WHEN [MigrationId] = N'SqlServer2016.TechBenchV1Import.0005'
+                THEN [AppliedAtUtc]
+        END
+    ) AS [TechBenchV1ImportAppliedAtUtc]
+FROM [tb_deploy].[SchemaMigrations];
+GO
+
+-- ============================================================================
+-- END 94-V0005-TechBenchV1ImportVerify.sql
 -- ============================================================================
 
 PRINT N'TechBench deployment completed successfully on CSRI-SQL.';

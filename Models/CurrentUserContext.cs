@@ -14,5 +14,7 @@ public sealed record CurrentUserContext(
 {
     public bool CanManageClients => IsAdmin;
 
-    public bool CanRunSharedSync => IsAdmin || IsSyncOperator;
+    public bool CanRunSharedSync => IsAdmin;
+
+    public bool CanManageSharedConfiguration => IsAdmin;
 }

@@ -63,7 +63,6 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         public const string UpsertSageCustomer = "[tb_app].[SyncUpsertSageCustomer]";
         public const string RemoveStaleSageCustomers =
             "[tb_app].[SyncRemoveStaleSageCustomers]";
-        public const string SaveClientMapping = "[tb_app].[AdminSaveExternalMapping]";
         public const string MergeClients = "[tb_app].[AdminMergeClients]";
         public const string ReconcileClientMatches = "[tb_app].[ReconcileClientMatches]";
         public const string SearchWorkEntries = "[tb_app].[SearchWorkEntries]";
@@ -73,6 +72,12 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
             "[tb_app].[EnsureWorkspaceDefaults]";
         public const string GetWorkEntry = "[tb_app].[GetWorkEntry]";
         public const string GetDistinctTags = "[tb_app].[GetDistinctTags]";
+        public const string GetOrganizationTags =
+            "[tb_app].[AdminGetOrganizationTags]";
+        public const string SaveOrganizationTag =
+            "[tb_app].[AdminSaveOrganizationTag]";
+        public const string DeleteOrganizationTag =
+            "[tb_app].[AdminDeleteOrganizationTag]";
         public const string SaveWorkEntry = "[tb_app].[SaveWorkEntry]";
         public const string DeleteWorkEntry = "[tb_app].[DeleteWorkEntry]";
         public const string GetWorkEntryLinks = "[tb_app].[GetWorkEntryLinks]";
@@ -126,6 +131,20 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         public const string BeginImportBatch = "[tb_app].[BeginImportBatch]";
         public const string AddImportLegacyMapping = "[tb_app].[AddImportLegacyMapping]";
         public const string CompleteImportBatch = "[tb_app].[CompleteImportBatch]";
+        public const string BeginTechBenchV1Import =
+            "[tb_app].[BeginTechBenchV1Import]";
+        public const string ResolveTechBenchV1Reference =
+            "[tb_app].[ResolveTechBenchV1Reference]";
+        public const string ImportTechBenchV1WorkEntry =
+            "[tb_app].[ImportTechBenchV1WorkEntry]";
+        public const string ImportTechBenchV1WorkEntryLink =
+            "[tb_app].[ImportTechBenchV1WorkEntryLink]";
+        public const string ImportTechBenchV1PostingLog =
+            "[tb_app].[ImportTechBenchV1PostingLog]";
+        public const string CompleteTechBenchV1Import =
+            "[tb_app].[CompleteTechBenchV1Import]";
+        public const string AbandonTechBenchV1Import =
+            "[tb_app].[AbandonTechBenchV1Import]";
     }
 
     public void Initialize() =>
@@ -133,13 +152,17 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        await _connectionFactory.GetCurrentUserContextAsync(cancellationToken)
+        var currentUser = await _connectionFactory
+            .GetCurrentUserContextAsync(cancellationToken)
             .ConfigureAwait(false);
-        await ExecuteNonQueryAsync(
-                Procedures.EnsureWorkspaceDefaults,
-                null,
-                cancellationToken)
-            .ConfigureAwait(false);
+        if (currentUser.CanManageSharedConfiguration)
+        {
+            await ExecuteNonQueryAsync(
+                    Procedures.EnsureWorkspaceDefaults,
+                    null,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
         try
         {
             _fullTextSearchAvailable = await QueryAsync(

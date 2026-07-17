@@ -11,6 +11,8 @@ public sealed partial class MainWindowViewModel
 {
     private int _editingCommonLinkId;
     private string _editingCommonLinkScope = "Organization";
+    private string? _editingCommonLinkBuiltInKey;
+    private int _editingCommonLinkSortOrder;
     private bool _isCommonLinkEditorOpen;
     private bool _microsoftAdminOpenInChromeIncognito;
     private string _commonLinkName = string.Empty;
@@ -111,10 +113,10 @@ public sealed partial class MainWindowViewModel
             _localPreferences.MicrosoftAdminOpenInChromeIncognito;
         NewCommonLinkCommand = new RelayCommand(
             _ => StartNewCommonLink(),
-            _ => _currentUser.CanManageClients);
+            _ => _currentUser.CanManageSharedConfiguration);
         EditCommonLinkCommand = new RelayCommand(
             EditCommonLink,
-            parameter => parameter is CommonLink { Id: > 0, IsBuiltIn: false } link
+            parameter => parameter is CommonLink { Id: > 0 } link
                 && CanManageCommonLink(link));
         SaveCommonLinkCommand = new RelayCommand(_ => SaveCommonLink(), _ => CanSaveCommonLink());
         CancelCommonLinkCommand = new RelayCommand(_ => CloseCommonLinkEditor(), _ => IsCommonLinkEditorOpen);
@@ -146,8 +148,15 @@ public sealed partial class MainWindowViewModel
 
     private void StartNewCommonLink()
     {
+        if (!_currentUser.CanManageSharedConfiguration)
+        {
+            return;
+        }
+
         _editingCommonLinkId = 0;
         _editingCommonLinkScope = "Organization";
+        _editingCommonLinkBuiltInKey = null;
+        _editingCommonLinkSortOrder = 0;
         CommonLinkName = string.Empty;
         CommonLinkUrl = string.Empty;
         CommonLinkValidationMessage = string.Empty;
@@ -157,7 +166,7 @@ public sealed partial class MainWindowViewModel
 
     private void EditCommonLink(object? parameter)
     {
-        if (parameter is not CommonLink { Id: > 0, IsBuiltIn: false } link
+        if (parameter is not CommonLink { Id: > 0 } link
             || !CanManageCommonLink(link))
         {
             return;
@@ -165,6 +174,8 @@ public sealed partial class MainWindowViewModel
 
         _editingCommonLinkId = link.Id;
         _editingCommonLinkScope = link.ScopeType;
+        _editingCommonLinkBuiltInKey = link.BuiltInKey;
+        _editingCommonLinkSortOrder = link.SortOrder;
         CommonLinkName = link.Name;
         CommonLinkUrl = link.Url;
         CommonLinkValidationMessage = string.Empty;
@@ -174,13 +185,21 @@ public sealed partial class MainWindowViewModel
 
     private bool CanSaveCommonLink()
     {
-        return IsCommonLinkEditorOpen
+        return _currentUser.CanManageSharedConfiguration
+            && IsCommonLinkEditorOpen
             && !string.IsNullOrWhiteSpace(CommonLinkName)
             && !string.IsNullOrWhiteSpace(CommonLinkUrl);
     }
 
     private void SaveCommonLink()
     {
+        if (!_currentUser.CanManageSharedConfiguration)
+        {
+            CommonLinkValidationMessage =
+                "Only a TechBench Admin may change shared Common Links.";
+            return;
+        }
+
         var name = CommonLinkName.Trim();
         if (name.Length > 80)
         {
@@ -209,7 +228,9 @@ public sealed partial class MainWindowViewModel
                 Id = _editingCommonLinkId,
                 ScopeType = _editingCommonLinkScope,
                 Name = name,
-                Url = normalizedUrl
+                Url = normalizedUrl,
+                SortOrder = _editingCommonLinkSortOrder,
+                BuiltInKey = _editingCommonLinkBuiltInKey
             });
         }
         catch (Exception ex) when (ex is SqlException or InvalidOperationException or ArgumentException)
@@ -251,8 +272,10 @@ public sealed partial class MainWindowViewModel
     }
 
     private bool CanManageCommonLink(CommonLink link) =>
-        link.ScopeType.Equals("User", StringComparison.OrdinalIgnoreCase)
-        || _currentUser.CanManageClients;
+        _currentUser.CanManageSharedConfiguration
+        && link.ScopeType.Equals(
+            "Organization",
+            StringComparison.OrdinalIgnoreCase);
 
     private void OpenCommonLink(object? parameter)
     {
@@ -290,6 +313,8 @@ public sealed partial class MainWindowViewModel
     {
         _editingCommonLinkId = 0;
         _editingCommonLinkScope = "Organization";
+        _editingCommonLinkBuiltInKey = null;
+        _editingCommonLinkSortOrder = 0;
         IsCommonLinkEditorOpen = false;
         CommonLinkName = string.Empty;
         CommonLinkUrl = string.Empty;

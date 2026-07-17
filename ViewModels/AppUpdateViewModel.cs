@@ -9,7 +9,6 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
     internal static readonly TimeSpan AutomaticCheckInterval = TimeSpan.FromHours(1);
 
     private readonly IAppUpdateService _updateService;
-    private readonly Func<UpdatePreparationResult>? _runPreUpdateCheck;
     private readonly Action _prepareForRestart;
     private readonly Action _shutdownApplication;
     private readonly Func<bool> _canInstall;
@@ -27,7 +26,6 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
 
     public AppUpdateViewModel(
         IAppUpdateService updateService,
-        Func<UpdatePreparationResult>? runPreUpdateCheck,
         Action prepareForRestart,
         Action shutdownApplication,
         Func<bool> canInstall,
@@ -35,7 +33,6 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         LocalPreferences? localPreferences = null)
     {
         _updateService = updateService;
-        _runPreUpdateCheck = runPreUpdateCheck;
         _prepareForRestart = prepareForRestart;
         _shutdownApplication = shutdownApplication;
         _canInstall = canInstall;
@@ -60,24 +57,6 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
 
         _automaticCheckTimer.Interval = InitialCheckDelay;
         _automaticCheckTimer.Tick += HandleAutomaticCheckTimerTick;
-    }
-
-    public AppUpdateViewModel(
-        IAppUpdateService updateService,
-        Action prepareForRestart,
-        Action shutdownApplication,
-        Func<bool> canInstall,
-        Action<string>? notifyUpdateAvailable = null,
-        LocalPreferences? localPreferences = null)
-        : this(
-            updateService,
-            runPreUpdateCheck: null,
-            prepareForRestart,
-            shutdownApplication,
-            canInstall,
-            notifyUpdateAvailable,
-            localPreferences)
-    {
     }
 
     public AsyncRelayCommand CheckForUpdatesCommand { get; }
@@ -235,15 +214,6 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
 
             StatusText = "Saving your draft and preparing to restart...";
             _prepareForRestart();
-            if (_runPreUpdateCheck is not null)
-            {
-                var preparation = _runPreUpdateCheck();
-                if (!preparation.Succeeded)
-                {
-                    StatusText = $"Update stopped: {preparation.Message}";
-                    return;
-                }
-            }
 
             StatusText = "Installing the update and restarting TechBench...";
             _updateService.BeginApplyAndRestart();

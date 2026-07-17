@@ -71,6 +71,63 @@ function Reset-WorkspaceDirectory {
     New-Item -ItemType Directory -Path $fullPath -Force | Out-Null
 }
 
+function Assert-ServerBackedPublishOutput {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $prohibitedArtifacts = @(Get-ChildItem -LiteralPath $Path -Recurse -File | Where-Object {
+        $_.Name -match '(?i)\.(?:db|sqlite|sqlite3)(?:-(?:wal|shm|journal))?$'
+    })
+    if ($prohibitedArtifacts.Count -gt 0) {
+        $artifactNames = $prohibitedArtifacts |
+            ForEach-Object { $_.FullName.Substring($Path.Length).TrimStart('\') }
+        throw "Server-backed V2 publish contains a prohibited local database artifact: $($artifactNames -join ', ')"
+    }
+
+    $dependenciesPath = Join-Path $Path 'TechBenchV2.deps.json'
+    if (-not (Test-Path -LiteralPath $dependenciesPath)) {
+        throw "Published dependency manifest was not found: $dependenciesPath"
+    }
+
+    if (-not (Select-String -LiteralPath $dependenciesPath `
+            -Pattern 'Microsoft\.Data\.Sqlite' `
+            -Quiet)) {
+        throw 'The read-only V1 database importer dependency is missing from the V2 publish.'
+    }
+
+    foreach ($requiredAssembly in @(
+        'Microsoft.Data.Sqlite.dll',
+        'SQLitePCLRaw.core.dll',
+        'SQLitePCLRaw.provider.e_sqlite3.dll'
+    )) {
+        if (-not (Test-Path -LiteralPath (Join-Path $Path $requiredAssembly))) {
+            throw "The read-only V1 database importer assembly is missing: $requiredAssembly"
+        }
+    }
+
+    $nativeSqlite = @(Get-ChildItem -LiteralPath $Path -Recurse -File -Filter 'e_sqlite3.dll')
+    if ($nativeSqlite.Count -eq 0) {
+        throw 'The x86 native SQLite library required by the read-only V1 importer is missing.'
+    }
+
+    foreach ($nativeLibrary in $nativeSqlite) {
+        $bytes = [IO.File]::ReadAllBytes($nativeLibrary.FullName)
+        if ($bytes.Length -lt 64) {
+            throw "The native SQLite library is not a valid PE file: $($nativeLibrary.FullName)"
+        }
+
+        $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+        if ($peOffset -lt 0 -or $peOffset + 6 -gt $bytes.Length) {
+            throw "The native SQLite library has an invalid PE header: $($nativeLibrary.FullName)"
+        }
+
+        $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+        if ($machine -ne 0x014c) {
+            throw ("The V1 importer native SQLite library is not x86 (PE machine 0x{0:X4}): {1}" `
+                -f $machine, $nativeLibrary.FullName)
+        }
+    }
+}
+
 Push-Location $repoRoot
 try {
     if (-not $AllowDirty) {
@@ -143,6 +200,8 @@ try {
         "-p:AssemblyVersion=$numericVersion.0",
         "-p:FileVersion=$numericVersion.0"
     )
+
+    Assert-ServerBackedPublishOutput $publishDirectory
 
     $packArguments = @(
         'tool', 'run', 'vpk', '--',

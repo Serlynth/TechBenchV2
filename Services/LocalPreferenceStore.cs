@@ -158,10 +158,6 @@ public sealed class LocalPreferences
 
     public int RefreshIntervalMinutes { get; set; } = 5;
 
-    public bool WhdAutoSyncEnabled { get; set; } = true;
-
-    public int WhdAutoSyncMinutes { get; set; } = 5;
-
     public DateTime? LastUpdateCheckAtUtc { get; set; }
 
     public string? SkippedUpdateVersion { get; set; }
@@ -188,7 +184,6 @@ public sealed class LocalPreferences
             ? WindowState
             : "Normal";
         RefreshIntervalMinutes = Math.Clamp(RefreshIntervalMinutes, 1, 120);
-        WhdAutoSyncMinutes = Math.Clamp(WhdAutoSyncMinutes, 1, 120);
         SageDsn = SageDsn.Trim();
         SageCompanyPath = SageCompanyPath.Trim();
         SkippedUpdateVersion = string.IsNullOrWhiteSpace(SkippedUpdateVersion)

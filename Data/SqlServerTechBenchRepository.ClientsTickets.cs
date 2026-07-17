@@ -246,31 +246,6 @@ public sealed partial class SqlServerTechBenchRepository
         return saved;
     }
 
-    public void SaveClientSageMapping(
-        int clientId,
-        string sageCustomerId,
-        string? sageCustomerName = null) =>
-        SaveClientSageMappingAsync(clientId, sageCustomerId, sageCustomerName)
-            .GetAwaiter()
-            .GetResult();
-
-    public Task SaveClientSageMappingAsync(
-        int clientId,
-        string sageCustomerId,
-        string? sageCustomerName = null,
-        CancellationToken cancellationToken = default) =>
-        ExecuteNonQueryAsync(
-            Procedures.SaveClientMapping,
-            command =>
-            {
-                AddInt(command, "@ClientId", clientId);
-                AddRequiredText(command, "@Source", 80, "Sage");
-                AddRequiredText(command, "@ExternalId", 240, sageCustomerId);
-                AddText(command, "@ExternalName", 240, sageCustomerName);
-                AddGuid(command, "@RequestId", Guid.NewGuid());
-            },
-            cancellationToken);
-
     public Client MergeClientRecords(int whdClientId, int sageClientId) =>
         MergeClientRecordsAsync(whdClientId, sageClientId).GetAwaiter().GetResult();
 

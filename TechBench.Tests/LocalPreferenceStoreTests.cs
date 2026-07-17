@@ -22,8 +22,6 @@ public sealed class LocalPreferenceStoreTests
             created.WindowHeight = 900;
             created.WindowState = "Maximized";
             created.RefreshIntervalMinutes = 15;
-            created.WhdAutoSyncEnabled = false;
-            created.WhdAutoSyncMinutes = 20;
             created.SageDsn = "CSRI-SAGE";
             created.SageCompanyPath = @"C:\Sage\Company";
             created.SageNativeAutoSave = true;
@@ -49,8 +47,6 @@ public sealed class LocalPreferenceStoreTests
             Assert.Equal(900, loaded.WindowHeight);
             Assert.Equal("Maximized", loaded.WindowState);
             Assert.Equal(15, loaded.RefreshIntervalMinutes);
-            Assert.False(loaded.WhdAutoSyncEnabled);
-            Assert.Equal(20, loaded.WhdAutoSyncMinutes);
             Assert.Equal("CSRI-SAGE", loaded.SageDsn);
             Assert.Equal(@"C:\Sage\Company", loaded.SageCompanyPath);
             Assert.True(loaded.SageNativeAutoSave);
@@ -75,7 +71,6 @@ public sealed class LocalPreferenceStoreTests
                 Theme = "unexpected",
                 WindowState = "Fullscreen",
                 RefreshIntervalMinutes = -10,
-                WhdAutoSyncMinutes = 900,
                 SageDsn = "  techbench  ",
                 SageCompanyPath = "  C:\\Sage\\Company  ",
                 SkippedUpdateVersion = "   "
@@ -85,7 +80,6 @@ public sealed class LocalPreferenceStoreTests
             Assert.Equal("Dark", loaded.Theme);
             Assert.Equal("Normal", loaded.WindowState);
             Assert.Equal(1, loaded.RefreshIntervalMinutes);
-            Assert.Equal(120, loaded.WhdAutoSyncMinutes);
             Assert.Equal("techbench", loaded.SageDsn);
             Assert.Equal(@"C:\Sage\Company", loaded.SageCompanyPath);
             Assert.Null(loaded.SkippedUpdateVersion);
@@ -101,6 +95,11 @@ public sealed class LocalPreferenceStoreTests
                 .Select(static property => property.Name)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             Assert.True(allowed.SetEquals(propertyNames));
+            Assert.DoesNotContain(
+                propertyNames,
+                static name => name.Contains(
+                    "AutoSync",
+                    StringComparison.OrdinalIgnoreCase));
 
             Assert.DoesNotContain(
                 propertyNames,

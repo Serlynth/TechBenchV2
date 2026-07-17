@@ -7,6 +7,11 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
 DECLARE @FailureCount int = 0;
+DECLARE @InstalledSchemaVersion int =
+(
+    SELECT MAX([SchemaVersion])
+    FROM [tb_deploy].[SchemaMigrations]
+);
 
 IF NOT EXISTS
 (
@@ -21,13 +26,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF
-(
-    SELECT MAX([SchemaVersion])
-    FROM [tb_deploy].[SchemaMigrations]
-) <> 3
+IF @InstalledSchemaVersion NOT IN (3, 4, 5)
 BEGIN
-    PRINT N'FAIL: The installed TechBench schema version is not 3.';
+    PRINT N'FAIL: V0003 verification supports installed schema version 3, 4, or 5.';
     SET @FailureCount += 1;
 END;
 
@@ -94,7 +95,8 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF OBJECT_ID(N'tb_data.OrganizationTags', N'U') IS NOT NULL
+IF @InstalledSchemaVersion = 3
+   AND OBJECT_ID(N'tb_data.OrganizationTags', N'U') IS NOT NULL
    AND EXISTS
    (
        SELECT 1
@@ -108,7 +110,8 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF OBJECT_ID(N'tb_data.OrganizationTags', N'U') IS NOT NULL
+IF @InstalledSchemaVersion = 3
+   AND OBJECT_ID(N'tb_data.OrganizationTags', N'U') IS NOT NULL
    AND EXISTS
    (
        SELECT 1
@@ -154,12 +157,24 @@ BEGIN
 END;
 
 IF @SaveWorkEntryDefinition IS NULL
-   OR CHARINDEX(N'[tb_data].[OrganizationTags]', @SaveWorkEntryDefinition) = 0
-   OR CHARINDEX(N'UPDLOCK', @SaveWorkEntryDefinition) = 0
-   OR CHARINDEX(N'HOLDLOCK', @SaveWorkEntryDefinition) = 0
-   OR CHARINDEX(N'MERGE', @SaveWorkEntryDefinition) > 0
+   OR
+   (
+       @InstalledSchemaVersion = 3
+       AND
+       (
+           CHARINDEX(N'[tb_data].[OrganizationTags]', @SaveWorkEntryDefinition) = 0
+           OR CHARINDEX(N'UPDLOCK', @SaveWorkEntryDefinition) = 0
+           OR CHARINDEX(N'HOLDLOCK', @SaveWorkEntryDefinition) = 0
+           OR CHARINDEX(N'MERGE', @SaveWorkEntryDefinition) > 0
+       )
+   )
+   OR
+   (
+       @InstalledSchemaVersion >= 4
+       AND CHARINDEX(N'[tb_data].[OrganizationTags]', @SaveWorkEntryDefinition) > 0
+   )
 BEGIN
-    PRINT N'FAIL: SaveWorkEntry does not transaction-safely publish canonical tags without MERGE.';
+    PRINT N'FAIL: SaveWorkEntry does not implement the installed schema version tag-catalog boundary.';
     SET @FailureCount += 1;
 END;
 
@@ -302,15 +317,19 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF CHARINDEX(
-       N'Whd.BaseUrl',
-       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
-   OR CHARINDEX(
-       N'Whd.AuthenticationMode',
-       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
-   OR CHARINDEX(
-       N'Sage.ActivityItemId',
-       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
+IF @InstalledSchemaVersion = 3
+   AND
+   (
+       CHARINDEX(
+           N'Whd.BaseUrl',
+           OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
+       OR CHARINDEX(
+           N'Whd.AuthenticationMode',
+           OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
+       OR CHARINDEX(
+           N'Sage.ActivityItemId',
+           OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
+   )
 BEGIN
     PRINT N'FAIL: SaveUserSetting does not protect organization-scoped keys.';
     SET @FailureCount += 1;
@@ -337,10 +356,10 @@ BEGIN
 END;
 
 IF CHARINDEX(
-       N'CONVERT(int, 3)',
+       N'CONVERT(int, ' + CONVERT(nvarchar(10), @InstalledSchemaVersion) + N')',
        OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'))) = 0
 BEGIN
-    PRINT N'FAIL: GetRepositoryCapabilities does not report schema version 3.';
+    PRINT N'FAIL: GetRepositoryCapabilities does not report the installed schema version.';
     SET @FailureCount += 1;
 END;
 
@@ -357,15 +376,30 @@ VALUES
     (N'tb_role_user', N'tb_app.GetDistinctTags'),
     (N'tb_role_user', N'tb_app.SaveWorkEntry'),
     (N'tb_role_user', N'tb_app.GetCommonLinks'),
-    (N'tb_role_user', N'tb_app.SaveCommonLink'),
-    (N'tb_role_user', N'tb_app.DeleteCommonLink'),
     (N'tb_role_user', N'tb_app.GetClientAliases'),
-    (N'tb_role_user', N'tb_app.SaveClientAlias'),
-    (N'tb_role_user', N'tb_app.DeleteClientAlias'),
     (N'tb_role_user', N'tb_app.SaveUserSetting'),
     (N'tb_role_user', N'tb_app.DeleteUserSetting'),
     (N'tb_role_admin', N'tb_app.AdminSaveOrganizationSetting'),
     (N'tb_role_admin', N'tb_app.AdminDeleteOrganizationSetting');
+
+IF @InstalledSchemaVersion = 3
+BEGIN
+    INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
+    VALUES
+        (N'tb_role_user', N'tb_app.SaveCommonLink'),
+        (N'tb_role_user', N'tb_app.DeleteCommonLink'),
+        (N'tb_role_user', N'tb_app.SaveClientAlias'),
+        (N'tb_role_user', N'tb_app.DeleteClientAlias');
+END
+ELSE
+BEGIN
+    INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
+    VALUES
+        (N'tb_role_admin', N'tb_app.SaveCommonLink'),
+        (N'tb_role_admin', N'tb_app.DeleteCommonLink'),
+        (N'tb_role_admin', N'tb_app.SaveClientAlias'),
+        (N'tb_role_admin', N'tb_app.DeleteClientAlias');
+END;
 
 DECLARE @MissingGrantCount int =
 (

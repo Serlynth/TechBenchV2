@@ -9,7 +9,7 @@ namespace TechBench.Tests;
 public sealed class WhdRestClientTests
 {
     [Fact]
-    public async Task SyncRetainsClosedTicketsReturnedByWhd()
+    public async Task OrganizationSyncRetainsExplicitlyClosedOrDeletedTicketsReturnedByWhd()
     {
         const string responseJson = """
             [
@@ -24,6 +24,13 @@ public sealed class WhdRestClientTests
                 "subject": "Closed ticket",
                 "statustype": { "id": 2, "statusTypeName": "Closed" },
                 "clientReporter": { "id": 11, "displayName": "Closed Client" }
+              },
+              {
+                "id": 103,
+                "subject": "Deleted ticket",
+                "deleted": 1,
+                "statustype": { "id": 1, "statusTypeName": "Open" },
+                "clientReporter": { "id": 12, "displayName": "Deleted Client" }
               }
             ]
             """;
@@ -31,7 +38,7 @@ public sealed class WhdRestClientTests
         using var httpClient = new HttpClient(new JsonResponseHandler(responseJson));
         var client = new WhdRestClient(httpClient);
 
-        var result = await client.GetMyTicketsAsync(new WhdConnectionSettings
+        var result = await client.GetOrganizationTicketsAsync(new WhdConnectionSettings
         {
             BaseUrl = "https://whd.example.test",
             Username = "technician",
@@ -39,9 +46,49 @@ public sealed class WhdRestClientTests
         });
 
         Assert.True(result.Success);
-        Assert.Equal(2, result.Tickets.Count);
+        Assert.Equal(3, result.Tickets.Count);
         Assert.Contains(result.Tickets, ticket => ticket.ExternalId == "WHD-101" && !ticket.IsClosed);
         Assert.Contains(result.Tickets, ticket => ticket.ExternalId == "WHD-102" && ticket.IsClosed);
+        Assert.Contains(result.Tickets, ticket => ticket.ExternalId == "WHD-103" && ticket.IsClosed);
+        Assert.Contains("organization", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("assigned", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task OrganizationSyncUsesTicketsResourceAndAllTicketQualifierOnEveryPage()
+    {
+        var firstPage = JsonSerializer.Serialize(Enumerable.Range(1, 100).Select(id => new
+        {
+            id,
+            subject = $"Ticket {id}",
+            statustype = new { id = 1, statusTypeName = "Open" },
+            clientReporter = new { id, displayName = $"Client {id}" }
+        }));
+        var handler = new RecordingHandler(request =>
+        {
+            var query = Uri.UnescapeDataString(request.RequestUri?.Query ?? string.Empty);
+            return Json(HttpStatusCode.OK, query.Contains("page=1", StringComparison.Ordinal)
+                ? firstPage
+                : "[]");
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetOrganizationTicketsAsync(ExplicitSettings());
+
+        Assert.True(result.Success, result.Message);
+        Assert.True(result.IsComplete);
+        Assert.Equal(100, result.Tickets.Count);
+        Assert.Equal(2, handler.Requests.Count);
+        foreach (var request in handler.Requests)
+        {
+            Assert.EndsWith("/Tickets", request.Uri?.AbsolutePath, StringComparison.Ordinal);
+            Assert.DoesNotContain("/Tickets/mine", request.Uri?.AbsolutePath, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(
+                "qualifier=((deleted = null) or (deleted = 0) or (deleted = 1))",
+                Uri.UnescapeDataString(request.Uri?.Query ?? string.Empty),
+                StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -51,7 +98,7 @@ public sealed class WhdRestClientTests
         using var httpClient = new HttpClient(handler);
         var client = new WhdRestClient(httpClient);
 
-        var result = await client.GetMyTicketsAsync(new WhdConnectionSettings
+        var result = await client.GetOrganizationTicketsAsync(new WhdConnectionSettings
         {
             BaseUrl = "http://whd.example.test",
             Username = "technician",
@@ -200,7 +247,7 @@ public sealed class WhdRestClientTests
         using var httpClient = new HttpClient(handler);
         var client = new WhdRestClient(httpClient);
 
-        var result = await client.GetMyTicketsAsync(ExplicitSettings());
+        var result = await client.GetOrganizationTicketsAsync(ExplicitSettings());
 
         Assert.True(result.Success);
         Assert.False(result.IsComplete);
@@ -233,7 +280,7 @@ public sealed class WhdRestClientTests
     }
 
     [Fact]
-    public async Task AutoAuthenticationIsDetectedOnlyOncePerConnection()
+    public async Task AutoAuthenticationUsesPermissionLightProbeOnlyOncePerConnection()
     {
         const string response = "[{\"id\":1,\"subject\":\"One\",\"clientReporter\":{\"id\":1,\"displayName\":\"Client\"}}]";
         var handler = new RecordingHandler(_ => Json(HttpStatusCode.OK, response));
@@ -246,9 +293,24 @@ public sealed class WhdRestClientTests
             Secret = "secret"
         };
 
-        Assert.True((await client.GetMyTicketsAsync(settings)).Success);
-        Assert.True((await client.GetMyTicketsAsync(settings)).Success);
+        Assert.True((await client.GetOrganizationTicketsAsync(settings)).Success);
+        Assert.True((await client.GetOrganizationTicketsAsync(settings)).Success);
         Assert.Equal(3, handler.RequestCount);
+        Assert.EndsWith("/Tickets/mine", handler.Requests[0].Uri?.AbsolutePath, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "qualifier=",
+            Uri.UnescapeDataString(handler.Requests[0].Uri?.Query ?? string.Empty),
+            StringComparison.OrdinalIgnoreCase);
+        Assert.All(
+            handler.Requests.Skip(1),
+            request =>
+            {
+                Assert.EndsWith("/Tickets", request.Uri?.AbsolutePath, StringComparison.Ordinal);
+                Assert.Contains(
+                    "qualifier=((deleted = null) or (deleted = 0) or (deleted = 1))",
+                    Uri.UnescapeDataString(request.Uri?.Query ?? string.Empty),
+                    StringComparison.Ordinal);
+            });
     }
 
     [Fact]
