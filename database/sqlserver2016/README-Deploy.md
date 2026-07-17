@@ -67,13 +67,20 @@ Run the scripts in this order:
 1. `00-Preflight.sql`
 2. `10-CreateDatabase.sql`
 3. `20-BaselineSchema.sql`
-4. `30-Security.sql`
-5. `40-StoredProcedures.sql`
-6. `50-Grants.sql`
-7. `90-Verify.sql`
+4. `21-V0002-OperationalSchema.sql`
+5. `30-Security.sql`
+6. `40-StoredProcedures.sql`
+7. `41-V0002-WorkProcedures.sql`
+8. `42-V0002-SharedProcedures.sql`
+9. `43-V0002-PostingProcedures.sql`
+10. `44-V0002-SyncImportProcedures.sql`
+11. `50-Grants.sql`
+12. `51-V0002-OperationalGrants.sql`
+13. `90-Verify.sql`
+14. `91-V0002-OperationalVerify.sql`
 
-The scripts are idempotent for the Phase 1 baseline and stop on validation or
-deployment errors.
+The scripts are idempotent for the Phase 1 baseline and the V0002 operational
+storage migration. They stop on validation or deployment errors.
 
 ## Database behavior
 
@@ -96,6 +103,14 @@ checks, retention, and restore testing remain DBA/operations responsibilities.
 - `tb_app.SearchClients` and `tb_app.GetClient` read shared clients.
 - `tb_app.AdminSaveClient` creates or updates clients for application
   administrators and uses SQL Server `rowversion` conflict detection.
+- V0002 procedures store tickets, work entries, owner-private Personal Notes,
+  links, drafts, templates, Common Links, organization/user settings, aliases,
+  posting coordination, synchronization runs, imports, and legacy mappings.
+- `tb_app.EnsureWorkspaceDefaults` idempotently creates the original seven
+  built-in Common Links and seven note templates after the first authenticated
+  application user has been registered.
+- Device-specific preferences remain in the workstation-local JSON settings
+  file; they are intentionally not stored in SQL Server.
 - `tb_app.ReadAuditEvents` is restricted to application administrators.
 
 The application roles receive no direct table write access. Client changes and

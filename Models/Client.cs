@@ -15,6 +15,7 @@ public sealed class Client
     public string? SageContactName { get; set; }
     public string? SageTelephone { get; set; }
     public string MatchStatus { get; set; } = "Unmatched";
+    public byte[]? RowVersion { get; set; }
 
     public string DisplayName => IsActive ? Name : $"{Name} (inactive)";
     public string SourceLabel => string.IsNullOrWhiteSpace(Source) ? "WHD" : Source;

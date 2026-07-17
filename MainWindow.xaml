@@ -455,7 +455,7 @@
                 <StackPanel DockPanel.Dock="Bottom">
                     <Border Background="{DynamicResource ControlBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12" Margin="0,12,0,0">
                         <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,7"><Ellipse Width="7" Height="7" Fill="{DynamicResource SuccessBrush}" Margin="0,0,8,0"/><TextBlock Text="LOCAL WORKSPACE" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource SecondaryTextBrush}"/></StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,7"><Ellipse Width="7" Height="7" Fill="{DynamicResource SuccessBrush}" Margin="0,0,8,0"/><TextBlock Text="SHARED SQL WORKSPACE" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource SecondaryTextBrush}"/></StackPanel>
                             <TextBlock Text="{Binding StatusMessage}"
                                        Foreground="{DynamicResource MutedTextBrush}"
                                        FontSize="11"
@@ -2976,6 +2976,7 @@
                                         <StackPanel>
                                             <CheckBox Content="Auto-sync assigned tickets"
                                                       IsChecked="{Binding WhdAutoSyncEnabled}"
+                                                      IsEnabled="{Binding CanRunSharedSync}"
                                                       Margin="0,0,0,10" />
                                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                                 <TextBlock Text="Every"
@@ -2983,6 +2984,7 @@
                                                            VerticalAlignment="Center"
                                                            Margin="0,0,8,0" />
                                                 <TextBox Text="{Binding WhdAutoSyncMinutesText, UpdateSourceTrigger=PropertyChanged}"
+                                                         IsEnabled="{Binding CanRunSharedSync}"
                                                          Width="58"
                                                          Margin="0,0,8,0" />
                                                 <TextBlock Text="minutes"
@@ -3161,78 +3163,6 @@
                                                 Style="{StaticResource PrimaryButtonStyle}" />
                                     </StackPanel>
                                 </Grid>
-                            </Grid>
-                        </Border>
-
-                        <Border Style="{StaticResource CardStyle}" Margin="0,14,0,0">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0" Margin="0,0,24,0">
-                                    <TextBlock Text="Local Data Safety" Style="{StaticResource SectionHeadingStyle}" />
-                                    <TextBlock Text="{Binding DatabaseHealthLabel}"
-                                               TextWrapping="Wrap"
-                                               Margin="0,0,0,6">
-                                        <TextBlock.Style>
-                                            <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource MutedTextStyle}">
-                                                <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding IsDatabaseHealthy}" Value="False">
-                                                        <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
-                                    <TextBlock Text="{Binding LastDatabaseBackupLabel}"
-                                               Style="{StaticResource MutedTextStyle}"
-                                               Margin="0,0,0,6" />
-                                    <TextBlock Text="Current database" Style="{StaticResource FieldLabelStyle}" Margin="0,4,0,2" />
-                                    <TextBlock Text="{Binding DatabasePath}"
-                                               Style="{StaticResource MutedTextStyle}"
-                                               TextTrimming="CharacterEllipsis"
-                                               ToolTip="{Binding DatabasePath}"
-                                               Margin="0,0,0,6" />
-                                    <TextBlock Text="{Binding DatabaseBackupDirectory}"
-                                               Style="{StaticResource MutedTextStyle}"
-                                               TextTrimming="CharacterEllipsis"
-                                               ToolTip="{Binding DatabaseBackupDirectory}" />
-                                    <TextBlock Text="OneDrive/Dropbox storage is supported for moving between PCs, but the database must only be open on one computer at a time."
-                                               Style="{StaticResource MutedTextStyle}"
-                                               TextWrapping="Wrap"
-                                               Margin="0,7,0,0" />
-                                </StackPanel>
-                                <WrapPanel Grid.Column="1"
-                                           HorizontalAlignment="Right"
-                                           VerticalAlignment="Center">
-                                    <Button Content="Move Database"
-                                            Command="{Binding MoveDatabaseCommand}"
-                                            MinWidth="122"
-                                            Margin="0,0,8,8" />
-                                    <Button Content="Use Existing"
-                                            Command="{Binding UseExistingDatabaseCommand}"
-                                            MinWidth="112"
-                                            Margin="0,0,8,8" />
-                                    <Button Content="Open Database"
-                                            Command="{Binding OpenDatabaseFolderCommand}"
-                                            MinWidth="116"
-                                            Margin="0,0,8,8" />
-                                    <Button Content="Back Up Now"
-                                            Command="{Binding BackupDatabaseCommand}"
-                                            Style="{StaticResource PrimaryButtonStyle}"
-                                            MinWidth="112"
-                                            Margin="0,0,8,8" />
-                                    <Button Content="Check Integrity"
-                                            Command="{Binding CheckDatabaseHealthCommand}"
-                                            MinWidth="118"
-                                            Margin="0,0,8,8" />
-                                    <Button Content="Open Backups"
-                                            Command="{Binding OpenBackupFolderCommand}"
-                                            MinWidth="112"
-                                            Margin="0,0,0,8" />
-                                </WrapPanel>
                             </Grid>
                         </Border>
 

@@ -17,10 +17,17 @@ $orderedScripts = @(
     '00-Preflight.sql'
     '10-CreateDatabase.sql'
     '20-BaselineSchema.sql'
+    '21-V0002-OperationalSchema.sql'
     '30-Security.sql'
     '40-StoredProcedures.sql'
+    '41-V0002-WorkProcedures.sql'
+    '42-V0002-SharedProcedures.sql'
+    '43-V0002-PostingProcedures.sql'
+    '44-V0002-SyncImportProcedures.sql'
     '50-Grants.sql'
+    '51-V0002-OperationalGrants.sql'
     '90-Verify.sql'
+    '91-V0002-OperationalVerify.sql'
 )
 
 $sections = [System.Collections.Generic.List[string]]::new()

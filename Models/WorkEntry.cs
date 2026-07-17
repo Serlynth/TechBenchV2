@@ -28,6 +28,8 @@ public sealed class WorkEntry
     public string? LastError { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.Now;
     public DateTime UpdatedAt { get; set; } = DateTime.Now;
+    public byte[]? RowVersion { get; set; }
+    public byte[]? PersonalNoteRowVersion { get; set; }
 
     public string ClientName { get; set; } = string.Empty;
     public string? TicketNumber { get; set; }

@@ -278,7 +278,7 @@ public sealed partial class MainWindowViewModel
         entry.WhdPosted = true;
         entry.WhdPostedAt = DateTime.Now;
         entry.LastError = null;
-        TechBenchRepository.UpdatePostingStatus(entry);
+        WorkEntryPostingStatusCalculator.Update(entry);
         _repository.SaveWorkEntry(entry);
         _repository.AddPostingLog(new PostingLog
         {
@@ -305,7 +305,7 @@ public sealed partial class MainWindowViewModel
             ? message
             : $"WHD sync pending: {message}";
         entry.LastError = fullMessage;
-        TechBenchRepository.UpdatePostingStatus(entry);
+        WorkEntryPostingStatusCalculator.Update(entry);
         _repository.SaveWorkEntry(entry);
         _repository.AddPostingLog(new PostingLog
         {
@@ -329,7 +329,7 @@ public sealed partial class MainWindowViewModel
     {
         var fullMessage = $"WHD sync conflict: {message}";
         entry.LastError = fullMessage;
-        TechBenchRepository.UpdatePostingStatus(entry);
+        WorkEntryPostingStatusCalculator.Update(entry);
         _repository.SaveWorkEntry(entry);
         _repository.AddPostingLog(new PostingLog
         {

@@ -9,6 +9,7 @@ public sealed class TicketStatusOption
     public int? WhdStatusTypeId { get; set; }
     public bool IsClosed { get; set; }
     public DateTime? LastSyncedAt { get; set; }
+    public byte[]? RowVersion { get; set; }
 
     public string DisplayName => string.IsNullOrWhiteSpace(Name) ? "Open" : Name;
 }

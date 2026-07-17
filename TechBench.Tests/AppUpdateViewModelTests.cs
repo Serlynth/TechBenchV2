@@ -80,7 +80,7 @@ public sealed class AppUpdateViewModelTests
     }
 
     [Fact]
-    public async Task DownloadAndInstall_PreparesBacksUpAndRequestsRestart()
+    public async Task DownloadAndInstall_PreparesAndRequestsRestart()
     {
         var prepared = false;
         var shutDown = false;
@@ -103,7 +103,7 @@ public sealed class AppUpdateViewModelTests
     }
 
     [Fact]
-    public async Task DownloadAndInstall_StopsWhenBackupFails()
+    public async Task DownloadAndInstall_StopsWhenPreparationFails()
     {
         var shutDown = false;
         var service = new FakeAppUpdateService
@@ -112,9 +112,8 @@ public sealed class AppUpdateViewModelTests
         };
         using var viewModel = CreateViewModel(
             service,
-            createBackup: () => new DatabaseBackupResult(
+            runPreUpdateCheck: () => new UpdatePreparationResult(
                 Succeeded: false,
-                Created: false,
                 Message: "Backup failed."),
             shutdownApplication: () => shutDown = true);
         await viewModel.CheckForUpdatesAsync(userInitiated: true);
@@ -140,16 +139,15 @@ public sealed class AppUpdateViewModelTests
 
     private static AppUpdateViewModel CreateViewModel(
         FakeAppUpdateService service,
-        Func<DatabaseBackupResult>? createBackup = null,
+        Func<UpdatePreparationResult>? runPreUpdateCheck = null,
         Action? prepareForRestart = null,
         Action? shutdownApplication = null,
         Action<string>? notifyUpdateAvailable = null)
     {
         return new AppUpdateViewModel(
             service,
-            createBackup ?? (() => new DatabaseBackupResult(
+            runPreUpdateCheck ?? (() => new UpdatePreparationResult(
                 Succeeded: true,
-                Created: true,
                 Message: "Backup created.")),
             prepareForRestart ?? (() => { }),
             shutdownApplication ?? (() => { }),

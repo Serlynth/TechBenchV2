@@ -13,7 +13,8 @@ public partial class DatabaseConnectionWindow : Window
         string? initialStatus = null)
     {
         InitializeComponent();
-        ServerTextBox.Text = initialOptions?.Server ?? string.Empty;
+        ServerTextBox.Text =
+            initialOptions?.Server ?? SqlServerConnectionOptions.DefaultServerName;
         DatabaseTextBox.Text =
             initialOptions?.Database ?? SqlServerConnectionOptions.DefaultDatabaseName;
         TrustServerCertificateCheckBox.IsChecked =

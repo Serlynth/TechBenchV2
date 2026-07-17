@@ -8,7 +8,7 @@ using TechBench.Services;
 
 namespace TechBench.Data;
 
-public sealed class TechBenchRepository
+public sealed class TechBenchRepository : ITechBenchRepository
 {
     private const string ClientSelectColumns = """
         Id, Name, Source, ExternalId, IsActive, LastSyncedAt,
@@ -1864,7 +1864,8 @@ public sealed class TechBenchRepository
         int attemptId,
         PostingAttemptStatus status,
         string message,
-        string? externalReference = null)
+        string? externalReference = null,
+        bool markPosted = true)
     {
         if (status == PostingAttemptStatus.Started)
         {
@@ -1936,6 +1937,74 @@ public sealed class TechBenchRepository
         command.Parameters.AddWithValue("$message", message);
         command.Parameters.AddWithValue("$completedAt", ToDbDateTime(DateTime.Now));
         return command.ExecuteNonQuery();
+    }
+
+    public void MarkWorkEntryPosted(
+        int workEntryId,
+        string destination,
+        string message,
+        string? externalReference = null)
+    {
+        var normalizedDestination = destination.Trim();
+        if (normalizedDestination is not ("WHD" or "Sage"))
+        {
+            throw new ArgumentException(
+                "Destination must be WHD or Sage.",
+                nameof(destination));
+        }
+
+        var entry = GetWorkEntry(workEntryId)
+            ?? throw new InvalidOperationException(
+                "The work entry no longer exists.");
+        if (entry.SagePosted)
+        {
+            throw new InvalidOperationException(
+                "Entries posted to Sage are permanently locked.");
+        }
+
+        if (normalizedDestination == "WHD")
+        {
+            if (entry.WhdPosted)
+            {
+                throw new InvalidOperationException(
+                    "The work entry is already marked posted to WHD.");
+            }
+
+            entry.WhdPosted = true;
+            entry.WhdPostedAt = DateTime.Now;
+        }
+        else
+        {
+            entry.SagePosted = true;
+            entry.SagePostedAt = DateTime.Now;
+            if (!string.IsNullOrWhiteSpace(externalReference))
+            {
+                entry.SageTicketNumber = externalReference.StartsWith(
+                    "SAGE-",
+                    StringComparison.OrdinalIgnoreCase)
+                    ? externalReference[5..]
+                    : externalReference;
+            }
+        }
+
+        entry.LastError = null;
+        WorkEntryPostingStatusCalculator.Update(entry);
+        SaveWorkEntry(entry);
+        ResolveOutstandingPostingAttempts(
+            workEntryId,
+            normalizedDestination,
+            message,
+            externalReference);
+        AddPostingLog(new PostingLog
+        {
+            WorkEntryId = workEntryId,
+            Destination = normalizedDestination,
+            Payload = "Manual external verification",
+            Success = true,
+            Message = message,
+            ExternalReference = externalReference,
+            CreatedAt = DateTime.Now
+        });
     }
 
     public bool HasSuccessfulSageDraftLog(int workEntryId)
@@ -2024,26 +2093,6 @@ public sealed class TechBenchRepository
         }
 
         return logs;
-    }
-
-    public static void UpdatePostingStatus(WorkEntry entry)
-    {
-        if (!string.IsNullOrWhiteSpace(entry.LastError))
-        {
-            entry.PostingStatus = PostingStatus.Failed;
-            return;
-        }
-
-        entry.PostingStatus = (entry.WhdPosted, entry.SagePosted) switch
-        {
-            (true, true) => PostingStatus.PostedToBoth,
-            (true, false) => PostingStatus.PostedToWhd,
-            (false, true) => PostingStatus.PostedToSage,
-            _ when entry.DurationMinutes > 0
-                && (entry.ClientId is > 0 || !string.IsNullOrWhiteSpace(entry.ManualClientName))
-                && !string.IsNullOrWhiteSpace(entry.Note) => PostingStatus.Ready,
-            _ => PostingStatus.Draft
-        };
     }
 
     private static void EnsureClientSyncColumns(SqliteConnection connection)

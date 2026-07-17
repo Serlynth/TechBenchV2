@@ -3,15 +3,11 @@ using TechBench.Models;
 
 namespace TechBench.Providers;
 
-/// <summary>
-/// Adapts the authoritative SQL repository to the client-search provider
-/// contract while preserving repository row-version tracking.
-/// </summary>
-public sealed class SqlServerClientProvider : IClientProvider
+public sealed class SqlServerTicketProvider : ITicketProvider
 {
     private readonly SqlServerTechBenchRepository _repository;
 
-    public SqlServerClientProvider(SqlServerTechBenchRepository repository)
+    public SqlServerTicketProvider(SqlServerTechBenchRepository repository)
     {
         _repository = repository
             ?? throw new ArgumentNullException(nameof(repository));
@@ -19,11 +15,13 @@ public sealed class SqlServerClientProvider : IClientProvider
 
     public string SourceName => "TechBench V2 SQL Server";
 
-    public Task<IReadOnlyList<Client>> SearchClientsAsync(
+    public Task<IReadOnlyList<Ticket>> SearchTicketsAsync(
+        int clientId,
         string? searchTerm,
         CancellationToken cancellationToken = default) =>
-        _repository.GetClientsAsync(
-            includeInactive: false,
+        _repository.GetTicketsAsync(
+            clientId,
             searchTerm,
+            includeClosed: false,
             cancellationToken);
 }

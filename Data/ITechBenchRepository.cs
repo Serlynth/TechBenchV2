@@ -1,0 +1,176 @@
+using TechBench.Models;
+
+namespace TechBench.Data;
+
+/// <summary>
+/// Persistence contract for the SQL Server-backed V2 workspace. Synchronous
+/// members keep the WPF command model simple while the implementation also
+/// exposes asynchronous operations for server-bound workflows.
+/// </summary>
+public interface ITechBenchRepository
+{
+    string DatabasePath { get; }
+
+    bool FullTextSearchAvailable { get; }
+
+    void Initialize();
+
+    IReadOnlyList<Client> GetClients(bool includeInactive = false, string? searchTerm = null);
+
+    Client? GetClient(int id);
+
+    int SaveClient(Client client);
+
+    void SynchronizeServerClientCache(IReadOnlyList<Client> clients);
+
+    IReadOnlyList<Ticket> GetTickets(
+        int? clientId = null,
+        string? searchTerm = null,
+        bool includeClosed = false);
+
+    Ticket? GetTicket(int id);
+
+    int SaveTicket(Ticket ticket);
+
+    IReadOnlyList<TicketStatusOption> GetTicketStatusOptions();
+
+    int UpsertTicketStatusOption(TicketStatusOption option);
+
+    int UpsertSyncedClient(Client client);
+
+    int UpsertSageCustomer(SageCustomer customer, DateTime? syncedAt = null);
+
+    void SaveClientSageMapping(
+        int clientId,
+        string sageCustomerId,
+        string? sageCustomerName = null);
+
+    Client MergeClientRecords(int whdClientId, int sageClientId);
+
+    int ReconcileExactClientMatches();
+
+    int ReconcileStrongClientMatches();
+
+    int ReconcileSafeClientMatches();
+
+    int RemoveStaleSageCustomers(
+        IReadOnlyCollection<string> activeSageCustomerIds,
+        DateTime? syncedAt = null);
+
+    Client? TryAutoMatchSageCustomerForClient(int clientId);
+
+    int UpsertSyncedTicket(Ticket ticket);
+
+    void SynchronizeWhdTickets(
+        IReadOnlyList<WhdSyncedTicket> whdTickets,
+        DateTime syncedAt,
+        bool reconcileMissing);
+
+    int SynchronizeWhdClients(
+        IReadOnlyList<WhdSyncedClient> whdClients,
+        DateTime syncedAt,
+        bool reconcileMissing = false);
+
+    (int SavedCount, int StaleCount) SynchronizeSageCustomers(
+        IReadOnlyList<SageCustomer> customers,
+        DateTime syncedAt);
+
+    IReadOnlyList<WorkEntry> GetWorkEntries(WorkEntryQuery query);
+
+    IReadOnlyList<string> GetDistinctTags();
+
+    WorkEntry? GetWorkEntry(int id);
+
+    int SaveWorkEntry(WorkEntry entry);
+
+    int ImportWorkEntries(
+        IEnumerable<WorkEntry> entries,
+        IReadOnlyDictionary<string, int>? clientAliases = null);
+
+    void DeleteWorkEntry(int id);
+
+    IReadOnlyList<WorkEntryLink> GetWorkEntryLinks(int workEntryId);
+
+    int SaveWorkEntryLink(
+        int sourceWorkEntryId,
+        int targetWorkEntryId,
+        WorkEntryLinkType linkType);
+
+    void DeleteWorkEntryLink(int linkId);
+
+    IReadOnlyList<NoteTemplate> GetTemplates();
+
+    int SaveTemplate(NoteTemplate template);
+
+    void DeleteTemplate(int id);
+
+    EditorDraft? GetEditorDraft();
+
+    void SaveEditorDraft(EditorDraft draft);
+
+    void ClearEditorDraft();
+
+    IReadOnlyDictionary<string, int> GetClientAliases();
+
+    void SaveClientAlias(string alias, int clientId);
+
+    IReadOnlyList<CommonLink> GetCommonLinks();
+
+    int SaveCommonLink(CommonLink link);
+
+    void DeleteCommonLink(int id);
+
+    IReadOnlyDictionary<string, string> GetSettings();
+
+    string GetSetting(string key, string fallback = "");
+
+    void SaveSetting(string key, string value);
+
+    void DeleteSetting(string key);
+
+    void AddPostingLog(PostingLog log);
+
+    PostingLog? GetLatestVerifiedWhdPostingLog(int workEntryId);
+
+    PostingAttemptStartResult TryBeginPostingAttempt(
+        int workEntryId,
+        string destination,
+        string attemptKey,
+        string payloadHash);
+
+    PostingAttempt? GetOutstandingPostingAttempt(int workEntryId, string destination);
+
+    void CompletePostingAttempt(
+        int attemptId,
+        PostingAttemptStatus status,
+        string message,
+        string? externalReference = null,
+        bool markPosted = true);
+
+    int ResolveOutstandingPostingAttempts(
+        int workEntryId,
+        string destination,
+        string message,
+        string? externalReference = null);
+
+    int AbandonOutstandingPostingAttempts(
+        int workEntryId,
+        string destination,
+        string message);
+
+    void MarkWorkEntryPosted(
+        int workEntryId,
+        string destination,
+        string message,
+        string? externalReference = null);
+
+    bool HasSuccessfulSageDraftLog(int workEntryId);
+
+    IReadOnlyList<PostingLog> GetPostingLogs(
+        string? destination = null,
+        bool? success = null,
+        string? keyword = null,
+        DateTime? startDate = null,
+        DateTime? endDate = null,
+        int limit = 250);
+}

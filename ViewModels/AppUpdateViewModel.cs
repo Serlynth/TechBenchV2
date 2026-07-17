@@ -9,11 +9,12 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
     internal static readonly TimeSpan AutomaticCheckInterval = TimeSpan.FromHours(1);
 
     private readonly IAppUpdateService _updateService;
-    private readonly Func<DatabaseBackupResult> _createPreUpdateBackup;
+    private readonly Func<UpdatePreparationResult>? _runPreUpdateCheck;
     private readonly Action _prepareForRestart;
     private readonly Action _shutdownApplication;
     private readonly Func<bool> _canInstall;
     private readonly Action<string> _notifyUpdateAvailable;
+    private readonly LocalPreferences? _localPreferences;
     private readonly DispatcherTimer _automaticCheckTimer = new();
     private AppUpdateRelease? _availableUpdate;
     private bool _isChecking;
@@ -26,18 +27,20 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
 
     public AppUpdateViewModel(
         IAppUpdateService updateService,
-        Func<DatabaseBackupResult> createPreUpdateBackup,
+        Func<UpdatePreparationResult>? runPreUpdateCheck,
         Action prepareForRestart,
         Action shutdownApplication,
         Func<bool> canInstall,
-        Action<string>? notifyUpdateAvailable = null)
+        Action<string>? notifyUpdateAvailable = null,
+        LocalPreferences? localPreferences = null)
     {
         _updateService = updateService;
-        _createPreUpdateBackup = createPreUpdateBackup;
+        _runPreUpdateCheck = runPreUpdateCheck;
         _prepareForRestart = prepareForRestart;
         _shutdownApplication = shutdownApplication;
         _canInstall = canInstall;
         _notifyUpdateAvailable = notifyUpdateAvailable ?? (_ => { });
+        _localPreferences = localPreferences;
         _statusText = updateService.IsInstalled
             ? "TechBench checks for stable updates automatically."
             : "Install TechBench with Setup.exe to enable automatic updates.";
@@ -57,6 +60,24 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
 
         _automaticCheckTimer.Interval = InitialCheckDelay;
         _automaticCheckTimer.Tick += HandleAutomaticCheckTimerTick;
+    }
+
+    public AppUpdateViewModel(
+        IAppUpdateService updateService,
+        Action prepareForRestart,
+        Action shutdownApplication,
+        Func<bool> canInstall,
+        Action<string>? notifyUpdateAvailable = null,
+        LocalPreferences? localPreferences = null)
+        : this(
+            updateService,
+            runPreUpdateCheck: null,
+            prepareForRestart,
+            shutdownApplication,
+            canInstall,
+            notifyUpdateAvailable,
+            localPreferences)
+    {
     }
 
     public AsyncRelayCommand CheckForUpdatesCommand { get; }
@@ -121,6 +142,11 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         }
 
         _completedVersion = version.Trim();
+        if (_localPreferences is not null)
+        {
+            _localPreferences.SkippedUpdateVersion = null;
+            TrySaveLocalPreferences();
+        }
         _isBannerDismissed = false;
         StatusText = $"Updated successfully to version {_completedVersion}.";
         RaiseDisplayProperties();
@@ -164,8 +190,12 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
             _completedVersion = null;
             _isBannerDismissed = update is not null
                 && !userInitiated
-                && string.Equals(previousVersion, update.Version, StringComparison.OrdinalIgnoreCase)
-                && _isBannerDismissed;
+                && ((string.Equals(previousVersion, update.Version, StringComparison.OrdinalIgnoreCase)
+                        && _isBannerDismissed)
+                    || string.Equals(
+                        _localPreferences?.SkippedUpdateVersion,
+                        update.Version,
+                        StringComparison.OrdinalIgnoreCase));
             StatusText = update is null
                 ? $"TechBench {_updateService.CurrentVersion} is up to date."
                 : $"Version {update.Version} is ready to download.";
@@ -178,6 +208,11 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            if (_localPreferences is not null)
+            {
+                _localPreferences.LastUpdateCheckAtUtc = DateTime.UtcNow;
+                TrySaveLocalPreferences();
+            }
             SetChecking(false);
         }
     }
@@ -198,13 +233,16 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
             var progress = new Progress<int>(SetDownloadProgress);
             await _updateService.DownloadUpdateAsync(progress);
 
-            StatusText = "Saving your draft and creating a verified database backup...";
+            StatusText = "Saving your draft and preparing to restart...";
             _prepareForRestart();
-            var backup = _createPreUpdateBackup();
-            if (!backup.Succeeded)
+            if (_runPreUpdateCheck is not null)
             {
-                StatusText = $"Update stopped: {backup.Message}";
-                return;
+                var preparation = _runPreUpdateCheck();
+                if (!preparation.Succeeded)
+                {
+                    StatusText = $"Update stopped: {preparation.Message}";
+                    return;
+                }
             }
 
             StatusText = "Installing the update and restarting TechBench...";
@@ -232,7 +270,24 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
     private void DismissBanner()
     {
         _isBannerDismissed = true;
+        if (_localPreferences is not null && _availableUpdate is not null)
+        {
+            _localPreferences.SkippedUpdateVersion = _availableUpdate.Version;
+            TrySaveLocalPreferences();
+        }
         RaiseDisplayProperties();
+    }
+
+    private void TrySaveLocalPreferences()
+    {
+        try
+        {
+            LocalPreferenceStore.Save(_localPreferences!);
+        }
+        catch
+        {
+            // Update checks must remain usable if local preference persistence fails.
+        }
     }
 
     private void ShowUpdateBanner()

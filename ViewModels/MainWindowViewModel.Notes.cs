@@ -228,7 +228,10 @@ public sealed partial class MainWindowViewModel
         ImportGoogleSheetsCommand = new RelayCommand(_ => ImportGoogleSheetsCsv(), _ => !IsEntryOperationRunning);
         NewNoteTemplateCommand = new RelayCommand(_ => StartNewNoteTemplate());
         SaveNoteTemplateCommand = new RelayCommand(_ => SaveManagedNoteTemplate(), _ => CanSaveManagedNoteTemplate());
-        DeleteNoteTemplateCommand = new RelayCommand(_ => DeleteManagedNoteTemplate(), _ => ManagedNoteTemplate is { Id: > 0 });
+        DeleteNoteTemplateCommand = new RelayCommand(
+            _ => DeleteManagedNoteTemplate(),
+            _ => ManagedNoteTemplate is { Id: > 0 } template
+                && CanManageNoteTemplate(template));
 
         FollowUpOptions.Add(new FollowUpOption(FollowUpState.None, "None"));
         FollowUpOptions.Add(new FollowUpOption(FollowUpState.FollowUp, "Follow-up"));
@@ -724,7 +727,9 @@ public sealed partial class MainWindowViewModel
     private bool CanSaveManagedNoteTemplate()
     {
         return !string.IsNullOrWhiteSpace(TemplateName)
-            && !string.IsNullOrWhiteSpace(TemplateText);
+            && !string.IsNullOrWhiteSpace(TemplateText)
+            && (ManagedNoteTemplate is null
+                || CanManageNoteTemplate(ManagedNoteTemplate));
     }
 
     private void SaveManagedNoteTemplate()
@@ -737,6 +742,7 @@ public sealed partial class MainWindowViewModel
         var template = new NoteTemplate
         {
             Id = ManagedNoteTemplate?.Id ?? 0,
+            ScopeType = ManagedNoteTemplate?.ScopeType ?? "User",
             Name = TemplateName.Trim(),
             Category = TemplateCategory.Trim(),
             TemplateText = TemplateText.Trim()
@@ -749,6 +755,7 @@ public sealed partial class MainWindowViewModel
     private void DeleteManagedNoteTemplate()
     {
         if (ManagedNoteTemplate is not { Id: > 0 } template
+            || !CanManageNoteTemplate(template)
             || !_dialogService.Confirm(
                 "Delete template",
                 $"Delete the note template '{template.Name}'?",
@@ -763,6 +770,10 @@ public sealed partial class MainWindowViewModel
         StartNewNoteTemplate();
         StatusMessage = "Note template deleted.";
     }
+
+    private bool CanManageNoteTemplate(NoteTemplate template) =>
+        template.ScopeType.Equals("User", StringComparison.OrdinalIgnoreCase)
+        || _currentUser.CanManageClients;
 
     private void ReloadNoteTemplates(int? selectedId = null)
     {

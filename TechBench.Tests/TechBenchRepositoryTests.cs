@@ -1,5 +1,6 @@
 using TechBench.Data;
 using TechBench.Models;
+using TechBench.Services;
 using Microsoft.Data.Sqlite;
 
 namespace TechBench.Tests;
@@ -120,7 +121,7 @@ public sealed class TechBenchRepositoryTests
                 CreatedAt = DateTime.Now,
                 UpdatedAt = DateTime.Now
             };
-            TechBenchRepository.UpdatePostingStatus(entry);
+            WorkEntryPostingStatusCalculator.Update(entry);
             repository.SaveWorkEntry(entry);
             repository.AddPostingLog(new PostingLog
             {
@@ -226,7 +227,7 @@ public sealed class TechBenchRepositoryTests
             repository.SaveWorkEntry(entry);
             entry.SagePosted = true;
             entry.SagePostedAt = DateTime.Now;
-            TechBenchRepository.UpdatePostingStatus(entry);
+            WorkEntryPostingStatusCalculator.Update(entry);
             repository.SaveWorkEntry(entry);
 
             entry.Note = "Changed after billing";
@@ -283,7 +284,7 @@ public sealed class TechBenchRepositoryTests
                 CreatedAt = DateTime.Now,
                 UpdatedAt = DateTime.Now
             };
-            TechBenchRepository.UpdatePostingStatus(entry);
+            WorkEntryPostingStatusCalculator.Update(entry);
             repository.SaveWorkEntry(entry);
             repository.AddPostingLog(new PostingLog
             {

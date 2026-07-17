@@ -1,7 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Windows.Data;
-using Microsoft.Data.Sqlite;
+using Microsoft.Data.SqlClient;
 using TechBench.Models;
 using TechBench.Services;
 
@@ -9,8 +9,8 @@ namespace TechBench.ViewModels;
 
 public sealed partial class MainWindowViewModel
 {
-    private const string MicrosoftAdminIncognitoSettingKey = "CommonLinks.Microsoft365Admin.OpenInChromeIncognito";
     private int _editingCommonLinkId;
+    private string _editingCommonLinkScope = "User";
     private bool _isCommonLinkEditorOpen;
     private bool _microsoftAdminOpenInChromeIncognito;
     private string _commonLinkName = string.Empty;
@@ -39,7 +39,8 @@ public sealed partial class MainWindowViewModel
                 return;
             }
 
-            _repository.SaveSetting(MicrosoftAdminIncognitoSettingKey, value.ToString());
+            _localPreferences.MicrosoftAdminOpenInChromeIncognito = value;
+            LocalPreferenceStore.Save(_localPreferences);
             StatusMessage = value
                 ? "Microsoft 365 Admin will open in Chrome Incognito."
                 : "Microsoft 365 Admin will open in the default browser.";
@@ -106,18 +107,19 @@ public sealed partial class MainWindowViewModel
         CommonLinksView.SortDescriptions.Add(
             new SortDescription(nameof(CommonLink.Name), ListSortDirection.Ascending));
 
-        _microsoftAdminOpenInChromeIncognito = _repository
-            .GetSetting(MicrosoftAdminIncognitoSettingKey, "false")
-            .Equals("true", StringComparison.OrdinalIgnoreCase);
+        _microsoftAdminOpenInChromeIncognito =
+            _localPreferences.MicrosoftAdminOpenInChromeIncognito;
         NewCommonLinkCommand = new RelayCommand(_ => StartNewCommonLink());
         EditCommonLinkCommand = new RelayCommand(
             EditCommonLink,
-            parameter => parameter is CommonLink { Id: > 0, IsBuiltIn: false });
+            parameter => parameter is CommonLink { Id: > 0, IsBuiltIn: false } link
+                && CanManageCommonLink(link));
         SaveCommonLinkCommand = new RelayCommand(_ => SaveCommonLink(), _ => CanSaveCommonLink());
         CancelCommonLinkCommand = new RelayCommand(_ => CloseCommonLinkEditor(), _ => IsCommonLinkEditorOpen);
         DeleteCommonLinkCommand = new RelayCommand(
             DeleteCommonLink,
-            parameter => parameter is CommonLink { Id: > 0, IsBuiltIn: false });
+            parameter => parameter is CommonLink { Id: > 0, IsBuiltIn: false } link
+                && CanManageCommonLink(link));
         OpenCommonLinkCommand = new RelayCommand(OpenCommonLink, parameter => parameter is CommonLink { Id: > 0 });
         RefreshCommonLinks();
     }
@@ -143,6 +145,7 @@ public sealed partial class MainWindowViewModel
     private void StartNewCommonLink()
     {
         _editingCommonLinkId = 0;
+        _editingCommonLinkScope = "User";
         CommonLinkName = string.Empty;
         CommonLinkUrl = string.Empty;
         CommonLinkValidationMessage = string.Empty;
@@ -152,12 +155,14 @@ public sealed partial class MainWindowViewModel
 
     private void EditCommonLink(object? parameter)
     {
-        if (parameter is not CommonLink { Id: > 0, IsBuiltIn: false } link)
+        if (parameter is not CommonLink { Id: > 0, IsBuiltIn: false } link
+            || !CanManageCommonLink(link))
         {
             return;
         }
 
         _editingCommonLinkId = link.Id;
+        _editingCommonLinkScope = link.ScopeType;
         CommonLinkName = link.Name;
         CommonLinkUrl = link.Url;
         CommonLinkValidationMessage = string.Empty;
@@ -200,11 +205,12 @@ public sealed partial class MainWindowViewModel
             _repository.SaveCommonLink(new CommonLink
             {
                 Id = _editingCommonLinkId,
+                ScopeType = _editingCommonLinkScope,
                 Name = name,
                 Url = normalizedUrl
             });
         }
-        catch (Exception ex) when (ex is SqliteException or InvalidOperationException or ArgumentException)
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException or ArgumentException)
         {
             CommonLinkValidationMessage = $"Could not save this link: {ex.Message}";
             return;
@@ -217,7 +223,8 @@ public sealed partial class MainWindowViewModel
 
     private void DeleteCommonLink(object? parameter)
     {
-        if (parameter is not CommonLink { Id: > 0, IsBuiltIn: false } link)
+        if (parameter is not CommonLink { Id: > 0, IsBuiltIn: false } link
+            || !CanManageCommonLink(link))
         {
             return;
         }
@@ -240,6 +247,10 @@ public sealed partial class MainWindowViewModel
         RefreshCommonLinks();
         StatusMessage = $"Removed common link: {link.Name}.";
     }
+
+    private bool CanManageCommonLink(CommonLink link) =>
+        link.ScopeType.Equals("User", StringComparison.OrdinalIgnoreCase)
+        || _currentUser.CanManageClients;
 
     private void OpenCommonLink(object? parameter)
     {
@@ -276,6 +287,7 @@ public sealed partial class MainWindowViewModel
     private void CloseCommonLinkEditor()
     {
         _editingCommonLinkId = 0;
+        _editingCommonLinkScope = "User";
         IsCommonLinkEditorOpen = false;
         CommonLinkName = string.Empty;
         CommonLinkUrl = string.Empty;

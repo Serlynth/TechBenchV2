@@ -21,4 +21,5 @@ public sealed class EditorDraft
     public DateTime? FollowUpDueDate { get; set; }
     public int? PendingFollowUpSourceId { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.Now;
+    public byte[]? RowVersion { get; set; }
 }

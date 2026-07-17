@@ -7,6 +7,7 @@ public sealed record SqlServerConnectionOptions(
     string Database,
     bool TrustServerCertificate = false)
 {
+    public const string DefaultServerName = "CSRI-SQL.CSRI.local";
     public const string DefaultDatabaseName = "TechBench";
     public const string DefaultApplicationName = "TechBench V2";
     public const int DefaultConnectTimeoutSeconds = 15;

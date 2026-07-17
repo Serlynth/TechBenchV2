@@ -1,236 +1,255 @@
 # TechBench V2 architecture
 
-## Status: Phase 1 alpha
+## Status
 
-TechBench V2 is being converted from the local SQLite design used by TechBench 1.x to a direct WPF-to-SQL Server architecture.
+TechBench V2 `2.0.0-alpha.2` implements the completed client-side conversion from the local SQLite design used by TechBench 1.x to a direct WPF-to-SQL Server design.
 
-Phase 1 is limited to the SQL connection/security foundation and the shared-client vertical slice. The shared client list is the first workflow to use the central database. Today, history, search, tickets, templates, settings, drafts, imports, posting logs, and posting coordination are not considered fully ported until their local repository calls have been replaced and verified against SQL Server.
+The production WPF runtime now uses the SQL Server repository for every business and operational workflow. Production builds exclude the SQLite packages and legacy local-database implementation. SQLite remains available only to test builds for regression and migration-boundary coverage.
 
-This alpha is not a production-ready multi-user release. The older API,
-PostgreSQL, Identity-login, Docker, and token-client prototype have been removed.
-The remaining SQLite path is transitional code for workflows that have not yet
-been ported to SQL Server.
+The implementation is still an alpha until the schema-version-2 upgrade and client are exercised against the actual SQL Server 2016 instance with real domain identities. "Implemented" does not mean "approved for production."
 
-## Finalized boundaries
+## Fixed boundaries
 
 - TechBench V1 remains unchanged, independently buildable, and independently installable.
-- TechBench V2 remains a Windows WPF application because Sage UI automation and Sage ODBC run on the technician workstation.
+- TechBench V2 remains a Windows WPF application because Sage UI automation and Sage ODBC execute on the technician workstation.
 - There is no TechBench API, web application, container, or server service.
-- Each WPF client connects directly to the existing SQL Server using Windows Integrated Authentication.
-- Active Directory groups determine application roles.
-- SQL Server is the authoritative store for all meaningful shared, user, worklog, draft, synchronization, and posting state.
-- A shared SQLite file is never used. Transitional local SQLite data must disappear as each workflow is ported.
-- WHD and Sage credentials remain protected by Windows Credential Manager and are never stored in source control or a SQL connection string.
+- Each client connects directly to SQL Server using Windows Integrated Authentication over encrypted TDS.
+- Active Directory membership maps to database roles.
+- SQL Server owns all business, user, worklog, draft, posting, synchronization, import, and audit state.
+- The workstation owns only non-business connection/device preferences, protected external-system secrets, updater artifacts, and user-created temporary/export files.
+- V2 has no offline business-data store and never uses a SQLite database on a network share.
+- WHD and Sage credentials are stored in Windows Credential Manager and never in SQL Server connection strings, local JSON, or source control.
 
 ## Runtime topology
 
-```text
+~~~text
 Domain-joined Windows workstation
     TechBench V2 WPF client (x86)
         |
         | Microsoft.Data.SqlClient
         | Windows Integrated Authentication
-        | encrypted TDS connection
+        | Encrypt=True
         v
-Existing SQL Server 2016 instance
+CSRI-SQL.CSRI.local
+    SQL Server 2016
     TechBench database
     compatibility level 130
-```
+    schema version 2
+~~~
 
-The application opens short-lived pooled SQL connections for individual operations. It must not keep a database transaction open while performing WHD requests, Sage ODBC calls, or Sage desktop automation.
+The application opens short-lived pooled connections for individual stored-procedure calls. It does not keep a database transaction open during WHD HTTP requests, Sage ODBC queries, or Sage desktop automation.
 
 A representative production connection string is:
 
-```text
-Server=tcp:sqlserver.example.local,1433;
+~~~text
+Server=CSRI-SQL.CSRI.local;
 Database=TechBench;
-Integrated Security=true;
-Encrypt=true;
-TrustServerCertificate=false;
-Application Name=TechBenchV2;
-Connect Timeout=5;
-```
+Integrated Security=True;
+Encrypt=True;
+TrustServerCertificate=False;
+MultipleActiveResultSets=False;
+Application Name=TechBench V2;
+Connect Timeout=15;
+~~~
 
-The deployed server name and database name are configuration, not credentials. Production should use a SQL Server certificate trusted by the workstations. `TrustServerCertificate=true` may be useful for a controlled development test, but it bypasses certificate-chain validation and is not the production target.
+The server and database names are non-secret deployment configuration. Production workstations should trust the SQL Server certificate. Enabling `TrustServerCertificate` bypasses certificate-chain validation and is only appropriate for a deliberately controlled diagnostic environment.
 
-## Identity and authorization
+## Startup, identity, and authorization
 
-There is no TechBench username/password screen. SQL Server sees the Windows identity of the person running TechBench.
+At startup the client:
 
-The database should expose a `GetCurrentUserContext` procedure that returns:
+1. Loads the non-secret SQL endpoint configuration.
+2. Opens an integrated-authentication SQL connection.
+3. Calls `tb_app.GetCurrentUserContext`.
+4. Verifies that the database reports schema version `2`.
+5. Receives the caller's Windows SID, login/display name, database instance ID, server UTC time, and effective role flags.
+6. Idempotently ensures the original built-in templates and Common Links exist.
+7. Refuses startup when the database is unreachable, the schema is incompatible, or the caller has no TechBench role.
 
-- `ORIGINAL_LOGIN()`
-- the user's Windows SID
-- display/login name
-- database instance identifier
-- schema version
-- SQL Server UTC time
-- technician, manager, administrator, and synchronization-operator flags
+The Windows SID is the durable user/owner key. Login names are retained for display and audit history but are not the ownership key because names can change.
 
-The Windows SID is the durable owner key. Login names are retained for display and audit history but must not be the only ownership key because account names can change.
+The deployed CSRI mappings are:
 
-Recommended database roles are:
+| Active Directory group | Database roles |
+|---|---|
+| `CSRI\TechBench_Users` | `tb_role_user` |
+| `CSRI\TechBench_Admins` | `tb_role_user`, `tb_role_manager`, `tb_role_admin`, `tb_role_sync_operator` |
 
-- `TechBench_Technician`: read shared reference data and manage the caller's own work.
-- `TechBench_Manager`: technician rights plus approved team reporting.
-- `TechBench_Admin`: manage shared clients, mappings, configuration, and imports.
-- `TechBench_SyncOperator`: run shared WHD/Sage snapshot synchronization.
+The database role meanings are:
 
-Domain groups are mapped to these database roles by the DBA. Role checks returned by SQL Server are authoritative; hiding a button in WPF is not authorization.
+- `tb_role_user`: use ordinary TechBench workflows and manage the caller's own work.
+- `tb_role_manager`: read approved team-level work and reports.
+- `tb_role_admin`: manage organization-scoped clients, matching, shared configuration, imports, and audit views.
+- `tb_role_sync_operator`: coordinate WHD and Sage snapshots.
 
-Application roles should receive `EXECUTE` permission on approved stored-procedure schemas. They should not receive broad `db_datareader`, `db_datawriter`, or direct table DML access. Tables and procedures should share an owner so normal ownership chaining can reach the underlying data without exposing it directly.
+Authorization is enforced in stored procedures. The groups do not receive `db_owner`, `db_datareader`, `db_datawriter`, `db_ddladmin`, or direct application-table DML permission. UI visibility is not a security boundary.
 
-Owner-sensitive tables should also use SQL Server Row-Level Security as defense in depth. Managers may be authorized to read ordinary team work entries, but Personal Notes remain owner-only unless a separate privacy-auditor policy is deliberately approved.
+## Client persistence contract
 
-## Data ownership
+The WPF view models depend on `ITechBenchRepository`. The production composition root supplies `SqlServerTechBenchRepository`; no production path constructs the legacy SQLite repository.
 
-### SQL Server authoritative data
+The SQL repository:
 
-The target database owns:
+- invokes SQL Server 2016-compatible stored procedures with typed parameters
+- obtains identity from the SQL session instead of trusting a caller-supplied username
+- maps SQL `rowversion` values into client models for optimistic concurrency
+- sends the generated device ID for device-scoped drafts, leases, and synchronization coordination
+- uses server UTC timestamps for durable state
+- exposes asynchronous operations and cancellation while retaining the synchronous surface required by existing WPF call sites
+- reports server capabilities rather than assuming optional SQL features are installed
 
-- user profiles identified by Windows SID
-- registered user/device records
-- clients and WHD/Sage source identities
-- client matches, merges, and aliases
+The schema-version-2 search implementation uses stored-procedure filtering and reports SQL Full-Text Search as unavailable. It therefore does not require the optional Full-Text component for this milestone.
+
+## SQL Server authoritative data
+
+The `TechBench` database owns:
+
+- registered users identified by Windows SID
+- clients, aliases, external identities, matching state, and merge audit
 - tickets and ticket status options
-- work entries and work-entry links
-- owner-only Personal Notes
-- editor recovery drafts
-- templates and saved tags
-- Common Links
-- organization, user, and device settings
-- posting logs and durable posting attempts
-- WHD/Sage synchronization runs and leases
-- import batches and legacy-ID mappings
+- work entries, related-entry links, tags, follow-ups, and search/history fields
+- owner-private Personal Notes and their WHD inclusion choice
+- editor recovery drafts keyed by owner SID and device ID
+- organization- and user-scoped templates
+- organization- and user-scoped Common Links
+- organization and user settings that represent application state
+- posting logs, attempts, outstanding-result state, and posting leases
+- WHD and Sage synchronization leases and runs
+- staged/imported records and legacy-ID mappings
 - audit events
-- schema/version metadata
+- database instance and schema migration metadata
 
-Editor drafts should be keyed by owner SID and device identifier, or by owner SID alone if drafts are expected to follow a user between workstations. The V1 singleton `EditorDrafts.Id = 1` design is not valid for multiple users.
+Tables are separated into deployment, data, private, user, operations, audit, security, and application-procedure schemas. Ordinary clients do not access those tables directly.
 
-### Workstation-local state
+### Ownership and privacy
 
-Only data that is not a shared business record remains local:
+Ordinary work is owned by the caller's Windows SID. Managers may read approved ordinary team work through manager-enabled procedure paths. Personal Notes are joined and returned only when the current SID owns them; team reads redact the private content.
 
-- installed application and update artifacts
-- transient UI state such as window position
-- WHD and Sage secrets in Windows Credential Manager
-- temporary export files selected by the user
+Drafts, user settings, user templates, user links, and user aliases are similarly scoped by the current SID. Organization-scoped changes require the appropriate administrative role.
 
-If an emergency local draft cache is later approved for network outages, it is recovery-only. It must never become a second writable worklog or an offline synchronization system.
+This milestone enforces those rules through the stored-procedure boundary and the absence of direct table permissions. Future row-level-security policies could provide additional defense in depth, but documentation must not assume a policy that is not deployed.
 
-## SQL Server schema conventions
+### Optimistic concurrency and immutability
 
-- Keep existing integer identifiers where practical to reduce WPF model churn.
-- Use `date`, `time(0)`, `bit`, `nvarchar`, and UTC `datetime2(3)` values.
-- Use native SQL Server `rowversion` columns for optimistic concurrency.
-- The database assigns owner SID, created/updated identity, and UTC timestamps.
-- Update and delete procedures require the expected `rowversion` and report a conflict when the row changed.
-- Client merges are administrator-only transactions that reassign all dependent records and write an audit event.
-- Personal Notes are stored separately from manager-visible work-entry fields.
-- WHD/Sage external identities should have unique source/external-ID constraints. A normalized child table is preferable to a pipe-delimited identity field.
+Mutable shared records carry SQL Server `rowversion` values. Update and delete procedures compare the expected rowversion and report conflicts instead of silently overwriting another workstation's changes.
 
-The existing SQLite repository cannot be converted by replacing only its connection class. It contains SQLite-specific FTS5, `PRAGMA`, `LIMIT`, `ON CONFLICT`, `julianday`, `COLLATE NOCASE`, and `last_insert_rowid()` behavior. V2 should split persistence behind feature-level interfaces and port each feature to parameterized SqlClient commands and SQL Server 2016-compatible stored procedures.
+The database also enforces posting boundaries:
 
-SQL Server Full-Text Search can replace SQLite FTS5, but Full-Text Search is an optional SQL Server component. The DBA must confirm that it is installed. Search needs a documented fallback until the SQL full-text path is deployed and verified.
+- a Sage-posted work entry cannot be modified
+- a WHD- or Sage-posted work entry cannot be deleted
+- Personal Note content remains separate from ordinary manager-readable fields
+- client merges run as administrator-only transactions and preserve/reassign dependent metadata
+
+## Workstation-local state
+
+Local JSON files under `%LOCALAPPDATA%\TechBenchV2` contain no work entries, notes, drafts, tickets, templates, links, posting history, sync history, or import data.
+
+`preferences.json` is limited to device behavior such as:
+
+- generated device ID
+- theme and window bounds/state
+- refresh and WHD auto-sync intervals
+- update-check and skipped-version state
+- Sage DSN/company-path/native-automation choices
+- the Microsoft admin-link browser preference
+
+`sql-server.json` contains the SQL Server address, database name, timeouts, and certificate-trust choice. It contains no username or password.
+
+WHD API tokens and Sage passwords use the V2-specific Windows Credential Manager namespace. Update packages, installed files, logs, and user-selected exports are operational files rather than an alternate business datastore.
+
+If an emergency local draft cache is ever introduced, it must be recovery-only and separately approved. It must not create an offline worklog or synchronization system.
 
 ## Posting and synchronization
 
-WHD and Sage external operations continue to run on the workstation, while SQL Server owns their durable state.
+WHD and Sage external calls still run on the workstation, while SQL Server owns coordination and durable results.
 
-The posting sequence is:
+The posting protocol is:
 
-1. Call a stored procedure to begin a posting attempt.
-2. SQL Server atomically records the outstanding attempt and commits it.
+1. Acquire or validate the server-side posting lease.
+2. Begin a durable posting attempt in SQL Server and commit it.
 3. Close the database transaction.
-4. Perform the WHD request or Sage operation.
-5. Complete the attempt in SQL Server with success, failure, or unknown status.
+4. Perform the WHD or Sage operation.
+5. Complete the attempt as success or failure, or leave/reconcile an unknown result when the external outcome is uncertain.
+6. Update the work entry's durable posting state under its rowversion/ownership rules.
 
-A process crash or uncertain external result must leave an outstanding `Unknown` attempt that blocks a blind retry until it is reconciled or explicitly abandoned. The current same-process mutex remains useful, but it is not sufficient for multiple workstations.
+Outstanding or unknown attempts prevent a blind retry that could duplicate external work. The same-process mutex still protects one local instance, but server leases coordinate multiple workstations.
 
-Shared client and ticket synchronization should use:
+WHD and Sage snapshot synchronization uses:
 
-- a synchronization-operator role
-- one durable synchronization lease per source
-- table-valued parameters or staging tables for complete snapshots
-- a single SQL transaction for upsert and missing-record reconciliation
-- audit records describing who synchronized, from which workstation, and whether the snapshot was complete
+- the `tb_role_sync_operator` permission
+- a durable, expiring lease per source
+- source, device, run, and lease validation
+- server-side snapshot application with a durable recorded run outcome
+- preservation of reconciled `Both` client source identity
+- audit/state records identifying the operator and workstation
 
 ## Database deployment and versioning
 
-Database creation and schema changes are DBA operations. The desktop application must not create, alter, or migrate the production database under an ordinary technician account.
+Database creation and schema changes are DBA operations. Ordinary clients never create or migrate the production database.
 
-Versioned DBA scripts or a SQL Server database project should:
+The SQL Server 2016 package contains idempotent stages for:
 
-1. create the `TechBench` database
-2. set compatibility level 130
-3. create schemas, tables, indexes, procedures, and security policies
-4. create database roles
-5. map approved Active Directory groups
-6. record the applied schema version
-7. configure backup, integrity-check, and restore procedures
+1. preflight validation
+2. database creation and configuration
+3. baseline schema
+4. schema-version-2 operational storage
+5. security and AD-role mappings
+6. baseline and version-2 stored procedures
+7. procedure grants
+8. baseline and version-2 verification
 
-The application checks the database schema version at startup and refuses to run against an incompatible schema. Database changes should be additive and backward-compatible while older V2 clients may still be installed. Deploy compatible database changes before the client version that consumes them.
+`database/sqlserver2016/Deploy-CSRI-Standalone.sql` combines every numbered stage for SSMS SQLCMD Mode and has no external include paths.
+
+Schema version `2` is recorded as migration `SqlServer2016.OperationalStorage.0002`. The alpha.2 client requires exactly schema version 2 and refuses other versions.
+
+Because alpha.1 used the schema-version-1 contract, the version-2 database and alpha.2 client are a coordinated cutover. Back up the database, upgrade it, install the matching client, and run smoke tests as one planned operation. Do not leave mixed alpha.1/alpha.2 clients in normal use.
 
 No TechBench server process needs to be installed or started.
 
-## Migration phases
+## Validation state and release gate
 
-### Phase 1: connection, security, and shared clients
+Code-level validation covers:
 
-- Preserve the independent V2 product identity.
-- Establish the integrated and encrypted SQL connection.
-- Deploy schema metadata, user-context, roles, and shared-client objects.
-- Load shared clients directly from SQL Server.
-- Permit client administration only for the administrator role.
-- Clearly report database-unavailable, permission-denied, and schema-version failures.
+- repository contract coverage for every WPF workflow
+- local-preference persistence without business fields or secrets
+- production build exclusion of SQLite code and packages
+- database procedure-name and grant coverage
+- SQL deployment-script static checks
+- application unit/regression tests
 
-Acceptance requires two domain users to see the same client list and a technician to be unable to perform an administrator-only client change.
+Production approval still requires a live SQL Server 2016 exercise. At minimum:
 
-### Phase 2: Today workspace and drafts
+1. Run the complete standalone upgrade on a backed-up `TechBench` database.
+2. Confirm schema version 2 and successful verification output.
+3. Connect as a member of `CSRI\TechBench_Users` and as a member of `CSRI\TechBench_Admins`.
+4. Confirm ordinary users cannot execute administrator-only operations.
+5. Confirm two workstations see shared client, ticket, entry, template, and link changes.
+6. Confirm Personal Notes remain invisible to other users and manager views.
+7. Force a rowversion conflict and verify that the client does not overwrite silently.
+8. Exercise WHD/Sage posting attempts and lease expiry/reconciliation.
+9. Exercise WHD/Sage snapshot leases with the expected operator role.
+10. Verify backup, `DBCC CHECKDB`, and restore procedures.
 
-- Move committed WorkEntries, Personal Notes, links, and recovery drafts to SQL Server.
-- Enforce owner/private-note access in the database.
-- Add `rowversion` conflict handling.
-- Convert WPF database calls to asynchronous operations.
-- Remove the local WorkEntry source of truth.
+Until those checks pass, alpha.2 is an implementation candidate, not a production release.
 
-### Phase 3: remaining shared workflows
+## V1 data migration
 
-- Move tickets, statuses, templates, Common Links, aliases, settings, tags, history, search, reports, and posting history.
-- Add manager-scoped reporting.
-- Deploy SQL Full-Text Search or the approved fallback.
-- Remove the remaining meaningful SQLite tables and local database-management UI.
+Installing alpha.2 does not automatically import V1 data.
 
-### Phase 4: posting and source synchronization
+Migration must use a verified copy of a V1 SQLite database, assign each imported work record to an explicit AD SID, preserve original identifiers in legacy mapping tables, and reconcile WHD/Sage identities before name-similarity matching. Counts, foreign keys, ownership, posting flags, links, and sample note content must be verified.
 
-- Add centralized posting-attempt coordination.
-- Add WHD and Sage synchronization leases and snapshot procedures.
-- Enforce Sage-posted immutability and WHD tracking rules at the database boundary.
-- Add operational audit and reconciliation tools.
-
-### Phase 5: V1 import and production pilot
-
-- Import only from copied V1 SQLite databases.
-- Assign imported work to an explicit AD SID.
-- Preserve legacy IDs through an import mapping table.
-- Deduplicate clients by WHD/Sage identities before name similarity.
-- Verify counts, foreign keys, posting state, audit ownership, and sample content.
-- Rehearse SQL backup and restore.
-- Freeze V1 data entry for final import and make V2 authoritative.
-
-V1 remains installed and unchanged, but it must be treated as archive-only after cutover. V1 and V2 must never be operated as dual writable systems.
+V1 remains installed and unchanged for rollback or historical reference. After cutover it should be archive-only. V1 and V2 must not operate as dual writable systems.
 
 ## SQL Server 2016 caveat
 
-The application is intentionally designed for SQL Server 2016 and database compatibility level 130. Scripts must be tested on an actual SQL Server 2016 staging database; setting compatibility level 130 on a newer server does not prove that newer engine syntax will run on SQL Server 2016.
+The database targets SQL Server 2016 and compatibility level 130. Scripts must be run against an actual SQL Server 2016 test or production instance; compatibility level 130 on a newer engine is not a substitute for engine-version testing.
 
-SQL Server 2016 extended support ended on July 14, 2026. Before production use, confirm:
+SQL Server 2016 extended support ended July 14, 2026. Before production use, confirm:
 
-- SQL Server 2016 SP3 and the organization's approved cumulative/security updates
-- Extended Security Updates coverage, or a documented upgrade plan
-- TLS 1.2 and a trusted server certificate
-- SQL Server edition and database-size/SQL Agent limitations
-- Full-Text Search installation if required
-- tested backup, `DBCC CHECKDB`, and restore procedures
+- the organization's approved SQL Server service pack and security-update posture
+- Extended Security Updates coverage or a documented upgrade plan
+- TLS 1.2 and a trusted SQL Server certificate
+- tested full/database-log backup policy appropriate to the selected recovery model
+- recurring integrity checks and a proven restore procedure
 
 Microsoft lifecycle reference: <https://learn.microsoft.com/lifecycle/products/sql-server-2016>

@@ -13,6 +13,7 @@ namespace TechBench;
 public partial class MainWindow : Window
 {
     private readonly WindowsNotificationService _notificationService;
+    private readonly LocalPreferences _localPreferences;
     private MarkdownEditorWindow? _markdownEditorWindow;
 
     public MainWindow(
@@ -20,29 +21,24 @@ public partial class MainWindow : Window
         CurrentUserContext currentUser)
     {
         InitializeComponent();
+        _localPreferences = LocalPreferenceStore.LoadOrCreate();
+        ApplyWindowPreferences();
         EditorClientComboBox.AddHandler(
             System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent,
             new TextChangedEventHandler(EditorClientComboBox_TextChanged));
 
-        var localDatabasePath = LocalUserDataPath.ResolveDatabasePath(
-            currentUser.DatabaseInstanceId,
-            currentUser.UserSid);
-        var localConnectionFactory = new SqliteConnectionFactory(localDatabasePath);
-        var databaseLocationService = new DatabaseLocationService(localConnectionFactory);
-        var databaseBackupService = new DatabaseBackupService(localConnectionFactory);
-        databaseBackupService.CreateDailyBackupIfDue();
-
-        var repository = new TechBenchRepository(localConnectionFactory);
+        var repository = new SqlServerTechBenchRepository(
+            connectionFactory,
+            _localPreferences.DeviceId);
         repository.Initialize();
-        databaseBackupService.CheckIntegrity();
         var whdRestClient = new WhdRestClient();
         var sageOdbcClient = new SageOdbcProcessClient();
         _notificationService = new WindowsNotificationService();
 
         var viewModel = new MainWindowViewModel(
             repository,
-            new SqlServerClientProvider(connectionFactory),
-            new LocalTicketProvider(repository),
+            new SqlServerClientProvider(repository),
+            new SqlServerTicketProvider(repository),
             new WhdRestPoster(whdRestClient),
             new SageNativeUiPoster(new SageNativeUiAutomation(), sageOdbcClient),
             whdRestClient,
@@ -52,16 +48,15 @@ public partial class MainWindow : Window
             new WindowsCredentialStore(LocalUserDataPath.ResolveCredentialScope(
                 currentUser.DatabaseInstanceId,
                 currentUser.UserSid)),
-            databaseBackupService,
-            databaseLocationService,
+            currentUser,
+            _localPreferences,
             new V2AppUpdateService(),
             () => System.Windows.Application.Current.Shutdown());
 
         DataContext = viewModel;
         viewModel.StatusMessage =
             $"Connected to {connectionFactory.Options.Server}/{connectionFactory.Options.Database} "
-            + $"as {currentUser.DisplayName}. Shared clients are live; "
-            + "unported workflows remain transitional in this alpha.";
+            + $"as {currentUser.DisplayName}. Server-backed workspace ready.";
         if (!string.IsNullOrWhiteSpace(App.UpdateCompletionVersion))
         {
             viewModel.Updates.MarkUpdateCompleted(App.UpdateCompletionVersion);
@@ -74,6 +69,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        SaveWindowPreferences();
         if (DataContext is IDisposable disposable)
         {
             disposable.Dispose();
@@ -81,6 +77,54 @@ public partial class MainWindow : Window
 
         _notificationService.Dispose();
         base.OnClosed(e);
+    }
+
+    private void ApplyWindowPreferences()
+    {
+        if (_localPreferences.WindowWidth is >= 640)
+        {
+            Width = _localPreferences.WindowWidth.Value;
+        }
+
+        if (_localPreferences.WindowHeight is >= 480)
+        {
+            Height = _localPreferences.WindowHeight.Value;
+        }
+
+        if (_localPreferences.WindowLeft is double left
+            && _localPreferences.WindowTop is double top
+            && double.IsFinite(left)
+            && double.IsFinite(top))
+        {
+            Left = left;
+            Top = top;
+            WindowStartupLocation = WindowStartupLocation.Manual;
+        }
+
+        WindowState = _localPreferences.WindowState.Equals(
+            "Maximized",
+            StringComparison.OrdinalIgnoreCase)
+            ? WindowState.Maximized
+            : WindowState.Normal;
+    }
+
+    private void SaveWindowPreferences()
+    {
+        var bounds = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
+        _localPreferences.WindowLeft = bounds.Left;
+        _localPreferences.WindowTop = bounds.Top;
+        _localPreferences.WindowWidth = bounds.Width;
+        _localPreferences.WindowHeight = bounds.Height;
+        _localPreferences.WindowState =
+            WindowState == WindowState.Maximized ? "Maximized" : "Normal";
+        try
+        {
+            LocalPreferenceStore.Save(_localPreferences);
+        }
+        catch
+        {
+            // Window shutdown should not be blocked by preference persistence.
+        }
     }
 
     private void EditorClientComboBoxItem_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)

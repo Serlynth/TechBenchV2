@@ -18,7 +18,7 @@ namespace TechBench.ViewModels;
 public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private const int DefaultWhdAutoSyncMinutes = 5;
-    private readonly TechBenchRepository _repository;
+    private readonly ITechBenchRepository _repository;
     private readonly IClientProvider _clientProvider;
     private readonly ITicketProvider _ticketProvider;
     private readonly IWorkEntryPoster _whdPoster;
@@ -28,9 +28,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly IUserDialogService _dialogService;
     private readonly IUserNotificationService _notificationService;
     private readonly ICredentialStore _credentialStore;
-    private readonly DatabaseBackupService _databaseBackupService;
-    private readonly DatabaseLocationService _databaseLocationService;
-    private readonly bool _isServerMode;
+    private readonly CurrentUserContext _currentUser;
+    private readonly LocalPreferences _localPreferences;
     private readonly PostingExecutionCoordinator _postingCoordinator = new();
     private readonly DispatcherTimer _whdAutoSyncTimer = new();
     private readonly DispatcherTimer _sageVerificationTimer = new() { Interval = TimeSpan.FromSeconds(30) };
@@ -112,12 +111,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private bool _isRefreshingTodayEntries;
     private bool _hasCloseoutIssues;
     private WorkEntry? _lastDeletedEntry;
-    private string _databaseHealthLabel = "Database check has not run.";
-    private string _lastDatabaseBackupLabel = "No local backup has been created yet.";
-    private bool _isDatabaseHealthy = true;
 
     public MainWindowViewModel(
-        TechBenchRepository repository,
+        ITechBenchRepository repository,
         IClientProvider clientProvider,
         ITicketProvider ticketProvider,
         IWorkEntryPoster whdPoster,
@@ -127,8 +123,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         IUserDialogService dialogService,
         IUserNotificationService notificationService,
         ICredentialStore credentialStore,
-        DatabaseBackupService databaseBackupService,
-        DatabaseLocationService databaseLocationService,
+        CurrentUserContext currentUser,
+        LocalPreferences localPreferences,
         IAppUpdateService appUpdateService,
         Action shutdownApplication)
     {
@@ -142,16 +138,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _dialogService = dialogService;
         _notificationService = notificationService;
         _credentialStore = credentialStore;
-        _databaseBackupService = databaseBackupService;
-        _databaseLocationService = databaseLocationService;
-        _isServerMode = clientProvider is not LocalClientProvider;
+        _currentUser = currentUser;
+        _localPreferences = localPreferences;
         Updates = new AppUpdateViewModel(
             appUpdateService,
-            () => _databaseBackupService.CreateBackup("Pre-update database backup"),
             PersistEditorDraftBeforeExit,
             shutdownApplication,
             () => !IsEntryOperationRunning,
-            _notificationService.ShowUpdateAvailable);
+            _notificationService.ShowUpdateAvailable,
+            _localPreferences);
 
         NavigateCommand = new RelayCommand(parameter => Navigate(parameter?.ToString() ?? "Today"));
         EditEntryCommand = new RelayCommand(EditEntry, parameter => parameter is WorkEntry { Id: > 0 });
@@ -186,22 +181,24 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         SelectEditorClientCommand = new RelayCommand(SelectEditorClient, parameter => parameter is Client);
         SaveSageCustomerMappingCommand = new RelayCommand(
             _ => SaveSageCustomerMapping(),
-            _ => !_isServerMode && SelectedSageMappingClient is not null);
+            _ => _currentUser.CanManageClients && SelectedSageMappingClient is not null);
         ApplyClientMatchCommand = new RelayCommand(_ => ApplyClientMatch(), _ => CanApplyClientMatch());
         SaveSettingsCommand = new RelayCommand(_ => SaveSettings());
         TestWhdConnectionCommand = new AsyncRelayCommand(TestWhdConnectionAsync);
-        SyncWhdTicketsCommand = new AsyncRelayCommand(SyncWhdTicketsNowAsync);
-        SyncWhdClientsCommand = new AsyncRelayCommand(SyncWhdClientsAsync, _ => !_isServerMode);
-        SyncWhdStatusesCommand = new AsyncRelayCommand(SyncWhdStatusesAsync);
+        SyncWhdTicketsCommand = new AsyncRelayCommand(
+            SyncWhdTicketsNowAsync,
+            _ => _currentUser.CanRunSharedSync);
+        SyncWhdClientsCommand = new AsyncRelayCommand(
+            SyncWhdClientsAsync,
+            _ => _currentUser.CanRunSharedSync);
+        SyncWhdStatusesCommand = new AsyncRelayCommand(
+            SyncWhdStatusesAsync,
+            _ => _currentUser.CanRunSharedSync);
         TestSageConnectionCommand = new RelayCommand(_ => TestSageConnection());
         TestSageOdbcCommand = new AsyncRelayCommand(TestSageOdbcAsync);
-        SyncSageCustomersCommand = new AsyncRelayCommand(SyncSageCustomersAsync, _ => !_isServerMode);
-        BackupDatabaseCommand = new RelayCommand(_ => BackupDatabase(), _ => !IsEntryOperationRunning);
-        CheckDatabaseHealthCommand = new RelayCommand(_ => CheckDatabaseHealth(), _ => !IsEntryOperationRunning);
-        OpenBackupFolderCommand = new RelayCommand(_ => OpenBackupFolder());
-        MoveDatabaseCommand = new RelayCommand(_ => MoveDatabase(), _ => CanChangeDatabaseLocation());
-        UseExistingDatabaseCommand = new RelayCommand(_ => UseExistingDatabase(), _ => CanChangeDatabaseLocation());
-        OpenDatabaseFolderCommand = new RelayCommand(_ => OpenDatabaseFolder());
+        SyncSageCustomersCommand = new AsyncRelayCommand(
+            SyncSageCustomersAsync,
+            _ => _currentUser.CanRunSharedSync);
         InitializeNoteFeatures();
         InitializeCommonLinks();
 
@@ -248,12 +245,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _whdAutoSyncTimer.Tick += HandleWhdAutoSyncTimerTick;
         _sageVerificationTimer.Tick += HandleSageVerificationTimerTick;
 
-        if (!_isServerMode)
-        {
-            _repository.ReconcileSafeClientMatches();
-        }
         LoadSettings();
-        RefreshDatabaseSafetyStatus();
         RefreshAll();
         PrimeKnownWhdTicketKeys();
         ConfigureWhdAutoSyncTimer();
@@ -262,14 +254,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         NewEntry();
         RestoreEditorDraft();
 
-        if (_databaseBackupService.LastBackupResult is { Succeeded: false } backupFailure)
-        {
-            StatusMessage = backupFailure.Message;
-        }
-        else if (!_isDatabaseHealthy)
-        {
-            StatusMessage = DatabaseHealthLabel;
-        }
     }
 
     public WorkEntryEditorViewModel Editor { get; } = new();
@@ -339,33 +323,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public RelayCommand TestSageConnectionCommand { get; }
     public AsyncRelayCommand TestSageOdbcCommand { get; }
     public AsyncRelayCommand SyncSageCustomersCommand { get; }
-    public RelayCommand BackupDatabaseCommand { get; }
-    public RelayCommand CheckDatabaseHealthCommand { get; }
-    public RelayCommand OpenBackupFolderCommand { get; }
-    public RelayCommand MoveDatabaseCommand { get; }
-    public RelayCommand UseExistingDatabaseCommand { get; }
-    public RelayCommand OpenDatabaseFolderCommand { get; }
 
     public string DatabasePath => _repository.DatabasePath;
-    public string DatabaseBackupDirectory => _databaseBackupService.BackupDirectory;
-
-    public string DatabaseHealthLabel
-    {
-        get => _databaseHealthLabel;
-        private set => SetProperty(ref _databaseHealthLabel, value);
-    }
-
-    public string LastDatabaseBackupLabel
-    {
-        get => _lastDatabaseBackupLabel;
-        private set => SetProperty(ref _lastDatabaseBackupLabel, value);
-    }
-
-    public bool IsDatabaseHealthy
-    {
-        get => _isDatabaseHealthy;
-        private set => SetProperty(ref _isDatabaseHealthy, value);
-    }
     public string EditorTitle => Editor.Id > 0 ? "Edit Entry" : "New Entry";
     public string EditorSubtitle => Editor.SelectedClient?.DisplayName
         ?? (Editor.UseManualClient && !string.IsNullOrWhiteSpace(Editor.ManualClientName)
@@ -400,11 +359,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(IsEditorReadOnly));
                 OnPropertyChanged(nameof(WorkspaceStateLabel));
                 RaiseEntryCommandStates();
-                BackupDatabaseCommand.RaiseCanExecuteChanged();
-                CheckDatabaseHealthCommand.RaiseCanExecuteChanged();
                 ApplyClientMatchCommand.RaiseCanExecuteChanged();
-                MoveDatabaseCommand.RaiseCanExecuteChanged();
-                UseExistingDatabaseCommand.RaiseCanExecuteChanged();
                 ImportGoogleSheetsCommand.RaiseCanExecuteChanged();
                 Updates.RefreshCommandStates();
             }
@@ -841,6 +796,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         set => SetProperty(ref _selectedWhdAuthenticationMode, value);
     }
 
+    public bool CanRunSharedSync => _currentUser.CanRunSharedSync;
+
     public bool WhdAutoSyncEnabled
     {
         get => _whdAutoSyncEnabled;
@@ -871,6 +828,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         get
         {
+            if (!CanRunSharedSync)
+            {
+                return "Shared WHD sync is managed by a TechBench administrator.";
+            }
+
             if (!WhdAutoSyncEnabled)
             {
                 return "Auto-sync is off.";
@@ -904,9 +866,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 SageMappedCustomerId = value is null
                     ? string.Empty
-                    : !string.IsNullOrWhiteSpace(value.SageCustomerId)
-                        ? value.SageCustomerId
-                        : _repository.GetSettings().GetValueOrDefault(BuildSageCustomerSettingKey(value.Id), string.Empty);
+                    : value.SageCustomerId ?? string.Empty;
                 SaveSageCustomerMappingCommand.RaiseCanExecuteChanged();
             }
         }
@@ -1086,9 +1046,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Phase 1 compatibility only: unported V1-derived workflows still
-        // resolve client foreign keys from the transitional local repository.
-        // This cache is removed when WorkEntries and Tickets move to SQL Server.
+        // The SQL repository is already authoritative. The compatibility
+        // implementation used by isolated legacy tests may still mirror this list.
         _repository.SynchronizeServerClientCache(sharedClients);
 
         Clients.Clear();
@@ -1879,7 +1838,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         entry.LastError = null;
-        TechBenchRepository.UpdatePostingStatus(entry);
+        WorkEntryPostingStatusCalculator.Update(entry);
         var id = _repository.SaveWorkEntry(entry);
         string? noteLinkError = null;
         if (_pendingFollowUpSource is { Id: > 0 } followUpSource)
@@ -1963,7 +1922,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var deletedId = restored.Id;
         restored.Id = 0;
         restored.LastError = null;
-        TechBenchRepository.UpdatePostingStatus(restored);
+        WorkEntryPostingStatusCalculator.Update(restored);
         var id = _repository.SaveWorkEntry(restored);
         foreach (var link in _lastDeletedEntryLinks)
         {
@@ -2013,7 +1972,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             PostingStatus = PostingStatus.Draft
         };
 
-        TechBenchRepository.UpdatePostingStatus(copy);
+        WorkEntryPostingStatusCalculator.Update(copy);
         var id = _repository.SaveWorkEntry(copy);
         RefreshAll();
         SelectedEntry = Entries.FirstOrDefault(entry => entry.Id == id);
@@ -2493,13 +2452,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             StatusMessage = result.Message;
         }
 
-        TechBenchRepository.UpdatePostingStatus(entry);
-        _repository.SaveWorkEntry(entry);
+        WorkEntryPostingStatusCalculator.Update(entry);
         _repository.CompletePostingAttempt(
             attemptStart.Attempt.Id,
             attemptStatus,
             result.Message,
-            result.ExternalReference);
+            result.ExternalReference,
+            result.MarkPosted);
         ConfigureSageVerificationTimer();
         if (refreshAfter)
         {
@@ -2525,27 +2484,22 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (destination == "WHD")
+        try
         {
-            entry.WhdPosted = true;
-            entry.WhdPostedAt = DateTime.Now;
+            _repository.MarkWorkEntryPosted(
+                entry.Id,
+                destination,
+                $"Marked {destination} posted manually after external verification.");
         }
-        _repository.ResolveOutstandingPostingAttempts(
-            entry.Id,
-            destination,
-            $"Marked {destination} posted manually after external verification.");
-        entry.LastError = null;
-        TechBenchRepository.UpdatePostingStatus(entry);
-        _repository.SaveWorkEntry(entry);
-        _repository.AddPostingLog(new PostingLog
+        catch (Exception ex) when (
+            ex is SqlException
+                or InvalidOperationException
+                or ArgumentException)
         {
-            WorkEntryId = entry.Id,
-            Destination = destination,
-            Payload = "Manual posted marker",
-            Success = true,
-            Message = $"Marked {destination} posted manually.",
-            CreatedAt = DateTime.Now
-        });
+            StatusMessage = $"Could not mark {destination} posted: {ex.Message}";
+            _dialogService.Error($"Mark {destination} posted", StatusMessage);
+            return;
+        }
 
         RefreshAll();
         SelectedEntry = Entries.FirstOrDefault(saved => saved.Id == entry.Id) ?? _repository.GetWorkEntry(entry.Id);
@@ -2723,26 +2677,37 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var pending = _repository.GetWorkEntries(new WorkEntryQuery { PendingSageOnly = true })
-            .Where(HasSageDraft)
-            .ToArray();
-        if (pending.Length == 0)
+        try
         {
-            _sageVerificationTimer.Stop();
-            return;
-        }
+            var pending = _repository.GetWorkEntries(
+                    new WorkEntryQuery { PendingSageOnly = true })
+                .Where(HasSageDraft)
+                .ToArray();
+            if (pending.Length == 0)
+            {
+                _sageVerificationTimer.Stop();
+                return;
+            }
 
-        if (_sageVerificationCursor >= pending.Length)
-        {
-            _sageVerificationCursor = 0;
-        }
+            if (_sageVerificationCursor >= pending.Length)
+            {
+                _sageVerificationCursor = 0;
+            }
 
-        var entry = pending[_sageVerificationCursor];
-        _sageVerificationCursor = (_sageVerificationCursor + 1) % pending.Length;
-        var result = await VerifySageEntryAsync(entry, showFeedback: false);
-        if (result.IsSaved)
+            var entry = pending[_sageVerificationCursor];
+            _sageVerificationCursor = (_sageVerificationCursor + 1) % pending.Length;
+            var result = await VerifySageEntryAsync(entry, showFeedback: false);
+            if (result.IsSaved)
+            {
+                StatusMessage = result.Message;
+            }
+        }
+        catch (Exception ex) when (
+            ex is SqlException
+                or InvalidOperationException)
         {
-            StatusMessage = result.Message;
+            StatusMessage =
+                $"Automatic Sage verification could not update the shared workspace: {ex.Message}";
         }
     }
 
@@ -2779,9 +2744,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 entry.SagePosted = true;
                 entry.SagePostedAt = DateTime.Now;
                 entry.LastError = null;
-                TechBenchRepository.UpdatePostingStatus(entry);
-                _repository.SaveWorkEntry(entry);
-                _repository.ResolveOutstandingPostingAttempts(
+                WorkEntryPostingStatusCalculator.Update(entry);
+                _repository.MarkWorkEntryPosted(
                     entry.Id,
                     "Sage",
                     result.Message,
@@ -2802,7 +2766,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             else if (showFeedback)
             {
                 entry.LastError = result.Message;
-                TechBenchRepository.UpdatePostingStatus(entry);
+                WorkEntryPostingStatusCalculator.Update(entry);
                 _repository.SaveWorkEntry(entry);
                 _repository.AddPostingLog(new PostingLog
                 {
@@ -3136,11 +3100,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void SaveSageCustomerMapping()
     {
-        if (_isServerMode)
+        if (!_currentUser.CanManageClients)
         {
             _dialogService.Info(
                 "Shared client mapping",
-                "Client mappings are server-managed in TechBench V2. The admin client editor will be wired to the server in the next migration step.");
+                "Your TechBench role does not allow changes to shared client mappings.");
             return;
         }
 
@@ -3150,7 +3114,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _repository.SaveSetting(BuildSageCustomerSettingKey(SelectedSageMappingClient.Id), SageMappedCustomerId.Trim());
         _repository.SaveClientSageMapping(SelectedSageMappingClient.Id, SageMappedCustomerId.Trim());
         RefreshClients();
         StatusMessage = $"Saved Sage Customer ID mapping for {SelectedSageMappingClient.Name}.";
@@ -3158,7 +3121,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private bool CanApplyClientMatch()
     {
-        return !_isServerMode
+        return _currentUser.CanManageClients
             && !IsEntryOperationRunning
             && SelectedManagedClient is not null
             && SelectedManagedClient.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase)
@@ -3201,221 +3164,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void RefreshDatabaseSafetyStatus()
-    {
-        var integrity = _databaseBackupService.LastIntegrityResult
-            ?? _databaseBackupService.CheckIntegrity();
-        IsDatabaseHealthy = integrity.IsHealthy;
-        DatabaseHealthLabel = integrity.Message;
-
-        var latestBackup = _databaseBackupService.GetLatestBackup();
-        LastDatabaseBackupLabel = latestBackup is null
-            ? "No local backup has been created yet."
-            : $"Last verified backup: {latestBackup.LastWriteTime:g}";
-    }
-
-    private void BackupDatabase()
-    {
-        var result = _databaseBackupService.CreateBackup();
-        RefreshDatabaseSafetyStatus();
-        StatusMessage = result.Message;
-        if (!result.Succeeded)
-        {
-            _dialogService.Error("Back up local data", result.Message);
-        }
-    }
-
-    private void CheckDatabaseHealth()
-    {
-        var result = _databaseBackupService.CheckIntegrity();
-        RefreshDatabaseSafetyStatus();
-        StatusMessage = result.Message;
-        if (result.IsHealthy)
-        {
-            _dialogService.Info("Check local data", result.Message);
-        }
-        else
-        {
-            _dialogService.Error("Check local data", result.Message);
-        }
-    }
-
-    private void OpenBackupFolder()
-    {
-        try
-        {
-            Directory.CreateDirectory(DatabaseBackupDirectory);
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = DatabaseBackupDirectory,
-                UseShellExecute = true
-            });
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-            StatusMessage = $"Could not open the backup folder: {ex.Message}";
-            _dialogService.Error("Open backups", StatusMessage);
-        }
-    }
-
-    private bool CanChangeDatabaseLocation() =>
-        !_isServerMode
-        && !IsEntryOperationRunning
-        && !_isWhdAutoSyncRunning
-        && !_isSageVerificationRunning
-        && !_isSagePostingRunning
-        && !Editor.IsDirty;
-
-    private void MoveDatabase()
-    {
-        if (!CanChangeDatabaseLocation())
-        {
-            return;
-        }
-
-        var confirmed = _dialogService.Confirm(
-            "Move TechBench database",
-            "TechBench will copy the current database to the selected location and keep the old file for rollback.\n\n"
-            + "If you choose OneDrive or Dropbox, close TechBench on every other computer before opening this database.",
-            "Choose Location",
-            "Cancel");
-        if (!confirmed)
-        {
-            return;
-        }
-
-        var dialog = new Microsoft.Win32.SaveFileDialog
-        {
-            Title = "Move TechBench Database",
-            Filter = "TechBench database (*.db)|*.db",
-            FileName = "techbench.db",
-            DefaultExt = ".db",
-            AddExtension = true,
-            OverwritePrompt = false,
-            InitialDirectory = Path.GetDirectoryName(DatabasePath)
-        };
-        if (dialog.ShowDialog() != true)
-        {
-            return;
-        }
-
-        var backup = _databaseBackupService.CreateBackup("Pre-move database backup");
-        if (!backup.Succeeded)
-        {
-            _dialogService.Error("Move database", backup.Message);
-            return;
-        }
-
-        CompleteDatabaseLocationChange(_databaseLocationService.MoveDatabase(dialog.FileName));
-    }
-
-    private void UseExistingDatabase()
-    {
-        if (!CanChangeDatabaseLocation())
-        {
-            return;
-        }
-
-        var confirmed = _dialogService.Confirm(
-            "Use existing database",
-            "Select an existing TechBench database, such as one stored in OneDrive or Dropbox.\n\n"
-            + "Only one computer may have a cloud-synced database open at a time.",
-            "Select Database",
-            "Cancel");
-        if (!confirmed)
-        {
-            return;
-        }
-
-        var dialog = new Microsoft.Win32.OpenFileDialog
-        {
-            Title = "Use Existing TechBench Database",
-            Filter = "TechBench database (*.db)|*.db|All files (*.*)|*.*",
-            CheckFileExists = true,
-            Multiselect = false,
-            InitialDirectory = Path.GetDirectoryName(DatabasePath)
-        };
-        if (dialog.ShowDialog() != true)
-        {
-            return;
-        }
-
-        var backup = _databaseBackupService.CreateBackup("Pre-switch database backup");
-        if (!backup.Succeeded)
-        {
-            _dialogService.Error("Use existing database", backup.Message);
-            return;
-        }
-
-        CompleteDatabaseLocationChange(_databaseLocationService.UseExistingDatabase(dialog.FileName));
-    }
-
-    private void CompleteDatabaseLocationChange(DatabaseLocationResult result)
-    {
-        if (!result.Succeeded)
-        {
-            StatusMessage = result.Message;
-            _dialogService.Error("Database location", result.Message);
-            return;
-        }
-
-        _repository.Initialize();
-        if (!_isServerMode)
-        {
-            _repository.ReconcileSafeClientMatches();
-        }
-        var integrity = _databaseBackupService.CheckIntegrity();
-        if (!integrity.IsHealthy)
-        {
-            var rollbackMessage = string.Empty;
-            if (!string.IsNullOrWhiteSpace(result.PreviousPath))
-            {
-                var rollback = _databaseLocationService.UseExistingDatabase(result.PreviousPath);
-                if (rollback.Succeeded)
-                {
-                    _repository.Initialize();
-                    rollbackMessage = $"\n\nTechBench restored the previous database at {result.PreviousPath}.";
-                }
-            }
-
-            StatusMessage = $"{integrity.Message}{rollbackMessage}";
-            _dialogService.Error("Database location", StatusMessage);
-            RefreshDatabaseSafetyStatus();
-            OnPropertyChanged(nameof(DatabasePath));
-            OnPropertyChanged(nameof(DatabaseBackupDirectory));
-            return;
-        }
-
-        LoadSettings();
-        RefreshDatabaseSafetyStatus();
-        OnPropertyChanged(nameof(DatabasePath));
-        OnPropertyChanged(nameof(DatabaseBackupDirectory));
-        RefreshAll();
-        PrimeKnownWhdTicketKeys();
-        NewEntry();
-        StatusMessage = result.Message;
-        _dialogService.Info("Database location", result.Message);
-    }
-
-    private void OpenDatabaseFolder()
-    {
-        try
-        {
-            var directory = Path.GetDirectoryName(DatabasePath)!;
-            Directory.CreateDirectory(directory);
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = directory,
-                UseShellExecute = true
-            });
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-            StatusMessage = $"Could not open the database folder: {ex.Message}";
-            _dialogService.Error("Database location", StatusMessage);
-        }
-    }
-
     private void LoadSettings()
     {
         var settings = _repository.GetSettings();
@@ -3424,16 +3172,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         WhdApiToken = LoadCredentialWithLegacyMigration(settings, "Whd.ApiToken");
         SelectedWhdAuthenticationMode = ToWhdAuthenticationModeLabel(
             settings.GetValueOrDefault("Whd.AuthenticationMode", WhdAuthenticationMode.Auto.ToString()));
-        WhdAutoSyncEnabled = settings.GetValueOrDefault("Whd.AutoSyncEnabled", "true").Equals("true", StringComparison.OrdinalIgnoreCase);
-        WhdAutoSyncMinutesText = settings.GetValueOrDefault("Whd.AutoSyncMinutes", DefaultWhdAutoSyncMinutes.ToString());
+        WhdAutoSyncEnabled = _localPreferences.WhdAutoSyncEnabled;
+        WhdAutoSyncMinutesText = _localPreferences.WhdAutoSyncMinutes.ToString();
         SageEmployeeId = settings.GetValueOrDefault("Sage.EmployeeId", string.Empty);
         SageActivityItemId = settings.GetValueOrDefault("Sage.ActivityItemId", string.Empty);
-        SageDsn = settings.GetValueOrDefault("Sage.Dsn", "techbench");
+        SageDsn = _localPreferences.SageDsn;
         SageUsername = settings.GetValueOrDefault("Sage.Username", string.Empty);
         SagePassword = LoadCredentialWithLegacyMigration(settings, "Sage.Password");
-        SageCompanyPath = settings.GetValueOrDefault("Sage.CompanyPath", string.Empty);
-        SageNativeAutoSave = settings.GetValueOrDefault("Sage.NativeAutoSave", "false").Equals("true", StringComparison.OrdinalIgnoreCase);
-        IsLightTheme = settings.GetValueOrDefault("Theme", "Dark").Equals("Light", StringComparison.OrdinalIgnoreCase);
+        SageCompanyPath = _localPreferences.SageCompanyPath;
+        SageNativeAutoSave = _localPreferences.SageNativeAutoSave;
+        IsLightTheme = _localPreferences.Theme.Equals("Light", StringComparison.OrdinalIgnoreCase);
         ThemeService.Apply(IsLightTheme ? AppTheme.Light : AppTheme.Dark);
     }
 
@@ -3443,14 +3191,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _repository.SaveSetting("Sage.EmployeeId", SageEmployeeId.Trim());
         _repository.DeleteSetting("Sage.DefaultCustomerId");
         _repository.SaveSetting("Sage.ActivityItemId", SageActivityItemId.Trim());
-        _repository.SaveSetting("Sage.NativeAutoSave", SageNativeAutoSave.ToString());
-        if (!_isServerMode && SelectedSageMappingClient is not null)
+        if (_currentUser.CanManageClients && SelectedSageMappingClient is not null)
         {
-            _repository.SaveSetting(BuildSageCustomerSettingKey(SelectedSageMappingClient.Id), SageMappedCustomerId.Trim());
             _repository.SaveClientSageMapping(SelectedSageMappingClient.Id, SageMappedCustomerId.Trim());
         }
         SaveSageConnectionSettings();
-        _repository.SaveSetting("Theme", IsLightTheme ? "Light" : "Dark");
+        _localPreferences.Theme = IsLightTheme ? "Light" : "Dark";
+        LocalPreferenceStore.Save(_localPreferences);
         ConfigureSageVerificationTimer();
         StatusMessage = "Settings saved.";
     }
@@ -3548,7 +3295,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task RunWhdAutoSyncAsync()
     {
-        if (!WhdAutoSyncEnabled || _isWhdAutoSyncRunning || !HasWhdConnectionFields())
+        if (!CanRunSharedSync
+            || !WhdAutoSyncEnabled
+            || _isWhdAutoSyncRunning
+            || !HasWhdConnectionFields())
         {
             return;
         }
@@ -3673,8 +3423,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _credentialStore.SetSecret("Whd.ApiToken", WhdApiToken);
         _repository.DeleteSetting("Whd.ApiToken");
         _repository.SaveSetting("Whd.AuthenticationMode", ParseWhdAuthenticationMode(SelectedWhdAuthenticationMode).ToString());
-        _repository.SaveSetting("Whd.AutoSyncEnabled", WhdAutoSyncEnabled.ToString());
-        _repository.SaveSetting("Whd.AutoSyncMinutes", ResolveWhdAutoSyncIntervalMinutes().ToString());
+        _localPreferences.WhdAutoSyncEnabled = WhdAutoSyncEnabled;
+        _localPreferences.WhdAutoSyncMinutes = ResolveWhdAutoSyncIntervalMinutes();
+        LocalPreferenceStore.Save(_localPreferences);
         ConfigureWhdAutoSyncTimer();
     }
 
@@ -3682,7 +3433,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         _whdAutoSyncTimer.Stop();
         _whdAutoSyncTimer.Interval = TimeSpan.FromMinutes(ResolveWhdAutoSyncIntervalMinutes());
-        if (WhdAutoSyncEnabled)
+        if (CanRunSharedSync && WhdAutoSyncEnabled)
         {
             _whdAutoSyncTimer.Start();
         }
@@ -3831,11 +3582,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void SaveSageConnectionSettings()
     {
-        _repository.SaveSetting("Sage.Dsn", SageDsn.Trim());
         _repository.SaveSetting("Sage.Username", SageUsername.Trim());
         _credentialStore.SetSecret("Sage.Password", SagePassword);
         _repository.DeleteSetting("Sage.Password");
-        _repository.SaveSetting("Sage.CompanyPath", SageCompanyPath.Trim());
+        _localPreferences.SageDsn = SageDsn.Trim();
+        _localPreferences.SageCompanyPath = SageCompanyPath.Trim();
+        _localPreferences.SageNativeAutoSave = SageNativeAutoSave;
+        LocalPreferenceStore.Save(_localPreferences);
         ConfigureSageVerificationTimer();
     }
 
@@ -3848,6 +3601,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             ["Whd.ApiToken"] = WhdApiToken,
             ["Whd.AuthenticationMode"] = ParseWhdAuthenticationMode(SelectedWhdAuthenticationMode).ToString(),
             ["Sage.Password"] = SagePassword,
+            ["Sage.Dsn"] = SageDsn.Trim(),
+            ["Sage.CompanyPath"] = SageCompanyPath.Trim(),
             ["Sage.EmployeeId"] = SageEmployeeId.Trim(),
             ["Sage.ActivityItemId"] = SageActivityItemId.Trim(),
             ["Sage.NativeAutoSave"] = SageNativeAutoSave.ToString()
@@ -3969,8 +3724,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         if (e.PropertyName == nameof(WorkEntryEditorViewModel.IsDirty))
         {
             OnPropertyChanged(nameof(WorkspaceStateLabel));
-            MoveDatabaseCommand.RaiseCanExecuteChanged();
-            UseExistingDatabaseCommand.RaiseCanExecuteChanged();
         }
 
         if (e.PropertyName is nameof(WorkEntryEditorViewModel.HasPostedDestination)
@@ -4352,14 +4105,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         return true;
     }
 
-    private static string BuildSageCustomerSettingKey(int clientId)
-    {
-        return $"Sage.CustomerId.{clientId}";
-    }
-
     private void TryAutoMatchSageCustomerForTicket(Ticket? ticket)
     {
-        if (_isServerMode || ticket is not { Id: > 0, ClientId: > 0 })
+        if (!_currentUser.CanRunSharedSync || ticket is not { Id: > 0, ClientId: > 0 })
         {
             return;
         }
