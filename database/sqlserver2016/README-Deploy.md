@@ -18,7 +18,7 @@ The prepared CSRI configuration is:
 | Database | `TechBench` |
 | Standard users | `CSRI\TechBench_Users` |
 | Application administrators | `CSRI\TechBench_Admins` |
-| WHD sync service | `CSRI\TechBench_SyncService` |
+| WHD sync service | `CSRI\TechBench_Sync` |
 | Compatibility level | SQL Server 2016 / level 130 |
 | Recovery model | `SIMPLE` initially |
 | Data file | At least 256 MB; fixed 64 MB growth |
@@ -40,21 +40,21 @@ authenticates the current Windows user, and the database derives identity from
 
 Three distinct AD principals are required:
 
-| AD group | Database roles |
+| AD principal | Database roles |
 |---|---|
 | `CSRI\TechBench_Users` | `tb_role_user` |
 | `CSRI\TechBench_Admins` | `tb_role_user`, `tb_role_manager`, `tb_role_admin`, `tb_role_sync_operator` |
-| `CSRI\TechBench_SyncService` | `tb_role_sync_service` only |
+| `CSRI\TechBench_Sync` | `tb_role_sync_service` only |
 
 Administrators receive normal user access through their role mapping, so they
 do not need membership in both AD groups.
 
-The WHD service uses the separate `CSRI\TechBench_SyncService` AD principal,
-which is a member only of `tb_role_sync_service`. It is not an application
-Admin and has execution rights only for the leased `tb_service` WHD contract.
-The principal may be the service account itself or, as prepared here, an AD
-group containing only the dedicated domain service account/gMSA. Do not place
-the service account in either TechBench application group.
+The WHD service uses the separate `CSRI\TechBench_Sync` AD account, which is
+mapped only to `tb_role_sync_service`. It is not an application Admin and has
+execution rights only for the leased `tb_service` WHD contract. The prepared
+CSRI deployment maps that service account directly; no same-named AD group is
+required. Do not place the service account in either TechBench application
+group.
 
 Organization-wide configuration and WHD/Sage synchronization require the
 effective `tb_role_admin` role. `tb_role_sync_operator` is retained for upgrade
@@ -82,7 +82,7 @@ tool by supplying:
 | `DatabaseName` | `TechBench` |
 | `UserGroup` | `CSRI\TechBench_Users` |
 | `AdminGroup` | `CSRI\TechBench_Admins` |
-| `SyncServicePrincipal` | `CSRI\TechBench_SyncService` |
+| `SyncServicePrincipal` | `CSRI\TechBench_Sync` |
 
 Run the scripts in this order:
 
@@ -169,7 +169,7 @@ schedule, verify, or restore a SQL Server backup.
   outcome for every read item and zero errors. A user can abandon only their own
   active V1 batch, including selecting that current batch by passing a null ID;
   the recovery is audited.
-- V0006 introduces a dedicated `CSRI\TechBench_SyncService` Windows login and
+- V0006 introduces a dedicated `CSRI\TechBench_Sync` Windows login and
   least-privilege `tb_role_sync_service` role for server-side WHD ingestion.
   Admins can request, monitor, and map Windows users to WHD technicians, but
   only the service role can claim leased work or apply WHD JSON snapshots.
@@ -219,9 +219,9 @@ client connection string.
 
 1. Add ordinary users to `CSRI\TechBench_Users`.
 2. Add application administrators to `CSRI\TechBench_Admins`.
-3. Run the WHD sync service as a dedicated account/gMSA that is a member only
-   of `CSRI\TechBench_SyncService`; do not add the account to either TechBench
-   application group or the Admin role.
+3. Run the WHD sync service as the dedicated `CSRI\TechBench_Sync` account;
+   do not add the account to either TechBench application group or the Admin
+   role.
 4. Have affected users sign out of Windows and sign back in so their group
    membership token refreshes.
 5. Test the V2 client using `CSRI-SQL.CSRI.local` and database `TechBench`.

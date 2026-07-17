@@ -19,7 +19,7 @@ Before installing the service or alpha.6 clients, have the DBA back up `TechBenc
 ## Prerequisites
 
 - Run the installer from an elevated PowerShell session on the target server.
-- Use a dedicated, least-privilege AD domain account or gMSA. With the default SQL deployment, add that account only to `CSRI\TechBench_SyncService`; do not add it directly or through a nested group to `TechBench_Users`, `TechBench_Admins`, or any unrelated SQL role. Alternatively, deploy SQL with the account itself as `SyncServicePrincipal`.
+- Use the dedicated, least-privilege `CSRI\TechBench_Sync` AD domain account. The default SQL deployment maps that account directly to the service-only database role; no same-named AD group is required. Do not add it directly or through a nested group to `TechBench_Users`, `TechBench_Admins`, or any unrelated SQL role.
 - For a gMSA, install the account on the host and grant that host permission to retrieve its password before installing the service. The installer calls `Test-ADServiceAccount` when the ActiveDirectory module is available.
 - For an ordinary domain account, ensure the supplied account is allowed to log on as a service. The installer adds that right when local policy permits it; a domain GPO can override the local assignment.
 - Review the package `appsettings.json`; it contains only the SQL Server name, database name, timeouts, and worker tuning. Admins configure the WHD endpoint, service username, authentication mode, and schedule in the TechBench client, which stores them in SQL Server.
@@ -32,10 +32,13 @@ For a normal domain account, PowerShell prompts for the Windows service account 
 ```powershell
 Expand-Archive .\TechBenchSyncService-2.0.0-alpha.6-win-x64.zip .\TechBenchSyncService
 Set-Location .\TechBenchSyncService
-.\Install-TechBenchSyncService.ps1 -ServiceAccount 'CSRI\svc_techbench_sync' -ConfigureWhdCredential
+.\Install-TechBenchSyncService.ps1 -ServiceAccount 'CSRI\TechBench_Sync' -ConfigureWhdCredential
 ```
 
-For a gMSA, include the trailing `$` and do not supply `-Credential`:
+The prepared CSRI deployment does not use a gMSA. If a future deployment
+switches to one, first redeploy SQL with that exact gMSA (or a dedicated group
+containing it) as `SyncServicePrincipal`; then include the trailing `$` and do
+not supply `-Credential`:
 
 ```powershell
 .\Install-TechBenchSyncService.ps1 -ServiceAccount 'CSRI\gmsa_techbench_sync$' -ConfigureWhdCredential

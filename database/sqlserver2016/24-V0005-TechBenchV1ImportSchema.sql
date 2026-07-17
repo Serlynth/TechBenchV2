@@ -153,34 +153,42 @@ BEGIN TRY
     ALTER TABLE [tb_ops].[ImportBatches]
         DROP CONSTRAINT [CK_ImportBatches_Counts];
 
-    ALTER TABLE [tb_ops].[ImportBatches]
-        ADD CONSTRAINT [CK_ImportBatches_Counts]
-            CHECK
-            (
-                [ReadCount] >= 0
-                AND [ImportedCount] >= 0
-                AND [SkippedCount] >= 0
-                AND [ConflictCount] >= 0
-                AND [ErrorCount] >= 0
-            );
+    /*
+        SQL Server binds column references while compiling the batch. Compile
+        every statement that consumes the newly added column only after the
+        ALTER TABLE above has updated the catalog. The dynamic batch remains
+        inside this transaction and is rolled back by the surrounding CATCH.
+    */
+    DECLARE @ConflictCountDependentSql nvarchar(max) = N'
+        ALTER TABLE [tb_ops].[ImportBatches]
+            ADD CONSTRAINT [CK_ImportBatches_Counts]
+                CHECK
+                (
+                    [ReadCount] >= 0
+                    AND [ImportedCount] >= 0
+                    AND [SkippedCount] >= 0
+                    AND [ConflictCount] >= 0
+                    AND [ErrorCount] >= 0
+                );
 
-    CREATE INDEX [IX_ImportBatches_OwnerSourceFileHash]
-        ON [tb_ops].[ImportBatches]
-        (
-            [OwnerWindowsSid],
-            [SourceSystem],
-            [FileHash],
-            [Status]
-        )
-        INCLUDE
-        (
-            [ImportedCount],
-            [SkippedCount],
-            [ConflictCount],
-            [ErrorCount],
-            [CompletedAtUtc]
-        )
-        WHERE [FileHash] IS NOT NULL;
+        CREATE INDEX [IX_ImportBatches_OwnerSourceFileHash]
+            ON [tb_ops].[ImportBatches]
+            (
+                [OwnerWindowsSid],
+                [SourceSystem],
+                [FileHash],
+                [Status]
+            )
+            INCLUDE
+            (
+                [ImportedCount],
+                [SkippedCount],
+                [ConflictCount],
+                [ErrorCount],
+                [CompletedAtUtc]
+            )
+            WHERE [FileHash] IS NOT NULL;';
+    EXEC sys.sp_executesql @ConflictCountDependentSql;
 
     CREATE UNIQUE INDEX [UX_ImportBatches_ActiveTechBenchV1]
         ON [tb_ops].[ImportBatches]([OwnerWindowsSid])

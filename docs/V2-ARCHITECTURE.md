@@ -74,11 +74,11 @@ The Windows SID is the durable user/owner key. Login names are retained for disp
 
 The deployed CSRI mappings are:
 
-| Active Directory group | Database roles |
+| Active Directory principal | Database roles |
 |---|---|
 | `CSRI\TechBench_Users` | `tb_role_user` |
 | `CSRI\TechBench_Admins` | `tb_role_user`, `tb_role_manager`, `tb_role_admin`, `tb_role_sync_operator` |
-| `CSRI\TechBench_SyncService` | `tb_role_sync_service` only |
+| `CSRI\TechBench_Sync` | `tb_role_sync_service` only |
 
 The database role meanings are:
 
@@ -88,7 +88,7 @@ The database role meanings are:
 - `tb_role_sync_operator`: retained for upgrade compatibility and synchronization-history inspection; it grants no shared mutation authority by itself.
 - `tb_role_sync_service`: claim/renew leased WHD work and apply validated WHD batches; it grants no interactive application or Admin authority.
 
-Authorization is enforced in stored procedures, with a SQL Server row-level-security policy adding table-level defense for WHD tickets. The groups do not receive `db_owner`, `db_datareader`, `db_datawriter`, `db_ddladmin`, or direct application-table DML permission. UI visibility is not a security boundary.
+Authorization is enforced in stored procedures, with a SQL Server row-level-security policy adding table-level defense for WHD tickets. The application principals do not receive `db_owner`, `db_datareader`, `db_datawriter`, `db_ddladmin`, or direct application-table DML permission. UI visibility is not a security boundary.
 
 Shared mutation and synchronization require the effective Admin role even if the caller has another technical role. Ordinary users can read shared catalogs but cannot change customer matching or aliases, Common Links, note templates, organization defaults, the WHD automatic-sync schedule, or WHD/Sage snapshot state.
 

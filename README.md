@@ -59,11 +59,11 @@ Users do not create a separate TechBench username or enter a database password. 
 
 The prepared CSRI mapping is:
 
-| Active Directory group | Database roles |
+| Active Directory principal | Database roles |
 |---|---|
 | `CSRI\TechBench_Users` | `tb_role_user` |
 | `CSRI\TechBench_Admins` | `tb_role_user`, `tb_role_manager`, `tb_role_admin`, `tb_role_sync_operator` |
-| `CSRI\TechBench_SyncService` | `tb_role_sync_service` only |
+| `CSRI\TechBench_Sync` | `tb_role_sync_service` only |
 
 The database derives the caller's durable owner identity from the Windows SID. Stored procedures enforce owner and role checks, and a SQL Server row-level-security policy applies the WHD technician/group assignment boundary to every ticket-table access path. Hiding or disabling a WPF control is only a user-interface convenience and is not the authorization boundary.
 
@@ -124,7 +124,7 @@ The desktop application checks the schema version at startup and refuses an inco
 The database and client must be upgraded as one planned cutover:
 
 1. Back up the `TechBench` database.
-2. Create the distinct sync-service AD principal/group, run the complete schema-version-6 standalone deployment, and confirm verification output.
+2. Create the distinct `CSRI\TechBench_Sync` service account, run the complete schema-version-6 standalone deployment, and confirm verification output.
 3. Build/install the x64 WHD Sync Service, provision its machine-protected WHD credential, and confirm it runs under only the service principal.
 4. Install the alpha.6 client and configure the WHD endpoint, service username, schedule, and AD-to-WHD technician mappings as a TechBench Admin.
 5. Test with at least one ordinary domain user and one TechBench administrator. Confirm the initial full sync, a later delta, service health, and direct/group ticket visibility.

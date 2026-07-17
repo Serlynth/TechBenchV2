@@ -63,7 +63,7 @@ $sections.Add(@'
 :setvar DatabaseName "TechBench"
 :setvar UserGroup "CSRI\TechBench_Users"
 :setvar AdminGroup "CSRI\TechBench_Admins"
-:setvar SyncServicePrincipal "CSRI\TechBench_SyncService"
+:setvar SyncServicePrincipal "CSRI\TechBench_Sync"
 
 USE [master];
 GO
