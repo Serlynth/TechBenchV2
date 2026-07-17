@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>TechBench.WHD</AssemblyName>
+    <RootNamespace>TechBench</RootNamespace>
+    <Version>2.0.0-alpha.6</Version>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Models\WhdConnectionSettings.cs" Link="Models\WhdConnectionSettings.cs" />
+    <Compile Include="..\Models\WhdSyncResult.cs" Link="Models\WhdSyncResult.cs" />
+    <Compile Include="..\Providers\PostingResult.cs" Link="Providers\PostingResult.cs" />
+    <Compile Include="..\Providers\WhdRestClient.cs" Link="Providers\WhdRestClient.cs" />
+  </ItemGroup>
+
+</Project>

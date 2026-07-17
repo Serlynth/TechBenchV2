@@ -369,10 +369,11 @@ BEGIN
             SET @Action = N'TicketUpdated';
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = @Action,
             @EntityType = N'Ticket',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -1137,10 +1138,11 @@ BEGIN
             WHERE [TagHash] = parsed_tag.[TagHash]
         );
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = @Action,
             @EntityType = N'WorkEntry',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -1299,10 +1301,11 @@ BEGIN
             THROW 51134, N'The work entry changed after it was loaded.', 1;
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'WorkEntryDeleted',
             @EntityType = N'WorkEntry',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -1463,10 +1466,11 @@ BEGIN
             SET @Id = CONVERT(int, SCOPE_IDENTITY());
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'WorkEntryLinkSaved',
             @EntityType = N'WorkEntryLink',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -1533,10 +1537,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51143, N'The work-entry link was not found, changed, or is not owned by the current user.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'WorkEntryLinkDeleted',
         @EntityType = N'WorkEntryLink',
-        @EntityId = CONVERT(nvarchar(120), @Id),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO

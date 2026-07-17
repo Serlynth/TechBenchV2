@@ -480,10 +480,11 @@ BEGIN
             SET @Action = N'TemplateUpdated';
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = @Action,
             @EntityType = N'Template',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -543,10 +544,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51205, N'The template was not found, changed, or cannot be deleted by the current user.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'TemplateDeleted',
         @EntityType = N'Template',
-        @EntityId = CONVERT(nvarchar(120), @Id),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO
@@ -721,10 +723,11 @@ BEGIN
                 THROW 51214, N'The Common Link changed after it was loaded.', 1;
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'CommonLinkSaved',
             @EntityType = N'CommonLink',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -795,10 +798,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51215, N'The Common Link was not found, changed, or cannot be deleted by the current user.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'CommonLinkDeleted',
         @EntityType = N'CommonLink',
-        @EntityId = CONVERT(nvarchar(120), @Id),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO
@@ -1310,10 +1314,11 @@ BEGIN
                 THROW 51234, N'The client alias changed after it was loaded.', 1;
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'ClientAliasSaved',
             @EntityType = N'ClientAlias',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -1372,10 +1377,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51235, N'The client alias was not found, changed, or cannot be deleted by the current user.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'ClientAliasDeleted',
         @EntityType = N'ClientAlias',
-        @EntityId = CONVERT(nvarchar(120), @Id),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO
@@ -1957,10 +1963,11 @@ BEGIN
         IF @@ROWCOUNT = 0
             THROW 51273, N'The source client changed during the merge.', 1;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @WhdClientId);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'ClientMerged',
             @EntityType = N'Client',
-            @EntityId = CONVERT(nvarchar(120), @WhdClientId),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -2207,10 +2214,11 @@ BEGIN
         WHERE [Id] = @Id
           AND [OwnerWindowsSid] = @UserSid;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'ClientAliasDeleted',
             @EntityType = N'ClientAlias',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
     END;
 END;

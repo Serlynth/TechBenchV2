@@ -1,10 +1,10 @@
 # TechBench V2 SQL Server 2016 deployment
 
 This package creates the shared `TechBench` database used by the TechBench V2
-WPF client. There is no separate TechBench server service. Each client connects
-directly to SQL Server with Windows Integrated Authentication.
+WPF client and the dedicated WHD sync service. Both use Windows Integrated
+Authentication; the service has a separate least-privilege database role.
 
-TechBench V2 `2.0.0-alpha.5` requires schema version `5`, including the
+TechBench V2 `2.0.0-alpha.6` requires schema version `6`, including the
 administrator-only shared-configuration boundary and owner-scoped V1 import
 contract in this package.
 
@@ -18,6 +18,7 @@ The prepared CSRI configuration is:
 | Database | `TechBench` |
 | Standard users | `CSRI\TechBench_Users` |
 | Application administrators | `CSRI\TechBench_Admins` |
+| WHD sync service | `CSRI\TechBench_SyncService` |
 | Compatibility level | SQL Server 2016 / level 130 |
 | Recovery model | `SIMPLE` initially |
 | Data file | At least 256 MB; fixed 64 MB growth |
@@ -37,15 +38,23 @@ The desktop application never stores a SQL username or password. SQL Server
 authenticates the current Windows user, and the database derives identity from
 `ORIGINAL_LOGIN()` and `SUSER_SID()`.
 
-Only two AD groups are required:
+Three distinct AD principals are required:
 
 | AD group | Database roles |
 |---|---|
 | `CSRI\TechBench_Users` | `tb_role_user` |
 | `CSRI\TechBench_Admins` | `tb_role_user`, `tb_role_manager`, `tb_role_admin`, `tb_role_sync_operator` |
+| `CSRI\TechBench_SyncService` | `tb_role_sync_service` only |
 
 Administrators receive normal user access through their role mapping, so they
 do not need membership in both AD groups.
+
+The WHD service uses the separate `CSRI\TechBench_SyncService` AD principal,
+which is a member only of `tb_role_sync_service`. It is not an application
+Admin and has execution rights only for the leased `tb_service` WHD contract.
+The principal may be the service account itself or, as prepared here, an AD
+group containing only the dedicated domain service account/gMSA. Do not place
+the service account in either TechBench application group.
 
 Organization-wide configuration and WHD/Sage synchronization require the
 effective `tb_role_admin` role. `tb_role_sync_operator` is retained for upgrade
@@ -73,6 +82,7 @@ tool by supplying:
 | `DatabaseName` | `TechBench` |
 | `UserGroup` | `CSRI\TechBench_Users` |
 | `AdminGroup` | `CSRI\TechBench_Admins` |
+| `SyncServicePrincipal` | `CSRI\TechBench_SyncService` |
 
 Run the scripts in this order:
 
@@ -83,28 +93,33 @@ Run the scripts in this order:
 5. `22-V0003-SharedReferenceData.sql`
 6. `23-V0004-AdminOwnedSharedConfig.sql`
 7. `24-V0005-TechBenchV1ImportSchema.sql`
-8. `30-Security.sql`
-9. `40-StoredProcedures.sql`
-10. `41-V0002-WorkProcedures.sql`
-11. `42-V0002-SharedProcedures.sql`
-12. `43-V0002-PostingProcedures.sql`
-13. `44-V0002-SyncImportProcedures.sql`
-14. `45-V0003-SharedReferenceProcedures.sql`
-15. `46-V0004-AdminSharedProcedures.sql`
-16. `47-V0005-TechBenchV1ImportProcedures.sql`
-17. `50-Grants.sql`
-18. `51-V0002-OperationalGrants.sql`
-19. `52-V0004-AdminSharedGrants.sql`
-20. `53-V0005-TechBenchV1ImportGrants.sql`
-21. `90-Verify.sql`
-22. `91-V0002-OperationalVerify.sql`
-23. `92-V0003-SharedReferenceVerify.sql`
-24. `93-V0004-AdminSharedVerify.sql`
-25. `94-V0005-TechBenchV1ImportVerify.sql`
+8. `25-V0006-WhdServerSyncSchema.sql`
+9. `30-Security.sql`
+10. `40-StoredProcedures.sql`
+11. `41-V0002-WorkProcedures.sql`
+12. `42-V0002-SharedProcedures.sql`
+13. `43-V0002-PostingProcedures.sql`
+14. `44-V0002-SyncImportProcedures.sql`
+15. `45-V0003-SharedReferenceProcedures.sql`
+16. `46-V0004-AdminSharedProcedures.sql`
+17. `47-V0005-TechBenchV1ImportProcedures.sql`
+18. `48-V0006-WhdServerSyncProcedures.sql`
+19. `50-Grants.sql`
+20. `51-V0002-OperationalGrants.sql`
+21. `52-V0004-AdminSharedGrants.sql`
+22. `53-V0005-TechBenchV1ImportGrants.sql`
+23. `54-V0006-WhdServerSyncGrants.sql`
+24. `90-Verify.sql`
+25. `91-V0002-OperationalVerify.sql`
+26. `92-V0003-SharedReferenceVerify.sql`
+27. `93-V0004-AdminSharedVerify.sql`
+28. `94-V0005-TechBenchV1ImportVerify.sql`
+29. `95-V0006-WhdServerSyncVerify.sql`
 
 The scripts are idempotent for the baseline, V0002 operational-storage, V0003
 shared-reference-data, V0004 Admin-owned-configuration, and V0005 owner-scoped
-V1-import migrations. They stop on validation or deployment errors.
+V1-import, and V0006 server-sync migrations. They stop on validation or
+deployment errors.
 
 ## Database behavior
 
@@ -154,6 +169,16 @@ schedule, verify, or restore a SQL Server backup.
   outcome for every read item and zero errors. A user can abandon only their own
   active V1 batch, including selecting that current batch by passing a null ID;
   the recovery is audited.
+- V0006 introduces a dedicated `CSRI\TechBench_SyncService` Windows login and
+  least-privilege `tb_role_sync_service` role for server-side WHD ingestion.
+  Admins can request, monitor, and map Windows users to WHD technicians, but
+  only the service role can claim leased work or apply WHD JSON snapshots.
+  Ticket batches never treat omission as deletion; a ticket closes or becomes
+  deleted only when WHD explicitly supplies that state. Direct technician and
+  synchronized group membership limit non-Admin WHD ticket reads and writes.
+  An enabled row-level-security filter/block policy enforces that boundary for
+  ticket-linked work entries, V1 imports, and future table access paths as well
+  as the primary ticket procedures.
 - `tb_app.ResolveTechBenchV1Reference` gives ordinary users a read-only,
   source-qualified exact resolver for V1 imports. It queries the authoritative
   client identities, Sage customer IDs, organization aliases/names, and ticket
@@ -163,8 +188,8 @@ schedule, verify, or restore a SQL Server backup.
 - Organization-scoped matching, aliases, Common Links, templates, settings,
   and WHD/Sage synchronization mutations require a TechBench Admin.
 - The WHD automatic-sync enabled state and interval are stored as organization
-  settings. An authorized workstation performs the external call because there
-  is no server process; SQL leases coordinate competing Admin workstations.
+  settings. The Windows sync service performs organization-wide WHD calls;
+  Admin workstations only configure, queue, and monitor the durable SQL work.
 - `tb_app.EnsureWorkspaceDefaults` is Admin-only. Before the initialization
   marker exists, it performs one insert-missing seed of the original Common
   Links and note templates and then records the marker with the real Admin SID.
@@ -194,16 +219,19 @@ client connection string.
 
 1. Add ordinary users to `CSRI\TechBench_Users`.
 2. Add application administrators to `CSRI\TechBench_Admins`.
-3. Have affected users sign out of Windows and sign back in so their group
+3. Run the WHD sync service as a dedicated account/gMSA that is a member only
+   of `CSRI\TechBench_SyncService`; do not add the account to either TechBench
+   application group or the Admin role.
+4. Have affected users sign out of Windows and sign back in so their group
    membership token refreshes.
-4. Test the V2 client using `CSRI-SQL.CSRI.local` and database `TechBench`.
-5. Verify an ordinary user cannot change shared settings or run WHD/Sage
+5. Test the V2 client using `CSRI-SQL.CSRI.local` and database `TechBench`.
+6. Verify an ordinary user cannot change shared settings or run WHD/Sage
    synchronization, and verify an Admin can perform the intended shared actions.
-6. Verify an ordinary user can start or abandon a V1 import only for their own
+7. Verify an ordinary user can start or abandon a V1 import only for their own
    Windows SID. Confirm a same-batch resume preserves imported outcomes, a later
    unchanged retry skips rather than duplicates rows, and equivalent legacy link
    IDs can reuse one SQL relationship.
-7. Have the DBA configure and test SQL Server backups, integrity checks, and a
+8. Have the DBA configure and test SQL Server backups, integrity checks, and a
    restore before production data entry. These operations are not performed by
    the TechBench client.
 

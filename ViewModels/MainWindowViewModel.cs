@@ -17,7 +17,6 @@ namespace TechBench.ViewModels;
 
 public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 {
-    private const int DefaultWhdAutoSyncMinutes = 5;
     private const int DefaultSharedDataRefreshMinutes = 5;
     private readonly ITechBenchRepository _repository;
     private readonly IClientProvider _clientProvider;
@@ -32,7 +31,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly CurrentUserContext _currentUser;
     private readonly LocalPreferences _localPreferences;
     private readonly PostingExecutionCoordinator _postingCoordinator = new();
-    private readonly DispatcherTimer _whdAutoSyncTimer = new();
     private readonly DispatcherTimer _sageVerificationTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private readonly DispatcherTimer _sharedDataRefreshTimer = new();
     private readonly HashSet<string> _knownWhdTicketKeys = new(StringComparer.OrdinalIgnoreCase);
@@ -89,16 +87,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private string _whdBaseUrl = string.Empty;
     private string _whdUsername = string.Empty;
     private string _whdApiToken = string.Empty;
+    private string _whdServiceUsername = string.Empty;
     private string _selectedWhdAuthenticationMode = "Auto (detect once)";
     private bool _whdAutoSyncEnabled = true;
-    private string _whdAutoSyncMinutesText = DefaultWhdAutoSyncMinutes.ToString();
-    private bool _effectiveWhdAutoSyncEnabled = true;
-    private int _effectiveWhdAutoSyncMinutes = DefaultWhdAutoSyncMinutes;
-    private bool _isWhdAutoSyncRunning;
+    private string _whdAutoSyncMinutesText = "5";
     private bool _isSageVerificationRunning;
     private bool _isSagePostingRunning;
     private int _sageVerificationCursor;
-    private DateTime? _lastWhdAutoSyncAt;
+    private WhdSyncServiceStatus _whdSyncServiceStatus = new();
     private string _sageEmployeeId = string.Empty;
     private string _sageActivityItemId = string.Empty;
     private string _sageDsn = string.Empty;
@@ -189,15 +185,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ApplyClientMatchCommand = new RelayCommand(_ => ApplyClientMatch(), _ => CanApplyClientMatch());
         SaveSettingsCommand = new RelayCommand(_ => SaveSettings());
         TestWhdConnectionCommand = new AsyncRelayCommand(TestWhdConnectionAsync);
-        SyncWhdTicketsCommand = new AsyncRelayCommand(
-            SyncWhdTicketsNowAsync,
-            _ => _currentUser.CanRunSharedSync);
-        SyncWhdClientsCommand = new AsyncRelayCommand(
-            SyncWhdClientsAsync,
-            _ => _currentUser.CanRunSharedSync);
-        SyncWhdStatusesCommand = new AsyncRelayCommand(
-            SyncWhdStatusesAsync,
-            _ => _currentUser.CanRunSharedSync);
+        RequestWhdServerSyncCommand = new AsyncRelayCommand(
+            RequestWhdServerSyncAsync,
+            _ => _currentUser.CanManageSharedConfiguration);
         TestSageConnectionCommand = new RelayCommand(_ => TestSageConnection());
         TestSageOdbcCommand = new AsyncRelayCommand(TestSageOdbcAsync);
         SyncSageCustomersCommand = new AsyncRelayCommand(
@@ -248,14 +238,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         Editor.PropertyChanged += HandleEditorPropertyChanged;
-        _whdAutoSyncTimer.Tick += HandleWhdAutoSyncTimerTick;
         _sageVerificationTimer.Tick += HandleSageVerificationTimerTick;
         _sharedDataRefreshTimer.Tick += HandleSharedDataRefreshTimerTick;
 
         LoadSettings();
         RefreshAll();
         PrimeKnownWhdTicketKeys();
-        ConfigureWhdAutoSyncTimer();
+        RefreshWhdSyncServiceStatus();
         ConfigureSageVerificationTimer();
         ConfigureSharedDataRefreshTimer();
         RunSearch();
@@ -324,9 +313,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public RelayCommand ApplyClientMatchCommand { get; }
     public RelayCommand SaveSettingsCommand { get; }
     public AsyncRelayCommand TestWhdConnectionCommand { get; }
-    public AsyncRelayCommand SyncWhdTicketsCommand { get; }
-    public AsyncRelayCommand SyncWhdClientsCommand { get; }
-    public AsyncRelayCommand SyncWhdStatusesCommand { get; }
+    public AsyncRelayCommand RequestWhdServerSyncCommand { get; }
     public RelayCommand TestSageConnectionCommand { get; }
     public AsyncRelayCommand TestSageOdbcCommand { get; }
     public AsyncRelayCommand SyncSageCustomersCommand { get; }
@@ -828,6 +815,18 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    public string WhdServiceUsername
+    {
+        get => _whdServiceUsername;
+        set
+        {
+            if (SetProperty(ref _whdServiceUsername, value))
+            {
+                MarkSettingsDirty();
+            }
+        }
+    }
+
     public bool CanRunSharedSync => _currentUser.CanRunSharedSync;
 
     public bool CanManageOrganizationSettings =>
@@ -861,27 +860,20 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public string WhdAutoSyncStatusLabel
     {
-        get
-        {
-            if (!CanRunSharedSync)
-            {
-                return "Shared WHD sync is managed by a TechBench administrator.";
-            }
-
-            var pendingSuffix = HasPendingWhdAutoSyncSchedule()
-                ? " Save Settings to apply the pending schedule change."
-                : string.Empty;
-
-            if (!_effectiveWhdAutoSyncEnabled)
-            {
-                return $"Auto-sync is off.{pendingSuffix}";
-            }
-
-            return _lastWhdAutoSyncAt.HasValue
-                ? $"Auto-sync every {_effectiveWhdAutoSyncMinutes} min. Last sync: {_lastWhdAutoSyncAt.Value:g}.{pendingSuffix}"
-                : $"Auto-sync every {_effectiveWhdAutoSyncMinutes} min. Waiting for next sync.{pendingSuffix}";
-        }
+        get => !WhdAutoSyncEnabled
+            ? "The server schedule is off."
+            : $"Server sync is scheduled every {ResolveWhdAutoSyncIntervalMinutes()} min.";
     }
+
+    public string WhdSyncServiceHealthLabel => _whdSyncServiceStatus.Summary;
+
+    public string WhdSyncServiceLastRunLabel => _whdSyncServiceStatus.LastRunAt.HasValue
+        ? _whdSyncServiceStatus.LastRunAt.Value.ToString("g")
+        : "No server run recorded";
+
+    public string WhdSyncServiceQueueLabel => _whdSyncServiceStatus.IsRunning
+        ? $"Running; {_whdSyncServiceStatus.QueueDepth} request(s) queued"
+        : $"{_whdSyncServiceStatus.QueueDepth} request(s) queued";
 
     public string SageEmployeeId
     {
@@ -994,7 +986,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     public string SharedDataRefreshStatusLabel =>
-        $"Reload shared clients, tickets, statuses, links, tags, and templates every "
+        $"Reload shared clients, tickets, statuses, links, tags, templates, and server status every "
         + $"{ResolveSharedDataRefreshIntervalMinutes()} minutes.";
 
     private void Navigate(string section)
@@ -1051,6 +1043,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             case "Common Links":
                 RefreshCommonLinks();
                 break;
+            case "Settings":
+                RefreshWhdAdministration();
+                break;
         }
     }
 
@@ -1066,6 +1061,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         RefreshHistory();
         RefreshPostingQueue();
         RefreshPostingLogs();
+        RefreshWhdAdministration();
         UpdateTotals();
     }
 
@@ -1107,11 +1103,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void HandleSharedDataRefreshTimerTick(object? sender, EventArgs e)
     {
-        if (_isDisposed
-            || IsEntryOperationRunning
-            || Editor.IsDirty
+        if (_isDisposed || IsEntryOperationRunning)
+        {
+            return;
+        }
+
+        if (CurrentSection.Equals("Settings", StringComparison.Ordinal))
+        {
+            RefreshWhdAdministration();
+            return;
+        }
+
+        if (Editor.IsDirty
             || IsCommonLinkEditorOpen
-            || CurrentSection.Equals("Settings", StringComparison.Ordinal)
             || _settingsHaveUnsavedChanges
             || HasPendingTemplateChanges())
         {
@@ -1123,6 +1127,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             RefreshClients();
             RefreshTicketStatusOptions();
             RefreshTicketList();
+            NotifyNewVisibleWhdTickets();
             RefreshEditorTickets();
             RefreshCommonLinks();
             RefreshTagSuggestions();
@@ -1148,6 +1153,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         try
         {
             WhdBaseUrl = settings.GetValueOrDefault("Whd.BaseUrl", string.Empty);
+            WhdServiceUsername = settings.GetValueOrDefault("Whd.ServiceUsername", string.Empty);
             SelectedWhdAuthenticationMode = ToWhdAuthenticationModeLabel(
                 settings.GetValueOrDefault(
                     "Whd.AuthenticationMode",
@@ -1162,15 +1168,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 : true;
             WhdAutoSyncMinutesText = settings.GetValueOrDefault(
                 "Whd.AutoSyncMinutes",
-                DefaultWhdAutoSyncMinutes.ToString());
-            ApplyLoadedWhdAutoSyncSchedule();
+                "5");
         }
         finally
         {
             _isLoadingSettings = wasLoadingSettings;
         }
 
-        ConfigureWhdAutoSyncTimer();
+        RefreshWhdSyncServiceStatus();
     }
 
     private void RefreshTagSuggestions()
@@ -3331,6 +3336,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             WhdBaseUrl = settings.GetValueOrDefault("Whd.BaseUrl", string.Empty);
             WhdUsername = settings.GetValueOrDefault("Whd.Username", string.Empty);
             WhdApiToken = LoadCredentialWithLegacyMigration(settings, "Whd.ApiToken");
+            WhdServiceUsername = settings.GetValueOrDefault("Whd.ServiceUsername", string.Empty);
             SelectedWhdAuthenticationMode = ToWhdAuthenticationModeLabel(
                 settings.GetValueOrDefault(
                     "Whd.AuthenticationMode",
@@ -3340,10 +3346,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 out var autoSyncEnabled)
                 ? autoSyncEnabled
                 : true;
-            WhdAutoSyncMinutesText = settings.GetValueOrDefault(
-                "Whd.AutoSyncMinutes",
-                DefaultWhdAutoSyncMinutes.ToString());
-            ApplyLoadedWhdAutoSyncSchedule();
+            WhdAutoSyncMinutesText = settings.GetValueOrDefault("Whd.AutoSyncMinutes", "5");
             SageEmployeeId = settings.GetValueOrDefault("Sage.EmployeeId", string.Empty);
             SageActivityItemId = settings.GetValueOrDefault(
                 "Sage.ActivityItemId",
@@ -3417,208 +3420,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task SyncWhdTicketsNowAsync(object? parameter)
+    private async Task RequestWhdServerSyncAsync(object? parameter)
     {
-        if (!EnsureCanRunSharedSync("Web Help Desk ticket sync"))
+        if (!CanManageOrganizationSettings)
         {
             return;
         }
 
-        SaveWhdConnectionSettings();
-
-        if (!HasWhdConnectionFields())
-        {
-            const string message = "Enter the Web Help Desk base URL, username, and API key/password before syncing tickets.";
-            StatusMessage = message;
-            _dialogService.Error("Web Help Desk tickets", message);
-            return;
-        }
-
-        await RunWhdTicketSyncAsync(showNotifications: true, isManual: true);
-    }
-
-    private async Task SyncWhdClientsAsync(object? parameter)
-    {
-        if (!EnsureCanRunSharedSync("Web Help Desk location sync"))
-        {
-            return;
-        }
-
-        SaveWhdConnectionSettings();
-
-        if (!HasWhdConnectionFields())
-        {
-            const string message = "Enter the Web Help Desk base URL, username, and API key/password before syncing locations.";
-            StatusMessage = message;
-            _dialogService.Error("Web Help Desk locations", message);
-            return;
-        }
-
-        StatusMessage = "Syncing Web Help Desk locations...";
-        var result = await _whdRestClient.GetClientsAsync(BuildWhdConnectionSettings());
-        if (!result.Success)
-        {
-            StatusMessage = result.Message;
-            _dialogService.Error("Web Help Desk locations", result.Message);
-            return;
-        }
-
-        var matchedCount = SaveWhdClients(result.Clients, result.IsComplete);
-        RefreshAll();
-        StatusMessage = matchedCount > 0
-            ? $"{result.Message} Matched {matchedCount} location(s) to Sage customer(s)."
-            : result.Message;
-        _dialogService.Info("Web Help Desk locations", StatusMessage);
-    }
-
-    private async Task SyncWhdStatusesAsync(object? parameter)
-    {
-        if (!EnsureCanRunSharedSync("Web Help Desk status sync"))
-        {
-            return;
-        }
-
-        SaveWhdConnectionSettings();
-
-        if (!HasWhdConnectionFields())
-        {
-            const string message = "Enter the Web Help Desk base URL, username, and API key/password before syncing statuses.";
-            StatusMessage = message;
-            _dialogService.Error("Web Help Desk status types", message);
-            return;
-        }
-
-        StatusMessage = "Syncing Web Help Desk ticket statuses...";
-        var result = await _whdRestClient.GetStatusTypesAsync(BuildWhdConnectionSettings());
-        if (!result.Success)
-        {
-            StatusMessage = result.Message;
-            _dialogService.Error("Web Help Desk status types", result.Message);
-            return;
-        }
-
-        SaveWhdStatusTypes(result.StatusTypes);
-        RefreshTicketStatusOptions();
+        var result = await Task.Run(_repository.RequestWhdSync);
+        RefreshWhdSyncServiceStatus();
         StatusMessage = result.Message;
-    }
-
-    private async void HandleWhdAutoSyncTimerTick(object? sender, EventArgs e)
-    {
-        await RunWhdAutoSyncAsync();
-    }
-
-    private async Task RunWhdAutoSyncAsync()
-    {
-        if (!CanRunSharedSync
-            || !_effectiveWhdAutoSyncEnabled
-            || _isWhdAutoSyncRunning
-            || !HasWhdConnectionFields())
+        if (!result.Accepted)
         {
-            return;
-        }
-
-        await RunWhdTicketSyncAsync(showNotifications: true, isManual: false);
-    }
-
-    private async Task RunWhdTicketSyncAsync(bool showNotifications, bool isManual)
-    {
-        if (_isWhdAutoSyncRunning)
-        {
-            return;
-        }
-
-        _isWhdAutoSyncRunning = true;
-        var operationName = isManual
-            ? "WHD organization ticket sync"
-            : "WHD organization auto-sync";
-        try
-        {
-            var knownBeforeSync = new HashSet<string>(_knownWhdTicketKeys, StringComparer.OrdinalIgnoreCase);
-            StatusMessage = $"{operationName} running...";
-            var result = await _whdRestClient.GetOrganizationTicketsAsync(BuildWhdConnectionSettings());
-            if (!result.Success)
-            {
-                StatusMessage = $"{operationName} failed: {result.Message}";
-                if (isManual)
-                {
-                    _dialogService.Error("Web Help Desk tickets", result.Message);
-                }
-
-                return;
-            }
-
-            var newTickets = result.Tickets
-                .Where(ticket => !ticket.IsClosed
-                    && TryGetWhdTicketKey(ticket, out var key)
-                    && !knownBeforeSync.Contains(key))
-                .ToList();
-
-            SaveWhdTickets(result.Tickets);
-            UpdateKnownWhdTicketKeys(result.Tickets, replace: false);
-            _lastWhdAutoSyncAt = DateTime.Now;
-            RefreshAll();
-            StatusMessage = !result.IsComplete
-                ? $"{operationName} completed partially. {result.Message}"
-                : newTickets.Count == 0
-                ? $"{operationName} complete at {_lastWhdAutoSyncAt.Value:g}. No new tickets."
-                : $"{operationName} added {newTickets.Count} new ticket(s).";
-            OnPropertyChanged(nameof(WhdAutoSyncStatusLabel));
-
-            if (showNotifications && newTickets.Count > 0)
-            {
-                _notificationService.ShowNewWhdTickets(newTickets);
-            }
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"{operationName} failed: {ex.Message}";
-            if (isManual)
-            {
-                _dialogService.Error("Web Help Desk tickets", ex.Message);
-            }
-        }
-        finally
-        {
-            _isWhdAutoSyncRunning = false;
-        }
-    }
-
-    private void SaveWhdTickets(IReadOnlyList<WhdSyncedTicket> whdTickets)
-    {
-        SaveOrganizationWhdTicketSnapshot(_repository, whdTickets, DateTime.Now);
-    }
-
-    internal static void SaveOrganizationWhdTicketSnapshot(
-        ITechBenchRepository repository,
-        IReadOnlyList<WhdSyncedTicket> whdTickets,
-        DateTime syncedAt)
-    {
-        // An organization-wide fetch can omit tickets because of WHD permissions,
-        // paging behavior, or concurrent changes. Only explicit returned state may
-        // close a shared ticket; absence is never authoritative.
-        repository.SynchronizeWhdTickets(whdTickets, syncedAt, reconcileMissing: false);
-    }
-
-    private int SaveWhdClients(IReadOnlyList<WhdSyncedClient> whdClients, bool reconcileMissing)
-    {
-        var alreadyMatched = _repository.SynchronizeWhdClients(whdClients, DateTime.Now, reconcileMissing);
-        return alreadyMatched + _repository.ReconcileSafeClientMatches();
-    }
-
-    private void SaveWhdStatusTypes(IReadOnlyList<WhdStatusType> statusTypes)
-    {
-        var syncedAt = DateTime.Now;
-        foreach (var statusType in statusTypes)
-        {
-            _repository.UpsertTicketStatusOption(new TicketStatusOption
-            {
-                Name = statusType.Name,
-                Source = "WHD",
-                ExternalId = $"WHD-{statusType.Id}",
-                WhdStatusTypeId = statusType.Id,
-                IsClosed = statusType.IsClosed,
-                LastSyncedAt = syncedAt
-            });
+            _dialogService.Error("Web Help Desk server sync", result.Message);
         }
     }
 
@@ -3651,6 +3465,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             var autoSyncMinutes = ResolveWhdAutoSyncIntervalMinutes();
             _repository.SaveOrganizationSetting("Whd.BaseUrl", WhdBaseUrl.Trim());
+            _repository.SaveOrganizationSetting("Whd.ServiceUsername", WhdServiceUsername.Trim());
             _repository.SaveOrganizationSetting(
                 "Whd.AuthenticationMode",
                 ParseWhdAuthenticationMode(SelectedWhdAuthenticationMode).ToString());
@@ -3660,8 +3475,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _repository.SaveOrganizationSetting(
                 "Whd.AutoSyncMinutes",
                 autoSyncMinutes.ToString());
-            _effectiveWhdAutoSyncEnabled = WhdAutoSyncEnabled;
-            _effectiveWhdAutoSyncMinutes = autoSyncMinutes;
             var wasLoadingSettings = _isLoadingSettings;
             _isLoadingSettings = true;
             try
@@ -3674,18 +3487,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
         }
 
-        ConfigureWhdAutoSyncTimer();
-    }
-
-    private void ConfigureWhdAutoSyncTimer()
-    {
-        _whdAutoSyncTimer.Stop();
-        _whdAutoSyncTimer.Interval = TimeSpan.FromMinutes(_effectiveWhdAutoSyncMinutes);
-        if (CanRunSharedSync && _effectiveWhdAutoSyncEnabled)
-        {
-            _whdAutoSyncTimer.Start();
-        }
-
         OnPropertyChanged(nameof(WhdAutoSyncStatusLabel));
     }
 
@@ -3693,46 +3494,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         if (!int.TryParse(WhdAutoSyncMinutesText, out var minutes))
         {
-            return DefaultWhdAutoSyncMinutes;
+            return 5;
         }
 
         return Math.Clamp(minutes, 1, 120);
     }
 
-    private void ApplyLoadedWhdAutoSyncSchedule()
-    {
-        _effectiveWhdAutoSyncEnabled = WhdAutoSyncEnabled;
-        _effectiveWhdAutoSyncMinutes = ResolveWhdAutoSyncIntervalMinutes();
-        WhdAutoSyncMinutesText = _effectiveWhdAutoSyncMinutes.ToString();
-    }
-
-    private bool HasPendingWhdAutoSyncSchedule()
-    {
-        return WhdAutoSyncEnabled != _effectiveWhdAutoSyncEnabled
-            || !int.TryParse(WhdAutoSyncMinutesText, out var enteredMinutes)
-            || enteredMinutes != _effectiveWhdAutoSyncMinutes;
-    }
-
     private void PrimeKnownWhdTicketKeys()
     {
         _knownWhdTicketKeys.Clear();
-        foreach (var ticket in _repository.GetTickets(includeClosed: true)
+        foreach (var ticket in _repository.GetTickets(includeClosed: false)
                      .Where(static ticket => ticket.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase)))
-        {
-            if (TryGetWhdTicketKey(ticket, out var key))
-            {
-                _knownWhdTicketKeys.Add(key);
-            }
-        }
-    }
-
-    private void UpdateKnownWhdTicketKeys(IEnumerable<WhdSyncedTicket> tickets, bool replace)
-    {
-        if (replace)
-        {
-            _knownWhdTicketKeys.Clear();
-        }
-        foreach (var ticket in tickets)
         {
             if (TryGetWhdTicketKey(ticket, out var key))
             {
@@ -3845,6 +3617,66 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             + (matchedCount > 0 ? $" Matched {matchedCount} to WHD location(s)." : string.Empty)
             + (staleCount > 0 ? $" Removed or deactivated {staleCount} old Sage customer(s)." : string.Empty);
         _dialogService.Info("Sage customers", StatusMessage);
+    }
+
+    private void NotifyNewVisibleWhdTickets()
+    {
+        var currentKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var newlyVisible = new List<WhdSyncedTicket>();
+        foreach (var ticket in _repository.GetTickets(includeClosed: false)
+                     .Where(static ticket => ticket.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (!TryGetWhdTicketKey(ticket, out var key) || !currentKeys.Add(key))
+            {
+                continue;
+            }
+
+            if (!_knownWhdTicketKeys.Contains(key))
+            {
+                newlyVisible.Add(new WhdSyncedTicket
+                {
+                    ExternalId = ticket.ExternalId ?? $"WHD-{ticket.TicketNumber}",
+                    TicketNumber = ticket.TicketNumber,
+                    Subject = ticket.Subject,
+                    Status = ticket.Status,
+                    StatusTypeId = ticket.WhdStatusTypeId,
+                    IsClosed = ticket.IsClosed,
+                    LastUpdatedUtc = ticket.LastSyncedAt.HasValue
+                        ? new DateTimeOffset(ticket.LastSyncedAt.Value)
+                        : null
+                });
+            }
+        }
+
+        _knownWhdTicketKeys.Clear();
+        _knownWhdTicketKeys.UnionWith(currentKeys);
+        if (newlyVisible.Count > 0)
+        {
+            _notificationService.ShowNewWhdTickets(newlyVisible);
+        }
+    }
+
+    private void RefreshWhdSyncServiceStatus()
+    {
+        if (!CanManageOrganizationSettings)
+        {
+            return;
+        }
+
+        try
+        {
+            _whdSyncServiceStatus = _repository.GetWhdSyncStatus();
+            OnPropertyChanged(nameof(WhdSyncServiceHealthLabel));
+            OnPropertyChanged(nameof(WhdSyncServiceLastRunLabel));
+            OnPropertyChanged(nameof(WhdSyncServiceQueueLabel));
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException or TimeoutException)
+        {
+            _whdSyncServiceStatus = new WhdSyncServiceStatus { Health = "Unavailable", Message = ex.Message };
+            OnPropertyChanged(nameof(WhdSyncServiceHealthLabel));
+            OnPropertyChanged(nameof(WhdSyncServiceLastRunLabel));
+            OnPropertyChanged(nameof(WhdSyncServiceQueueLabel));
+        }
     }
 
     private bool EnsureCanRunSharedSync(string operation)
@@ -4412,8 +4244,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _isDisposed = true;
         DisposeNoteFeatures();
         Updates.Dispose();
-        _whdAutoSyncTimer.Stop();
-        _whdAutoSyncTimer.Tick -= HandleWhdAutoSyncTimerTick;
         _sageVerificationTimer.Stop();
         _sageVerificationTimer.Tick -= HandleSageVerificationTimerTick;
         _sharedDataRefreshTimer.Stop();

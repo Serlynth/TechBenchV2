@@ -102,6 +102,11 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
             "[tb_app].[AdminSaveOrganizationSetting]";
         public const string DeleteOrganizationSetting =
             "[tb_app].[AdminDeleteOrganizationSetting]";
+        public const string GetWhdSyncStatus = "[tb_app].[GetWhdSyncStatus]";
+        public const string RequestWhdSync = "[tb_app].[AdminRequestWhdSync]";
+        public const string GetWhdUserMappings = "[tb_app].[AdminGetWhdUserMappings]";
+        public const string GetWhdTechnicians = "[tb_app].[AdminGetWhdTechnicians]";
+        public const string SaveWhdUserMapping = "[tb_app].[AdminSaveWhdUserMapping]";
         public const string AddPostingLog = "[tb_app].[AddPostingLog]";
         public const string GetLatestVerifiedWhdPostingLog =
             "[tb_app].[GetLatestVerifiedWhdPostingLog]";

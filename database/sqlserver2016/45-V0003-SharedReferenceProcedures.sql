@@ -203,10 +203,11 @@ BEGIN
             SET @Action = N'CommonLinkUpdated';
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = @Action,
             @EntityType = N'CommonLink',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -275,10 +276,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51307, N'The Common Link was not found or changed after it was loaded.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'CommonLinkDeleted',
         @EntityType = N'CommonLink',
-        @EntityId = CONVERT(nvarchar(120), @Id),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO
@@ -462,10 +464,11 @@ BEGIN
 
         IF @Action IS NOT NULL
         BEGIN
+            DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
             EXEC [tb_security].[WriteAuditEvent]
                 @Action = @Action,
                 @EntityType = N'ClientAlias',
-                @EntityId = CONVERT(nvarchar(120), @Id),
+                @EntityId = @AuditEntityId,
                 @RequestId = @RequestId;
         END;
 
@@ -524,10 +527,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51316, N'The client alias was not found or changed after it was loaded.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'ClientAliasDeleted',
         @EntityType = N'ClientAlias',
-        @EntityId = CONVERT(nvarchar(120), @Id),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO
@@ -641,10 +645,11 @@ BEGIN
             SET @Action = N'TemplateUpdated';
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = @Action,
             @EntityType = N'Template',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -704,10 +709,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51336, N'The organization template was not found or changed; legacy personal templates are read-only.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'TemplateDeleted',
         @EntityType = N'Template',
-        @EntityId = CONVERT(nvarchar(120), @Id),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO

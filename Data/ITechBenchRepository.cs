@@ -140,6 +140,16 @@ public interface ITechBenchRepository
 
     void DeleteOrganizationSetting(string key);
 
+    WhdSyncServiceStatus GetWhdSyncStatus();
+
+    WhdSyncRequestResult RequestWhdSync();
+
+    IReadOnlyList<WhdUserMapping> GetWhdUserMappings();
+
+    IReadOnlyList<WhdTechnician> GetWhdTechnicians();
+
+    WhdUserMapping SaveWhdUserMapping(WhdUserMapping mapping);
+
     void AddPostingLog(PostingLog log);
 
     PostingLog? GetLatestVerifiedWhdPostingLog(int workEntryId);

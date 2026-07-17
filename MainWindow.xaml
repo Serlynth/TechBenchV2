@@ -1871,11 +1871,6 @@
                                                    Margin="0,0,0,10" />
                                     </StackPanel>
                                     <WrapPanel Grid.Column="1" HorizontalAlignment="Right">
-                                        <Button Content="Sync WHD Locations"
-                                                Command="{Binding SyncWhdClientsCommand}"
-                                                Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                MinWidth="150"
-                                                Margin="0,0,8,8" />
                                         <Button Content="Sync Sage Customers"
                                                 Command="{Binding SyncSageCustomersCommand}"
                                                 Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
@@ -2991,36 +2986,30 @@
                                                Style="{StaticResource MutedTextStyle}"
                                                TextWrapping="Wrap"
                                                Margin="0,-4,0,10" />
-                                    <TextBlock Text="API username" Style="{StaticResource FieldLabelStyle}" />
+                                    <TextBlock Text="My WHD username" Style="{StaticResource FieldLabelStyle}" />
                                     <TextBox Text="{Binding WhdUsername, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" />
-                                    <TextBlock Text="API key, password, or token" Style="{StaticResource FieldLabelStyle}" />
+                                    <TextBlock Text="My API key, password, or token" Style="{StaticResource FieldLabelStyle}" />
                                     <PasswordBox x:Name="WhdApiTokenPasswordBox"
                                                  PasswordChanged="WhdApiTokenPasswordBox_PasswordChanged"
                                                  Margin="0,0,0,8" />
-                                    <TextBlock Text="Shared WHD synchronization uses this Admin's WHD credentials. Configure a WHD Admin identity that can read all organization tickets."
+                                    <TextBlock Text="Your WHD credentials are used only to test your access and post your work notes. Organization synchronization runs on the server."
                                                Style="{StaticResource MutedTextStyle}"
                                                TextWrapping="Wrap"
-                                               Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                Margin="0,0,0,14" />
                                     <WrapPanel>
                                         <Button Content="Test Connection"
                                                 Command="{Binding TestWhdConnectionCommand}"
                                                 MinWidth="126"
                                                 Margin="0,0,8,0" />
-                                        <Button Content="Sync Organization Tickets Now"
-                                                Command="{Binding SyncWhdTicketsCommand}"
+                                        <Button Content="Request Server Sync Now"
+                                                Command="{Binding RequestWhdServerSyncCommand}"
                                                 Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                 MinWidth="210"
                                                 Margin="0,0,8,0" />
-                                        <Button Content="Sync WHD Locations Now"
-                                                Command="{Binding SyncWhdClientsCommand}"
+                                        <Button Content="Refresh Server Status"
+                                                Command="{Binding RefreshWhdAdministrationCommand}"
                                                 Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                MinWidth="172"
-                                                Margin="0,0,8,0" />
-                                        <Button Content="Sync Ticket Statuses"
-                                                Command="{Binding SyncWhdStatusesCommand}"
-                                                Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                MinWidth="150" />
+                                                MinWidth="170" />
                                     </WrapPanel>
                                     <Border BorderBrush="{DynamicResource BorderBrush}"
                                             BorderThickness="0,1,0,0"
@@ -3028,7 +3017,7 @@
                                             Padding="0,14,0,0"
                                             Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
                                         <StackPanel>
-                                            <TextBlock Text="The WHD auto-sync schedule is stored on SQL Server and managed by TechBench Admins."
+                                            <TextBlock Text="The server owns organization-wide WHD synchronization. These settings are stored on SQL Server and managed by TechBench Admins."
                                                        Style="{StaticResource MutedTextStyle}"
                                                        TextWrapping="Wrap"
                                                        Margin="0,0,0,10" />
@@ -3053,6 +3042,38 @@
                                                        Style="{StaticResource MutedTextStyle}"
                                                        Margin="0,8,0,0"
                                                        TextWrapping="Wrap" />
+                                            <TextBlock Text="Server service username" Style="{StaticResource FieldLabelStyle}" Margin="0,12,0,0" />
+                                            <TextBox Text="{Binding WhdServiceUsername, UpdateSourceTrigger=PropertyChanged}"
+                                                     Margin="0,0,0,8" />
+                                            <TextBlock Text="Health" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBlock Text="{Binding WhdSyncServiceHealthLabel}" Style="{StaticResource DetailValueStyle}" TextWrapping="Wrap" />
+                                            <TextBlock Text="Last server run" Style="{StaticResource FieldLabelStyle}" Margin="0,8,0,0" />
+                                            <TextBlock Text="{Binding WhdSyncServiceLastRunLabel}" Style="{StaticResource DetailValueStyle}" />
+                                            <TextBlock Text="Queue" Style="{StaticResource FieldLabelStyle}" Margin="0,8,0,0" />
+                                            <TextBlock Text="{Binding WhdSyncServiceQueueLabel}" Style="{StaticResource DetailValueStyle}" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="0,1,0,0"
+                                            Margin="0,14,0,0"
+                                            Padding="0,14,0,0"
+                                            Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <StackPanel>
+                                            <TextBlock Text="AD User to WHD Technician Mapping" Style="{StaticResource SectionHeadingStyle}" />
+                                            <TextBlock Text="Select a TechBench user and the WHD technician whose assignments they should see."
+                                                       Style="{StaticResource MutedTextStyle}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                                            <ComboBox ItemsSource="{Binding WhdUserMappings}"
+                                                      SelectedItem="{Binding SelectedWhdUserMapping}"
+                                                      DisplayMemberPath="UserLabel"
+                                                      Margin="0,0,0,8" />
+                                            <ComboBox ItemsSource="{Binding WhdTechnicians}"
+                                                      SelectedItem="{Binding SelectedWhdTechnician}"
+                                                      DisplayMemberPath="DisplayName"
+                                                      Margin="0,0,0,8" />
+                                            <Button Content="Save WHD User Mapping"
+                                                    Command="{Binding SaveWhdUserMappingCommand}"
+                                                    MinWidth="190"
+                                                    HorizontalAlignment="Left" />
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>

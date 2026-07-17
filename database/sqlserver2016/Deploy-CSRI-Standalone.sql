@@ -14,6 +14,7 @@
 :setvar DatabaseName "TechBench"
 :setvar UserGroup "CSRI\TechBench_Users"
 :setvar AdminGroup "CSRI\TechBench_Admins"
+:setvar SyncServicePrincipal "CSRI\TechBench_SyncService"
 
 USE [master];
 GO
@@ -39,6 +40,7 @@ SET XACT_ABORT ON;
 DECLARE @DatabaseName sysname = N'$(DatabaseName)';
 DECLARE @UserGroup sysname = N'$(UserGroup)';
 DECLARE @AdminGroup sysname = N'$(AdminGroup)';
+DECLARE @SyncServicePrincipal sysname = N'$(SyncServicePrincipal)';
 DECLARE @ProductMajorVersion int =
     TRY_CONVERT(int, SERVERPROPERTY(N'ProductMajorVersion'));
 DECLARE @ProductVersion nvarchar(128) =
@@ -78,25 +80,29 @@ END;
 
 IF NULLIF(LTRIM(RTRIM(@UserGroup)), N'') IS NULL
    OR NULLIF(LTRIM(RTRIM(@AdminGroup)), N'') IS NULL
+   OR NULLIF(LTRIM(RTRIM(@SyncServicePrincipal)), N'') IS NULL
 BEGIN
-    RAISERROR(N'UserGroup and AdminGroup must both be supplied.', 16, 1);
+    RAISERROR(N'UserGroup, AdminGroup, and SyncServicePrincipal must all be supplied.', 16, 1);
     RETURN;
 END;
 
 IF @UserGroup NOT LIKE N'%\%'
    OR @AdminGroup NOT LIKE N'%\%'
+   OR @SyncServicePrincipal NOT LIKE N'%\%'
 BEGIN
     RAISERROR(
-        N'Application groups must use DOMAIN\name format.',
+        N'Application groups and SyncServicePrincipal must use DOMAIN\name format.',
         16,
         1);
     RETURN;
 END;
 
 IF @UserGroup = @AdminGroup
+   OR @UserGroup = @SyncServicePrincipal
+   OR @AdminGroup = @SyncServicePrincipal
 BEGIN
     RAISERROR(
-        N'UserGroup and AdminGroup must be distinct so ordinary users do not receive administration rights.',
+        N'UserGroup, AdminGroup, and SyncServicePrincipal must be three distinct principals.',
         16,
         1);
     RETURN;
@@ -110,6 +116,10 @@ BEGIN TRY
     EXEC master.dbo.xp_logininfo
         @acctname = @AdminGroup,
         @option = N'members';
+
+    /* Resolves the dedicated service account without enumerating members. */
+    EXEC master.dbo.xp_logininfo
+        @acctname = @SyncServicePrincipal;
 END TRY
 BEGIN CATCH
     DECLARE @GroupError nvarchar(2048) = ERROR_MESSAGE();
@@ -144,6 +154,7 @@ PRINT N'  Database: ' + @DatabaseName;
 PRINT N'  Database owner: ' + SUSER_SNAME(0x01) + N' (built-in SID 0x01)';
 PRINT N'  User group: ' + @UserGroup;
 PRINT N'  Admin group: ' + @AdminGroup;
+PRINT N'  WHD sync service principal: ' + @SyncServicePrincipal;
 PRINT N'AD group resolution passed.';
 GO
 
@@ -1455,12 +1466,13 @@ BEGIN TRY
       AND column_definition.[name] = N'ScopeType';
 
     IF @CommonLinkDefault IS NOT NULL
-        EXEC
-        (
+    BEGIN
+        DECLARE @DropCommonLinkDefaultSql nvarchar(max) =
             N'ALTER TABLE [tb_data].[CommonLinks] DROP CONSTRAINT '
             + QUOTENAME(@CommonLinkDefault)
-            + N';'
-        );
+            + N';';
+        EXEC (@DropCommonLinkDefaultSql);
+    END;
 
     ALTER TABLE [tb_data].[CommonLinks]
         ADD CONSTRAINT [DF_CommonLinks_ScopeType]
@@ -1508,12 +1520,13 @@ BEGIN TRY
       AND column_definition.[name] = N'ScopeType';
 
     IF @ClientAliasDefault IS NOT NULL
-        EXEC
-        (
+    BEGIN
+        DECLARE @DropClientAliasDefaultSql nvarchar(max) =
             N'ALTER TABLE [tb_data].[ClientAliases] DROP CONSTRAINT '
             + QUOTENAME(@ClientAliasDefault)
-            + N';'
-        );
+            + N';';
+        EXEC (@DropClientAliasDefaultSql);
+    END;
 
     ALTER TABLE [tb_data].[ClientAliases]
         ADD CONSTRAINT [DF_ClientAliases_ScopeType]
@@ -2068,6 +2081,322 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 25-V0006-WhdServerSyncSchema.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.TechBenchV1Import.0005'
+      AND [SchemaVersion] = 5
+)
+BEGIN
+    RAISERROR(N'V0005 must be installed before WHDServerSync.0006.', 16, 1);
+    RETURN;
+END;
+
+IF SCHEMA_ID(N'tb_whd') IS NULL
+    EXEC(N'CREATE SCHEMA [tb_whd] AUTHORIZATION [dbo];');
+IF SCHEMA_ID(N'tb_sync') IS NULL
+    EXEC(N'CREATE SCHEMA [tb_sync] AUTHORIZATION [dbo];');
+GO
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF COL_LENGTH(N'tb_data.Tickets', N'WhdLastUpdatedUtc') IS NULL
+        ALTER TABLE [tb_data].[Tickets] ADD [WhdLastUpdatedUtc] datetime2(3) NULL;
+    IF COL_LENGTH(N'tb_data.Tickets', N'IsWhdDeleted') IS NULL
+        ALTER TABLE [tb_data].[Tickets] ADD [IsWhdDeleted] bit NOT NULL
+            CONSTRAINT [DF_Tickets_IsWhdDeleted] DEFAULT (0);
+    IF COL_LENGTH(N'tb_data.Tickets', N'AssignedTechExternalId') IS NULL
+        ALTER TABLE [tb_data].[Tickets] ADD [AssignedTechExternalId] nvarchar(120) NULL;
+    IF COL_LENGTH(N'tb_data.Tickets', N'AssignedTechName') IS NULL
+        ALTER TABLE [tb_data].[Tickets] ADD [AssignedTechName] nvarchar(240) NULL;
+    IF COL_LENGTH(N'tb_data.Tickets', N'AssignedGroupExternalId') IS NULL
+        ALTER TABLE [tb_data].[Tickets] ADD [AssignedGroupExternalId] nvarchar(120) NULL;
+    IF COL_LENGTH(N'tb_data.Tickets', N'AssignedGroupName') IS NULL
+        ALTER TABLE [tb_data].[Tickets] ADD [AssignedGroupName] nvarchar(240) NULL;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.indexes
+        WHERE [object_id] = OBJECT_ID(N'tb_data.Tickets')
+          AND [name] = N'IX_Tickets_WhdAssignedTech'
+    )
+        EXEC sys.sp_executesql N'
+            CREATE INDEX [IX_Tickets_WhdAssignedTech]
+                ON [tb_data].[Tickets]([Source], [AssignedTechExternalId], [IsClosed])
+                INCLUDE ([AssignedGroupExternalId], [IsWhdDeleted]);';
+
+    IF OBJECT_ID(N'tb_whd.Technicians', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_whd].[Technicians]
+        (
+            [ExternalId] nvarchar(120) NOT NULL,
+            [DisplayName] nvarchar(240) NOT NULL,
+            [Username] nvarchar(240) NULL,
+            [Email] nvarchar(320) NULL,
+            [IsActive] bit NOT NULL CONSTRAINT [DF_WhdTechnicians_IsActive] DEFAULT (1),
+            [WhdLastUpdatedUtc] datetime2(3) NULL,
+            [LastSyncedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_WhdTechnicians_LastSynced] DEFAULT (SYSUTCDATETIME()),
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_WhdTechnicians] PRIMARY KEY CLUSTERED ([ExternalId])
+        );
+    END;
+
+    IF COL_LENGTH(N'tb_whd.Technicians', N'Username') IS NULL
+        ALTER TABLE [tb_whd].[Technicians] ADD [Username] nvarchar(240) NULL;
+
+    IF OBJECT_ID(N'tb_whd.TechnicianGroups', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_whd].[TechnicianGroups]
+        (
+            [ExternalId] nvarchar(120) NOT NULL,
+            [DisplayName] nvarchar(240) NOT NULL,
+            [IsActive] bit NOT NULL CONSTRAINT [DF_WhdGroups_IsActive] DEFAULT (1),
+            [WhdLastUpdatedUtc] datetime2(3) NULL,
+            [LastSyncedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_WhdGroups_LastSynced] DEFAULT (SYSUTCDATETIME()),
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_WhdTechnicianGroups] PRIMARY KEY CLUSTERED ([ExternalId])
+        );
+    END;
+
+    IF OBJECT_ID(N'tb_whd.TechnicianGroupMemberships', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_whd].[TechnicianGroupMemberships]
+        (
+            [TechnicianExternalId] nvarchar(120) NOT NULL,
+            [GroupExternalId] nvarchar(120) NOT NULL,
+            [LastSyncedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_WhdMemberships_LastSynced] DEFAULT (SYSUTCDATETIME()),
+            CONSTRAINT [PK_WhdTechnicianGroupMemberships]
+                PRIMARY KEY CLUSTERED ([TechnicianExternalId], [GroupExternalId]),
+            CONSTRAINT [FK_WhdMemberships_Technician]
+                FOREIGN KEY ([TechnicianExternalId])
+                REFERENCES [tb_whd].[Technicians]([ExternalId]),
+            CONSTRAINT [FK_WhdMemberships_Group]
+                FOREIGN KEY ([GroupExternalId])
+                REFERENCES [tb_whd].[TechnicianGroups]([ExternalId])
+        );
+    END;
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.indexes
+        WHERE [object_id] = OBJECT_ID(N'tb_whd.TechnicianGroupMemberships')
+          AND [name] = N'IX_WhdMemberships_Group'
+    )
+        CREATE INDEX [IX_WhdMemberships_Group]
+            ON [tb_whd].[TechnicianGroupMemberships]([GroupExternalId], [TechnicianExternalId]);
+
+    IF OBJECT_ID(N'tb_whd.UserTechnicianMappings', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_whd].[UserTechnicianMappings]
+        (
+            [Id] int IDENTITY(1,1) NOT NULL,
+            [WindowsSid] varbinary(85) NOT NULL,
+            [TechnicianExternalId] nvarchar(120) NOT NULL,
+            [UpdatedByWindowsSid] varbinary(85) NOT NULL,
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_WhdUserMappings_Updated] DEFAULT (SYSUTCDATETIME()),
+            CONSTRAINT [PK_WhdUserTechnicianMappings] PRIMARY KEY CLUSTERED ([WindowsSid]),
+            CONSTRAINT [UQ_WhdUserTechnicianMappings_Id] UNIQUE ([Id]),
+            CONSTRAINT [FK_WhdUserMappings_User]
+                FOREIGN KEY ([WindowsSid]) REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_WhdUserMappings_Technician]
+                FOREIGN KEY ([TechnicianExternalId]) REFERENCES [tb_whd].[Technicians]([ExternalId]),
+            CONSTRAINT [FK_WhdUserMappings_UpdatedBy]
+                FOREIGN KEY ([UpdatedByWindowsSid]) REFERENCES [tb_security].[Users]([WindowsSid])
+        );
+    END;
+
+    IF OBJECT_ID(N'tb_sync.WhdSyncRequests', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_sync].[WhdSyncRequests]
+        (
+            [RequestId] uniqueidentifier NOT NULL,
+            [RequestedByWindowsSid] varbinary(85) NOT NULL,
+            [RequestedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_WhdRequests_Requested] DEFAULT (SYSUTCDATETIME()),
+            [RequestType] nvarchar(40) NOT NULL,
+            [Status] nvarchar(30) NOT NULL
+                CONSTRAINT [DF_WhdRequests_Status] DEFAULT (N'Queued'),
+            [CompletedAtUtc] datetime2(3) NULL,
+            [Message] nvarchar(1000) NULL,
+            CONSTRAINT [PK_WhdSyncRequests] PRIMARY KEY CLUSTERED ([RequestId]),
+            CONSTRAINT [FK_WhdRequests_Requester]
+                FOREIGN KEY ([RequestedByWindowsSid]) REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [CK_WhdRequests_Type]
+                CHECK ([RequestType] IN (N'Full', N'Incremental')),
+            CONSTRAINT [CK_WhdRequests_Status]
+                CHECK ([Status] IN (N'Queued', N'Running', N'Completed', N'Failed'))
+        );
+    END;
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.indexes
+        WHERE [object_id] = OBJECT_ID(N'tb_sync.WhdSyncRequests')
+          AND [name] = N'IX_WhdSyncRequests_StatusRequested'
+    )
+        CREATE INDEX [IX_WhdSyncRequests_StatusRequested]
+            ON [tb_sync].[WhdSyncRequests]([Status], [RequestedAtUtc] DESC)
+            INCLUDE ([RequestType], [CompletedAtUtc]);
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.indexes
+        WHERE [object_id] = OBJECT_ID(N'tb_sync.WhdSyncRequests')
+          AND [name] = N'IX_WhdSyncRequests_RequestedAt'
+    )
+        CREATE INDEX [IX_WhdSyncRequests_RequestedAt]
+            ON [tb_sync].[WhdSyncRequests]([RequestedAtUtc] DESC, [RequestId])
+            INCLUDE ([Status], [RequestType], [CompletedAtUtc]);
+
+    IF OBJECT_ID(N'tb_sync.WhdSyncWork', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_sync].[WhdSyncWork]
+        (
+            [WorkId] uniqueidentifier NOT NULL,
+            [RequestId] uniqueidentifier NOT NULL,
+            [WorkType] nvarchar(40) NOT NULL,
+            [State] nvarchar(30) NOT NULL CONSTRAINT [DF_WhdWork_State] DEFAULT (N'Queued'),
+            [PayloadJson] nvarchar(max) NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_WhdWork_Created] DEFAULT (SYSUTCDATETIME()),
+            [CompletedAtUtc] datetime2(3) NULL,
+            [ErrorMessage] nvarchar(2000) NULL,
+            CONSTRAINT [PK_WhdSyncWork] PRIMARY KEY CLUSTERED ([WorkId]),
+            CONSTRAINT [FK_WhdWork_Request]
+                FOREIGN KEY ([RequestId]) REFERENCES [tb_sync].[WhdSyncRequests]([RequestId]),
+            CONSTRAINT [CK_WhdWork_Type]
+                CHECK ([WorkType] IN (N'Clients', N'Tickets', N'Statuses', N'Technicians', N'Groups')),
+            CONSTRAINT [CK_WhdWork_State]
+                CHECK ([State] IN (N'Queued', N'Leased', N'Completed', N'Failed')),
+            CONSTRAINT [CK_WhdWork_Payload]
+                CHECK ([PayloadJson] IS NULL OR ISJSON([PayloadJson]) = 1)
+        );
+    END;
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.indexes
+        WHERE [object_id] = OBJECT_ID(N'tb_sync.WhdSyncWork')
+          AND [name] = N'IX_WhdSyncWork_Claim'
+    )
+        CREATE INDEX [IX_WhdSyncWork_Claim]
+            ON [tb_sync].[WhdSyncWork]([State], [CreatedAtUtc])
+            INCLUDE ([RequestId], [WorkType]);
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.indexes
+        WHERE [object_id] = OBJECT_ID(N'tb_sync.WhdSyncWork')
+          AND [name] = N'IX_WhdSyncWork_RequestState'
+    )
+        CREATE INDEX [IX_WhdSyncWork_RequestState]
+            ON [tb_sync].[WhdSyncWork]([RequestId], [State])
+            INCLUDE ([WorkType], [CompletedAtUtc]);
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.indexes
+        WHERE [object_id] = OBJECT_ID(N'tb_sync.WhdSyncWork')
+          AND [name] = N'IX_WhdSyncWork_ReferenceHistory'
+    )
+        CREATE INDEX [IX_WhdSyncWork_ReferenceHistory]
+            ON [tb_sync].[WhdSyncWork]([WorkType], [State], [CompletedAtUtc]);
+
+    IF OBJECT_ID(N'tb_sync.WhdSyncLeases', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_sync].[WhdSyncLeases]
+        (
+            [WorkId] uniqueidentifier NOT NULL,
+            [LeaseId] uniqueidentifier NOT NULL,
+            [WorkerId] uniqueidentifier NOT NULL,
+            [AcquiredAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_WhdLeases_Acquired] DEFAULT (SYSUTCDATETIME()),
+            [ExpiresAtUtc] datetime2(3) NOT NULL,
+            CONSTRAINT [PK_WhdSyncLeases] PRIMARY KEY CLUSTERED ([WorkId]),
+            CONSTRAINT [UQ_WhdSyncLeases_Lease] UNIQUE ([LeaseId]),
+            CONSTRAINT [FK_WhdLeases_Work]
+                FOREIGN KEY ([WorkId]) REFERENCES [tb_sync].[WhdSyncWork]([WorkId]),
+            CONSTRAINT [CK_WhdLeases_Expiry] CHECK ([ExpiresAtUtc] > [AcquiredAtUtc])
+        );
+    END;
+
+    IF OBJECT_ID(N'tb_sync.WhdSyncCursors', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_sync].[WhdSyncCursors]
+        (
+            [CursorName] nvarchar(80) NOT NULL,
+            [CursorValue] nvarchar(400) NULL,
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_WhdCursors_Updated] DEFAULT (SYSUTCDATETIME()),
+            CONSTRAINT [PK_WhdSyncCursors] PRIMARY KEY CLUSTERED ([CursorName])
+        );
+    END;
+
+    IF OBJECT_ID(N'tb_sync.WhdSyncHealth', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_sync].[WhdSyncHealth]
+        (
+            [HealthId] tinyint NOT NULL
+                CONSTRAINT [PK_WhdSyncHealth] PRIMARY KEY
+                CONSTRAINT [CK_WhdSyncHealth_OneRow] CHECK ([HealthId] = 1),
+            [LastSuccessfulAtUtc] datetime2(3) NULL,
+            [LastAttemptAtUtc] datetime2(3) NULL,
+            [LastError] nvarchar(2000) NULL,
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_WhdHealth_Updated] DEFAULT (SYSUTCDATETIME())
+        );
+    END;
+
+    IF NOT EXISTS (SELECT 1 FROM [tb_sync].[WhdSyncHealth] WHERE [HealthId] = 1)
+        INSERT INTO [tb_sync].[WhdSyncHealth]([HealthId]) VALUES (1);
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_deploy].[SchemaMigrations]
+        WHERE [MigrationId] = N'SqlServer2016.WhdServerSync.0006'
+    )
+    BEGIN
+        INSERT INTO [tb_deploy].[SchemaMigrations]
+            ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+        VALUES
+            (N'SqlServer2016.WhdServerSync.0006', 6, N'2.0.0-alpha.6', NULL);
+    END;
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0
+        ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+PRINT N'SqlServer2016.WhdServerSync.0006 is installed.';
+GO
+
+-- ============================================================================
+-- END 25-V0006-WhdServerSyncSchema.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 30-Security.sql
 -- ============================================================================
 
@@ -2088,7 +2417,8 @@ FROM
 (
     VALUES
         (N'$(UserGroup)'),
-        (N'$(AdminGroup)')
+        (N'$(AdminGroup)'),
+        (N'$(SyncServicePrincipal)')
 ) AS Principals([PrincipalName]);
 
 OPEN PrincipalCursor;
@@ -2165,6 +2495,8 @@ IF DATABASE_PRINCIPAL_ID(N'tb_role_admin') IS NULL
     CREATE ROLE [tb_role_admin] AUTHORIZATION [dbo];
 IF DATABASE_PRINCIPAL_ID(N'tb_role_sync_operator') IS NULL
     CREATE ROLE [tb_role_sync_operator] AUTHORIZATION [dbo];
+IF DATABASE_PRINCIPAL_ID(N'tb_role_sync_service') IS NULL
+    CREATE ROLE [tb_role_sync_service] AUTHORIZATION [dbo];
 
 DECLARE @Principal sysname;
 DECLARE @DefaultSchema sysname;
@@ -2176,7 +2508,8 @@ FROM
 (
     VALUES
         (N'$(UserGroup)', N'tb_app'),
-        (N'$(AdminGroup)', N'tb_app')
+        (N'$(AdminGroup)', N'tb_app'),
+        (N'$(SyncServicePrincipal)', N'tb_service')
 ) AS Principals([PrincipalName], [DefaultSchema]);
 
 OPEN UserCursor;
@@ -2248,6 +2581,82 @@ END;
 
 CLOSE MembershipCursor;
 DEALLOCATE MembershipCursor;
+
+/* Keep the service boundary exact across redeployments or principal changes. */
+DECLARE ServiceBoundaryCursor CURSOR LOCAL STATIC READ_ONLY FOR
+SELECT role_principal.[name], member_principal.[name]
+FROM sys.database_role_members AS drm
+INNER JOIN sys.database_principals AS role_principal
+    ON role_principal.[principal_id] = drm.[role_principal_id]
+INNER JOIN sys.database_principals AS member_principal
+    ON member_principal.[principal_id] = drm.[member_principal_id]
+WHERE
+    (role_principal.[name] = N'tb_role_sync_service'
+     AND member_principal.[name] <> N'$(SyncServicePrincipal)')
+ OR (member_principal.[name] = N'$(SyncServicePrincipal)'
+     AND role_principal.[name] <> N'tb_role_sync_service')
+ OR (member_principal.[name] = N'tb_role_sync_service'
+     AND role_principal.[name] <> N'tb_role_sync_service');
+
+OPEN ServiceBoundaryCursor;
+FETCH NEXT FROM ServiceBoundaryCursor INTO @RoleName, @MemberName;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    SET @Sql = N'ALTER ROLE ' + QUOTENAME(@RoleName)
+        + N' DROP MEMBER ' + QUOTENAME(@MemberName) + N';';
+    EXEC sys.sp_executesql @Sql;
+
+    FETCH NEXT FROM ServiceBoundaryCursor INTO @RoleName, @MemberName;
+END;
+
+CLOSE ServiceBoundaryCursor;
+DEALLOCATE ServiceBoundaryCursor;
+
+/* The Windows service identity is deliberately not an application Admin. */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.database_role_members AS drm
+    INNER JOIN sys.database_principals AS role_principal
+        ON role_principal.principal_id = drm.role_principal_id
+    INNER JOIN sys.database_principals AS member_principal
+        ON member_principal.principal_id = drm.member_principal_id
+    WHERE role_principal.name = N'tb_role_sync_service'
+      AND member_principal.name = N'$(SyncServicePrincipal)'
+)
+BEGIN
+    SET @Sql = N'ALTER ROLE [tb_role_sync_service] ADD MEMBER '
+        + QUOTENAME(N'$(SyncServicePrincipal)') + N';';
+    EXEC sys.sp_executesql @Sql;
+END;
+
+DECLARE @SyncServiceSid varbinary(85) = SUSER_SID(N'$(SyncServicePrincipal)');
+IF @SyncServiceSid IS NULL
+    THROW 51790, N'The WHD sync service principal could not be resolved after login creation.', 1;
+
+/* Preserve historical FK actors if AD recreates the service principal with
+   the same name but a different SID, while freeing the unique login name. */
+UPDATE [tb_security].[Users]
+SET [LoginName] = LEFT
+    (
+        N'Retired:' + CONVERT(nvarchar(170), [WindowsSid], 1) + N':' + [LoginName],
+        256
+    )
+WHERE [LoginName] = N'$(SyncServicePrincipal)'
+  AND [WindowsSid] <> @SyncServiceSid;
+
+IF NOT EXISTS (SELECT 1 FROM [tb_security].[Users] WHERE [WindowsSid] = @SyncServiceSid)
+BEGIN
+    INSERT INTO [tb_security].[Users]
+    (
+        [WindowsSid], [LoginName], [DisplayName], [IsTechnician], [IsManager], [IsAdmin], [IsSyncOperator]
+    )
+    VALUES
+    (
+        @SyncServiceSid, N'$(SyncServicePrincipal)', N'TechBench WHD Sync Service', 0, 0, 0, 0
+    );
+END;
 
 PRINT N'TechBench AD logins, database users, and role memberships are configured.';
 GO
@@ -3248,10 +3657,11 @@ BEGIN
             SET @Action = N'TicketUpdated';
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = @Action,
             @EntityType = N'Ticket',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -4016,10 +4426,11 @@ BEGIN
             WHERE [TagHash] = parsed_tag.[TagHash]
         );
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = @Action,
             @EntityType = N'WorkEntry',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -4178,10 +4589,11 @@ BEGIN
             THROW 51134, N'The work entry changed after it was loaded.', 1;
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'WorkEntryDeleted',
             @EntityType = N'WorkEntry',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -4342,10 +4754,11 @@ BEGIN
             SET @Id = CONVERT(int, SCOPE_IDENTITY());
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'WorkEntryLinkSaved',
             @EntityType = N'WorkEntryLink',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -4412,10 +4825,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51143, N'The work-entry link was not found, changed, or is not owned by the current user.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'WorkEntryLinkDeleted',
         @EntityType = N'WorkEntryLink',
-        @EntityId = CONVERT(nvarchar(120), @Id),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO
@@ -5100,10 +5514,11 @@ BEGIN
             SET @Action = N'TemplateUpdated';
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = @Action,
             @EntityType = N'Template',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -5163,10 +5578,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51205, N'The template was not found, changed, or cannot be deleted by the current user.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'TemplateDeleted',
         @EntityType = N'Template',
-        @EntityId = CONVERT(nvarchar(120), @Id),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO
@@ -5341,10 +5757,11 @@ BEGIN
                 THROW 51214, N'The Common Link changed after it was loaded.', 1;
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'CommonLinkSaved',
             @EntityType = N'CommonLink',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -5415,10 +5832,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51215, N'The Common Link was not found, changed, or cannot be deleted by the current user.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'CommonLinkDeleted',
         @EntityType = N'CommonLink',
-        @EntityId = CONVERT(nvarchar(120), @Id),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO
@@ -5930,10 +6348,11 @@ BEGIN
                 THROW 51234, N'The client alias changed after it was loaded.', 1;
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'ClientAliasSaved',
             @EntityType = N'ClientAlias',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -5992,10 +6411,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51235, N'The client alias was not found, changed, or cannot be deleted by the current user.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'ClientAliasDeleted',
         @EntityType = N'ClientAlias',
-        @EntityId = CONVERT(nvarchar(120), @Id),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO
@@ -6577,10 +6997,11 @@ BEGIN
         IF @@ROWCOUNT = 0
             THROW 51273, N'The source client changed during the merge.', 1;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @WhdClientId);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'ClientMerged',
             @EntityType = N'Client',
-            @EntityId = CONVERT(nvarchar(120), @WhdClientId),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -6827,10 +7248,11 @@ BEGIN
         WHERE [Id] = @Id
           AND [OwnerWindowsSid] = @UserSid;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'ClientAliasDeleted',
             @EntityType = N'ClientAlias',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
     END;
 END;
@@ -7542,10 +7964,11 @@ BEGIN
             );
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @AttemptId);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'PostingAttemptCompleted',
             @EntityType = N'PostingAttempt',
-            @EntityId = CONVERT(nvarchar(120), @AttemptId);
+            @EntityId = @AuditEntityId;
 
         COMMIT TRANSACTION;
     END TRY
@@ -7832,10 +8255,11 @@ BEGIN
             @Message, @ExternalReference, @EffectiveRequestId, @NowUtc
         );
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @WorkEntryId);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'WorkEntryManuallyMarkedPosted',
             @EntityType = N'WorkEntry',
-            @EntityId = CONVERT(nvarchar(120), @WorkEntryId),
+            @EntityId = @AuditEntityId,
             @RequestId = @EffectiveRequestId;
 
         COMMIT TRANSACTION;
@@ -8499,10 +8923,11 @@ BEGIN
         @ExternalName = @ExternalName,
         @LastSyncedAtUtc = NULL;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @ClientId);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'ExternalClientMappingSaved',
         @EntityType = N'Client',
-        @EntityId = CONVERT(nvarchar(120), @ClientId),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO
@@ -9111,6 +9536,7 @@ BEGIN
     DECLARE @Name nvarchar(160);
     DECLARE @IsClosed bit;
     DECLARE @SavedCount int = 0;
+    DECLARE @StatusExternalId nvarchar(240);
 
     DECLARE StatusCursor CURSOR LOCAL FAST_FORWARD FOR
     SELECT [Id], [Name], [IsClosed] FROM @Snapshot;
@@ -9133,11 +9559,12 @@ BEGIN
             [LastSyncedAt] datetime2(3),
             [RowVersion] binary(8)
         );
+        SET @StatusExternalId = CONVERT(nvarchar(240), @Id);
         INSERT INTO @StatusResult
         EXEC [tb_app].[SyncUpsertTicketStatusOption]
             @Name = @Name,
             @Source = N'WHD',
-            @ExternalId = CONVERT(nvarchar(240), @Id),
+            @ExternalId = @StatusExternalId,
             @WhdStatusTypeId = @Id,
             @IsClosed = @IsClosed,
             @SyncedAtUtc = @SyncedAtUtc;
@@ -9699,10 +10126,11 @@ BEGIN
         CASE WHEN @ExpectedCount < 0 THEN 0 ELSE @ExpectedCount END
     );
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @BatchId);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'ImportBatchStarted',
         @EntityType = N'ImportBatch',
-        @EntityId = CONVERT(nvarchar(120), @BatchId),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 
     SELECT @BatchId AS [BatchId], @BatchId AS [ImportBatchId];
@@ -10089,10 +10517,11 @@ BEGIN
             SET @Action = N'CommonLinkUpdated';
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = @Action,
             @EntityType = N'CommonLink',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -10161,10 +10590,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51307, N'The Common Link was not found or changed after it was loaded.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'CommonLinkDeleted',
         @EntityType = N'CommonLink',
-        @EntityId = CONVERT(nvarchar(120), @Id),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO
@@ -10348,10 +10778,11 @@ BEGIN
 
         IF @Action IS NOT NULL
         BEGIN
+            DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
             EXEC [tb_security].[WriteAuditEvent]
                 @Action = @Action,
                 @EntityType = N'ClientAlias',
-                @EntityId = CONVERT(nvarchar(120), @Id),
+                @EntityId = @AuditEntityId,
                 @RequestId = @RequestId;
         END;
 
@@ -10410,10 +10841,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51316, N'The client alias was not found or changed after it was loaded.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'ClientAliasDeleted',
         @EntityType = N'ClientAlias',
-        @EntityId = CONVERT(nvarchar(120), @Id),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO
@@ -10527,10 +10959,11 @@ BEGIN
             SET @Action = N'TemplateUpdated';
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = @Action,
             @EntityType = N'Template',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -10590,10 +11023,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51336, N'The organization template was not found or changed; legacy personal templates are read-only.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'TemplateDeleted',
         @EntityType = N'Template',
-        @EntityId = CONVERT(nvarchar(120), @Id),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO
@@ -11348,10 +11782,11 @@ BEGIN
             SET @Action = N'CommonLinkUpdated';
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = @Action,
             @EntityType = N'CommonLink',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -11420,10 +11855,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51307, N'The Common Link was not found or changed after it was loaded.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'CommonLinkDeleted',
         @EntityType = N'CommonLink',
-        @EntityId = CONVERT(nvarchar(120), @Id),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO
@@ -11569,10 +12005,11 @@ BEGIN
 
         IF @Action IS NOT NULL
         BEGIN
+            DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
             EXEC [tb_security].[WriteAuditEvent]
                 @Action = @Action,
                 @EntityType = N'ClientAlias',
-                @EntityId = CONVERT(nvarchar(120), @Id),
+                @EntityId = @AuditEntityId,
                 @RequestId = @RequestId;
         END;
 
@@ -11869,10 +12306,11 @@ BEGIN
             SET @Action = N'OrganizationTagUpdated';
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = @Action,
             @EntityType = N'OrganizationTag',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -11927,10 +12365,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51525, N'The organization tag was not found or changed after it was loaded.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'OrganizationTagDeleted',
         @EntityType = N'OrganizationTag',
-        @EntityId = CONVERT(nvarchar(120), @Id),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO
@@ -12249,10 +12688,11 @@ BEGIN
             END;
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = @Action,
             @EntityType = N'WorkEntry',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -12608,10 +13048,11 @@ BEGIN
         CASE WHEN @ExpectedCount < 0 THEN 0 ELSE @ExpectedCount END
     );
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @BatchId);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'ImportBatchStarted',
         @EntityType = N'ImportBatch',
-        @EntityId = CONVERT(nvarchar(120), @BatchId),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 
     SELECT @BatchId AS [BatchId], @BatchId AS [ImportBatchId];
@@ -12762,10 +13203,11 @@ BEGIN
         @ExpectedCount
     );
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @BatchId);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'TechBenchV1ImportStarted',
         @EntityType = N'ImportBatch',
-        @EntityId = CONVERT(nvarchar(120), @BatchId),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 
     SELECT
@@ -13408,10 +13850,11 @@ BEGIN
             @BatchId
         );
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @NewEntityId);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'TechBenchV1WorkEntryImported',
             @EntityType = N'WorkEntry',
-            @EntityId = CONVERT(nvarchar(120), @NewEntityId),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -14188,10 +14631,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51642, N'The TechBench V1 import batch is missing, final, or owned by another user.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @BatchId);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'TechBenchV1ImportCompleted',
         @EntityType = N'ImportBatch',
-        @EntityId = CONVERT(nvarchar(120), @BatchId),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 
     SELECT
@@ -14265,10 +14709,11 @@ BEGIN
         IF @@ROWCOUNT = 0
             THROW 51646, N'The TechBench V1 import batch is missing, final, or owned by another user.', 1;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @BatchId);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'TechBenchV1ImportAbandoned',
             @EntityType = N'ImportBatch',
-            @EntityId = CONVERT(nvarchar(120), @BatchId),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -14352,6 +14797,1512 @@ GO
 
 -- ============================================================================
 -- END 47-V0005-TechBenchV1ImportProcedures.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 48-V0006-WhdServerSyncProcedures.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+GO
+
+IF SCHEMA_ID(N'tb_service') IS NULL EXEC(N'CREATE SCHEMA [tb_service] AUTHORIZATION [dbo];');
+GO
+
+/* The service contract intentionally uses leases rather than caller identity. */
+IF OBJECT_ID(N'tb_service.GetWhdSyncConfiguration', N'P') IS NOT NULL DROP PROCEDURE [tb_service].[GetWhdSyncConfiguration];
+GO
+CREATE PROCEDURE [tb_service].[GetWhdSyncConfiguration]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT
+        COALESCE(MAX(CASE WHEN s.[SettingKey] = N'Whd.BaseUrl' THEN s.[SettingValue] END), N'') AS [BaseUrl],
+        COALESCE(MAX(CASE WHEN s.[SettingKey] = N'Whd.ServiceUsername' THEN s.[SettingValue] END), N'') AS [Username],
+        COALESCE(MAX(CASE WHEN s.[SettingKey] = N'Whd.AuthenticationMode' THEN s.[SettingValue] END), N'Auto') AS [AuthenticationMode],
+        COALESCE(
+            TRY_CONVERT(bit, MAX(CASE WHEN s.[SettingKey] = N'Whd.AutoSyncEnabled' THEN s.[SettingValue] END)),
+            CONVERT(bit, 1)) AS [AutoSyncEnabled],
+        COALESCE(
+            TRY_CONVERT(int, MAX(CASE WHEN s.[SettingKey] = N'Whd.AutoSyncMinutes' THEN s.[SettingValue] END)),
+            5) AS [AutoSyncMinutes],
+        c.[CursorValue],
+        h.[LastSuccessfulAtUtc],
+        h.[LastAttemptAtUtc],
+        h.[LastError]
+    FROM [tb_sync].[WhdSyncHealth] AS h
+    LEFT JOIN [tb_sync].[WhdSyncCursors] AS c
+        ON c.[CursorName] = N'WhdTickets'
+    LEFT JOIN [tb_data].[OrganizationSettings] AS s
+        ON s.[SettingKey] IN
+           (
+               N'Whd.BaseUrl',
+               N'Whd.ServiceUsername',
+               N'Whd.AuthenticationMode',
+               N'Whd.AutoSyncEnabled',
+               N'Whd.AutoSyncMinutes'
+           )
+    WHERE h.[HealthId] = 1
+    GROUP BY
+        c.[CursorValue],
+        h.[LastSuccessfulAtUtc],
+        h.[LastAttemptAtUtc],
+        h.[LastError];
+END;
+GO
+
+IF OBJECT_ID(N'tb_service.ClaimWhdSyncWork', N'P') IS NOT NULL DROP PROCEDURE [tb_service].[ClaimWhdSyncWork];
+GO
+CREATE PROCEDURE [tb_service].[ClaimWhdSyncWork]
+    @WorkerId uniqueidentifier,
+    @LeaseSeconds int
+AS
+BEGIN
+    SET NOCOUNT ON; SET XACT_ABORT ON;
+    IF @WorkerId IS NULL OR @LeaseSeconds NOT BETWEEN 15 AND 3600 THROW 51800, N'WorkerId and a lease from 15 to 3600 seconds are required.', 1;
+    DECLARE @WorkId uniqueidentifier, @LeaseId uniqueidentifier = NEWID(), @Now datetime2(3) = SYSUTCDATETIME(), @Until datetime2(3);
+    DECLARE @ServiceSid varbinary(85) =
+    (
+        SELECT [WindowsSid]
+        FROM [tb_security].[Users]
+        WHERE [LoginName] = N'$(SyncServicePrincipal)'
+    );
+    IF @ServiceSid IS NULL
+        THROW 51814, N'The configured WHD sync service principal has no TechBench service actor.', 1;
+    SET @Until = DATEADD(second, @LeaseSeconds, @Now);
+    BEGIN TRANSACTION;
+
+    DECLARE @QueueLockResult int;
+    EXEC @QueueLockResult = sys.sp_getapplock
+        @Resource = N'TechBench.WHD.SyncQueue',
+        @LockMode = N'Exclusive',
+        @LockOwner = N'Transaction',
+        @LockTimeout = 5000;
+    IF @QueueLockResult < 0
+        THROW 51817, N'Could not acquire the WHD synchronization queue lock.', 1;
+
+    DECLARE @AutoEnabled bit = COALESCE
+    (
+        TRY_CONVERT(bit, (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings] WHERE [SettingKey] = N'Whd.AutoSyncEnabled')),
+        1
+    );
+    DECLARE @AutoMinutes int = COALESCE
+    (
+        TRY_CONVERT(int, (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings] WHERE [SettingKey] = N'Whd.AutoSyncMinutes')),
+        5
+    );
+    SET @AutoMinutes = CASE WHEN @AutoMinutes < 1 THEN 1 WHEN @AutoMinutes > 1440 THEN 1440 ELSE @AutoMinutes END;
+
+    IF @AutoEnabled = 1
+       AND NOT EXISTS
+       (
+           SELECT 1
+           FROM [tb_sync].[WhdSyncWork]
+           WHERE [State] IN (N'Queued', N'Leased')
+       )
+       AND NOT EXISTS
+       (
+           SELECT 1
+           FROM [tb_sync].[WhdSyncHealth]
+           WHERE [HealthId] = 1
+             AND [LastAttemptAtUtc] > DATEADD(minute, -@AutoMinutes, @Now)
+       )
+    BEGIN
+        DECLARE @AutoRequestId uniqueidentifier = NEWID();
+        DECLARE @AutoRequestType nvarchar(40) = CASE
+            WHEN EXISTS
+            (
+                SELECT 1 FROM [tb_sync].[WhdSyncCursors]
+                WHERE [CursorName] = N'WhdTickets'
+                  AND NULLIF([CursorValue], N'') IS NOT NULL
+            ) THEN N'Incremental'
+            ELSE N'Full'
+        END;
+        DECLARE @IncludeReferenceWork bit = CASE
+            WHEN @AutoRequestType = N'Full' THEN 1
+            WHEN
+            (
+                SELECT COUNT(DISTINCT [WorkType])
+                FROM [tb_sync].[WhdSyncWork]
+                WHERE [State] = N'Completed'
+                  AND [WorkType] IN (N'Clients', N'Statuses', N'Technicians', N'Groups')
+                  AND [CompletedAtUtc] >= DATEADD(day, -1, @Now)
+            ) < 4 THEN 1
+            ELSE 0
+        END;
+
+        INSERT INTO [tb_sync].[WhdSyncRequests]
+            ([RequestId], [RequestedByWindowsSid], [RequestType])
+        VALUES
+            (@AutoRequestId, @ServiceSid, @AutoRequestType);
+
+        INSERT INTO [tb_sync].[WhdSyncWork]
+            ([WorkId], [RequestId], [WorkType])
+        SELECT NEWID(), @AutoRequestId, work_type.[WorkType]
+        FROM
+        (
+            VALUES
+                (N'Clients'),
+                (N'Statuses'),
+                (N'Technicians'),
+                (N'Groups'),
+                (N'Tickets')
+        ) AS work_type([WorkType])
+        WHERE work_type.[WorkType] = N'Tickets'
+           OR @IncludeReferenceWork = 1;
+    END;
+
+    SELECT TOP (1) @WorkId = w.[WorkId]
+    FROM [tb_sync].[WhdSyncWork] AS w WITH (UPDLOCK, READPAST, READCOMMITTEDLOCK, ROWLOCK)
+    LEFT JOIN [tb_sync].[WhdSyncLeases] AS l WITH (UPDLOCK, HOLDLOCK) ON l.[WorkId] = w.[WorkId]
+    WHERE w.[State] = N'Queued' OR (w.[State] = N'Leased' AND l.[ExpiresAtUtc] <= @Now)
+    ORDER BY
+        w.[CreatedAtUtc],
+        CASE w.[WorkType]
+            WHEN N'Clients' THEN 1
+            WHEN N'Statuses' THEN 2
+            WHEN N'Technicians' THEN 3
+            WHEN N'Groups' THEN 4
+            WHEN N'Tickets' THEN 5
+            ELSE 6
+        END,
+        w.[WorkId];
+    IF @WorkId IS NOT NULL
+    BEGIN
+        DELETE FROM [tb_sync].[WhdSyncLeases] WHERE [WorkId] = @WorkId;
+        INSERT INTO [tb_sync].[WhdSyncLeases]([WorkId], [LeaseId], [WorkerId], [AcquiredAtUtc], [ExpiresAtUtc]) VALUES (@WorkId, @LeaseId, @WorkerId, @Now, @Until);
+        UPDATE [tb_sync].[WhdSyncWork] SET [State] = N'Leased' WHERE [WorkId] = @WorkId;
+        UPDATE r SET [Status] = N'Running' FROM [tb_sync].[WhdSyncRequests] AS r JOIN [tb_sync].[WhdSyncWork] AS w ON w.[RequestId] = r.[RequestId] WHERE w.[WorkId] = @WorkId AND r.[Status] = N'Queued';
+    END;
+    COMMIT TRANSACTION;
+    SELECT w.[WorkId], l.[LeaseId], l.[WorkerId], l.[ExpiresAtUtc], w.[RequestId], r.[RequestType], w.[WorkType], w.[PayloadJson], c.[CursorValue]
+    FROM [tb_sync].[WhdSyncWork] AS w JOIN [tb_sync].[WhdSyncLeases] AS l ON l.[WorkId] = w.[WorkId]
+    JOIN [tb_sync].[WhdSyncRequests] AS r ON r.[RequestId] = w.[RequestId]
+    LEFT JOIN [tb_sync].[WhdSyncCursors] AS c ON c.[CursorName] = N'WhdTickets'
+    WHERE w.[WorkId] = @WorkId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_service.RenewWhdSyncLease', N'P') IS NOT NULL DROP PROCEDURE [tb_service].[RenewWhdSyncLease];
+GO
+CREATE PROCEDURE [tb_service].[RenewWhdSyncLease]
+    @WorkId uniqueidentifier, @LeaseId uniqueidentifier, @WorkerId uniqueidentifier, @LeaseSeconds int
+AS
+BEGIN
+    SET NOCOUNT ON; SET XACT_ABORT ON;
+    IF @LeaseSeconds NOT BETWEEN 15 AND 3600 THROW 51801, N'LeaseSeconds must be from 15 to 3600.', 1;
+    DECLARE @Now datetime2(3) = SYSUTCDATETIME(), @Until datetime2(3) = DATEADD(second, @LeaseSeconds, SYSUTCDATETIME());
+    UPDATE [tb_sync].[WhdSyncLeases] SET [ExpiresAtUtc] = @Until
+    WHERE [WorkId] = @WorkId AND [LeaseId] = @LeaseId AND [WorkerId] = @WorkerId AND [ExpiresAtUtc] > @Now;
+    IF @@ROWCOUNT <> 1 THROW 51802, N'WHD sync lease is missing, expired, or owned by another worker.', 1;
+    SELECT @WorkId AS [WorkId], @LeaseId AS [LeaseId], @Until AS [ExpiresAtUtc];
+END;
+GO
+
+/* Every apply path validates the same unexpired lease before modifying data. */
+IF OBJECT_ID(N'tb_service.ApplyWhdClientSnapshot', N'P') IS NOT NULL DROP PROCEDURE [tb_service].[ApplyWhdClientSnapshot];
+GO
+CREATE PROCEDURE [tb_service].[ApplyWhdClientSnapshot]
+    @WorkId uniqueidentifier, @LeaseId uniqueidentifier, @WorkerId uniqueidentifier, @Json nvarchar(max), @SyncedAtUtc datetime2(3)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF COALESCE(ISJSON(@Json), 0) <> 1
+       OR LEFT(LTRIM(@Json), 1) <> N'['
+       OR RIGHT(RTRIM(@Json), 1) <> N']'
+       OR @SyncedAtUtc IS NULL
+        THROW 51803, N'Valid JSON and SyncedAtUtc are required.', 1;
+
+    DECLARE @ActorSid varbinary(85) =
+    (
+        SELECT [WindowsSid]
+        FROM [tb_security].[Users]
+        WHERE [LoginName] = N'$(SyncServicePrincipal)'
+    );
+    IF @ActorSid IS NULL
+        THROW 51814, N'The WHD sync service actor is missing.', 1;
+
+    DECLARE @Snapshot TABLE
+    (
+        [ExternalId] nvarchar(500) NOT NULL PRIMARY KEY,
+        [Name] nvarchar(240) NOT NULL,
+        [LocationName] nvarchar(240) NULL,
+        [ContactName] nvarchar(240) NULL,
+        [IsActive] bit NOT NULL
+    );
+
+    ;WITH parsed AS
+    (
+        SELECT
+            NULLIF(LTRIM(RTRIM([ExternalId])), N'') AS [ExternalId],
+            NULLIF(LTRIM(RTRIM([Name])), N'') AS [Name],
+            NULLIF(LTRIM(RTRIM([LocationName])), N'') AS [LocationName],
+            NULLIF(LTRIM(RTRIM([ContactName])), N'') AS [ContactName],
+            COALESCE([IsActive], 1) AS [IsActive]
+        FROM OPENJSON(@Json)
+        WITH
+        (
+            [ExternalId] nvarchar(500) '$.externalId',
+            [Name] nvarchar(240) '$.name',
+            [LocationName] nvarchar(240) '$.locationName',
+            [ContactName] nvarchar(240) '$.contactName',
+            [IsActive] bit '$.isActive'
+        )
+    ),
+    ranked AS
+    (
+        SELECT *, ROW_NUMBER() OVER
+            (PARTITION BY [ExternalId] ORDER BY [ExternalId]) AS [RowNumber]
+        FROM parsed
+        WHERE [ExternalId] IS NOT NULL AND [Name] IS NOT NULL
+    )
+    INSERT INTO @Snapshot([ExternalId], [Name], [LocationName], [ContactName], [IsActive])
+    SELECT [ExternalId], [Name], [LocationName], [ContactName], [IsActive]
+    FROM ranked
+    WHERE [RowNumber] = 1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        DECLARE @ClientWorkType nvarchar(40);
+        SELECT @ClientWorkType = work_item.[WorkType]
+        FROM [tb_sync].[WhdSyncLeases] AS lease WITH (UPDLOCK, HOLDLOCK)
+        INNER JOIN [tb_sync].[WhdSyncWork] AS work_item
+            ON work_item.[WorkId] = lease.[WorkId]
+        WHERE lease.[WorkId] = @WorkId
+          AND lease.[LeaseId] = @LeaseId
+          AND lease.[WorkerId] = @WorkerId
+          AND lease.[ExpiresAtUtc] > SYSUTCDATETIME()
+          AND work_item.[State] = N'Leased'
+          AND work_item.[WorkType] IN (N'Clients', N'Tickets');
+
+        IF @ClientWorkType IS NULL
+            THROW 51804, N'Valid WHD client/ticket-work lease required.', 1;
+
+        /* Preserve the shared customer match: WHD identities may point at a
+           Sage/Both client rather than a standalone WHD client row. */
+        UPDATE client
+        SET
+            [Name] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[Name] ELSE client.[Name] END,
+            [WhdLocationName] = snapshot.[LocationName],
+            [WhdContactName] = snapshot.[ContactName],
+            [IsActive] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[IsActive] ELSE client.[IsActive] END,
+            [LastSyncedAtUtc] = @SyncedAtUtc,
+            [UpdatedAtUtc] = SYSUTCDATETIME(),
+            [UpdatedByWindowsSid] = @ActorSid
+        FROM [tb_data].[Clients] AS client
+        INNER JOIN [tb_data].[ClientExternalIdentities] AS identity_row
+            ON identity_row.[ClientId] = client.[Id]
+           AND identity_row.[SourceSystem] = N'WHD'
+        INNER JOIN @Snapshot AS snapshot
+            ON snapshot.[ExternalId] = identity_row.[ExternalId];
+
+        UPDATE identity_row
+        SET
+            [ExternalName] = snapshot.[Name],
+            [LastSyncedAtUtc] = @SyncedAtUtc,
+            [UpdatedByWindowsSid] = @ActorSid,
+            [UpdatedAtUtc] = SYSUTCDATETIME()
+        FROM [tb_data].[ClientExternalIdentities] AS identity_row
+        INNER JOIN @Snapshot AS snapshot
+            ON snapshot.[ExternalId] = identity_row.[ExternalId]
+        WHERE identity_row.[SourceSystem] = N'WHD';
+
+        /* Seed identity rows for databases upgraded from the original
+           Source/ExternalId representation. */
+        INSERT INTO [tb_data].[ClientExternalIdentities]
+        (
+            [ClientId], [SourceSystem], [ExternalId], [ExternalName],
+            [LastSyncedAtUtc], [CreatedByWindowsSid], [UpdatedByWindowsSid]
+        )
+        SELECT
+            legacy.[Id], N'WHD', snapshot.[ExternalId], snapshot.[Name],
+            @SyncedAtUtc, @ActorSid, @ActorSid
+        FROM @Snapshot AS snapshot
+        CROSS APPLY
+        (
+            SELECT TOP (1) client.[Id]
+            FROM [tb_data].[Clients] AS client WITH (UPDLOCK, HOLDLOCK)
+            WHERE client.[ExternalId] = snapshot.[ExternalId]
+              AND client.[Source] IN (N'WHD', N'Both')
+            ORDER BY CASE WHEN client.[Source] = N'Both' THEN 0 ELSE 1 END, client.[Id]
+        ) AS legacy
+        WHERE NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[ClientExternalIdentities] AS existing WITH (UPDLOCK, HOLDLOCK)
+            WHERE existing.[SourceSystem] = N'WHD'
+              AND existing.[ExternalId] = snapshot.[ExternalId]
+        );
+
+        DECLARE @NewClients TABLE
+        (
+            [ExternalId] nvarchar(500) NOT NULL PRIMARY KEY,
+            [ClientId] int NOT NULL
+        );
+
+        INSERT INTO [tb_data].[Clients]
+        (
+            [Name], [Source], [ExternalId], [IsActive], [LastSyncedAtUtc],
+            [WhdLocationName], [WhdContactName], [MatchStatus],
+            [CreatedByWindowsSid], [UpdatedByWindowsSid]
+        )
+        OUTPUT inserted.[ExternalId], inserted.[Id]
+            INTO @NewClients([ExternalId], [ClientId])
+        SELECT
+            snapshot.[Name], N'WHD', snapshot.[ExternalId], snapshot.[IsActive], @SyncedAtUtc,
+            snapshot.[LocationName], snapshot.[ContactName], N'Unmatched', @ActorSid, @ActorSid
+        FROM @Snapshot AS snapshot
+        WHERE NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[ClientExternalIdentities] AS existing WITH (UPDLOCK, HOLDLOCK)
+            WHERE existing.[SourceSystem] = N'WHD'
+              AND existing.[ExternalId] = snapshot.[ExternalId]
+        );
+
+        INSERT INTO [tb_data].[ClientExternalIdentities]
+        (
+            [ClientId], [SourceSystem], [ExternalId], [ExternalName],
+            [LastSyncedAtUtc], [CreatedByWindowsSid], [UpdatedByWindowsSid]
+        )
+        SELECT
+            new_client.[ClientId], N'WHD', snapshot.[ExternalId], snapshot.[Name],
+            @SyncedAtUtc, @ActorSid, @ActorSid
+        FROM @NewClients AS new_client
+        INNER JOIN @Snapshot AS snapshot
+            ON snapshot.[ExternalId] = new_client.[ExternalId];
+
+        /* Refresh legacy rows immediately after their WHD identity is seeded,
+           rather than waiting for the next synchronization cycle. */
+        UPDATE client
+        SET
+            [Name] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[Name] ELSE client.[Name] END,
+            [WhdLocationName] = snapshot.[LocationName],
+            [WhdContactName] = snapshot.[ContactName],
+            [IsActive] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[IsActive] ELSE client.[IsActive] END,
+            [LastSyncedAtUtc] = @SyncedAtUtc,
+            [UpdatedAtUtc] = SYSUTCDATETIME(),
+            [UpdatedByWindowsSid] = @ActorSid
+        FROM [tb_data].[Clients] AS client
+        INNER JOIN [tb_data].[ClientExternalIdentities] AS identity_row
+            ON identity_row.[ClientId] = client.[Id]
+           AND identity_row.[SourceSystem] = N'WHD'
+        INNER JOIN @Snapshot AS snapshot
+            ON snapshot.[ExternalId] = identity_row.[ExternalId];
+
+        /* The Clients work is a complete active-location snapshot. Embedded
+           client batches during Tickets work are deliberately upsert-only. */
+        IF @ClientWorkType = N'Clients'
+        BEGIN
+            UPDATE client
+            SET
+                [IsActive] = 0,
+                [UpdatedAtUtc] = SYSUTCDATETIME(),
+                [UpdatedByWindowsSid] = @ActorSid
+            FROM [tb_data].[Clients] AS client
+            INNER JOIN [tb_data].[ClientExternalIdentities] AS identity_row
+                ON identity_row.[ClientId] = client.[Id]
+               AND identity_row.[SourceSystem] = N'WHD'
+               AND identity_row.[ExternalId] LIKE N'WHD-LOCATION-%'
+            WHERE client.[Source] = N'WHD'
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM @Snapshot AS active_location
+                  WHERE active_location.[ExternalId] = identity_row.[ExternalId]
+              );
+        END;
+
+        DECLARE @SavedCount int = (SELECT COUNT(*) FROM @Snapshot);
+        DECLARE @InsertedCount int = (SELECT COUNT(*) FROM @NewClients);
+
+        COMMIT TRANSACTION;
+
+        SELECT
+            @SavedCount AS [SavedCount],
+            @InsertedCount AS [InsertedCount],
+            @SyncedAtUtc AS [SyncedAtUtc];
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+GO
+
+IF OBJECT_ID(N'tb_service.ApplyWhdTicketBatch', N'P') IS NOT NULL DROP PROCEDURE [tb_service].[ApplyWhdTicketBatch];
+GO
+CREATE PROCEDURE [tb_service].[ApplyWhdTicketBatch]
+    @WorkId uniqueidentifier, @LeaseId uniqueidentifier, @WorkerId uniqueidentifier, @Json nvarchar(max), @SyncedAtUtc datetime2(3)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF COALESCE(ISJSON(@Json), 0) <> 1
+       OR LEFT(LTRIM(@Json), 1) <> N'['
+       OR RIGHT(RTRIM(@Json), 1) <> N']'
+       OR @SyncedAtUtc IS NULL
+        THROW 51805, N'Valid JSON and SyncedAtUtc are required.', 1;
+
+    DECLARE @ActorSid varbinary(85) =
+    (
+        SELECT [WindowsSid]
+        FROM [tb_security].[Users]
+        WHERE [LoginName] = N'$(SyncServicePrincipal)'
+    );
+    IF @ActorSid IS NULL
+        THROW 51814, N'The WHD sync service actor is missing.', 1;
+
+    DECLARE @Tickets TABLE
+    (
+        [ExternalId] nvarchar(240) NOT NULL PRIMARY KEY,
+        [TicketNumber] nvarchar(120) NOT NULL,
+        [Subject] nvarchar(500) NULL,
+        [Status] nvarchar(160) NULL,
+        [StatusTypeId] int NULL,
+        [ClientExternalId] nvarchar(500) NOT NULL,
+        [IsClosed] bit NOT NULL,
+        [IsDeleted] bit NOT NULL,
+        [LastUpdatedUtc] datetime2(3) NULL,
+        [AssignedTechExternalId] nvarchar(120) NULL,
+        [AssignedTechName] nvarchar(240) NULL,
+        [AssignedGroupExternalId] nvarchar(120) NULL,
+        [AssignedGroupName] nvarchar(240) NULL
+    );
+
+    ;WITH parsed AS
+    (
+        SELECT
+            NULLIF(LTRIM(RTRIM([ExternalId])), N'') AS [ExternalId],
+            NULLIF(LTRIM(RTRIM([TicketNumber])), N'') AS [TicketNumber],
+            NULLIF(LTRIM(RTRIM([Subject])), N'') AS [Subject],
+            NULLIF(LTRIM(RTRIM([Status])), N'') AS [Status],
+            [StatusTypeId],
+            NULLIF(LTRIM(RTRIM([ClientExternalId])), N'') AS [ClientExternalId],
+            COALESCE([IsClosed], 0) AS [IsClosed],
+            COALESCE([IsDeleted], 0) AS [IsDeleted],
+            [LastUpdatedUtc],
+            NULLIF(LTRIM(RTRIM([AssignedTechExternalId])), N'') AS [AssignedTechExternalId],
+            NULLIF(LTRIM(RTRIM([AssignedTechName])), N'') AS [AssignedTechName],
+            NULLIF(LTRIM(RTRIM([AssignedGroupExternalId])), N'') AS [AssignedGroupExternalId],
+            NULLIF(LTRIM(RTRIM([AssignedGroupName])), N'') AS [AssignedGroupName]
+        FROM OPENJSON(@Json)
+        WITH
+        (
+            [ExternalId] nvarchar(240) '$.externalId',
+            [TicketNumber] nvarchar(120) '$.ticketNumber',
+            [Subject] nvarchar(500) '$.subject',
+            [Status] nvarchar(160) '$.status',
+            [StatusTypeId] int '$.statusTypeId',
+            [ClientExternalId] nvarchar(500) '$.clientExternalId',
+            [IsClosed] bit '$.isClosed',
+            [IsDeleted] bit '$.isDeleted',
+            [LastUpdatedUtc] datetime2(3) '$.lastUpdatedUtc',
+            [AssignedTechExternalId] nvarchar(120) '$.assignedTechnicianExternalId',
+            [AssignedTechName] nvarchar(240) '$.assignedTechnicianName',
+            [AssignedGroupExternalId] nvarchar(120) '$.assignedGroupExternalId',
+            [AssignedGroupName] nvarchar(240) '$.assignedGroupName'
+        )
+    ),
+    ranked AS
+    (
+        SELECT *, ROW_NUMBER() OVER
+            (PARTITION BY [ExternalId] ORDER BY [LastUpdatedUtc] DESC, [TicketNumber]) AS [RowNumber]
+        FROM parsed
+        WHERE [ExternalId] IS NOT NULL
+          AND [TicketNumber] IS NOT NULL
+          AND [ClientExternalId] IS NOT NULL
+    )
+    INSERT INTO @Tickets
+    (
+        [ExternalId], [TicketNumber], [Subject], [Status], [StatusTypeId],
+        [ClientExternalId], [IsClosed], [IsDeleted], [LastUpdatedUtc],
+        [AssignedTechExternalId], [AssignedTechName],
+        [AssignedGroupExternalId], [AssignedGroupName]
+    )
+    SELECT
+        [ExternalId], [TicketNumber], [Subject], [Status], [StatusTypeId],
+        [ClientExternalId], [IsClosed], [IsDeleted], [LastUpdatedUtc],
+        [AssignedTechExternalId], [AssignedTechName],
+        [AssignedGroupExternalId], [AssignedGroupName]
+    FROM ranked
+    WHERE [RowNumber] = 1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_sync].[WhdSyncLeases] AS lease WITH (UPDLOCK, HOLDLOCK)
+            INNER JOIN [tb_sync].[WhdSyncWork] AS work_item
+                ON work_item.[WorkId] = lease.[WorkId]
+            WHERE lease.[WorkId] = @WorkId
+              AND lease.[LeaseId] = @LeaseId
+              AND lease.[WorkerId] = @WorkerId
+              AND lease.[ExpiresAtUtc] > SYSUTCDATETIME()
+              AND work_item.[State] = N'Leased'
+              AND work_item.[WorkType] = N'Tickets'
+        )
+            THROW 51806, N'Valid WHD ticket-work lease required.', 1;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM @Tickets AS incoming
+            WHERE NOT EXISTS
+            (
+                SELECT 1
+                FROM [tb_data].[ClientExternalIdentities] AS identity_row
+                WHERE identity_row.[SourceSystem] = N'WHD'
+                  AND identity_row.[ExternalId] = incoming.[ClientExternalId]
+            )
+        )
+            THROW 51815, N'A WHD ticket referenced a client identity that was not durably applied.', 1;
+
+        UPDATE ticket
+        SET
+            [TicketNumber] = incoming.[TicketNumber],
+            [ClientId] = identity_row.[ClientId],
+            [Subject] = COALESCE(incoming.[Subject], ticket.[Subject]),
+            [Status] = COALESCE(incoming.[Status], ticket.[Status]),
+            [WhdStatusTypeId] = incoming.[StatusTypeId],
+            [IsWhdDeleted] = incoming.[IsDeleted],
+            [IsClosed] = CASE WHEN incoming.[IsDeleted] = 1 THEN 1 ELSE incoming.[IsClosed] END,
+            [WhdLastUpdatedUtc] = COALESCE(incoming.[LastUpdatedUtc], ticket.[WhdLastUpdatedUtc]),
+            [AssignedTechExternalId] = incoming.[AssignedTechExternalId],
+            [AssignedTechName] = incoming.[AssignedTechName],
+            [AssignedGroupExternalId] = incoming.[AssignedGroupExternalId],
+            [AssignedGroupName] = incoming.[AssignedGroupName],
+            [LastSyncedAtUtc] = @SyncedAtUtc,
+            [UpdatedAtUtc] = SYSUTCDATETIME(),
+            [UpdatedByWindowsSid] = @ActorSid
+        FROM [tb_data].[Tickets] AS ticket
+        INNER JOIN @Tickets AS incoming
+            ON ticket.[Source] = N'WHD'
+           AND ticket.[ExternalId] = incoming.[ExternalId]
+        INNER JOIN [tb_data].[ClientExternalIdentities] AS identity_row
+            ON identity_row.[SourceSystem] = N'WHD'
+           AND identity_row.[ExternalId] = incoming.[ClientExternalId]
+        WHERE incoming.[LastUpdatedUtc] IS NULL
+           OR ticket.[WhdLastUpdatedUtc] IS NULL
+           OR incoming.[LastUpdatedUtc] >= ticket.[WhdLastUpdatedUtc];
+
+        INSERT INTO [tb_data].[Tickets]
+        (
+            [TicketNumber], [ClientId], [Subject], [Status], [Source], [ExternalId],
+            [WhdStatusTypeId], [IsClosed], [LastSyncedAtUtc], [WhdLastUpdatedUtc],
+            [IsWhdDeleted], [AssignedTechExternalId], [AssignedTechName],
+            [AssignedGroupExternalId], [AssignedGroupName],
+            [CreatedByWindowsSid], [UpdatedByWindowsSid]
+        )
+        SELECT
+            incoming.[TicketNumber], identity_row.[ClientId],
+            COALESCE(incoming.[Subject], N''), COALESCE(incoming.[Status], N'Open'),
+            N'WHD', incoming.[ExternalId], incoming.[StatusTypeId],
+            CASE WHEN incoming.[IsDeleted] = 1 THEN 1 ELSE incoming.[IsClosed] END,
+            @SyncedAtUtc, incoming.[LastUpdatedUtc], incoming.[IsDeleted],
+            incoming.[AssignedTechExternalId], incoming.[AssignedTechName],
+            incoming.[AssignedGroupExternalId], incoming.[AssignedGroupName],
+            @ActorSid, @ActorSid
+        FROM @Tickets AS incoming
+        INNER JOIN [tb_data].[ClientExternalIdentities] AS identity_row
+            ON identity_row.[SourceSystem] = N'WHD'
+           AND identity_row.[ExternalId] = incoming.[ClientExternalId]
+        WHERE NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[Tickets] AS existing WITH (UPDLOCK, HOLDLOCK)
+            WHERE existing.[Source] = N'WHD'
+              AND existing.[ExternalId] = incoming.[ExternalId]
+        );
+
+        DECLARE @InsertedCount int = @@ROWCOUNT;
+        DECLARE @SavedCount int = (SELECT COUNT(*) FROM @Tickets);
+
+        COMMIT TRANSACTION;
+
+        SELECT
+            @SavedCount AS [SavedCount],
+            @InsertedCount AS [InsertedCount],
+            @SyncedAtUtc AS [SyncedAtUtc];
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+GO
+
+IF OBJECT_ID(N'tb_service.ApplyWhdTicketStatusSnapshot', N'P') IS NOT NULL DROP PROCEDURE [tb_service].[ApplyWhdTicketStatusSnapshot];
+GO
+CREATE PROCEDURE [tb_service].[ApplyWhdTicketStatusSnapshot]
+    @WorkId uniqueidentifier, @LeaseId uniqueidentifier, @WorkerId uniqueidentifier, @Json nvarchar(max), @SyncedAtUtc datetime2(3)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF COALESCE(ISJSON(@Json), 0) <> 1
+       OR LEFT(LTRIM(@Json), 1) <> N'['
+       OR RIGHT(RTRIM(@Json), 1) <> N']'
+       OR @SyncedAtUtc IS NULL
+        THROW 51807, N'Valid JSON and SyncedAtUtc are required.', 1;
+
+    DECLARE @Snapshot TABLE
+    (
+        [ExternalId] nvarchar(240) NOT NULL PRIMARY KEY,
+        [WhdStatusTypeId] int NULL,
+        [Name] nvarchar(160) NOT NULL,
+        [IsClosed] bit NOT NULL
+    );
+
+    ;WITH parsed AS
+    (
+        SELECT
+            NULLIF(LTRIM(RTRIM([ExternalId])), N'') AS [ExternalId],
+            [WhdStatusTypeId],
+            NULLIF(LTRIM(RTRIM([Name])), N'') AS [Name],
+            COALESCE([IsClosed], 0) AS [IsClosed]
+        FROM OPENJSON(@Json)
+        WITH
+        (
+            [ExternalId] nvarchar(240) '$.externalId',
+            [WhdStatusTypeId] int '$.whdStatusTypeId',
+            [Name] nvarchar(160) '$.name',
+            [IsClosed] bit '$.isClosed'
+        )
+    ),
+    ranked AS
+    (
+        SELECT *, ROW_NUMBER() OVER
+            (PARTITION BY [ExternalId] ORDER BY [WhdStatusTypeId]) AS [RowNumber]
+        FROM parsed
+        WHERE [ExternalId] IS NOT NULL AND [Name] IS NOT NULL
+    )
+    INSERT INTO @Snapshot([ExternalId], [WhdStatusTypeId], [Name], [IsClosed])
+    SELECT [ExternalId], [WhdStatusTypeId], [Name], [IsClosed]
+    FROM ranked
+    WHERE [RowNumber] = 1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_sync].[WhdSyncLeases] AS lease WITH (UPDLOCK, HOLDLOCK)
+            INNER JOIN [tb_sync].[WhdSyncWork] AS work_item
+                ON work_item.[WorkId] = lease.[WorkId]
+            WHERE lease.[WorkId] = @WorkId
+              AND lease.[LeaseId] = @LeaseId
+              AND lease.[WorkerId] = @WorkerId
+              AND lease.[ExpiresAtUtc] > SYSUTCDATETIME()
+              AND work_item.[State] = N'Leased'
+              AND work_item.[WorkType] = N'Statuses'
+        )
+            THROW 51808, N'Valid WHD status-work lease required.', 1;
+
+        MERGE [tb_data].[TicketStatusOptions] AS target
+        USING @Snapshot AS source
+            ON target.[Source] = N'WHD'
+           AND target.[ExternalId] = source.[ExternalId]
+        WHEN MATCHED THEN
+            UPDATE SET
+                [Name] = source.[Name],
+                [WhdStatusTypeId] = source.[WhdStatusTypeId],
+                [IsClosed] = source.[IsClosed],
+                [LastSyncedAtUtc] = @SyncedAtUtc,
+                [UpdatedAtUtc] = SYSUTCDATETIME()
+        WHEN NOT MATCHED BY TARGET THEN
+            INSERT
+                ([Name], [Source], [ExternalId], [WhdStatusTypeId], [IsClosed], [LastSyncedAtUtc])
+            VALUES
+                (source.[Name], N'WHD', source.[ExternalId], source.[WhdStatusTypeId], source.[IsClosed], @SyncedAtUtc);
+
+        COMMIT TRANSACTION;
+        SELECT (SELECT COUNT(*) FROM @Snapshot) AS [SavedCount], @SyncedAtUtc AS [SyncedAtUtc];
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+GO
+
+IF OBJECT_ID(N'tb_service.ApplyWhdTechnicianSnapshot', N'P') IS NOT NULL DROP PROCEDURE [tb_service].[ApplyWhdTechnicianSnapshot];
+GO
+CREATE PROCEDURE [tb_service].[ApplyWhdTechnicianSnapshot]
+    @WorkId uniqueidentifier, @LeaseId uniqueidentifier, @WorkerId uniqueidentifier, @Json nvarchar(max), @SyncedAtUtc datetime2(3)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF COALESCE(ISJSON(@Json), 0) <> 1
+       OR LEFT(LTRIM(@Json), 1) <> N'['
+       OR RIGHT(RTRIM(@Json), 1) <> N']'
+       OR @SyncedAtUtc IS NULL
+        THROW 51809, N'Valid JSON and SyncedAtUtc are required.', 1;
+
+    DECLARE @Snapshot TABLE
+    (
+        [ExternalId] nvarchar(120) NOT NULL PRIMARY KEY,
+        [DisplayName] nvarchar(240) NOT NULL,
+        [Username] nvarchar(240) NULL,
+        [Email] nvarchar(320) NULL,
+        [IsActive] bit NOT NULL,
+        [LastUpdatedUtc] datetime2(3) NULL
+    );
+
+    ;WITH parsed AS
+    (
+        SELECT
+            NULLIF(LTRIM(RTRIM([ExternalId])), N'') AS [ExternalId],
+            NULLIF(LTRIM(RTRIM([DisplayName])), N'') AS [DisplayName],
+            NULLIF(LTRIM(RTRIM([Username])), N'') AS [Username],
+            NULLIF(LTRIM(RTRIM([Email])), N'') AS [Email],
+            COALESCE([IsActive], 1) AS [IsActive],
+            [LastUpdatedUtc]
+        FROM OPENJSON(@Json)
+        WITH
+        (
+            [ExternalId] nvarchar(120) '$.externalId',
+            [DisplayName] nvarchar(240) '$.displayName',
+            [Username] nvarchar(240) '$.username',
+            [Email] nvarchar(320) '$.email',
+            [IsActive] bit '$.isActive',
+            [LastUpdatedUtc] datetime2(3) '$.lastUpdatedUtc'
+        )
+    ),
+    ranked AS
+    (
+        SELECT *, ROW_NUMBER() OVER
+            (PARTITION BY [ExternalId] ORDER BY [LastUpdatedUtc] DESC, [DisplayName]) AS [RowNumber]
+        FROM parsed
+        WHERE [ExternalId] IS NOT NULL AND [DisplayName] IS NOT NULL
+    )
+    INSERT INTO @Snapshot
+        ([ExternalId], [DisplayName], [Username], [Email], [IsActive], [LastUpdatedUtc])
+    SELECT [ExternalId], [DisplayName], [Username], [Email], [IsActive], [LastUpdatedUtc]
+    FROM ranked
+    WHERE [RowNumber] = 1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_sync].[WhdSyncLeases] AS lease WITH (UPDLOCK, HOLDLOCK)
+            INNER JOIN [tb_sync].[WhdSyncWork] AS work_item
+                ON work_item.[WorkId] = lease.[WorkId]
+            WHERE lease.[WorkId] = @WorkId
+              AND lease.[LeaseId] = @LeaseId
+              AND lease.[WorkerId] = @WorkerId
+              AND lease.[ExpiresAtUtc] > SYSUTCDATETIME()
+              AND work_item.[State] = N'Leased'
+              AND work_item.[WorkType] = N'Technicians'
+        )
+            THROW 51810, N'Valid WHD technician-work lease required.', 1;
+
+        MERGE [tb_whd].[Technicians] AS target
+        USING @Snapshot AS source
+            ON target.[ExternalId] = source.[ExternalId]
+        WHEN MATCHED THEN
+            UPDATE SET
+                [DisplayName] = source.[DisplayName],
+                [Username] = source.[Username],
+                [Email] = source.[Email],
+                [IsActive] = source.[IsActive],
+                [WhdLastUpdatedUtc] = source.[LastUpdatedUtc],
+                [LastSyncedAtUtc] = @SyncedAtUtc
+        WHEN NOT MATCHED BY TARGET THEN
+            INSERT
+                ([ExternalId], [DisplayName], [Username], [Email], [IsActive],
+                 [WhdLastUpdatedUtc], [LastSyncedAtUtc])
+            VALUES
+                (source.[ExternalId], source.[DisplayName], source.[Username], source.[Email],
+                 source.[IsActive], source.[LastUpdatedUtc], @SyncedAtUtc)
+        WHEN NOT MATCHED BY SOURCE THEN
+            UPDATE SET [IsActive] = 0, [LastSyncedAtUtc] = @SyncedAtUtc;
+
+        COMMIT TRANSACTION;
+        SELECT (SELECT COUNT(*) FROM @Snapshot) AS [SavedCount], @SyncedAtUtc AS [SyncedAtUtc];
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+GO
+
+IF OBJECT_ID(N'tb_service.ApplyWhdTechGroupSnapshot', N'P') IS NOT NULL DROP PROCEDURE [tb_service].[ApplyWhdTechGroupSnapshot];
+GO
+CREATE PROCEDURE [tb_service].[ApplyWhdTechGroupSnapshot]
+    @WorkId uniqueidentifier, @LeaseId uniqueidentifier, @WorkerId uniqueidentifier, @Json nvarchar(max), @SyncedAtUtc datetime2(3)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF COALESCE(ISJSON(@Json), 0) <> 1
+       OR LEFT(LTRIM(@Json), 1) <> N'['
+       OR RIGHT(RTRIM(@Json), 1) <> N']'
+       OR @SyncedAtUtc IS NULL
+        THROW 51811, N'Valid JSON and SyncedAtUtc are required.', 1;
+
+    DECLARE @Groups TABLE
+    (
+        [ExternalId] nvarchar(120) NOT NULL PRIMARY KEY,
+        [DisplayName] nvarchar(240) NOT NULL,
+        [IsActive] bit NOT NULL,
+        [LastUpdatedUtc] datetime2(3) NULL
+    );
+    DECLARE @Memberships TABLE
+    (
+        [TechnicianExternalId] nvarchar(120) NOT NULL,
+        [GroupExternalId] nvarchar(120) NOT NULL,
+        PRIMARY KEY ([TechnicianExternalId], [GroupExternalId])
+    );
+
+    ;WITH parsed AS
+    (
+        SELECT
+            NULLIF(LTRIM(RTRIM([ExternalId])), N'') AS [ExternalId],
+            NULLIF(LTRIM(RTRIM([DisplayName])), N'') AS [DisplayName],
+            COALESCE([IsActive], 1) AS [IsActive],
+            [LastUpdatedUtc]
+        FROM OPENJSON(@Json)
+        WITH
+        (
+            [ExternalId] nvarchar(120) '$.externalId',
+            [DisplayName] nvarchar(240) '$.name',
+            [IsActive] bit '$.isActive',
+            [LastUpdatedUtc] datetime2(3) '$.lastUpdatedUtc'
+        )
+    ),
+    ranked AS
+    (
+        SELECT *, ROW_NUMBER() OVER
+            (PARTITION BY [ExternalId] ORDER BY [LastUpdatedUtc] DESC, [DisplayName]) AS [RowNumber]
+        FROM parsed
+        WHERE [ExternalId] IS NOT NULL AND [DisplayName] IS NOT NULL
+    )
+    INSERT INTO @Groups([ExternalId], [DisplayName], [IsActive], [LastUpdatedUtc])
+    SELECT [ExternalId], [DisplayName], [IsActive], [LastUpdatedUtc]
+    FROM ranked
+    WHERE [RowNumber] = 1;
+
+    INSERT INTO @Memberships([TechnicianExternalId], [GroupExternalId])
+    SELECT DISTINCT
+        NULLIF(LTRIM(RTRIM(member.[TechnicianExternalId])), N''),
+        NULLIF(LTRIM(RTRIM(group_row.[ExternalId])), N'')
+    FROM OPENJSON(@Json)
+    WITH
+    (
+        [ExternalId] nvarchar(120) '$.externalId',
+        [Technicians] nvarchar(max) '$.technicianExternalIds' AS JSON
+    ) AS group_row
+    CROSS APPLY OPENJSON(group_row.[Technicians])
+    WITH ([TechnicianExternalId] nvarchar(120) '$') AS member
+    WHERE NULLIF(LTRIM(RTRIM(member.[TechnicianExternalId])), N'') IS NOT NULL
+      AND NULLIF(LTRIM(RTRIM(group_row.[ExternalId])), N'') IS NOT NULL;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_sync].[WhdSyncLeases] AS lease WITH (UPDLOCK, HOLDLOCK)
+            INNER JOIN [tb_sync].[WhdSyncWork] AS work_item
+                ON work_item.[WorkId] = lease.[WorkId]
+            WHERE lease.[WorkId] = @WorkId
+              AND lease.[LeaseId] = @LeaseId
+              AND lease.[WorkerId] = @WorkerId
+              AND lease.[ExpiresAtUtc] > SYSUTCDATETIME()
+              AND work_item.[State] = N'Leased'
+              AND work_item.[WorkType] = N'Groups'
+        )
+            THROW 51812, N'Valid WHD group-work lease required.', 1;
+
+        MERGE [tb_whd].[TechnicianGroups] AS target
+        USING @Groups AS source
+            ON target.[ExternalId] = source.[ExternalId]
+        WHEN MATCHED THEN
+            UPDATE SET
+                [DisplayName] = source.[DisplayName],
+                [IsActive] = source.[IsActive],
+                [WhdLastUpdatedUtc] = source.[LastUpdatedUtc],
+                [LastSyncedAtUtc] = @SyncedAtUtc
+        WHEN NOT MATCHED BY TARGET THEN
+            INSERT
+                ([ExternalId], [DisplayName], [IsActive], [WhdLastUpdatedUtc], [LastSyncedAtUtc])
+            VALUES
+                (source.[ExternalId], source.[DisplayName], source.[IsActive],
+                 source.[LastUpdatedUtc], @SyncedAtUtc)
+        WHEN NOT MATCHED BY SOURCE THEN
+            UPDATE SET [IsActive] = 0, [LastSyncedAtUtc] = @SyncedAtUtc;
+
+        /* Membership is a complete snapshot. Replacing it atomically prevents
+           removed group access from remaining visible to former members. */
+        DELETE FROM [tb_whd].[TechnicianGroupMemberships];
+
+        INSERT INTO [tb_whd].[TechnicianGroupMemberships]
+            ([TechnicianExternalId], [GroupExternalId], [LastSyncedAtUtc])
+        SELECT membership.[TechnicianExternalId], membership.[GroupExternalId], @SyncedAtUtc
+        FROM @Memberships AS membership
+        INNER JOIN [tb_whd].[Technicians] AS technician
+            ON technician.[ExternalId] = membership.[TechnicianExternalId]
+        INNER JOIN [tb_whd].[TechnicianGroups] AS group_row
+            ON group_row.[ExternalId] = membership.[GroupExternalId]
+        WHERE technician.[IsActive] = 1 AND group_row.[IsActive] = 1;
+
+        COMMIT TRANSACTION;
+        SELECT
+            (SELECT COUNT(*) FROM @Groups) AS [SavedGroupCount],
+            (SELECT COUNT(*) FROM @Memberships) AS [ReadMembershipCount],
+            @SyncedAtUtc AS [SyncedAtUtc];
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+GO
+
+IF OBJECT_ID(N'tb_service.CompleteWhdSyncWork', N'P') IS NOT NULL DROP PROCEDURE [tb_service].[CompleteWhdSyncWork];
+GO
+CREATE PROCEDURE [tb_service].[CompleteWhdSyncWork]
+    @WorkId uniqueidentifier, @LeaseId uniqueidentifier, @WorkerId uniqueidentifier, @Succeeded bit, @CursorValue nvarchar(400) = NULL, @Message nvarchar(2000) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @Now datetime2(3) = SYSUTCDATETIME();
+    DECLARE @RequestId uniqueidentifier;
+    DECLARE @WorkType nvarchar(40);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        SELECT
+            @RequestId = work_item.[RequestId],
+            @WorkType = work_item.[WorkType]
+        FROM [tb_sync].[WhdSyncLeases] AS lease WITH (UPDLOCK, HOLDLOCK)
+        INNER JOIN [tb_sync].[WhdSyncWork] AS work_item WITH (UPDLOCK, HOLDLOCK)
+            ON work_item.[WorkId] = lease.[WorkId]
+        WHERE lease.[WorkId] = @WorkId
+          AND lease.[LeaseId] = @LeaseId
+          AND lease.[WorkerId] = @WorkerId
+          AND lease.[ExpiresAtUtc] > @Now
+          AND work_item.[State] = N'Leased';
+
+        IF @RequestId IS NULL
+            THROW 51813, N'Valid WHD work lease required.', 1;
+
+        IF @CursorValue IS NOT NULL
+           AND
+           (
+               @Succeeded <> 1
+               OR @WorkType <> N'Tickets'
+               OR TRY_CONVERT(datetimeoffset(3), @CursorValue) IS NULL
+           )
+            THROW 51816, N'Only successful Tickets work with a valid UTC cursor may advance WHD state.', 1;
+
+        UPDATE [tb_sync].[WhdSyncWork]
+        SET
+            [State] = CASE WHEN @Succeeded = 1 THEN N'Completed' ELSE N'Failed' END,
+            [CompletedAtUtc] = @Now,
+            [ErrorMessage] = CASE WHEN @Succeeded = 1 THEN NULL ELSE @Message END
+        WHERE [WorkId] = @WorkId;
+
+        /* Cursor changes only after successful, durably applied Tickets work. */
+        IF @Succeeded = 1 AND @WorkType = N'Tickets' AND @CursorValue IS NOT NULL
+        BEGIN
+            MERGE [tb_sync].[WhdSyncCursors] AS target
+            USING
+            (
+                SELECT N'WhdTickets' AS [CursorName], @CursorValue AS [CursorValue]
+            ) AS source
+                ON target.[CursorName] = source.[CursorName]
+            WHEN MATCHED AND
+            (
+                TRY_CONVERT(datetimeoffset(3), target.[CursorValue]) IS NULL
+                OR TRY_CONVERT(datetimeoffset(3), source.[CursorValue])
+                   > TRY_CONVERT(datetimeoffset(3), target.[CursorValue])
+            ) THEN
+                UPDATE SET
+                    [CursorValue] = source.[CursorValue],
+                    [UpdatedAtUtc] = @Now
+            WHEN NOT MATCHED THEN
+                INSERT ([CursorName], [CursorValue])
+                VALUES (source.[CursorName], source.[CursorValue]);
+        END;
+
+        DELETE FROM [tb_sync].[WhdSyncLeases]
+        WHERE [WorkId] = @WorkId;
+
+        DECLARE @HasPendingWork bit = CASE WHEN EXISTS
+        (
+            SELECT 1
+            FROM [tb_sync].[WhdSyncWork]
+            WHERE [RequestId] = @RequestId
+              AND [State] IN (N'Queued', N'Leased')
+        ) THEN 1 ELSE 0 END;
+        DECLARE @HasFailedWork bit = CASE WHEN EXISTS
+        (
+            SELECT 1
+            FROM [tb_sync].[WhdSyncWork]
+            WHERE [RequestId] = @RequestId
+              AND [State] = N'Failed'
+        ) THEN 1 ELSE 0 END;
+        DECLARE @FailureMessage nvarchar(2000) =
+        (
+            SELECT TOP (1) [ErrorMessage]
+            FROM [tb_sync].[WhdSyncWork]
+            WHERE [RequestId] = @RequestId
+              AND [State] = N'Failed'
+            ORDER BY [CompletedAtUtc] DESC, [WorkId]
+        );
+
+        UPDATE [tb_sync].[WhdSyncRequests]
+        SET
+            [Status] = CASE
+                WHEN @HasPendingWork = 1 THEN N'Running'
+                WHEN @HasFailedWork = 1 THEN N'Failed'
+                ELSE N'Completed'
+            END,
+            [CompletedAtUtc] = CASE WHEN @HasPendingWork = 0 THEN @Now ELSE NULL END,
+            [Message] = LEFT
+            (
+                CASE
+                    WHEN @HasFailedWork = 1 THEN COALESCE(@FailureMessage, N'WHD synchronization failed.')
+                    WHEN @HasPendingWork = 0 THEN @Message
+                    ELSE NULL
+                END,
+                1000
+            )
+        WHERE [RequestId] = @RequestId;
+
+        /* Health is request-level: a successful sibling cannot hide a failed
+           work item or claim the whole synchronization succeeded. */
+        IF @HasPendingWork = 0
+        BEGIN
+            UPDATE [tb_sync].[WhdSyncHealth]
+            SET
+                [LastAttemptAtUtc] = @Now,
+                [LastSuccessfulAtUtc] = CASE
+                    WHEN @HasFailedWork = 0 THEN @Now
+                    ELSE [LastSuccessfulAtUtc]
+                END,
+                [LastError] = CASE
+                    WHEN @HasFailedWork = 1
+                        THEN COALESCE(@FailureMessage, N'WHD synchronization failed.')
+                    ELSE NULL
+                END,
+                [UpdatedAtUtc] = @Now
+            WHERE [HealthId] = 1;
+        END;
+
+        COMMIT TRANSACTION;
+
+        SELECT @WorkId AS [WorkId], @Succeeded AS [Succeeded];
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+GO
+
+/* Admin endpoints may request, monitor, and map users, but never submit snapshots. */
+IF OBJECT_ID(N'tb_app.AdminRequestWhdSync', N'P') IS NOT NULL DROP PROCEDURE [tb_app].[AdminRequestWhdSync];
+GO
+CREATE PROCEDURE [tb_app].[AdminRequestWhdSync] @RequestType nvarchar(40)=N'Incremental', @RequestId uniqueidentifier=NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @Sid varbinary(85), @Login nvarchar(256), @Name nvarchar(160);
+    DECLARE @Tech bit, @Manager bit, @Admin bit, @Sync bit;
+    EXEC [tb_security].[EnsureCurrentUser]
+        @UserSid = @Sid OUTPUT,
+        @LoginName = @Login OUTPUT,
+        @DisplayName = @Name OUTPUT,
+        @IsTechnician = @Tech OUTPUT,
+        @IsManager = @Manager OUTPUT,
+        @IsAdmin = @Admin OUTPUT,
+        @IsSyncOperator = @Sync OUTPUT;
+
+    IF @Admin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 51820, N'Only a TechBench Admin may request WHD sync.', 1;
+    IF @RequestType NOT IN (N'Full', N'Incremental')
+        THROW 51821, N'RequestType must be Full or Incremental.', 1;
+
+    IF @RequestType = N'Incremental'
+       AND NOT EXISTS
+       (
+           SELECT 1
+           FROM [tb_sync].[WhdSyncCursors]
+           WHERE [CursorName] = N'WhdTickets'
+             AND NULLIF([CursorValue], N'') IS NOT NULL
+       )
+        SET @RequestType = N'Full';
+
+    SET @RequestId = COALESCE(@RequestId, NEWID());
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        DECLARE @QueueLockResult int;
+        EXEC @QueueLockResult = sys.sp_getapplock
+            @Resource = N'TechBench.WHD.SyncQueue',
+            @LockMode = N'Exclusive',
+            @LockOwner = N'Transaction',
+            @LockTimeout = 5000;
+        IF @QueueLockResult < 0
+            THROW 51817, N'Could not acquire the WHD synchronization queue lock.', 1;
+
+        DECLARE @ExistingRequestId uniqueidentifier =
+        (
+            SELECT TOP (1) request_row.[RequestId]
+            FROM [tb_sync].[WhdSyncRequests] AS request_row
+            INNER JOIN [tb_sync].[WhdSyncWork] AS work_item
+                ON work_item.[RequestId] = request_row.[RequestId]
+            WHERE work_item.[State] IN (N'Queued', N'Leased')
+            ORDER BY request_row.[RequestedAtUtc], request_row.[RequestId]
+        );
+        IF @ExistingRequestId IS NOT NULL
+        BEGIN
+            COMMIT TRANSACTION;
+            SELECT @ExistingRequestId AS [RequestId], N'AlreadyQueued' AS [Status];
+            RETURN;
+        END;
+
+        INSERT INTO [tb_sync].[WhdSyncRequests]
+            ([RequestId], [RequestedByWindowsSid], [RequestType])
+        VALUES
+            (@RequestId, @Sid, @RequestType);
+
+        INSERT INTO [tb_sync].[WhdSyncWork]([WorkId], [RequestId], [WorkType])
+        SELECT NEWID(), @RequestId, work_type.[WorkType]
+        FROM
+        (
+            VALUES
+                (N'Clients'),
+                (N'Statuses'),
+                (N'Technicians'),
+                (N'Groups'),
+                (N'Tickets')
+        ) AS work_type([WorkType])
+        WHERE @RequestType = N'Full'
+           OR work_type.[WorkType] = N'Tickets';
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT @RequestId AS [RequestId], N'Queued' AS [Status];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.GetWhdSyncStatus', N'P') IS NOT NULL DROP PROCEDURE [tb_app].[GetWhdSyncStatus];
+GO
+CREATE PROCEDURE [tb_app].[GetWhdSyncStatus]
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @Sid varbinary(85), @Login nvarchar(256), @Name nvarchar(160);
+    DECLARE @Tech bit, @Manager bit, @Admin bit, @Sync bit;
+    EXEC [tb_security].[EnsureCurrentUser]
+        @UserSid = @Sid OUTPUT,
+        @LoginName = @Login OUTPUT,
+        @DisplayName = @Name OUTPUT,
+        @IsTechnician = @Tech OUTPUT,
+        @IsManager = @Manager OUTPUT,
+        @IsAdmin = @Admin OUTPUT,
+        @IsSyncOperator = @Sync OUTPUT;
+
+    IF @Admin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 51822, N'Only a TechBench Admin may monitor WHD sync.', 1;
+
+    SELECT TOP (1)
+        request_row.[RequestId],
+        request_row.[RequestType],
+        request_row.[Status],
+        request_row.[RequestedAtUtc],
+        request_row.[CompletedAtUtc],
+        request_row.[Message],
+        SUM(CASE WHEN work_item.[State] = N'Completed' THEN 1 ELSE 0 END) AS [CompletedWorkCount],
+        SUM(CASE WHEN work_item.[State] = N'Failed' THEN 1 ELSE 0 END) AS [FailedWorkCount],
+        SUM(CASE WHEN work_item.[State] IN (N'Queued', N'Leased') THEN 1 ELSE 0 END) AS [QueueDepth]
+    FROM [tb_sync].[WhdSyncRequests] AS request_row
+    INNER JOIN [tb_sync].[WhdSyncWork] AS work_item
+        ON work_item.[RequestId] = request_row.[RequestId]
+    GROUP BY
+        request_row.[RequestId], request_row.[RequestType], request_row.[Status],
+        request_row.[RequestedAtUtc], request_row.[CompletedAtUtc], request_row.[Message]
+    ORDER BY request_row.[RequestedAtUtc] DESC, request_row.[RequestId] DESC;
+
+    SELECT [LastSuccessfulAtUtc], [LastAttemptAtUtc], [LastError], [UpdatedAtUtc]
+    FROM [tb_sync].[WhdSyncHealth]
+    WHERE [HealthId] = 1;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminGetWhdUserMappings', N'P') IS NOT NULL DROP PROCEDURE [tb_app].[AdminGetWhdUserMappings];
+GO
+CREATE PROCEDURE [tb_app].[AdminGetWhdUserMappings]
+AS
+BEGIN
+ SET NOCOUNT ON; IF IS_ROLEMEMBER(N'tb_role_admin')<>1 THROW 51823,N'Only a TechBench Admin may manage WHD user mappings.',1; SELECT COALESCE(m.[Id],0) [Id],CONVERT(varchar(170),u.[WindowsSid],1) [UserSid],u.[LoginName],u.[DisplayName],m.[TechnicianExternalId],t.[DisplayName] [TechnicianDisplayName],m.[UpdatedAtUtc] FROM [tb_security].[Users] u LEFT JOIN [tb_whd].[UserTechnicianMappings] m ON m.[WindowsSid]=u.[WindowsSid] LEFT JOIN [tb_whd].[Technicians] t ON t.[ExternalId]=m.[TechnicianExternalId] WHERE u.[IsTechnician]=1 ORDER BY u.[LoginName]; END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminSaveWhdUserMapping', N'P') IS NOT NULL DROP PROCEDURE [tb_app].[AdminSaveWhdUserMapping];
+GO
+CREATE PROCEDURE [tb_app].[AdminSaveWhdUserMapping]
+    @WindowsLoginName nvarchar(256),
+    @TechnicianExternalId nvarchar(120) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @Actor varbinary(85), @Sid varbinary(85), @Login nvarchar(256), @Name nvarchar(160);
+    DECLARE @Tech bit, @Manager bit, @Admin bit, @Sync bit;
+    EXEC [tb_security].[EnsureCurrentUser]
+        @UserSid = @Actor OUTPUT,
+        @LoginName = @Login OUTPUT,
+        @DisplayName = @Name OUTPUT,
+        @IsTechnician = @Tech OUTPUT,
+        @IsManager = @Manager OUTPUT,
+        @IsAdmin = @Admin OUTPUT,
+        @IsSyncOperator = @Sync OUTPUT;
+
+    IF @Admin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 51824, N'Only a TechBench Admin may manage WHD user mappings.', 1;
+
+    SET @WindowsLoginName = NULLIF(LTRIM(RTRIM(@WindowsLoginName)), N'');
+    SET @TechnicianExternalId = NULLIF(LTRIM(RTRIM(@TechnicianExternalId)), N'');
+    SET @Sid = SUSER_SID(@WindowsLoginName);
+
+    IF @Sid IS NULL
+       OR NOT EXISTS (SELECT 1 FROM [tb_security].[Users] WHERE [WindowsSid] = @Sid)
+        THROW 51825, N'The mapped Windows user must have signed in to TechBench.', 1;
+
+    IF @TechnicianExternalId IS NOT NULL
+       AND NOT EXISTS
+       (
+           SELECT 1
+           FROM [tb_whd].[Technicians]
+           WHERE [ExternalId] = @TechnicianExternalId
+             AND [IsActive] = 1
+       )
+        THROW 51826, N'Unknown or inactive WHD technician.', 1;
+
+    DECLARE @PreviousTechnicianExternalId nvarchar(120) =
+    (
+        SELECT [TechnicianExternalId]
+        FROM [tb_whd].[UserTechnicianMappings]
+        WHERE [WindowsSid] = @Sid
+    );
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF @TechnicianExternalId IS NULL
+        BEGIN
+            DELETE FROM [tb_whd].[UserTechnicianMappings]
+            WHERE [WindowsSid] = @Sid;
+        END
+        ELSE
+        BEGIN
+            MERGE [tb_whd].[UserTechnicianMappings] AS target
+            USING
+            (
+                SELECT @Sid AS [WindowsSid], @TechnicianExternalId AS [TechnicianExternalId]
+            ) AS source
+                ON target.[WindowsSid] = source.[WindowsSid]
+            WHEN MATCHED THEN
+                UPDATE SET
+                    [TechnicianExternalId] = source.[TechnicianExternalId],
+                    [UpdatedByWindowsSid] = @Actor,
+                    [UpdatedAtUtc] = SYSUTCDATETIME()
+            WHEN NOT MATCHED THEN
+                INSERT ([WindowsSid], [TechnicianExternalId], [UpdatedByWindowsSid])
+                VALUES (source.[WindowsSid], source.[TechnicianExternalId], @Actor);
+        END;
+
+        DECLARE @AuditJson nvarchar(max) =
+        (
+            SELECT
+                @WindowsLoginName AS [windowsLoginName],
+                @PreviousTechnicianExternalId AS [previousTechnicianExternalId],
+                @TechnicianExternalId AS [technicianExternalId]
+            FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+        );
+        DECLARE @AuditAction nvarchar(120) = CASE
+            WHEN @TechnicianExternalId IS NULL THEN N'WhdUserMappingRemoved'
+            ELSE N'WhdUserMappingSaved'
+        END;
+        DECLARE @AuditEntityId nvarchar(120) = LEFT(@WindowsLoginName, 120);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action = @AuditAction,
+            @EntityType = N'WhdUserMapping',
+            @EntityId = @AuditEntityId,
+            @RequestId = NULL,
+            @DataJson = @AuditJson;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        COALESCE(mapping.[Id], 0) AS [Id],
+        CONVERT(varchar(170), user_row.[WindowsSid], 1) AS [UserSid],
+        user_row.[LoginName],
+        user_row.[DisplayName],
+        mapping.[TechnicianExternalId],
+        technician.[DisplayName] AS [TechnicianDisplayName]
+    FROM [tb_security].[Users] AS user_row
+    LEFT JOIN [tb_whd].[UserTechnicianMappings] AS mapping
+        ON mapping.[WindowsSid] = user_row.[WindowsSid]
+    LEFT JOIN [tb_whd].[Technicians] AS technician
+        ON technician.[ExternalId] = mapping.[TechnicianExternalId]
+    WHERE user_row.[WindowsSid] = @Sid;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminGetWhdTechnicians', N'P') IS NOT NULL DROP PROCEDURE [tb_app].[AdminGetWhdTechnicians];
+GO
+CREATE PROCEDURE [tb_app].[AdminGetWhdTechnicians]
+AS
+BEGIN
+ SET NOCOUNT ON; IF IS_ROLEMEMBER(N'tb_role_admin')<>1 THROW 51827,N'Only a TechBench Admin may view WHD technicians.',1; SELECT [ExternalId],[DisplayName],[Username],[Email],[IsActive],[WhdLastUpdatedUtc],[LastSyncedAtUtc] FROM [tb_whd].[Technicians] ORDER BY [DisplayName],[ExternalId]; END;
+GO
+
+/* WHD is access-scoped for ordinary users; non-WHD tickets retain V0002 behavior. */
+IF OBJECT_ID(N'tb_app.SearchTickets', N'P') IS NOT NULL DROP PROCEDURE [tb_app].[SearchTickets];
+GO
+CREATE PROCEDURE [tb_app].[SearchTickets] @ClientId int=NULL,@Search nvarchar(240)=NULL,@IncludeClosed bit=0,@Limit int=500
+AS
+BEGIN
+ SET NOCOUNT ON; DECLARE @Sid varbinary(85),@Login nvarchar(256),@Name nvarchar(160),@Tech bit,@Manager bit,@Admin bit,@Sync bit; EXEC [tb_security].[EnsureCurrentUser] @UserSid=@Sid OUTPUT,@LoginName=@Login OUTPUT,@DisplayName=@Name OUTPUT,@IsTechnician=@Tech OUTPUT,@IsManager=@Manager OUTPUT,@IsAdmin=@Admin OUTPUT,@IsSyncOperator=@Sync OUTPUT; SET @Limit=CASE WHEN @Limit IS NULL OR @Limit<1 THEN 1 WHEN @Limit>2000 THEN 2000 ELSE @Limit END; SET @Search=NULLIF(LTRIM(RTRIM(@Search)),N''); DECLARE @Pattern nvarchar(500)=CASE WHEN @Search IS NULL THEN NULL ELSE N'%'+REPLACE(REPLACE(REPLACE(REPLACE(@Search,N'~',N'~~'),N'%',N'~%'),N'_',N'~_'),N'[',N'~[')+N'%' END; SELECT TOP(@Limit) t.[Id],t.[TicketNumber],t.[ClientId],t.[Subject],t.[Status],t.[Source],t.[ExternalId],t.[WhdStatusTypeId],t.[IsClosed],t.[LastSyncedAtUtc] [LastSyncedAt],t.[WhdLastUpdatedUtc],t.[IsWhdDeleted],t.[AssignedTechExternalId],t.[AssignedTechName],t.[AssignedGroupExternalId],t.[AssignedGroupName],t.[RowVersion] FROM [tb_data].[Tickets] t WHERE (@ClientId IS NULL OR t.[ClientId]=@ClientId) AND (@IncludeClosed=1 OR t.[IsClosed]=0) AND (@Pattern IS NULL OR t.[TicketNumber] LIKE @Pattern ESCAPE N'~' OR t.[Subject] LIKE @Pattern ESCAPE N'~' OR t.[Status] LIKE @Pattern ESCAPE N'~' OR t.[ExternalId] LIKE @Pattern ESCAPE N'~') AND (t.[Source]<>N'WHD' OR @Admin=1 OR EXISTS(SELECT 1 FROM [tb_whd].[UserTechnicianMappings] m WHERE m.[WindowsSid]=@Sid AND (m.[TechnicianExternalId]=t.[AssignedTechExternalId] OR EXISTS(SELECT 1 FROM [tb_whd].[TechnicianGroupMemberships] gm WHERE gm.[TechnicianExternalId]=m.[TechnicianExternalId] AND gm.[GroupExternalId]=t.[AssignedGroupExternalId])))) ORDER BY t.[IsClosed],t.[TicketNumber],t.[Id]; END;
+GO
+
+IF OBJECT_ID(N'tb_app.GetTicket', N'P') IS NOT NULL DROP PROCEDURE [tb_app].[GetTicket];
+GO
+CREATE PROCEDURE [tb_app].[GetTicket] @Id int
+AS
+BEGIN
+ SET NOCOUNT ON; DECLARE @Sid varbinary(85),@Login nvarchar(256),@Name nvarchar(160),@Tech bit,@Manager bit,@Admin bit,@Sync bit; EXEC [tb_security].[EnsureCurrentUser] @UserSid=@Sid OUTPUT,@LoginName=@Login OUTPUT,@DisplayName=@Name OUTPUT,@IsTechnician=@Tech OUTPUT,@IsManager=@Manager OUTPUT,@IsAdmin=@Admin OUTPUT,@IsSyncOperator=@Sync OUTPUT; SELECT t.[Id],t.[TicketNumber],t.[ClientId],t.[Subject],t.[Status],t.[Source],t.[ExternalId],t.[WhdStatusTypeId],t.[IsClosed],t.[LastSyncedAtUtc] [LastSyncedAt],t.[WhdLastUpdatedUtc],t.[IsWhdDeleted],t.[AssignedTechExternalId],t.[AssignedTechName],t.[AssignedGroupExternalId],t.[AssignedGroupName],t.[RowVersion] FROM [tb_data].[Tickets] t WHERE t.[Id]=@Id AND (t.[Source]<>N'WHD' OR @Admin=1 OR EXISTS(SELECT 1 FROM [tb_whd].[UserTechnicianMappings] m WHERE m.[WindowsSid]=@Sid AND (m.[TechnicianExternalId]=t.[AssignedTechExternalId] OR EXISTS(SELECT 1 FROM [tb_whd].[TechnicianGroupMemberships] gm WHERE gm.[TechnicianExternalId]=m.[TechnicianExternalId] AND gm.[GroupExternalId]=t.[AssignedGroupExternalId])))); END;
+GO
+
+/* Enforce the same WHD assignment boundary at the table, not only in ticket
+   search procedures. This also protects SaveTicket, SaveWorkEntry, work-entry
+   joins, and any future procedure that touches tb_data.Tickets. */
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.security_policies AS policy
+    INNER JOIN sys.schemas AS schema_row
+        ON schema_row.[schema_id] = policy.[schema_id]
+    WHERE schema_row.[name] = N'tb_security'
+      AND policy.[name] = N'WhdTicketAccessPolicy'
+)
+BEGIN
+    EXEC sys.sp_executesql
+        N'ALTER SECURITY POLICY [tb_security].[WhdTicketAccessPolicy] WITH (STATE = OFF);';
+    EXEC sys.sp_executesql
+        N'DROP SECURITY POLICY [tb_security].[WhdTicketAccessPolicy];';
+END;
+GO
+
+IF OBJECT_ID(N'tb_security.FilterWhdTicketAccess', N'IF') IS NOT NULL
+    DROP FUNCTION [tb_security].[FilterWhdTicketAccess];
+GO
+
+CREATE FUNCTION [tb_security].[FilterWhdTicketAccess]
+(
+    @Source nvarchar(40),
+    @AssignedTechExternalId nvarchar(120),
+    @AssignedGroupExternalId nvarchar(120)
+)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN
+(
+    SELECT CONVERT(bit, 1) AS [AccessAllowed]
+    WHERE @Source <> N'WHD'
+       OR USER_NAME() = N'dbo'
+       OR IS_ROLEMEMBER(N'db_owner') = 1
+       OR IS_ROLEMEMBER(N'tb_role_admin') = 1
+       OR IS_ROLEMEMBER(N'tb_role_sync_service') = 1
+       OR EXISTS
+       (
+           SELECT 1
+           FROM [tb_whd].[UserTechnicianMappings] AS mapping
+           WHERE mapping.[WindowsSid] = SUSER_SID(ORIGINAL_LOGIN())
+             AND
+             (
+                 mapping.[TechnicianExternalId] = @AssignedTechExternalId
+                 OR EXISTS
+                 (
+                     SELECT 1
+                     FROM [tb_whd].[TechnicianGroupMemberships] AS membership
+                     WHERE membership.[TechnicianExternalId] = mapping.[TechnicianExternalId]
+                       AND membership.[GroupExternalId] = @AssignedGroupExternalId
+                 )
+             )
+       )
+);
+GO
+
+CREATE SECURITY POLICY [tb_security].[WhdTicketAccessPolicy]
+    ADD FILTER PREDICATE [tb_security].[FilterWhdTicketAccess]
+        ([Source], [AssignedTechExternalId], [AssignedGroupExternalId])
+        ON [tb_data].[Tickets],
+    ADD BLOCK PREDICATE [tb_security].[FilterWhdTicketAccess]
+        ([Source], [AssignedTechExternalId], [AssignedGroupExternalId])
+        ON [tb_data].[Tickets] AFTER INSERT,
+    ADD BLOCK PREDICATE [tb_security].[FilterWhdTicketAccess]
+        ([Source], [AssignedTechExternalId], [AssignedGroupExternalId])
+        ON [tb_data].[Tickets] AFTER UPDATE
+    WITH (STATE = ON, SCHEMABINDING = ON);
+GO
+
+-- ============================================================================
+-- END 48-V0006-WhdServerSyncProcedures.sql
 -- ============================================================================
 
 -- ============================================================================
@@ -14858,6 +16809,52 @@ GO
 
 -- ============================================================================
 -- END 53-V0005-TechBenchV1ImportGrants.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 54-V0006-WhdServerSyncGrants.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+/* Desktop Admins may orchestrate WHD work, not apply untrusted snapshots. */
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncApplyClientSnapshot] FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncApplyTicketSnapshot] FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncApplyTicketStatusSnapshot] FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncUpsertTicket] FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncUpsertTicketStatusOption] FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncUpsertClient] FROM [tb_role_admin];
+
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminRequestWhdSync] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetWhdSyncStatus] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetWhdUserMappings] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminSaveWhdUserMapping] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetWhdTechnicians] TO [tb_role_admin];
+
+GRANT EXECUTE ON OBJECT::[tb_app].[SearchTickets] TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetTicket] TO [tb_role_user];
+
+GRANT EXECUTE ON OBJECT::[tb_service].[GetWhdSyncConfiguration] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[ClaimWhdSyncWork] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[RenewWhdSyncLease] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[ApplyWhdClientSnapshot] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[ApplyWhdTicketBatch] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[ApplyWhdTicketStatusSnapshot] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[ApplyWhdTechnicianSnapshot] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[ApplyWhdTechGroupSnapshot] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[CompleteWhdSyncWork] TO [tb_role_sync_service];
+
+PRINT N'TechBench V0006 WHD server-sync grants applied.';
+GO
+
+-- ============================================================================
+-- END 54-V0006-WhdServerSyncGrants.sql
 -- ============================================================================
 
 -- ============================================================================
@@ -18391,6 +20388,522 @@ GO
 
 -- ============================================================================
 -- END 94-V0005-TechBenchV1ImportVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 95-V0006-WhdServerSyncVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @FailureCount int = 0;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.WhdServerSync.0006'
+      AND [SchemaVersion] = 6
+      AND [ReleaseVersion] = N'2.0.0-alpha.6'
+)
+BEGIN
+    PRINT N'FAIL: V0006 migration marker is missing.';
+    SET @FailureCount += 1;
+END;
+
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) <> 6
+BEGIN
+    PRINT N'FAIL: installed schema version is not 6.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @RequiredObjects TABLE
+(
+    [ObjectName] nvarchar(300) NOT NULL PRIMARY KEY,
+    [ObjectType] char(2) NOT NULL
+);
+INSERT INTO @RequiredObjects([ObjectName], [ObjectType]) VALUES
+    (N'tb_whd.Technicians', N'U'),
+    (N'tb_whd.TechnicianGroups', N'U'),
+    (N'tb_whd.TechnicianGroupMemberships', N'U'),
+    (N'tb_whd.UserTechnicianMappings', N'U'),
+    (N'tb_sync.WhdSyncRequests', N'U'),
+    (N'tb_sync.WhdSyncWork', N'U'),
+    (N'tb_sync.WhdSyncLeases', N'U'),
+    (N'tb_sync.WhdSyncCursors', N'U'),
+    (N'tb_sync.WhdSyncHealth', N'U'),
+    (N'tb_service.GetWhdSyncConfiguration', N'P'),
+    (N'tb_service.ClaimWhdSyncWork', N'P'),
+    (N'tb_service.RenewWhdSyncLease', N'P'),
+    (N'tb_service.ApplyWhdClientSnapshot', N'P'),
+    (N'tb_service.ApplyWhdTicketBatch', N'P'),
+    (N'tb_service.ApplyWhdTicketStatusSnapshot', N'P'),
+    (N'tb_service.ApplyWhdTechnicianSnapshot', N'P'),
+    (N'tb_service.ApplyWhdTechGroupSnapshot', N'P'),
+    (N'tb_service.CompleteWhdSyncWork', N'P'),
+    (N'tb_security.FilterWhdTicketAccess', N'IF'),
+    (N'tb_app.AdminRequestWhdSync', N'P'),
+    (N'tb_app.GetWhdSyncStatus', N'P'),
+    (N'tb_app.AdminGetWhdUserMappings', N'P'),
+    (N'tb_app.AdminSaveWhdUserMapping', N'P'),
+    (N'tb_app.AdminGetWhdTechnicians', N'P');
+
+IF EXISTS
+(
+    SELECT 1
+    FROM @RequiredObjects AS required
+    WHERE OBJECT_ID(required.[ObjectName], required.[ObjectType]) IS NULL
+)
+BEGIN
+    PRINT N'FAIL: one or more V0006 objects are missing.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @RequiredColumns TABLE
+(
+    [ObjectName] nvarchar(300) NOT NULL,
+    [ColumnName] sysname NOT NULL,
+    PRIMARY KEY ([ObjectName], [ColumnName])
+);
+INSERT INTO @RequiredColumns([ObjectName], [ColumnName]) VALUES
+    (N'tb_data.Tickets', N'WhdLastUpdatedUtc'),
+    (N'tb_data.Tickets', N'IsWhdDeleted'),
+    (N'tb_data.Tickets', N'AssignedTechExternalId'),
+    (N'tb_data.Tickets', N'AssignedTechName'),
+    (N'tb_data.Tickets', N'AssignedGroupExternalId'),
+    (N'tb_data.Tickets', N'AssignedGroupName'),
+    (N'tb_whd.Technicians', N'Username');
+
+IF EXISTS
+(
+    SELECT 1
+    FROM @RequiredColumns AS required
+    WHERE COL_LENGTH(required.[ObjectName], required.[ColumnName]) IS NULL
+)
+BEGIN
+    PRINT N'FAIL: a required V0006 column is missing.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @RequiredIndexes TABLE
+(
+    [ObjectName] nvarchar(300) NOT NULL,
+    [IndexName] sysname NOT NULL,
+    PRIMARY KEY ([ObjectName], [IndexName])
+);
+INSERT INTO @RequiredIndexes([ObjectName], [IndexName]) VALUES
+    (N'tb_data.Tickets', N'IX_Tickets_WhdAssignedTech'),
+    (N'tb_whd.TechnicianGroupMemberships', N'IX_WhdMemberships_Group'),
+    (N'tb_sync.WhdSyncRequests', N'IX_WhdSyncRequests_StatusRequested'),
+    (N'tb_sync.WhdSyncRequests', N'IX_WhdSyncRequests_RequestedAt'),
+    (N'tb_sync.WhdSyncWork', N'IX_WhdSyncWork_Claim'),
+    (N'tb_sync.WhdSyncWork', N'IX_WhdSyncWork_RequestState'),
+    (N'tb_sync.WhdSyncWork', N'IX_WhdSyncWork_ReferenceHistory');
+
+IF EXISTS
+(
+    SELECT 1
+    FROM @RequiredIndexes AS required
+    WHERE NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.indexes AS index_row
+        WHERE index_row.[object_id] = OBJECT_ID(required.[ObjectName], N'U')
+          AND index_row.[name] = required.[IndexName]
+          AND index_row.[is_disabled] = 0
+    )
+)
+BEGIN
+    PRINT N'FAIL: a required V0006 index is missing or disabled.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @RequiredParameters TABLE
+(
+    [ProcedureName] nvarchar(300) NOT NULL,
+    [ParameterName] sysname NOT NULL,
+    PRIMARY KEY ([ProcedureName], [ParameterName])
+);
+INSERT INTO @RequiredParameters([ProcedureName], [ParameterName]) VALUES
+    (N'tb_service.ClaimWhdSyncWork', N'@WorkerId'),
+    (N'tb_service.ClaimWhdSyncWork', N'@LeaseSeconds'),
+    (N'tb_service.RenewWhdSyncLease', N'@WorkId'),
+    (N'tb_service.RenewWhdSyncLease', N'@LeaseId'),
+    (N'tb_service.RenewWhdSyncLease', N'@WorkerId'),
+    (N'tb_service.RenewWhdSyncLease', N'@LeaseSeconds'),
+    (N'tb_service.ApplyWhdClientSnapshot', N'@WorkId'),
+    (N'tb_service.ApplyWhdClientSnapshot', N'@LeaseId'),
+    (N'tb_service.ApplyWhdClientSnapshot', N'@WorkerId'),
+    (N'tb_service.ApplyWhdClientSnapshot', N'@Json'),
+    (N'tb_service.ApplyWhdClientSnapshot', N'@SyncedAtUtc'),
+    (N'tb_service.ApplyWhdTicketBatch', N'@WorkId'),
+    (N'tb_service.ApplyWhdTicketBatch', N'@LeaseId'),
+    (N'tb_service.ApplyWhdTicketBatch', N'@WorkerId'),
+    (N'tb_service.ApplyWhdTicketBatch', N'@Json'),
+    (N'tb_service.ApplyWhdTicketBatch', N'@SyncedAtUtc'),
+    (N'tb_service.ApplyWhdTicketStatusSnapshot', N'@Json'),
+    (N'tb_service.ApplyWhdTechnicianSnapshot', N'@Json'),
+    (N'tb_service.ApplyWhdTechGroupSnapshot', N'@Json'),
+    (N'tb_service.CompleteWhdSyncWork', N'@WorkId'),
+    (N'tb_service.CompleteWhdSyncWork', N'@LeaseId'),
+    (N'tb_service.CompleteWhdSyncWork', N'@WorkerId'),
+    (N'tb_service.CompleteWhdSyncWork', N'@Succeeded'),
+    (N'tb_app.AdminRequestWhdSync', N'@RequestType'),
+    (N'tb_app.AdminRequestWhdSync', N'@RequestId'),
+    (N'tb_app.AdminSaveWhdUserMapping', N'@WindowsLoginName'),
+    (N'tb_app.AdminSaveWhdUserMapping', N'@TechnicianExternalId');
+
+IF EXISTS
+(
+    SELECT 1
+    FROM @RequiredParameters AS required
+    WHERE NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.parameters AS parameter_row
+        WHERE parameter_row.[object_id] = OBJECT_ID(required.[ProcedureName], N'P')
+          AND parameter_row.[name] = required.[ParameterName]
+    )
+)
+BEGIN
+    PRINT N'FAIL: V0006 procedure parameter contract is incomplete.';
+    SET @FailureCount += 1;
+END;
+
+IF N'$(UserGroup)' = N'$(AdminGroup)'
+   OR N'$(UserGroup)' = N'$(SyncServicePrincipal)'
+   OR N'$(AdminGroup)' = N'$(SyncServicePrincipal)'
+BEGIN
+    PRINT N'FAIL: application and service principals are not pairwise distinct.';
+    SET @FailureCount += 1;
+END;
+
+IF DATABASE_PRINCIPAL_ID(N'tb_role_sync_service') IS NULL
+BEGIN
+    PRINT N'FAIL: tb_role_sync_service is missing.';
+    SET @FailureCount += 1;
+END;
+
+IF
+(
+    SELECT COUNT(*)
+    FROM sys.database_role_members AS drm
+    INNER JOIN sys.database_principals AS role_principal
+        ON role_principal.[principal_id] = drm.[role_principal_id]
+    WHERE role_principal.[name] = N'tb_role_sync_service'
+) <> 1
+OR NOT EXISTS
+(
+    SELECT 1
+    FROM sys.database_role_members AS drm
+    INNER JOIN sys.database_principals AS role_principal
+        ON role_principal.[principal_id] = drm.[role_principal_id]
+    INNER JOIN sys.database_principals AS member_principal
+        ON member_principal.[principal_id] = drm.[member_principal_id]
+    WHERE role_principal.[name] = N'tb_role_sync_service'
+      AND member_principal.[name] = N'$(SyncServicePrincipal)'
+)
+BEGIN
+    PRINT N'FAIL: tb_role_sync_service must contain only the configured service principal.';
+    SET @FailureCount += 1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.database_role_members AS drm
+    INNER JOIN sys.database_principals AS role_principal
+        ON role_principal.[principal_id] = drm.[role_principal_id]
+    INNER JOIN sys.database_principals AS member_principal
+        ON member_principal.[principal_id] = drm.[member_principal_id]
+    WHERE member_principal.[name] = N'$(SyncServicePrincipal)'
+      AND role_principal.[name] <> N'tb_role_sync_service'
+)
+BEGIN
+    PRINT N'FAIL: the service principal is a member of a database role other than tb_role_sync_service.';
+    SET @FailureCount += 1;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_security].[Users]
+    WHERE [WindowsSid] = SUSER_SID(N'$(SyncServicePrincipal)')
+      AND [LoginName] = N'$(SyncServicePrincipal)'
+      AND [IsTechnician] = 0
+      AND [IsManager] = 0
+      AND [IsAdmin] = 0
+      AND [IsSyncOperator] = 0
+)
+BEGIN
+    PRINT N'FAIL: the service audit actor is missing or has application privileges.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @ServiceProcedures TABLE ([ObjectName] nvarchar(300) NOT NULL PRIMARY KEY);
+INSERT INTO @ServiceProcedures([ObjectName]) VALUES
+    (N'tb_service.GetWhdSyncConfiguration'),
+    (N'tb_service.ClaimWhdSyncWork'),
+    (N'tb_service.RenewWhdSyncLease'),
+    (N'tb_service.ApplyWhdClientSnapshot'),
+    (N'tb_service.ApplyWhdTicketBatch'),
+    (N'tb_service.ApplyWhdTicketStatusSnapshot'),
+    (N'tb_service.ApplyWhdTechnicianSnapshot'),
+    (N'tb_service.ApplyWhdTechGroupSnapshot'),
+    (N'tb_service.CompleteWhdSyncWork');
+
+IF EXISTS
+(
+    SELECT 1
+    FROM @ServiceProcedures AS required
+    WHERE NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.database_permissions AS permission_row
+        WHERE permission_row.[grantee_principal_id] = DATABASE_PRINCIPAL_ID(N'tb_role_sync_service')
+          AND permission_row.[class] = 1
+          AND permission_row.[major_id] = OBJECT_ID(required.[ObjectName], N'P')
+          AND permission_row.[permission_name] = N'EXECUTE'
+          AND permission_row.[state] IN (N'G', N'W')
+    )
+)
+BEGIN
+    PRINT N'FAIL: a required service EXECUTE grant is missing.';
+    SET @FailureCount += 1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions AS permission_row
+    WHERE permission_row.[grantee_principal_id] = DATABASE_PRINCIPAL_ID(N'tb_role_sync_service')
+      AND permission_row.[state] IN (N'G', N'W')
+      AND
+      (
+          permission_row.[permission_name] IN
+              (N'SELECT', N'INSERT', N'UPDATE', N'DELETE', N'ALTER', N'CONTROL', N'TAKE OWNERSHIP')
+          OR
+          (
+              permission_row.[permission_name] = N'EXECUTE'
+              AND
+              (
+                  permission_row.[class] <> 1
+                  OR NOT EXISTS
+                  (
+                      SELECT 1
+                      FROM @ServiceProcedures AS allowed
+                      WHERE OBJECT_ID(allowed.[ObjectName], N'P') = permission_row.[major_id]
+                  )
+              )
+          )
+      )
+)
+BEGIN
+    PRINT N'FAIL: tb_role_sync_service has direct data/control or unexpected execution grants.';
+    SET @FailureCount += 1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.database_role_members AS drm
+    INNER JOIN sys.database_principals AS containing_role
+        ON containing_role.[principal_id] = drm.[role_principal_id]
+    INNER JOIN sys.database_principals AS member_role
+        ON member_role.[principal_id] = drm.[member_principal_id]
+    WHERE member_role.[name] = N'tb_role_sync_service'
+)
+OR EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions AS permission_row
+    WHERE permission_row.[grantee_principal_id] = DATABASE_PRINCIPAL_ID(N'$(SyncServicePrincipal)')
+      AND permission_row.[state] IN (N'G', N'W')
+      AND permission_row.[permission_name] IN
+          (N'SELECT', N'INSERT', N'UPDATE', N'DELETE', N'ALTER', N'CONTROL', N'TAKE OWNERSHIP', N'EXECUTE')
+)
+BEGIN
+    PRINT N'FAIL: the service role is nested or the service principal has direct grants.';
+    SET @FailureCount += 1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions AS permission_row
+    WHERE permission_row.[grantee_principal_id] = DATABASE_PRINCIPAL_ID(N'tb_role_admin')
+      AND permission_row.[permission_name] = N'EXECUTE'
+      AND permission_row.[state] IN (N'G', N'W')
+      AND permission_row.[major_id] IN
+      (
+          OBJECT_ID(N'tb_app.SyncApplyClientSnapshot'),
+          OBJECT_ID(N'tb_app.SyncApplyTicketSnapshot'),
+          OBJECT_ID(N'tb_app.SyncApplyTicketStatusSnapshot'),
+          OBJECT_ID(N'tb_app.SyncUpsertClient'),
+          OBJECT_ID(N'tb_app.SyncUpsertTicket'),
+          OBJECT_ID(N'tb_app.SyncUpsertTicketStatusOption')
+      )
+)
+BEGIN
+    PRINT N'FAIL: Admin retains old direct WHD snapshot mutation grants.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @ClaimDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ClaimWhdSyncWork'));
+DECLARE @CompleteDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_service.CompleteWhdSyncWork'));
+DECLARE @MappingDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminSaveWhdUserMapping'));
+DECLARE @SearchDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SearchTickets'));
+DECLARE @GetTicketDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetTicket'));
+
+SELECT @ClaimDefinition = REPLACE(REPLACE(REPLACE(@ClaimDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @CompleteDefinition = REPLACE(REPLACE(REPLACE(@CompleteDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @MappingDefinition = REPLACE(REPLACE(REPLACE(@MappingDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @SearchDefinition = REPLACE(REPLACE(REPLACE(@SearchDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @GetTicketDefinition = REPLACE(REPLACE(REPLACE(@GetTicketDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+
+IF CHARINDEX(N'sp_getapplock', @ClaimDefinition) = 0
+   OR CHARINDEX(N'READCOMMITTEDLOCK', @ClaimDefinition) = 0
+   OR CHARINDEX(N'DATEADD(day,-1,@Now)', @ClaimDefinition) = 0
+BEGIN
+    PRINT N'FAIL: ClaimWhdSyncWork lacks queue serialization, RCSI-safe claiming, or daily reference cadence.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'@WorkType<>N''Tickets''', @CompleteDefinition) = 0
+   OR CHARINDEX(N'TRY_CONVERT(datetimeoffset(3),@CursorValue)', @CompleteDefinition) = 0
+   OR CHARINDEX(N'@HasPendingWork=0', @CompleteDefinition) = 0
+BEGIN
+    PRINT N'FAIL: CompleteWhdSyncWork lacks ticket-only valid cursor or request-level health protection.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'@TechnicianExternalIdnvarchar(120)=NULL', @MappingDefinition) = 0
+   OR CHARINDEX(N'WriteAuditEvent', @MappingDefinition) = 0
+   OR CHARINDEX(N'DELETEFROM[tb_whd].[UserTechnicianMappings]', @MappingDefinition) = 0
+BEGIN
+    PRINT N'FAIL: WHD user mapping does not support audited removal.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'[Source]<>N''WHD''OR@Admin=1', @SearchDefinition) = 0
+   OR CHARINDEX(N'[Source]<>N''WHD''OR@Admin=1', @GetTicketDefinition) = 0
+BEGIN
+    PRINT N'FAIL: WHD ticket access filtering is missing.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @TicketAccessDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_security.FilterWhdTicketAccess', N'IF'));
+SELECT @TicketAccessDefinition = REPLACE(REPLACE(REPLACE(
+    @TicketAccessDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+
+IF @TicketAccessDefinition IS NULL
+   OR CHARINDEX(N'USER_NAME()=N''dbo''', @TicketAccessDefinition) = 0
+   OR CHARINDEX(N'IS_ROLEMEMBER(N''tb_role_admin'')=1', @TicketAccessDefinition) = 0
+   OR CHARINDEX(N'IS_ROLEMEMBER(N''tb_role_sync_service'')=1', @TicketAccessDefinition) = 0
+   OR CHARINDEX(N'SUSER_SID(ORIGINAL_LOGIN())', @TicketAccessDefinition) = 0
+   OR CHARINDEX(N'UserTechnicianMappings', @TicketAccessDefinition) = 0
+   OR CHARINDEX(N'TechnicianGroupMemberships', @TicketAccessDefinition) = 0
+BEGIN
+    PRINT N'FAIL: the WHD ticket row-access predicate is incomplete.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @TicketPolicyId int =
+(
+    SELECT policy.[object_id]
+    FROM sys.security_policies AS policy
+    INNER JOIN sys.schemas AS schema_row
+        ON schema_row.[schema_id] = policy.[schema_id]
+    WHERE schema_row.[name] = N'tb_security'
+      AND policy.[name] = N'WhdTicketAccessPolicy'
+      AND policy.[is_enabled] = 1
+      AND policy.[is_schema_bound] = 1
+);
+
+IF @TicketPolicyId IS NULL
+   OR
+   (
+       SELECT COUNT(*)
+       FROM sys.security_predicates AS predicate_row
+       WHERE predicate_row.[object_id] = @TicketPolicyId
+         AND predicate_row.[target_object_id] = OBJECT_ID(N'tb_data.Tickets', N'U')
+         AND predicate_row.[predicate_definition] LIKE N'%FilterWhdTicketAccess%'
+         AND
+         (
+             (predicate_row.[predicate_type_desc] = N'FILTER' AND predicate_row.[operation_desc] IS NULL)
+             OR (predicate_row.[predicate_type_desc] = N'BLOCK'
+                 AND predicate_row.[operation_desc] IN (N'AFTER INSERT', N'AFTER UPDATE'))
+         )
+   ) <> 3
+BEGIN
+    PRINT N'FAIL: the enabled WHD ticket security policy does not contain the required filter and block predicates.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @ArrayApplyProcedures TABLE ([ObjectName] nvarchar(300) NOT NULL PRIMARY KEY);
+INSERT INTO @ArrayApplyProcedures([ObjectName]) VALUES
+    (N'tb_service.ApplyWhdClientSnapshot'),
+    (N'tb_service.ApplyWhdTicketBatch'),
+    (N'tb_service.ApplyWhdTicketStatusSnapshot'),
+    (N'tb_service.ApplyWhdTechnicianSnapshot'),
+    (N'tb_service.ApplyWhdTechGroupSnapshot');
+
+IF EXISTS
+(
+    SELECT 1
+    FROM @ArrayApplyProcedures AS procedure_row
+    CROSS APPLY
+    (
+        SELECT REPLACE(REPLACE(REPLACE(
+            OBJECT_DEFINITION(OBJECT_ID(procedure_row.[ObjectName], N'P')),
+            N' ', N''), CHAR(13), N''), CHAR(10), N'') AS [Definition]
+    ) AS normalized
+    WHERE CHARINDEX(N'COALESCE(ISJSON(@Json),0)<>1', normalized.[Definition]) = 0
+       OR CHARINDEX(N'LEFT(LTRIM(@Json),1)<>N''[''', normalized.[Definition]) = 0
+       OR CHARINDEX(N'BEGINTRANSACTION', normalized.[Definition]) = 0
+       OR CHARINDEX(N'HOLDLOCK', normalized.[Definition]) = 0
+)
+BEGIN
+    PRINT N'FAIL: an apply procedure lacks array validation or atomic lease-bound application.';
+    SET @FailureCount += 1;
+END;
+
+IF NOT EXISTS (SELECT 1 FROM [tb_sync].[WhdSyncHealth] WHERE [HealthId] = 1)
+BEGIN
+    PRINT N'FAIL: the WHD synchronization health singleton is missing.';
+    SET @FailureCount += 1;
+END;
+
+IF @FailureCount > 0
+BEGIN
+    RAISERROR(
+        N'TechBench V0006 WHD server-sync verification failed with %d issue(s).',
+        16,
+        1,
+        @FailureCount);
+    RETURN;
+END;
+
+PRINT N'TechBench V0006 WHD server-sync verification passed.';
+SELECT
+    DB_NAME() AS [DatabaseName],
+    MAX([SchemaVersion]) AS [SchemaVersion],
+    MAX(CASE
+        WHEN [MigrationId] = N'SqlServer2016.WhdServerSync.0006'
+            THEN [AppliedAtUtc]
+        END) AS [WhdServerSyncAppliedAtUtc]
+FROM [tb_deploy].[SchemaMigrations];
+GO
+
+-- ============================================================================
+-- END 95-V0006-WhdServerSyncVerify.sql
 -- ============================================================================
 
 PRINT N'TechBench deployment completed successfully on CSRI-SQL.';

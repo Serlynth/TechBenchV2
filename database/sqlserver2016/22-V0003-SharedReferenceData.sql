@@ -165,12 +165,13 @@ BEGIN TRY
       AND column_definition.[name] = N'ScopeType';
 
     IF @CommonLinkDefault IS NOT NULL
-        EXEC
-        (
+    BEGIN
+        DECLARE @DropCommonLinkDefaultSql nvarchar(max) =
             N'ALTER TABLE [tb_data].[CommonLinks] DROP CONSTRAINT '
             + QUOTENAME(@CommonLinkDefault)
-            + N';'
-        );
+            + N';';
+        EXEC (@DropCommonLinkDefaultSql);
+    END;
 
     ALTER TABLE [tb_data].[CommonLinks]
         ADD CONSTRAINT [DF_CommonLinks_ScopeType]
@@ -218,12 +219,13 @@ BEGIN TRY
       AND column_definition.[name] = N'ScopeType';
 
     IF @ClientAliasDefault IS NOT NULL
-        EXEC
-        (
+    BEGIN
+        DECLARE @DropClientAliasDefaultSql nvarchar(max) =
             N'ALTER TABLE [tb_data].[ClientAliases] DROP CONSTRAINT '
             + QUOTENAME(@ClientAliasDefault)
-            + N';'
-        );
+            + N';';
+        EXEC (@DropClientAliasDefaultSql);
+    END;
 
     ALTER TABLE [tb_data].[ClientAliases]
         ADD CONSTRAINT [DF_ClientAliases_ScopeType]

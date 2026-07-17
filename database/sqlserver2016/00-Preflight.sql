@@ -9,6 +9,7 @@ SET XACT_ABORT ON;
 DECLARE @DatabaseName sysname = N'$(DatabaseName)';
 DECLARE @UserGroup sysname = N'$(UserGroup)';
 DECLARE @AdminGroup sysname = N'$(AdminGroup)';
+DECLARE @SyncServicePrincipal sysname = N'$(SyncServicePrincipal)';
 DECLARE @ProductMajorVersion int =
     TRY_CONVERT(int, SERVERPROPERTY(N'ProductMajorVersion'));
 DECLARE @ProductVersion nvarchar(128) =
@@ -48,25 +49,29 @@ END;
 
 IF NULLIF(LTRIM(RTRIM(@UserGroup)), N'') IS NULL
    OR NULLIF(LTRIM(RTRIM(@AdminGroup)), N'') IS NULL
+   OR NULLIF(LTRIM(RTRIM(@SyncServicePrincipal)), N'') IS NULL
 BEGIN
-    RAISERROR(N'UserGroup and AdminGroup must both be supplied.', 16, 1);
+    RAISERROR(N'UserGroup, AdminGroup, and SyncServicePrincipal must all be supplied.', 16, 1);
     RETURN;
 END;
 
 IF @UserGroup NOT LIKE N'%\%'
    OR @AdminGroup NOT LIKE N'%\%'
+   OR @SyncServicePrincipal NOT LIKE N'%\%'
 BEGIN
     RAISERROR(
-        N'Application groups must use DOMAIN\name format.',
+        N'Application groups and SyncServicePrincipal must use DOMAIN\name format.',
         16,
         1);
     RETURN;
 END;
 
 IF @UserGroup = @AdminGroup
+   OR @UserGroup = @SyncServicePrincipal
+   OR @AdminGroup = @SyncServicePrincipal
 BEGIN
     RAISERROR(
-        N'UserGroup and AdminGroup must be distinct so ordinary users do not receive administration rights.',
+        N'UserGroup, AdminGroup, and SyncServicePrincipal must be three distinct principals.',
         16,
         1);
     RETURN;
@@ -80,6 +85,10 @@ BEGIN TRY
     EXEC master.dbo.xp_logininfo
         @acctname = @AdminGroup,
         @option = N'members';
+
+    /* Resolves the dedicated service account without enumerating members. */
+    EXEC master.dbo.xp_logininfo
+        @acctname = @SyncServicePrincipal;
 END TRY
 BEGIN CATCH
     DECLARE @GroupError nvarchar(2048) = ERROR_MESSAGE();
@@ -114,5 +123,6 @@ PRINT N'  Database: ' + @DatabaseName;
 PRINT N'  Database owner: ' + SUSER_SNAME(0x01) + N' (built-in SID 0x01)';
 PRINT N'  User group: ' + @UserGroup;
 PRINT N'  Admin group: ' + @AdminGroup;
+PRINT N'  WHD sync service principal: ' + @SyncServicePrincipal;
 PRINT N'AD group resolution passed.';
 GO

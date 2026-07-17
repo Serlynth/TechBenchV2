@@ -461,10 +461,11 @@ BEGIN
         @ExternalName = @ExternalName,
         @LastSyncedAtUtc = NULL;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @ClientId);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'ExternalClientMappingSaved',
         @EntityType = N'Client',
-        @EntityId = CONVERT(nvarchar(120), @ClientId),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO
@@ -1073,6 +1074,7 @@ BEGIN
     DECLARE @Name nvarchar(160);
     DECLARE @IsClosed bit;
     DECLARE @SavedCount int = 0;
+    DECLARE @StatusExternalId nvarchar(240);
 
     DECLARE StatusCursor CURSOR LOCAL FAST_FORWARD FOR
     SELECT [Id], [Name], [IsClosed] FROM @Snapshot;
@@ -1095,11 +1097,12 @@ BEGIN
             [LastSyncedAt] datetime2(3),
             [RowVersion] binary(8)
         );
+        SET @StatusExternalId = CONVERT(nvarchar(240), @Id);
         INSERT INTO @StatusResult
         EXEC [tb_app].[SyncUpsertTicketStatusOption]
             @Name = @Name,
             @Source = N'WHD',
-            @ExternalId = CONVERT(nvarchar(240), @Id),
+            @ExternalId = @StatusExternalId,
             @WhdStatusTypeId = @Id,
             @IsClosed = @IsClosed,
             @SyncedAtUtc = @SyncedAtUtc;
@@ -1661,10 +1664,11 @@ BEGIN
         CASE WHEN @ExpectedCount < 0 THEN 0 ELSE @ExpectedCount END
     );
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @BatchId);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'ImportBatchStarted',
         @EntityType = N'ImportBatch',
-        @EntityId = CONVERT(nvarchar(120), @BatchId),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 
     SELECT @BatchId AS [BatchId], @BatchId AS [ImportBatchId];

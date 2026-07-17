@@ -8,12 +8,45 @@ public sealed partial class MainWindowViewModel
 {
     private OrganizationTag? _selectedOrganizationTag;
     private string _newOrganizationTag = string.Empty;
+    private WhdUserMapping? _selectedWhdUserMapping;
+    private WhdTechnician? _selectedWhdTechnician;
 
     public ObservableCollection<OrganizationTag> ManagedOrganizationTags { get; } = new();
+    public ObservableCollection<WhdUserMapping> WhdUserMappings { get; } = new();
+    public ObservableCollection<WhdTechnician> WhdTechnicians { get; } = new();
 
     public RelayCommand AddOrganizationTagCommand { get; private set; } = null!;
 
     public RelayCommand DeleteOrganizationTagCommand { get; private set; } = null!;
+    public RelayCommand SaveWhdUserMappingCommand { get; private set; } = null!;
+    public RelayCommand RefreshWhdAdministrationCommand { get; private set; } = null!;
+
+    public WhdUserMapping? SelectedWhdUserMapping
+    {
+        get => _selectedWhdUserMapping;
+        set
+        {
+            if (SetProperty(ref _selectedWhdUserMapping, value))
+            {
+                var technicianExternalId = value?.WhdTechnicianExternalId ?? string.Empty;
+                SelectedWhdTechnician = WhdTechnicians.FirstOrDefault(
+                    technician => technician.ExternalId == technicianExternalId);
+                SaveWhdUserMappingCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public WhdTechnician? SelectedWhdTechnician
+    {
+        get => _selectedWhdTechnician;
+        set
+        {
+            if (SetProperty(ref _selectedWhdTechnician, value))
+            {
+                SaveWhdUserMappingCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
 
     public OrganizationTag? SelectedOrganizationTag
     {
@@ -48,8 +81,17 @@ public sealed partial class MainWindowViewModel
             _ => DeleteOrganizationTag(),
             _ => _currentUser.CanManageSharedConfiguration
                 && SelectedOrganizationTag is { Id: > 0 });
+        SaveWhdUserMappingCommand = new RelayCommand(
+            _ => SaveWhdUserMapping(),
+            _ => _currentUser.CanManageSharedConfiguration
+                && SelectedWhdUserMapping is not null
+                && SelectedWhdTechnician is not null);
+        RefreshWhdAdministrationCommand = new RelayCommand(
+            _ => RefreshWhdAdministration(),
+            _ => _currentUser.CanManageSharedConfiguration);
 
         RefreshOrganizationTags();
+        RefreshWhdUserMappings();
     }
 
     private bool CanAddOrganizationTag()
@@ -142,5 +184,96 @@ public sealed partial class MainWindowViewModel
             ? ManagedOrganizationTags.FirstOrDefault(tag => tag.Id == selectedId.Value)
             : null;
         AddOrganizationTagCommand.RaiseCanExecuteChanged();
+    }
+
+    private void RefreshWhdUserMappings()
+    {
+        if (!_currentUser.CanManageSharedConfiguration)
+        {
+            WhdUserMappings.Clear();
+            WhdTechnicians.Clear();
+            SelectedWhdUserMapping = null;
+            return;
+        }
+
+        var selectedLoginName = SelectedWhdUserMapping?.LoginName;
+        var selectedTechnicianExternalId = SelectedWhdTechnician?.ExternalId;
+        var technicians = _repository.GetWhdTechnicians()
+            .Where(technician => technician.IsActive)
+            .ToArray();
+        var mappings = _repository.GetWhdUserMappings();
+
+        WhdTechnicians.Clear();
+        WhdTechnicians.Add(new WhdTechnician
+        {
+            ExternalId = string.Empty,
+            Name = "No WHD technician (remove mapping)",
+            IsActive = true
+        });
+        foreach (var technician in technicians)
+        {
+            WhdTechnicians.Add(technician);
+        }
+
+        WhdUserMappings.Clear();
+        foreach (var mapping in mappings)
+        {
+            WhdUserMappings.Add(mapping);
+        }
+
+        SelectedWhdUserMapping = selectedLoginName is null
+            ? WhdUserMappings.FirstOrDefault()
+            : WhdUserMappings.FirstOrDefault(mapping => mapping.LoginName == selectedLoginName);
+        if (selectedTechnicianExternalId is not null)
+        {
+            SelectedWhdTechnician = WhdTechnicians.FirstOrDefault(
+                technician => technician.ExternalId == selectedTechnicianExternalId)
+                ?? SelectedWhdTechnician;
+        }
+    }
+
+    private void RefreshWhdAdministration()
+    {
+        if (!_currentUser.CanManageSharedConfiguration)
+        {
+            return;
+        }
+
+        RefreshWhdSyncServiceStatus();
+        try
+        {
+            RefreshWhdUserMappings();
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException or TimeoutException)
+        {
+            StatusMessage = $"WHD administration refresh will retry later: {ex.Message}";
+        }
+    }
+
+    private void SaveWhdUserMapping()
+    {
+        if (!_currentUser.CanManageSharedConfiguration
+            || SelectedWhdUserMapping is not { } mapping
+            || SelectedWhdTechnician is not { } technician)
+        {
+            return;
+        }
+
+        try
+        {
+            mapping.WhdTechnicianExternalId = string.IsNullOrWhiteSpace(technician.ExternalId)
+                ? null
+                : technician.ExternalId;
+            _repository.SaveWhdUserMapping(mapping);
+            RefreshWhdUserMappings();
+            StatusMessage = mapping.WhdTechnicianExternalId is null
+                ? $"Removed the WHD technician mapping for {mapping.UserLabel}."
+                : $"Saved the WHD technician mapping for {mapping.UserLabel}.";
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        {
+            StatusMessage = $"Could not save the WHD technician mapping: {ex.Message}";
+            _dialogService.Error("WHD user mapping", StatusMessage);
+        }
     }
 }

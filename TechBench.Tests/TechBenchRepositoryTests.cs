@@ -1113,22 +1113,22 @@ public sealed class TechBenchRepositoryTests
     }
 
     [Fact]
-    public void OrganizationTicketSnapshotUpdatesExplicitClosedStateWithoutClosingAnAbsentTicket()
+    public void RepositoryTicketSnapshotUpdatesExplicitClosedStateWithoutClosingAnAbsentTicket()
     {
         WithRepository((repository, _) =>
         {
             var returned = BuildWhdTicket("201");
             var laterAbsent = BuildWhdTicket("202");
-            MainWindowViewModel.SaveOrganizationWhdTicketSnapshot(
-                repository,
+            repository.SynchronizeWhdTickets(
                 [returned, laterAbsent],
-                DateTime.Now);
+                DateTime.Now,
+                reconcileMissing: false);
 
             var returnedClosed = BuildWhdTicket("201", isClosed: true);
-            MainWindowViewModel.SaveOrganizationWhdTicketSnapshot(
-                repository,
+            repository.SynchronizeWhdTickets(
                 [returnedClosed],
-                DateTime.Now);
+                DateTime.Now,
+                reconcileMissing: false);
 
             var tickets = repository.GetTickets(includeClosed: true);
             Assert.True(tickets.Single(ticket => ticket.TicketNumber == "201").IsClosed);

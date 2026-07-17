@@ -4,7 +4,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <StartupObject>TechBench.App</StartupObject>
-    <Version>2.0.0-alpha.5</Version>
+    <Version>2.0.0-alpha.6</Version>
     <AssemblyVersion>2.0.0.0</AssemblyVersion>
     <FileVersion>2.0.0.0</FileVersion>
     <AssemblyName>TechBenchV2</AssemblyName>
@@ -39,7 +39,18 @@
 
   <ItemGroup>
     <Compile Remove="TechBench.Tests\**\*.cs" />
+    <Compile Remove="TechBench.SyncService\**\*.cs" />
+    <Compile Remove="TechBench.SyncService.Tests\**\*.cs" />
+    <Compile Remove="TechBench.WHD\**\*.cs" />
+    <Compile Remove="Models\WhdConnectionSettings.cs" />
+    <Compile Remove="Models\WhdSyncResult.cs" />
+    <Compile Remove="Providers\PostingResult.cs" />
+    <Compile Remove="Providers\WhdRestClient.cs" />
     <Compile Remove="artifacts\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="TechBench.WHD\TechBench.WHD.csproj" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TechBenchTestBuild)' != 'true'">

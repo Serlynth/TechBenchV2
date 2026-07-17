@@ -9,7 +9,7 @@ public sealed class SqlServerTechBenchRepositoryContractTests
     [Fact]
     public void ClientTargetsV0005Schema()
     {
-        Assert.Equal(5, SqlServerConnectionFactory.SupportedSchemaVersion);
+        Assert.Equal(6, SqlServerConnectionFactory.SupportedSchemaVersion);
     }
 
     [Fact]
@@ -133,5 +133,15 @@ public sealed class SqlServerTechBenchRepositoryContractTests
         Assert.Equal(
             "[tb_app].[AdminDeleteOrganizationTag]",
             SqlServerTechBenchRepository.Procedures.DeleteOrganizationTag);
+    }
+
+    [Fact]
+    public void WhdServerSyncUsesOnlyTheAdminQueueStatusAndMappingProcedures()
+    {
+        Assert.Equal("[tb_app].[AdminRequestWhdSync]", SqlServerTechBenchRepository.Procedures.RequestWhdSync);
+        Assert.Equal("[tb_app].[GetWhdSyncStatus]", SqlServerTechBenchRepository.Procedures.GetWhdSyncStatus);
+        Assert.Equal("[tb_app].[AdminGetWhdUserMappings]", SqlServerTechBenchRepository.Procedures.GetWhdUserMappings);
+        Assert.Equal("[tb_app].[AdminSaveWhdUserMapping]", SqlServerTechBenchRepository.Procedures.SaveWhdUserMapping);
+        Assert.Equal("[tb_app].[AdminGetWhdTechnicians]", SqlServerTechBenchRepository.Procedures.GetWhdTechnicians);
     }
 }

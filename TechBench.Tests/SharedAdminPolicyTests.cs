@@ -55,6 +55,31 @@ public sealed class SharedAdminPolicyTests
             nameof(ITechBenchRepository.DeleteOrganizationTag)));
     }
 
+    [Fact]
+    public void WorkstationDoesNotExposeOrganizationWhdSyncCommandsOrTimer()
+    {
+        Assert.Null(typeof(MainWindowViewModel).GetProperty("SyncWhdTicketsCommand"));
+        Assert.Null(typeof(MainWindowViewModel).GetProperty("SyncWhdClientsCommand"));
+        Assert.Null(typeof(MainWindowViewModel).GetProperty("SyncWhdStatusesCommand"));
+        Assert.NotNull(typeof(MainWindowViewModel).GetProperty("RequestWhdServerSyncCommand"));
+        Assert.NotNull(typeof(MainWindowViewModel).GetProperty("RefreshWhdAdministrationCommand"));
+        Assert.DoesNotContain(
+            typeof(MainWindowViewModel).GetFields(
+                System.Reflection.BindingFlags.Instance
+                | System.Reflection.BindingFlags.NonPublic),
+            field => field.Name.Contains("WhdAutoSyncTimer", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RepositoryExposesServerWhdQueueStatusAndMappingContracts()
+    {
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(nameof(ITechBenchRepository.GetWhdSyncStatus)));
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(nameof(ITechBenchRepository.RequestWhdSync)));
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(nameof(ITechBenchRepository.GetWhdUserMappings)));
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(nameof(ITechBenchRepository.SaveWhdUserMapping)));
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(nameof(ITechBenchRepository.GetWhdTechnicians)));
+    }
+
     private static CurrentUserContext CreateUser(
         bool isAdmin,
         bool isSyncOperator) =>

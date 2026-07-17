@@ -146,7 +146,7 @@ try {
     }
 
     Invoke-Checked $dotnet @('tool', 'restore')
-    Invoke-Checked $dotnet @('test', $testProjectPath, '-c', 'Release')
+    Invoke-Checked $dotnet @('test', $testProjectPath, '-c', 'Release', '-m:1')
 
     Reset-WorkspaceDirectory $publishDirectory
     Reset-WorkspaceDirectory $releaseDirectory
@@ -238,6 +238,10 @@ try {
 
     $distSetupPath = Join-Path $distDirectory 'TechBenchV2Setup.exe'
     Copy-Item -LiteralPath $setup.FullName -Destination $distSetupPath -Force
+    $distChecksumPath = "$distSetupPath.sha256"
+    $setupHash = (Get-FileHash -LiteralPath $distSetupPath -Algorithm SHA256).Hash
+    "$setupHash  $([IO.Path]::GetFileName($distSetupPath))" |
+        Set-Content -LiteralPath $distChecksumPath -Encoding ASCII
 
     if ($Publish) {
         $token = (gh auth token).Trim()
@@ -264,6 +268,7 @@ try {
     }
 
     Write-Host "Installer: $distSetupPath"
+    Write-Host "Installer SHA-256: $distChecksumPath"
 }
 finally {
     Pop-Location

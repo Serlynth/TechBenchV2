@@ -55,6 +55,26 @@ public sealed class TechBenchRepository : ITechBenchRepository
 
     public bool FullTextSearchAvailable => _fullTextSearchAvailable;
 
+    // Legacy SQLite workspaces do not host the server-side WHD synchronization service.
+    public WhdSyncServiceStatus GetWhdSyncStatus() => new()
+    {
+        Health = "Unavailable",
+        Message = "WHD organization sync requires the SQL Server workspace."
+    };
+
+    public WhdSyncRequestResult RequestWhdSync() => new()
+    {
+        Accepted = false,
+        Message = "WHD organization sync requires the SQL Server workspace."
+    };
+
+    public IReadOnlyList<WhdUserMapping> GetWhdUserMappings() => Array.Empty<WhdUserMapping>();
+
+    public IReadOnlyList<WhdTechnician> GetWhdTechnicians() => Array.Empty<WhdTechnician>();
+
+    public WhdUserMapping SaveWhdUserMapping(WhdUserMapping mapping) =>
+        throw new InvalidOperationException("WHD user mappings require the SQL Server workspace.");
+
     public IReadOnlyList<Client> GetClients(bool includeInactive = false, string? searchTerm = null)
     {
         using var connection = _connectionFactory.CreateConnection();

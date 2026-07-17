@@ -647,10 +647,11 @@ BEGIN
             );
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @AttemptId);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'PostingAttemptCompleted',
             @EntityType = N'PostingAttempt',
-            @EntityId = CONVERT(nvarchar(120), @AttemptId);
+            @EntityId = @AuditEntityId;
 
         COMMIT TRANSACTION;
     END TRY
@@ -937,10 +938,11 @@ BEGIN
             @Message, @ExternalReference, @EffectiveRequestId, @NowUtc
         );
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @WorkEntryId);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'WorkEntryManuallyMarkedPosted',
             @EntityType = N'WorkEntry',
-            @EntityId = CONVERT(nvarchar(120), @WorkEntryId),
+            @EntityId = @AuditEntityId,
             @RequestId = @EffectiveRequestId;
 
         COMMIT TRANSACTION;

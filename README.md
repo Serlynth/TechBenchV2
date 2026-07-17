@@ -4,7 +4,7 @@ TechBench V2 is the multi-user successor to TechBench 1.x. It keeps the existing
 
 The original TechBench workspace is not modified. V1 and V2 have separate product identities, executables, mutex names, settings, credential namespaces, packages, and update feeds.
 
-Current milestone: `2.0.0-alpha.5` - the server-backed client, strict administrator-owned shared-data boundary, and owner-scoped V1 migration contract are implemented. It still requires deployment to the real SQL Server 2016 instance and domain-user smoke testing before it should be treated as production-ready.
+Current milestone: `2.0.0-alpha.6` - the server-backed client, owner-scoped V1 migration, and dedicated WHD synchronization service are implemented. It still requires deployment to the real SQL Server 2016 instance plus domain-user and live-WHD smoke testing before it should be treated as production-ready.
 
 ## What V2 stores where
 
@@ -17,7 +17,8 @@ SQL Server is the source of truth for:
 - organization-wide Common Links, shared templates, and the canonical tag catalog
 - administrator-managed organization settings, including WHD/Sage defaults and the WHD automatic-sync schedule, plus user-scoped identity settings
 - posting logs, durable posting attempts, and posting leases
-- WHD/Sage synchronization leases and runs
+- server-side WHD synchronization requests, leases, cursors, health, technicians, groups, and AD-user mappings
+- Sage synchronization leases and runs
 - import batches, legacy-ID mappings, and audit history
 
 The workstation keeps only non-business state:
@@ -26,25 +27,29 @@ The workstation keeps only non-business state:
 - a generated device ID
 - theme, window position/size/state, the shared-data view refresh interval, and similar device preferences
 - device-specific Sage, update, and browser options
-- WHD and Sage secrets protected by Windows Credential Manager
+- each user's personal WHD/Sage posting secrets protected by Windows Credential Manager
 - installed application/update artifacts and temporary files explicitly created by the user
 
 The production client packages the SQLite runtime only for the read-only **Import V1 Database...** action. It never creates or uses a local SQLite business-data store, and the legacy local repository/providers remain excluded from production builds. V2 has no offline business-data store or client-side database-backup feature, so SQL Server must be reachable to use the application. SQL Server backup and restore are DBA responsibilities.
 
 ## Deployment model
 
-There is no TechBench web server, API process, container, or background server service to install.
+There is no TechBench web server, public API, or container. V2 does include one small internal Windows service for organization-wide WHD reads.
 
 ~~~text
-TechBench V2 WPF client (x86)
-    -> Microsoft.Data.SqlClient
+WHD
+    -> HTTPS with one dedicated WHD service identity
+    -> TechBench WHD Sync Service (Windows service, x64)
+    -> approved tb_service stored procedures over encrypted TDS
+    -> TechBench database, schema version 6
+
+TechBench V2 WPF clients (x86)
+    -> approved tb_app stored procedures over encrypted TDS
     -> Windows Integrated Authentication
-    -> encrypted SQL Server connection
-    -> CSRI-SQL.CSRI.local
-    -> TechBench database, schema version 5
+    -> the same TechBench database
 ~~~
 
-WHD API work, Sage ODBC access, and Sage desktop automation still run from the technician workstation. SQL Server stores the durable state, the organization-wide WHD automatic-sync schedule, and the coordination records used across workstations. Shared WHD ticket synchronization uses an Admin's configured WHD identity to request organization tickets; that WHD identity must have access to the full ticket set. Explicit closed or deleted records update the shared snapshot, but an omitted ticket is never closed by inference.
+The service performs the initial full organization ticket import, short overlapping ticket deltas at the Admin-configured interval, and daily reference refreshes for WHD clients, statuses, technicians, and group memberships. SQL Server stores the durable queue, cursor, and health state. Admin clients configure the non-secret WHD endpoint/service username, request Sync Now, and map AD users to WHD technicians; the WHD credential exists only as machine-protected data on the service host. Explicit closed or deleted records update the shared snapshot, but omission never closes a ticket. Sage ODBC and Sage desktop automation remain workstation-side because they depend on the installed Sage client.
 
 The V2 client uses short-lived pooled connections and stored procedures. It does not hold a database transaction open while calling WHD or Sage.
 
@@ -58,10 +63,11 @@ The prepared CSRI mapping is:
 |---|---|
 | `CSRI\TechBench_Users` | `tb_role_user` |
 | `CSRI\TechBench_Admins` | `tb_role_user`, `tb_role_manager`, `tb_role_admin`, `tb_role_sync_operator` |
+| `CSRI\TechBench_SyncService` | `tb_role_sync_service` only |
 
-The database derives the caller's durable owner identity from the Windows SID. Stored procedures enforce owner and role checks. Hiding or disabling a WPF control is only a user-interface convenience and is not the authorization boundary.
+The database derives the caller's durable owner identity from the Windows SID. Stored procedures enforce owner and role checks, and a SQL Server row-level-security policy applies the WHD technician/group assignment boundary to every ticket-table access path. Hiding or disabling a WPF control is only a user-interface convenience and is not the authorization boundary.
 
-Only members of `CSRI\TechBench_Admins` may change organization-wide configuration or run WHD/Sage shared synchronization. Administrator-owned actions include client matching and shared aliases, Common Links, note templates, shared WHD/Sage defaults, the WHD automatic-sync schedule, and manual customer/client snapshot synchronization. Ordinary users can read the resulting shared catalogs and manage their own work, notes, drafts, credentials, and user-specific identifiers.
+Only members of `CSRI\TechBench_Admins` may change organization-wide configuration, queue WHD work, or run Sage shared synchronization. Only the dedicated service principal can claim WHD work and apply WHD snapshots. Ordinary users can read their mapped direct/group WHD tickets and the resulting shared catalogs while managing their own work, notes, drafts, credentials, and user-specific identifiers.
 
 Settings does not provide a second manual Sage customer-mapping editor. Administrators manage customer matching in the dedicated Client Matching workspace so there is one shared, audited workflow.
 
@@ -78,8 +84,9 @@ Deployment:
 
 - domain-joined or trusted-domain Windows workstations
 - SQL Server 2016 at compatibility level 130
-- the `TechBench` database at schema version 5
-- the CSRI Active Directory groups mapped by the database deployment
+- the `TechBench` database at schema version 6
+- three distinct CSRI Active Directory principals mapped by the database deployment
+- a domain-joined x64 Windows service host with outbound HTTPS access to WHD and encrypted SQL access
 - TCP connectivity from workstations to SQL Server
 - TLS 1.2 and a SQL Server certificate trusted by the workstations
 - a DBA-owned, tested SQL Server backup, integrity-check, and restore process
@@ -90,7 +97,7 @@ SQL Server 2016 extended support ended July 14, 2026. Before production use, con
 
 ## Database deployment
 
-The DBA-owned deployment package is in [database/sqlserver2016](database/sqlserver2016). The standalone script creates or upgrades the database and installs the complete schema-version-5 stored-procedure contract:
+The DBA-owned deployment package is in [database/sqlserver2016](database/sqlserver2016). The standalone script creates or upgrades the database and installs the complete schema-version-6 stored-procedure contract:
 
 `database/sqlserver2016/Deploy-CSRI-Standalone.sql`
 
@@ -110,21 +117,22 @@ Application Name=TechBench V2;
 
 No SQL username, `sa` password, or other credential belongs in the client connection configuration.
 
-The desktop application checks the schema version at startup and refuses an incompatible database. Version `2.0.0-alpha.5` requires database schema version `5`, including the administrator-only shared-configuration boundary and owner-scoped V1 import contract.
+The desktop application checks the schema version at startup and refuses an incompatible database. Version `2.0.0-alpha.6` requires database schema version `6`, including the leased service-only WHD ingestion contract.
 
-### Coordinated alpha.5 upgrade
+### Coordinated alpha.6 upgrade
 
 The database and client must be upgraded as one planned cutover:
 
 1. Back up the `TechBench` database.
-2. Run the complete schema-version-5 standalone deployment and confirm its verification output.
-3. Install the alpha.5 client.
-4. Test with at least one ordinary domain user and one TechBench administrator.
-5. Verify that ordinary users cannot change shared configuration or run shared synchronization, while administrators can manage matching, aliases, templates, Common Links, organization settings, and WHD/Sage synchronization. Use a WHD Admin identity for the shared ticket sync and confirm it can read tickets assigned across technician groups.
-6. Verify shared clients, tickets, canonical customer matching, aliases, tags, templates, Common Links, work entries, Personal Note privacy, drafts, posting coordination, automatic refresh, and optimistic-concurrency conflicts.
-7. Have the DBA configure and test ongoing SQL Server backups before production data entry.
+2. Create the distinct sync-service AD principal/group, run the complete schema-version-6 standalone deployment, and confirm verification output.
+3. Build/install the x64 WHD Sync Service, provision its machine-protected WHD credential, and confirm it runs under only the service principal.
+4. Install the alpha.6 client and configure the WHD endpoint, service username, schedule, and AD-to-WHD technician mappings as a TechBench Admin.
+5. Test with at least one ordinary domain user and one TechBench administrator. Confirm the initial full sync, a later delta, service health, and direct/group ticket visibility.
+6. Verify that ordinary users cannot change shared configuration or queue/apply synchronization, while administrators can manage matching, aliases, templates, Common Links, organization settings, and queue WHD/Sage work.
+7. Verify shared clients, tickets, canonical customer matching, aliases, tags, templates, Common Links, work entries, Personal Note privacy, drafts, posting coordination, automatic refresh, and optimistic-concurrency conflicts.
+8. Have the DBA configure and test ongoing SQL Server backups before production data entry.
 
-Do not deploy only one side. The alpha.5 client rejects schema versions 1 through 4; earlier alpha clients do not have the schema-version-5 owner-scoped import contract.
+Do not deploy only one side. The alpha.6 client requires schema version 6; earlier alpha clients do not understand the service-owned WHD contract.
 
 Users newly added to an AD group should sign out of Windows and sign back in before testing so their Windows security token includes the new membership.
 
@@ -132,8 +140,9 @@ Users newly added to an AD group should sign out of Windows and sign back in bef
 
 ~~~powershell
 dotnet restore TechBenchV2.sln
-dotnet build TechBench.csproj -c Release
+dotnet build TechBenchV2.sln -c Release
 dotnet test TechBench.Tests\TechBench.Tests.csproj -c Release
+.\scripts\Publish-TechBenchServer.ps1 -Version 2.0.0-alpha.6
 ~~~
 
 The release script rejects any packaged `.db`, `.sqlite`, or `.sqlite3` data file and verifies that the read-only V1 importer dependency is present. The packaged SQLite runtime is an import reader only; the production project still excludes the V1 local repository, database-location service, and local client/ticket providers.
@@ -151,6 +160,6 @@ Unit and contract tests do not replace the required integration run against the 
 - Verify counts, relationships, ownership, posting state, and sample note content before cutover.
 - Do not run V1 and V2 as dual writable production systems.
 
-V1 remains untouched and available for rollback or historical reference. Its data is not automatically migrated merely by installing alpha.5; each user uses **Settings > Import V1 Database...**, reviews the preview, and explicitly starts their own import. Work history, Personal Notes, entry tags, follow-up state, posting state/history, and note links move to that user's SQL-owned records. Equivalent legacy link rows may share one canonical SQL relationship. A resumed batch counts mappings first accepted by that same batch as imported, while a later batch skips unchanged mappings. Dependent links and posting logs attach only through work-entry mappings accepted by the current batch, and a successful completion must account for every read item with zero errors. A user may abandon their own stale active V1 batch before restarting. Shared configuration, credentials, editor drafts, active posting attempts, and local caches are intentionally excluded.
+V1 remains untouched and available for rollback or historical reference. Its data is not automatically migrated merely by installing alpha.6; each user uses **Settings > Import V1 Database...**, reviews the preview, and explicitly starts their own import. Work history, Personal Notes, entry tags, follow-up state, posting state/history, and note links move to that user's SQL-owned records. Equivalent legacy link rows may share one canonical SQL relationship. A resumed batch counts mappings first accepted by that same batch as imported, while a later batch skips unchanged mappings. Dependent links and posting logs attach only through work-entry mappings accepted by the current batch, and a successful completion must account for every read item with zero errors. A user may abandon their own stale active V1 batch before restarting. Shared configuration, credentials, editor drafts, active posting attempts, and local caches are intentionally excluded.
 
-For implementation details, see [docs/V2-ARCHITECTURE.md](docs/V2-ARCHITECTURE.md). For the DBA runbook, see [database/sqlserver2016/README-Deploy.md](database/sqlserver2016/README-Deploy.md).
+For implementation details, see [docs/V2-ARCHITECTURE.md](docs/V2-ARCHITECTURE.md). For deployment, see the [database runbook](database/sqlserver2016/README-Deploy.md) and [WHD service runbook](docs/WHD-SYNC-SERVICE.md).

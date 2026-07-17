@@ -94,10 +94,11 @@ BEGIN
         CASE WHEN @ExpectedCount < 0 THEN 0 ELSE @ExpectedCount END
     );
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @BatchId);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'ImportBatchStarted',
         @EntityType = N'ImportBatch',
-        @EntityId = CONVERT(nvarchar(120), @BatchId),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 
     SELECT @BatchId AS [BatchId], @BatchId AS [ImportBatchId];
@@ -248,10 +249,11 @@ BEGIN
         @ExpectedCount
     );
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @BatchId);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'TechBenchV1ImportStarted',
         @EntityType = N'ImportBatch',
-        @EntityId = CONVERT(nvarchar(120), @BatchId),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 
     SELECT
@@ -894,10 +896,11 @@ BEGIN
             @BatchId
         );
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @NewEntityId);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'TechBenchV1WorkEntryImported',
             @EntityType = N'WorkEntry',
-            @EntityId = CONVERT(nvarchar(120), @NewEntityId),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -1674,10 +1677,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51642, N'The TechBench V1 import batch is missing, final, or owned by another user.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @BatchId);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'TechBenchV1ImportCompleted',
         @EntityType = N'ImportBatch',
-        @EntityId = CONVERT(nvarchar(120), @BatchId),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 
     SELECT
@@ -1751,10 +1755,11 @@ BEGIN
         IF @@ROWCOUNT = 0
             THROW 51646, N'The TechBench V1 import batch is missing, final, or owned by another user.', 1;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @BatchId);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'TechBenchV1ImportAbandoned',
             @EntityType = N'ImportBatch',
-            @EntityId = CONVERT(nvarchar(120), @BatchId),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;

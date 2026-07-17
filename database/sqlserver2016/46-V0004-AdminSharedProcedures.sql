@@ -453,10 +453,11 @@ BEGIN
             SET @Action = N'CommonLinkUpdated';
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = @Action,
             @EntityType = N'CommonLink',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -525,10 +526,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51307, N'The Common Link was not found or changed after it was loaded.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'CommonLinkDeleted',
         @EntityType = N'CommonLink',
-        @EntityId = CONVERT(nvarchar(120), @Id),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO
@@ -674,10 +676,11 @@ BEGIN
 
         IF @Action IS NOT NULL
         BEGIN
+            DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
             EXEC [tb_security].[WriteAuditEvent]
                 @Action = @Action,
                 @EntityType = N'ClientAlias',
-                @EntityId = CONVERT(nvarchar(120), @Id),
+                @EntityId = @AuditEntityId,
                 @RequestId = @RequestId;
         END;
 
@@ -974,10 +977,11 @@ BEGIN
             SET @Action = N'OrganizationTagUpdated';
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = @Action,
             @EntityType = N'OrganizationTag',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;
@@ -1032,10 +1036,11 @@ BEGIN
     IF @@ROWCOUNT = 0
         THROW 51525, N'The organization tag was not found or changed after it was loaded.', 1;
 
+    DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
     EXEC [tb_security].[WriteAuditEvent]
         @Action = N'OrganizationTagDeleted',
         @EntityType = N'OrganizationTag',
-        @EntityId = CONVERT(nvarchar(120), @Id),
+        @EntityId = @AuditEntityId,
         @RequestId = @RequestId;
 END;
 GO
@@ -1354,10 +1359,11 @@ BEGIN
             END;
         END;
 
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = @Action,
             @EntityType = N'WorkEntry',
-            @EntityId = CONVERT(nvarchar(120), @Id),
+            @EntityId = @AuditEntityId,
             @RequestId = @RequestId;
 
         COMMIT TRANSACTION;

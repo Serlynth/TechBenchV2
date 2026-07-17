@@ -14,6 +14,7 @@ namespace TechBench.Providers;
 public sealed class WhdRestClient
 {
     private const int PageSize = 100;
+    private const int MaximumPageCount = 10_000;
     private readonly HttpClient _httpClient;
     private readonly ConcurrentDictionary<string, WhdAuthParameters> _authenticationCache = new(StringComparer.Ordinal);
 
@@ -24,7 +25,7 @@ public sealed class WhdRestClient
     {
     }
 
-    internal WhdRestClient(HttpClient httpClient)
+    public WhdRestClient(HttpClient httpClient)
     {
         _httpClient = httpClient;
     }
@@ -56,9 +57,21 @@ public sealed class WhdRestClient
         }
     }
 
-    public async Task<WhdSyncResult> GetOrganizationTicketsAsync(
+    public Task<WhdSyncResult> GetOrganizationTicketsAsync(
         WhdConnectionSettings settings,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        GetOrganizationTicketsCoreAsync(settings, null, cancellationToken);
+
+    public Task<WhdSyncResult> GetOrganizationTicketsChangedSinceAsync(
+        WhdConnectionSettings settings,
+        DateTimeOffset changedSinceUtc,
+        CancellationToken cancellationToken = default) =>
+        GetOrganizationTicketsCoreAsync(settings, changedSinceUtc, cancellationToken);
+
+    private async Task<WhdSyncResult> GetOrganizationTicketsCoreAsync(
+        WhdConnectionSettings settings,
+        DateTimeOffset? changedSinceUtc,
+        CancellationToken cancellationToken)
     {
         var validationError = Validate(settings);
         if (validationError is not null)
@@ -74,11 +87,12 @@ public sealed class WhdRestClient
             var pageSignatures = new HashSet<string>(StringComparer.Ordinal);
             var isComplete = false;
 
-            for (var page = 1; page <= 100; page++)
+            for (var page = 1; page <= MaximumPageCount; page++)
             {
                 var batch = await GetOrganizationTicketsPageAsync(
                     settings,
                     auth,
+                    changedSinceUtc,
                     page,
                     PageSize,
                     cancellationToken);
@@ -119,8 +133,9 @@ public sealed class WhdRestClient
             var openTicketCount = tickets.Count(static ticket => !ticket.IsClosed);
             var closedTicketCount = tickets.Count - openTicketCount;
             return WhdSyncResult.Succeeded(
-                $"Synced {openTicketCount} non-closed organization Web Help Desk ticket(s) using the current Admin's WHD credentials"
+                $"Read {openTicketCount} non-closed organization Web Help Desk ticket(s)"
                 + (closedTicketCount > 0 ? $" and updated {closedTicketCount} closed ticket(s)." : ".")
+                + (changedSinceUtc.HasValue ? $" Changes since {changedSinceUtc.Value:O} were requested." : string.Empty)
                 + (isComplete ? string.Empty : " Paging stopped because WHD repeated a page; returned tickets were still updated."),
                 tickets,
                 isComplete);
@@ -224,7 +239,7 @@ public sealed class WhdRestClient
             var pageSignatures = new HashSet<string>(StringComparer.Ordinal);
             var isComplete = false;
 
-            for (var page = 1; page <= 200; page++)
+            for (var page = 1; page <= MaximumPageCount; page++)
             {
                 var batch = await GetLocationsPageAsync(settings, auth, page, PageSize, cancellationToken);
                 if (batch.Count == 0)
@@ -270,6 +285,106 @@ public sealed class WhdRestClient
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
         {
             return WhdClientSyncResult.Failed($"Web Help Desk client sync failed: {ex.Message}");
+        }
+    }
+
+    public async Task<WhdTechnicianSyncResult> GetTechniciansAsync(
+        WhdConnectionSettings settings,
+        CancellationToken cancellationToken = default)
+    {
+        var validationError = Validate(settings);
+        if (validationError is not null)
+        {
+            return WhdTechnicianSyncResult.Failed(validationError);
+        }
+
+        try
+        {
+            var auth = await ResolveAuthenticationAsync(settings, cancellationToken);
+            var technicians = new List<WhdSyncedTechnician>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var signatures = new HashSet<string>(StringComparer.Ordinal);
+            var isComplete = false;
+
+            for (var page = 1; page <= MaximumPageCount; page++)
+            {
+                var batch = await GetTechniciansPageAsync(settings, auth, page, PageSize, cancellationToken);
+                if (batch.Count == 0)
+                {
+                    isComplete = true;
+                    break;
+                }
+
+                var signature = BuildPageSignature(batch.Select(static item => item.ExternalId));
+                if (!signatures.Add(signature))
+                {
+                    break;
+                }
+
+                foreach (var technician in batch)
+                {
+                    if (seen.Add(technician.ExternalId))
+                    {
+                        technicians.Add(technician);
+                    }
+                }
+
+                if (batch.Count < PageSize)
+                {
+                    isComplete = true;
+                    break;
+                }
+            }
+
+            return WhdTechnicianSyncResult.Succeeded(
+                $"Read {technicians.Count} Web Help Desk technician(s).",
+                technicians,
+                isComplete);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
+        {
+            return WhdTechnicianSyncResult.Failed($"Web Help Desk technician sync failed: {ex.Message}");
+        }
+    }
+
+    public async Task<WhdTechnicianGroupSyncResult> GetTechnicianGroupsAsync(
+        WhdConnectionSettings settings,
+        CancellationToken cancellationToken = default)
+    {
+        var validationError = Validate(settings);
+        if (validationError is not null)
+        {
+            return WhdTechnicianGroupSyncResult.Failed(validationError);
+        }
+
+        try
+        {
+            var auth = await ResolveAuthenticationAsync(settings, cancellationToken);
+            try
+            {
+                return await GetTechnicianGroupsFromEndpointAsync(
+                    settings,
+                    auth,
+                    cancellationToken);
+            }
+            catch (HttpRequestException ex) when (ex.StatusCode is
+                HttpStatusCode.NotFound or
+                HttpStatusCode.BadRequest or
+                HttpStatusCode.MethodNotAllowed)
+            {
+                // TechGroups is available on some WHD releases but is not a
+                // documented endpoint on all supported versions. Long Tech
+                // records commonly carry their group membership, so use that
+                // representation when the dedicated resource is unavailable.
+                return await GetTechnicianGroupsFromTechRecordsAsync(
+                    settings,
+                    auth,
+                    cancellationToken);
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
+        {
+            return WhdTechnicianGroupSyncResult.Failed($"Web Help Desk technician-group sync failed: {ex.Message}");
         }
     }
 
@@ -380,7 +495,7 @@ public sealed class WhdRestClient
         {
             var auth = await ResolveAuthenticationAsync(settings, cancellationToken);
             var pageSignatures = new HashSet<string>(StringComparer.Ordinal);
-            for (var page = 1; page <= 100; page++)
+            for (var page = 1; page <= MaximumPageCount; page++)
             {
                 var requestUri = BuildRequestUri(settings.BaseUrl, "TicketNotes", auth, new Dictionary<string, string>
                 {
@@ -657,19 +772,38 @@ public sealed class WhdRestClient
     private Task<IReadOnlyList<WhdSyncedTicket>> GetOrganizationTicketsPageAsync(
         WhdConnectionSettings settings,
         WhdAuthParameters auth,
+        DateTimeOffset? changedSinceUtc,
         int page,
         int limit,
         CancellationToken cancellationToken)
     {
         var requestUri = BuildRequestUri(settings.BaseUrl, "Tickets", auth, new Dictionary<string, string>
         {
-            ["qualifier"] = "((deleted = null) or (deleted = 0) or (deleted = 1))",
+            ["qualifier"] = BuildOrganizationTicketQualifier(changedSinceUtc),
             ["style"] = "long",
+            ["withUTC"] = "true",
             ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
             ["page"] = page.ToString(CultureInfo.InvariantCulture)
         });
 
         return GetTicketsPageAsync(requestUri, cancellationToken);
+    }
+
+    private static string BuildOrganizationTicketQualifier(DateTimeOffset? changedSinceUtc)
+    {
+        const string includeExplicitDeletionState =
+            "((deleted = null) or (deleted = 0) or (deleted = 1))";
+        if (!changedSinceUtc.HasValue)
+        {
+            return includeExplicitDeletionState;
+        }
+
+        // WHD qualifiers use EOQualifier syntax. Always format the server cursor
+        // in invariant UTC and let URI construction escape it as one value.
+        var timestamp = changedSinceUtc.Value.UtcDateTime.ToString(
+            "yyyy-MM-dd'T'HH:mm:ss.fff'Z'",
+            CultureInfo.InvariantCulture);
+        return $"({includeExplicitDeletionState} and (lastUpdated >= '{timestamp}'))";
     }
 
     private async Task<IReadOnlyList<WhdSyncedTicket>> GetTicketsPageAsync(
@@ -718,6 +852,163 @@ public sealed class WhdRestClient
 
         using var document = JsonDocument.Parse(content);
         return ParseLocations(document.RootElement);
+    }
+
+    private async Task<IReadOnlyList<WhdSyncedTechnician>> GetTechniciansPageAsync(
+        WhdConnectionSettings settings,
+        WhdAuthParameters auth,
+        int page,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var requestUri = BuildRequestUri(settings.BaseUrl, "Techs", auth, new Dictionary<string, string>
+        {
+            ["style"] = "long",
+            ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            ["page"] = page.ToString(CultureInfo.InvariantCulture)
+        });
+
+        using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var message = string.IsNullOrWhiteSpace(content) ? response.ReasonPhrase : content.Trim();
+            throw new HttpRequestException(
+                $"HTTP {(int)response.StatusCode} from Web Help Desk technicians: {message}",
+                null,
+                response.StatusCode);
+        }
+
+        using var document = JsonDocument.Parse(content);
+        return ParseTechnicians(document.RootElement);
+    }
+
+    private async Task<IReadOnlyList<WhdSyncedTechnicianGroup>> GetTechnicianGroupsPageAsync(
+        WhdConnectionSettings settings,
+        WhdAuthParameters auth,
+        int page,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var requestUri = BuildRequestUri(settings.BaseUrl, "TechGroups", auth, new Dictionary<string, string>
+        {
+            ["style"] = "long",
+            ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            ["page"] = page.ToString(CultureInfo.InvariantCulture)
+        });
+
+        using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var message = string.IsNullOrWhiteSpace(content) ? response.ReasonPhrase : content.Trim();
+            throw new HttpRequestException(
+                $"HTTP {(int)response.StatusCode} from Web Help Desk technician groups: {message}",
+                null,
+                response.StatusCode);
+        }
+
+        using var document = JsonDocument.Parse(content);
+        return ParseTechnicianGroups(document.RootElement);
+    }
+
+    private async Task<WhdTechnicianGroupSyncResult> GetTechnicianGroupsFromEndpointAsync(
+        WhdConnectionSettings settings,
+        WhdAuthParameters auth,
+        CancellationToken cancellationToken)
+    {
+        var groups = new Dictionary<string, WhdSyncedTechnicianGroup>(StringComparer.OrdinalIgnoreCase);
+        var signatures = new HashSet<string>(StringComparer.Ordinal);
+        var isComplete = false;
+        for (var page = 1; page <= MaximumPageCount; page++)
+        {
+            var batch = await GetTechnicianGroupsPageAsync(
+                settings,
+                auth,
+                page,
+                PageSize,
+                cancellationToken);
+            if (batch.Count == 0)
+            {
+                isComplete = true;
+                break;
+            }
+
+            var signature = BuildPageSignature(batch.Select(static item =>
+                item.ExternalId + ":" + string.Join(",", item.TechnicianExternalIds)));
+            if (!signatures.Add(signature))
+            {
+                break;
+            }
+
+            MergeTechnicianGroups(groups, batch);
+            if (batch.Count < PageSize)
+            {
+                isComplete = true;
+                break;
+            }
+        }
+
+        return WhdTechnicianGroupSyncResult.Succeeded(
+            $"Read {groups.Count} Web Help Desk technician group(s).",
+            groups.Values.OrderBy(static item => item.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+            isComplete);
+    }
+
+    private async Task<WhdTechnicianGroupSyncResult> GetTechnicianGroupsFromTechRecordsAsync(
+        WhdConnectionSettings settings,
+        WhdAuthParameters auth,
+        CancellationToken cancellationToken)
+    {
+        var groups = new Dictionary<string, WhdSyncedTechnicianGroup>(StringComparer.OrdinalIgnoreCase);
+        var pageSignatures = new HashSet<string>(StringComparer.Ordinal);
+        var isComplete = false;
+        for (var page = 1; page <= MaximumPageCount; page++)
+        {
+            var requestUri = BuildRequestUri(settings.BaseUrl, "Techs", auth, new Dictionary<string, string>
+            {
+                ["style"] = "long",
+                ["limit"] = PageSize.ToString(CultureInfo.InvariantCulture),
+                ["page"] = page.ToString(CultureInfo.InvariantCulture)
+            });
+            using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
+            var content = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(
+                    $"HTTP {(int)response.StatusCode} from Web Help Desk technician membership data: "
+                    + (string.IsNullOrWhiteSpace(content) ? response.ReasonPhrase : content.Trim()),
+                    null,
+                    response.StatusCode);
+            }
+
+            using var document = JsonDocument.Parse(content);
+            var records = EnumerateRecords(document.RootElement).ToList();
+            if (records.Count == 0)
+            {
+                isComplete = true;
+                break;
+            }
+
+            var signature = BuildPageSignature(records.Select(static item =>
+                ReadStringAny(item, "id", "techId", "technicianId") ?? string.Empty));
+            if (!pageSignatures.Add(signature))
+            {
+                break;
+            }
+
+            MergeTechnicianGroups(groups, ParseTechnicianGroupsFromTechRecords(records));
+            if (records.Count < PageSize)
+            {
+                isComplete = true;
+                break;
+            }
+        }
+
+        return WhdTechnicianGroupSyncResult.Succeeded(
+            $"Read {groups.Count} Web Help Desk technician group(s) from technician membership data.",
+            groups.Values.OrderBy(static item => item.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+            isComplete);
     }
 
     private async Task<IReadOnlyList<WhdStatusType>> GetStatusTypesListAsync(
@@ -951,6 +1242,183 @@ public sealed class WhdRestClient
         return locations;
     }
 
+    private static IReadOnlyList<WhdSyncedTechnician> ParseTechnicians(JsonElement root)
+    {
+        var technicians = new List<WhdSyncedTechnician>();
+        foreach (var element in EnumerateRecords(root))
+        {
+            if (element.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var id = ReadStringAny(element, "id", "techId", "technicianId");
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                continue;
+            }
+
+            var username = ReadStringAny(element, "username", "userName", "loginName");
+            var email = ReadStringAny(element, "email", "emailAddress");
+            var displayName = ReadStringAny(element, "displayName", "fullName", "name")
+                ?? BuildName(element)
+                ?? username
+                ?? email
+                ?? $"Technician {id}";
+            technicians.Add(new WhdSyncedTechnician
+            {
+                ExternalId = FormatWhdTechnicianId(id),
+                DisplayName = displayName.Trim(),
+                Username = string.IsNullOrWhiteSpace(username) ? null : username.Trim(),
+                Email = string.IsNullOrWhiteSpace(email) ? null : email.Trim(),
+                IsActive = !ReadBooleanAny(element, "deleted", "inactive", "isInactive", "disabled")
+            });
+        }
+
+        return technicians;
+    }
+
+    private static IReadOnlyList<WhdSyncedTechnicianGroup> ParseTechnicianGroups(JsonElement root)
+    {
+        var groups = new List<WhdSyncedTechnicianGroup>();
+        foreach (var element in EnumerateRecords(root))
+        {
+            if (element.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var id = ReadStringAny(element, "id", "techGroupId", "groupId");
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                continue;
+            }
+
+            var name = ReadStringAny(element, "techGroupName", "groupName", "displayName", "name")
+                ?? $"Technician group {id}";
+            groups.Add(new WhdSyncedTechnicianGroup
+            {
+                ExternalId = FormatWhdGroupId(id),
+                Name = name.Trim(),
+                IsActive = !ReadBooleanAny(element, "deleted", "inactive", "isInactive", "disabled"),
+                TechnicianExternalIds = ReadTechnicianMemberIds(element)
+            });
+        }
+
+        return groups;
+    }
+
+    private static IReadOnlyList<WhdSyncedTechnicianGroup> ParseTechnicianGroupsFromTechRecords(
+        IReadOnlyList<JsonElement> technicians)
+    {
+        var groups = new Dictionary<string, (string Name, bool IsActive, HashSet<string> Members)>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var technician in technicians)
+        {
+            var technicianId = ReadStringAny(technician, "id", "techId", "technicianId");
+            if (string.IsNullOrWhiteSpace(technicianId))
+            {
+                continue;
+            }
+
+            var formattedTechnicianId = FormatWhdTechnicianId(technicianId);
+            foreach (var groupElement in EnumerateGroupObjects(technician))
+            {
+                var groupId = ReadStringAny(groupElement, "id", "techGroupId", "groupId");
+                if (string.IsNullOrWhiteSpace(groupId))
+                {
+                    continue;
+                }
+
+                var formattedGroupId = FormatWhdGroupId(groupId);
+                var groupName = ReadStringAny(
+                        groupElement,
+                        "techGroupName",
+                        "groupName",
+                        "displayName",
+                        "name")
+                    ?? $"Technician group {groupId}";
+                if (!groups.TryGetValue(formattedGroupId, out var group))
+                {
+                    group = (
+                        groupName.Trim(),
+                        !ReadBooleanAny(groupElement, "deleted", "inactive", "isInactive", "disabled"),
+                        new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+                }
+
+                group.Members.Add(formattedTechnicianId);
+                groups[formattedGroupId] = group;
+            }
+        }
+
+        return groups.Select(static pair => new WhdSyncedTechnicianGroup
+        {
+            ExternalId = pair.Key,
+            Name = pair.Value.Name,
+            IsActive = pair.Value.IsActive,
+            TechnicianExternalIds = pair.Value.Members.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToList()
+        }).ToList();
+    }
+
+    private static IEnumerable<JsonElement> EnumerateGroupObjects(JsonElement technician)
+    {
+        foreach (var propertyName in new[] { "techGroups", "technicianGroups", "groups" })
+        {
+            if (!technician.TryGetProperty(propertyName, out var groups)
+                || groups.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var group in groups.EnumerateArray())
+            {
+                if (group.ValueKind == JsonValueKind.Object)
+                {
+                    yield return group;
+                }
+            }
+        }
+
+        if (technician.TryGetProperty("techGroupLevels", out var levels)
+            && levels.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var level in levels.EnumerateArray())
+            {
+                var group = TryGetObject(level, "techGroup") ?? TryGetObject(level, "group");
+                if (group.HasValue)
+                {
+                    yield return group.Value;
+                }
+            }
+        }
+    }
+
+    private static void MergeTechnicianGroups(
+        IDictionary<string, WhdSyncedTechnicianGroup> target,
+        IEnumerable<WhdSyncedTechnicianGroup> source)
+    {
+        foreach (var group in source)
+        {
+            if (!target.TryGetValue(group.ExternalId, out var existing))
+            {
+                target[group.ExternalId] = group;
+                continue;
+            }
+
+            target[group.ExternalId] = new WhdSyncedTechnicianGroup
+            {
+                ExternalId = existing.ExternalId,
+                Name = string.IsNullOrWhiteSpace(group.Name) ? existing.Name : group.Name,
+                IsActive = existing.IsActive || group.IsActive,
+                TechnicianExternalIds = existing.TechnicianExternalIds
+                    .Concat(group.TechnicianExternalIds)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+                    .ToList()
+            };
+        }
+    }
+
     private static void AddLocation(List<WhdSyncedClient> locations, JsonElement locationElement)
     {
         if (locationElement.ValueKind != JsonValueKind.Object)
@@ -973,7 +1441,7 @@ public sealed class WhdRestClient
         var trimmedName = locationName.Trim();
         locations.Add(new WhdSyncedClient
         {
-            ExternalId = $"WHD-LOCATION-{id.Trim()}",
+            ExternalId = FormatWhdLocationId(id),
             Name = trimmedName,
             LocationName = trimmedName,
             ContactName = null,
@@ -1003,7 +1471,13 @@ public sealed class WhdRestClient
         {
             Id = id.Value,
             Name = name,
-            IsClosed = IsClosedStatus(name)
+            IsClosed = ReadBooleanAny(
+                    statusTypeElement,
+                    "closed",
+                    "isClosed",
+                    "terminal",
+                    "isTerminal")
+                || IsClosedStatus(name)
         });
     }
 
@@ -1031,7 +1505,37 @@ public sealed class WhdRestClient
             ?? ReadNestedInt(ticketElement, "statusType", "id")
             ?? ReadNestedInt(ticketElement, "status", "id");
 
-        var isClosed = IsClosedStatus(status) || ReadBoolean(ticketElement, "deleted");
+        var isDeleted = ReadBooleanAny(ticketElement, "deleted", "isDeleted");
+        var isClosed = ReadBooleanAny(
+                ticketElement,
+                "closed",
+                "isClosed",
+                "canceled",
+                "cancelled",
+                "isCanceled",
+                "isCancelled")
+            || IsClosedStatus(status)
+            || isDeleted;
+        var assignedTechnician = TryGetObjectAny(
+            ticketElement,
+            "assignedTech",
+            "assignedTechnician",
+            "tech",
+            "technician",
+            "techAssigned");
+        var assignedGroup = TryGetObjectAny(
+            ticketElement,
+            "techGroup",
+            "assignedTechGroup",
+            "assignedGroup",
+            "group")
+            ?? TryGetNestedObject(ticketElement, "requestType", "techGroup");
+        var assignedTechnicianId = assignedTechnician.HasValue
+            ? ReadStringAny(assignedTechnician.Value, "id", "techId", "technicianId")
+            : ReadStringAny(ticketElement, "assignedTechId", "assignedTechnicianId", "techId");
+        var assignedGroupId = assignedGroup.HasValue
+            ? ReadStringAny(assignedGroup.Value, "id", "techGroupId", "groupId")
+            : ReadStringAny(ticketElement, "techGroupId", "assignedGroupId");
 
         tickets.Add(new WhdSyncedTicket
         {
@@ -1041,6 +1545,27 @@ public sealed class WhdRestClient
             Status = status,
             StatusTypeId = statusTypeId,
             IsClosed = isClosed,
+            IsDeleted = isDeleted,
+            LastUpdatedUtc = ReadDateTimeOffsetAny(
+                ticketElement,
+                "lastUpdatedUtc",
+                "lastUpdated",
+                "lastUpdatedDate",
+                "updatedAt",
+                "dateModified",
+                "modified"),
+            AssignedTechnicianExternalId = string.IsNullOrWhiteSpace(assignedTechnicianId)
+                ? null
+                : FormatWhdTechnicianId(assignedTechnicianId),
+            AssignedTechnicianName = assignedTechnician.HasValue
+                ? ReadStringAny(assignedTechnician.Value, "displayName", "fullName", "name", "username")
+                : ReadStringAny(ticketElement, "assignedTechName", "assignedTechnicianName"),
+            AssignedGroupExternalId = string.IsNullOrWhiteSpace(assignedGroupId)
+                ? null
+                : FormatWhdGroupId(assignedGroupId),
+            AssignedGroupName = assignedGroup.HasValue
+                ? ReadStringAny(assignedGroup.Value, "techGroupName", "groupName", "displayName", "name")
+                : ReadStringAny(ticketElement, "techGroupName", "assignedGroupName"),
             Client = ReadClient(ticketElement)
         });
     }
@@ -1061,7 +1586,7 @@ public sealed class WhdRestClient
         }
 
         var element = clientElement.Value;
-        var id = ReadString(element, "id")
+        var clientId = ReadString(element, "id")
             ?? ReadString(element, "username")
             ?? ReadString(element, "email")
             ?? ReadString(element, "displayName")
@@ -1076,12 +1601,24 @@ public sealed class WhdRestClient
             ?? ReadString(element, "email")
             ?? "Unknown WHD Client";
 
+        var locationElement = TryGetObject(ticketElement, "location");
+        var locationId = locationElement.HasValue
+            ? ReadStringAny(locationElement.Value, "id", "locationId")
+            : ReadStringAny(ticketElement, "locationId");
         var locationName = ReadLocationName(ticketElement);
-        var name = BuildClientDisplayName(locationName, clientName);
+        var hasLocationIdentity = !string.IsNullOrWhiteSpace(locationId);
+        var name = hasLocationIdentity && !string.IsNullOrWhiteSpace(locationName)
+            ? locationName.Trim()
+            : BuildClientDisplayName(locationName, clientName);
 
         return new WhdSyncedClient
         {
-            ExternalId = FormatWhdId(id),
+            // Location is TechBench's customer boundary. Using the reporter's
+            // WHD client ID here would split one customer into a client row per
+            // contact and bypass the shared WHD-to-Sage customer mapping.
+            ExternalId = hasLocationIdentity
+                ? FormatWhdLocationId(locationId!)
+                : FormatWhdId(clientId),
             Name = name,
             LocationName = string.IsNullOrWhiteSpace(locationName) ? null : locationName.Trim(),
             ContactName = string.IsNullOrWhiteSpace(clientName) ? null : clientName.Trim()
@@ -1123,6 +1660,144 @@ public sealed class WhdRestClient
         return element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.Object
             ? value
             : null;
+    }
+
+    private static JsonElement? TryGetObjectAny(JsonElement element, params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            var value = TryGetObject(element, propertyName);
+            if (value.HasValue)
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    private static JsonElement? TryGetNestedObject(
+        JsonElement element,
+        string objectName,
+        string nestedObjectName)
+    {
+        var parent = TryGetObject(element, objectName);
+        return parent.HasValue ? TryGetObject(parent.Value, nestedObjectName) : null;
+    }
+
+    private static string? ReadStringAny(JsonElement element, params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            var value = ReadString(element, propertyName);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool ReadBooleanAny(JsonElement element, params string[] propertyNames) =>
+        propertyNames.Any(propertyName => ReadBoolean(element, propertyName));
+
+    private static DateTimeOffset? ReadDateTimeOffsetAny(
+        JsonElement element,
+        params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            if (!element.TryGetProperty(propertyName, out var value))
+            {
+                continue;
+            }
+
+            if (value.ValueKind == JsonValueKind.Number
+                && value.TryGetInt64(out var epoch))
+            {
+                try
+                {
+                    return epoch > 10_000_000_000
+                        ? DateTimeOffset.FromUnixTimeMilliseconds(epoch)
+                        : DateTimeOffset.FromUnixTimeSeconds(epoch);
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    // Continue through aliases when a WHD extension returns an invalid value.
+                }
+            }
+
+            var text = value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : value.ToString();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            var dotNetJsonStart = text.IndexOf("/Date(", StringComparison.OrdinalIgnoreCase);
+            if (dotNetJsonStart >= 0)
+            {
+                var digits = new string(text.Skip(dotNetJsonStart + 6)
+                    .TakeWhile(character => char.IsDigit(character) || character == '-')
+                    .ToArray());
+                if (long.TryParse(digits, NumberStyles.Integer, CultureInfo.InvariantCulture, out var milliseconds))
+                {
+                    try
+                    {
+                        return DateTimeOffset.FromUnixTimeMilliseconds(milliseconds);
+                    }
+                    catch (ArgumentOutOfRangeException)
+                    {
+                        // Fall through to the normal date parser.
+                    }
+                }
+            }
+
+            if (DateTimeOffset.TryParse(
+                    text,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                    out var parsed))
+            {
+                return parsed;
+            }
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<string> ReadTechnicianMemberIds(JsonElement groupElement)
+    {
+        foreach (var propertyName in new[] { "techs", "technicians", "members", "techMembers" })
+        {
+            if (!groupElement.TryGetProperty(propertyName, out var members)
+                || members.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            var identifiers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var member in members.EnumerateArray())
+            {
+                var id = member.ValueKind switch
+                {
+                    JsonValueKind.Object => ReadStringAny(member, "id", "techId", "technicianId"),
+                    JsonValueKind.String => member.GetString(),
+                    JsonValueKind.Number => member.ToString(),
+                    _ => null
+                };
+                if (!string.IsNullOrWhiteSpace(id))
+                {
+                    identifiers.Add(FormatWhdTechnicianId(id));
+                }
+            }
+
+            return identifiers.OrderBy(static id => id, StringComparer.OrdinalIgnoreCase).ToArray();
+        }
+
+        return Array.Empty<string>();
     }
 
     private static string? BuildName(JsonElement element)
@@ -1196,7 +1871,9 @@ public sealed class WhdRestClient
     private static bool IsClosedStatus(string status)
     {
         return status.Trim().Equals("Closed", StringComparison.OrdinalIgnoreCase)
-            || status.Contains("closed", StringComparison.OrdinalIgnoreCase);
+            || status.Contains("closed", StringComparison.OrdinalIgnoreCase)
+            || status.Trim().Equals("Canceled", StringComparison.OrdinalIgnoreCase)
+            || status.Trim().Equals("Cancelled", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? TryReadResponseId(string content)
@@ -1342,6 +2019,30 @@ public sealed class WhdRestClient
     {
         var trimmed = value.Trim();
         return trimmed.StartsWith("WHD-", StringComparison.OrdinalIgnoreCase) ? trimmed : $"WHD-{trimmed}";
+    }
+
+    private static string FormatWhdLocationId(string value)
+    {
+        var trimmed = value.Trim();
+        return trimmed.StartsWith("WHD-LOCATION-", StringComparison.OrdinalIgnoreCase)
+            ? trimmed
+            : $"WHD-LOCATION-{trimmed}";
+    }
+
+    private static string FormatWhdTechnicianId(string value)
+    {
+        var trimmed = value.Trim();
+        return trimmed.StartsWith("WHD-TECH-", StringComparison.OrdinalIgnoreCase)
+            ? trimmed
+            : $"WHD-TECH-{trimmed}";
+    }
+
+    private static string FormatWhdGroupId(string value)
+    {
+        var trimmed = value.Trim();
+        return trimmed.StartsWith("WHD-GROUP-", StringComparison.OrdinalIgnoreCase)
+            ? trimmed
+            : $"WHD-GROUP-{trimmed}";
     }
 
     private sealed class WhdAuthParameters
