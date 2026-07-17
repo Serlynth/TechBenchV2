@@ -14823,6 +14823,36 @@ GO
 IF SCHEMA_ID(N'tb_service') IS NULL EXEC(N'CREATE SCHEMA [tb_service] AUTHORIZATION [dbo];');
 GO
 
+ALTER PROCEDURE [tb_app].[GetRepositoryCapabilities]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SELECT
+        CONVERT(int, 6) AS [SchemaVersion],
+        CONVERT(bit, 0) AS [FullTextSearchAvailable],
+        CONVERT(bit, 1) AS [SupportsTickets],
+        CONVERT(bit, 1) AS [SupportsWorkEntries],
+        CONVERT(bit, 1) AS [SupportsPrivateNotes],
+        CONVERT(bit, 1) AS [SupportsPostingLeases],
+        CONVERT(bit, 1) AS [SupportsSyncLeases],
+        CONVERT(bit, 1) AS [SupportsImports],
+        CONVERT(bit, 1) AS [SupportsTechBenchV1Import];
+END;
+GO
+
 /* The service contract intentionally uses leases rather than caller identity. */
 IF OBJECT_ID(N'tb_service.GetWhdSyncConfiguration', N'P') IS NOT NULL DROP PROCEDURE [tb_service].[GetWhdSyncConfiguration];
 GO
@@ -17295,9 +17325,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5)
+IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6)
 BEGIN
-    PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, or 5.';
+    PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, 5, or 6.';
     SET @FailureCount += 1;
 END;
 
@@ -17910,10 +17940,17 @@ BEGIN
         (N'tb_role_admin', N'tb_app.SaveCommonLink'),
         (N'tb_role_admin', N'tb_app.SaveClientAlias'),
         (N'tb_role_admin', N'tb_app.AcquireSyncLease'),
-        (N'tb_role_admin', N'tb_app.SyncApplyClientSnapshot'),
-        (N'tb_role_admin', N'tb_app.SyncApplyTicketSnapshot'),
-        (N'tb_role_admin', N'tb_app.SyncApplyTicketStatusSnapshot'),
         (N'tb_role_admin', N'tb_app.SyncApplySageCustomerSnapshot');
+
+    /* V0006 moves organization-wide WHD snapshot application to the service. */
+    IF @InstalledSchemaVersion < 6
+    BEGIN
+        INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
+        VALUES
+            (N'tb_role_admin', N'tb_app.SyncApplyClientSnapshot'),
+            (N'tb_role_admin', N'tb_app.SyncApplyTicketSnapshot'),
+            (N'tb_role_admin', N'tb_app.SyncApplyTicketStatusSnapshot');
+    END;
 END;
 
 DECLARE @MissingGrantCount int =
@@ -18034,9 +18071,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (3, 4, 5)
+IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6)
 BEGIN
-    PRINT N'FAIL: V0003 verification supports installed schema version 3, 4, or 5.';
+    PRINT N'FAIL: V0003 verification supports installed schema version 3, 4, 5, or 6.';
     SET @FailureCount += 1;
 END;
 
@@ -18520,9 +18557,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (4, 5)
+IF @InstalledSchemaVersion NOT IN (4, 5, 6)
 BEGIN
-    PRINT N'FAIL: V0004 verification supports installed schema version 4 or 5.';
+    PRINT N'FAIL: V0004 verification supports installed schema version 4, 5, or 6.';
     SET @FailureCount += 1;
 END;
 
@@ -18997,17 +19034,24 @@ VALUES
     (N'tb_role_admin', N'tb_app.ReleaseSyncLease'),
     (N'tb_role_admin', N'tb_app.BeginSyncRun'),
     (N'tb_role_admin', N'tb_app.CompleteSyncRun'),
-    (N'tb_role_admin', N'tb_app.SyncApplyClientSnapshot'),
-    (N'tb_role_admin', N'tb_app.SyncApplyTicketSnapshot'),
-    (N'tb_role_admin', N'tb_app.SyncApplyTicketStatusSnapshot'),
     (N'tb_role_admin', N'tb_app.SyncApplySageCustomerSnapshot'),
-    (N'tb_role_admin', N'tb_app.SyncUpsertClient'),
     (N'tb_role_admin', N'tb_app.SyncUpsertSageCustomer'),
     (N'tb_role_admin', N'tb_app.SyncRemoveStaleSageCustomers'),
     (N'tb_role_admin', N'tb_app.SyncUpsertClientExternalIdentity'),
-    (N'tb_role_admin', N'tb_app.SyncUpsertTicketStatusOption'),
-    (N'tb_role_admin', N'tb_app.SyncUpsertTicket'),
     (N'tb_role_sync_operator', N'tb_app.GetSyncRuns');
+
+/* V0006 moves organization-wide WHD mutations to tb_role_sync_service. */
+IF @InstalledSchemaVersion < 6
+BEGIN
+    INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
+    VALUES
+        (N'tb_role_admin', N'tb_app.SyncApplyClientSnapshot'),
+        (N'tb_role_admin', N'tb_app.SyncApplyTicketSnapshot'),
+        (N'tb_role_admin', N'tb_app.SyncApplyTicketStatusSnapshot'),
+        (N'tb_role_admin', N'tb_app.SyncUpsertClient'),
+        (N'tb_role_admin', N'tb_app.SyncUpsertTicketStatusOption'),
+        (N'tb_role_admin', N'tb_app.SyncUpsertTicket');
+END;
 
 DECLARE @MissingGrantCount int =
 (
@@ -19190,6 +19234,11 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
 DECLARE @FailureCount int = 0;
+DECLARE @InstalledSchemaVersion int =
+(
+    SELECT MAX([SchemaVersion])
+    FROM [tb_deploy].[SchemaMigrations]
+);
 
 IF NOT EXISTS
 (
@@ -19218,13 +19267,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF
-(
-    SELECT MAX([SchemaVersion])
-    FROM [tb_deploy].[SchemaMigrations]
-) <> 5
+IF @InstalledSchemaVersion NOT IN (5, 6)
 BEGIN
-    PRINT N'FAIL: The installed TechBench schema version is not 5.';
+    PRINT N'FAIL: V0005 verification supports installed schema version 5 or 6.';
     SET @FailureCount += 1;
 END;
 
@@ -20351,13 +20396,13 @@ BEGIN
 END;
 
 IF CHARINDEX(
-       N'CONVERT(int, 5)',
+       N'CONVERT(int, ' + CONVERT(nvarchar(10), @InstalledSchemaVersion) + N')',
        OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'))) = 0
    OR CHARINDEX(
        N'[SupportsTechBenchV1Import]',
        OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'))) = 0
 BEGIN
-    PRINT N'FAIL: GetRepositoryCapabilities does not report schema version 5 and V1 import support.';
+    PRINT N'FAIL: GetRepositoryCapabilities does not report the installed schema version and V1 import support.';
     SET @FailureCount += 1;
 END;
 

@@ -26,9 +26,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (4, 5)
+IF @InstalledSchemaVersion NOT IN (4, 5, 6)
 BEGIN
-    PRINT N'FAIL: V0004 verification supports installed schema version 4 or 5.';
+    PRINT N'FAIL: V0004 verification supports installed schema version 4, 5, or 6.';
     SET @FailureCount += 1;
 END;
 
@@ -503,17 +503,24 @@ VALUES
     (N'tb_role_admin', N'tb_app.ReleaseSyncLease'),
     (N'tb_role_admin', N'tb_app.BeginSyncRun'),
     (N'tb_role_admin', N'tb_app.CompleteSyncRun'),
-    (N'tb_role_admin', N'tb_app.SyncApplyClientSnapshot'),
-    (N'tb_role_admin', N'tb_app.SyncApplyTicketSnapshot'),
-    (N'tb_role_admin', N'tb_app.SyncApplyTicketStatusSnapshot'),
     (N'tb_role_admin', N'tb_app.SyncApplySageCustomerSnapshot'),
-    (N'tb_role_admin', N'tb_app.SyncUpsertClient'),
     (N'tb_role_admin', N'tb_app.SyncUpsertSageCustomer'),
     (N'tb_role_admin', N'tb_app.SyncRemoveStaleSageCustomers'),
     (N'tb_role_admin', N'tb_app.SyncUpsertClientExternalIdentity'),
-    (N'tb_role_admin', N'tb_app.SyncUpsertTicketStatusOption'),
-    (N'tb_role_admin', N'tb_app.SyncUpsertTicket'),
     (N'tb_role_sync_operator', N'tb_app.GetSyncRuns');
+
+/* V0006 moves organization-wide WHD mutations to tb_role_sync_service. */
+IF @InstalledSchemaVersion < 6
+BEGIN
+    INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
+    VALUES
+        (N'tb_role_admin', N'tb_app.SyncApplyClientSnapshot'),
+        (N'tb_role_admin', N'tb_app.SyncApplyTicketSnapshot'),
+        (N'tb_role_admin', N'tb_app.SyncApplyTicketStatusSnapshot'),
+        (N'tb_role_admin', N'tb_app.SyncUpsertClient'),
+        (N'tb_role_admin', N'tb_app.SyncUpsertTicketStatusOption'),
+        (N'tb_role_admin', N'tb_app.SyncUpsertTicket');
+END;
 
 DECLARE @MissingGrantCount int =
 (

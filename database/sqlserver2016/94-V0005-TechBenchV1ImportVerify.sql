@@ -7,6 +7,11 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
 DECLARE @FailureCount int = 0;
+DECLARE @InstalledSchemaVersion int =
+(
+    SELECT MAX([SchemaVersion])
+    FROM [tb_deploy].[SchemaMigrations]
+);
 
 IF NOT EXISTS
 (
@@ -35,13 +40,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF
-(
-    SELECT MAX([SchemaVersion])
-    FROM [tb_deploy].[SchemaMigrations]
-) <> 5
+IF @InstalledSchemaVersion NOT IN (5, 6)
 BEGIN
-    PRINT N'FAIL: The installed TechBench schema version is not 5.';
+    PRINT N'FAIL: V0005 verification supports installed schema version 5 or 6.';
     SET @FailureCount += 1;
 END;
 
@@ -1168,13 +1169,13 @@ BEGIN
 END;
 
 IF CHARINDEX(
-       N'CONVERT(int, 5)',
+       N'CONVERT(int, ' + CONVERT(nvarchar(10), @InstalledSchemaVersion) + N')',
        OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'))) = 0
    OR CHARINDEX(
        N'[SupportsTechBenchV1Import]',
        OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'))) = 0
 BEGIN
-    PRINT N'FAIL: GetRepositoryCapabilities does not report schema version 5 and V1 import support.';
+    PRINT N'FAIL: GetRepositoryCapabilities does not report the installed schema version and V1 import support.';
     SET @FailureCount += 1;
 END;
 

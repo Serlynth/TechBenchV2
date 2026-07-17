@@ -84,6 +84,160 @@ public sealed partial class SqlServer2016SyntaxTests
             "The ConflictCount-dependent dynamic DDL must execute after the static ALTER TABLE ADD.");
     }
 
+    [Fact]
+    public void V0002VerifierUsesTheSchemaV6WhdServiceGrantBoundary()
+    {
+        var path = Path.Combine(FindSqlDirectory(), "91-V0002-OperationalVerify.sql");
+        var source = File.ReadAllText(path);
+
+        Assert.Contains(
+            "@InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6)",
+            source,
+            StringComparison.OrdinalIgnoreCase);
+
+        var expectedGrantsStart = source.IndexOf(
+            "DECLARE @ExpectedGrants",
+            StringComparison.OrdinalIgnoreCase);
+        var schemaV6Boundary = source.IndexOf(
+            "IF @InstalledSchemaVersion < 6",
+            expectedGrantsStart,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.True(expectedGrantsStart >= 0 && schemaV6Boundary > expectedGrantsStart);
+
+        foreach (var retainedGrant in new[]
+                 {
+                     "AcquireSyncLease",
+                     "SyncApplySageCustomerSnapshot"
+                 })
+        {
+            var tuple = $"(N'tb_role_admin', N'tb_app.{retainedGrant}')";
+            var position = source.IndexOf(
+                tuple,
+                expectedGrantsStart,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.InRange(position, expectedGrantsStart, schemaV6Boundary - 1);
+        }
+
+        foreach (var serviceOwnedGrant in new[]
+                 {
+                     "SyncApplyClientSnapshot",
+                     "SyncApplyTicketSnapshot",
+                     "SyncApplyTicketStatusSnapshot"
+                 })
+        {
+            var tuple = $"(N'tb_role_admin', N'tb_app.{serviceOwnedGrant}')";
+            var position = source.IndexOf(
+                tuple,
+                expectedGrantsStart,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.True(
+                position > schemaV6Boundary,
+                $"{serviceOwnedGrant} must be expected only before the schema V6 service boundary.");
+        }
+    }
+
+    [Theory]
+    [InlineData(
+        "92-V0003-SharedReferenceVerify.sql",
+        "@InstalledSchemaVersion NOT IN (3, 4, 5, 6)")]
+    [InlineData(
+        "93-V0004-AdminSharedVerify.sql",
+        "@InstalledSchemaVersion NOT IN (4, 5, 6)")]
+    [InlineData(
+        "94-V0005-TechBenchV1ImportVerify.sql",
+        "@InstalledSchemaVersion NOT IN (5, 6)")]
+    public void EarlierSchemaVerifiersAcceptTheFinalSchemaVersion(
+        string fileName,
+        string expectedVersionCheck)
+    {
+        var path = Path.Combine(FindSqlDirectory(), fileName);
+        Assert.Contains(
+            expectedVersionCheck,
+            File.ReadAllText(path),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void V0004VerifierUsesTheSchemaV6WhdServiceGrantBoundary()
+    {
+        var sqlDirectory = FindSqlDirectory();
+        var verifySource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "93-V0004-AdminSharedVerify.sql"));
+        var grantSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "54-V0006-WhdServerSyncGrants.sql"));
+        var expectedGrantsStart = verifySource.IndexOf(
+            "DECLARE @ExpectedGrants",
+            StringComparison.OrdinalIgnoreCase);
+        var schemaV6Boundary = verifySource.IndexOf(
+            "IF @InstalledSchemaVersion < 6",
+            expectedGrantsStart,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.True(expectedGrantsStart >= 0 && schemaV6Boundary > expectedGrantsStart);
+
+        foreach (var retainedGrant in new[]
+                 {
+                     "AcquireSyncLease",
+                     "ReleaseSyncLease",
+                     "BeginSyncRun",
+                     "CompleteSyncRun",
+                     "SyncApplySageCustomerSnapshot",
+                     "SyncUpsertSageCustomer",
+                     "SyncRemoveStaleSageCustomers",
+                     "SyncUpsertClientExternalIdentity"
+                 })
+        {
+            var tuple = $"(N'tb_role_admin', N'tb_app.{retainedGrant}')";
+            var position = verifySource.IndexOf(
+                tuple,
+                expectedGrantsStart,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.InRange(position, expectedGrantsStart, schemaV6Boundary - 1);
+        }
+
+        foreach (var serviceOwnedGrant in new[]
+                 {
+                     "SyncApplyClientSnapshot",
+                     "SyncApplyTicketSnapshot",
+                     "SyncApplyTicketStatusSnapshot",
+                     "SyncUpsertClient",
+                     "SyncUpsertTicketStatusOption",
+                     "SyncUpsertTicket"
+                 })
+        {
+            var tuple = $"(N'tb_role_admin', N'tb_app.{serviceOwnedGrant}')";
+            var position = verifySource.IndexOf(
+                tuple,
+                expectedGrantsStart,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.True(
+                position > schemaV6Boundary,
+                $"{serviceOwnedGrant} must be expected only before the schema V6 service boundary.");
+            Assert.Contains(
+                $"REVOKE EXECUTE ON OBJECT::[tb_app].[{serviceOwnedGrant}] FROM [tb_role_admin]",
+                grantSource,
+                StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public void V0006PublishesSchemaV6RepositoryCapabilities()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindSqlDirectory(),
+            "48-V0006-WhdServerSyncProcedures.sql"));
+
+        Assert.Contains(
+            "ALTER PROCEDURE [tb_app].[GetRepositoryCapabilities]",
+            source,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "CONVERT(int, 6) AS [SchemaVersion]",
+            source,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string PreprocessSqlCmd(string source)
     {
         var preprocessed = SqlCmdDirectiveLine().Replace(

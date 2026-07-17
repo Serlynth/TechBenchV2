@@ -26,9 +26,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (3, 4, 5)
+IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6)
 BEGIN
-    PRINT N'FAIL: V0003 verification supports installed schema version 3, 4, or 5.';
+    PRINT N'FAIL: V0003 verification supports installed schema version 3, 4, 5, or 6.';
     SET @FailureCount += 1;
 END;
 

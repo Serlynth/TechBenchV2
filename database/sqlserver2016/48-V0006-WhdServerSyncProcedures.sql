@@ -10,6 +10,36 @@ GO
 IF SCHEMA_ID(N'tb_service') IS NULL EXEC(N'CREATE SCHEMA [tb_service] AUTHORIZATION [dbo];');
 GO
 
+ALTER PROCEDURE [tb_app].[GetRepositoryCapabilities]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SELECT
+        CONVERT(int, 6) AS [SchemaVersion],
+        CONVERT(bit, 0) AS [FullTextSearchAvailable],
+        CONVERT(bit, 1) AS [SupportsTickets],
+        CONVERT(bit, 1) AS [SupportsWorkEntries],
+        CONVERT(bit, 1) AS [SupportsPrivateNotes],
+        CONVERT(bit, 1) AS [SupportsPostingLeases],
+        CONVERT(bit, 1) AS [SupportsSyncLeases],
+        CONVERT(bit, 1) AS [SupportsImports],
+        CONVERT(bit, 1) AS [SupportsTechBenchV1Import];
+END;
+GO
+
 /* The service contract intentionally uses leases rather than caller identity. */
 IF OBJECT_ID(N'tb_service.GetWhdSyncConfiguration', N'P') IS NOT NULL DROP PROCEDURE [tb_service].[GetWhdSyncConfiguration];
 GO
