@@ -1258,8 +1258,12 @@ function Get-AvailableServiceUpdate {
         Accept = 'application/vnd.github+json'
         'User-Agent' = 'TechBench-ServerManager'
     }
-    $releases = @(Invoke-RestMethod -Uri $script:ReleaseApiUrl -Headers $headers `
-        -Method Get -TimeoutSec 30)
+    # Windows PowerShell 5.1 treats a command that returns a JSON array as one
+    # nested item when the command itself is placed inside @(...). Capture the
+    # response first so @($releaseResponse) enumerates each GitHub release.
+    $releaseResponse = Invoke-RestMethod -Uri $script:ReleaseApiUrl -Headers $headers `
+        -Method Get -TimeoutSec 30
+    $releases = @($releaseResponse)
     $currentVersion = (Get-ServiceDetails).Version
     $currentParts = ConvertTo-SemanticVersionParts $currentVersion
     $currentIsStable = $null -ne $currentParts -and

@@ -81,6 +81,16 @@ public sealed class ServerManagerScriptTests
     }
 
     [Fact]
+    public void ReleaseDiscoveryEnumeratesGithubJsonArraysOnWindowsPowerShell51()
+    {
+        var source = ReadScript("TechBench-ServerManager.ps1");
+
+        Assert.Contains("$releaseResponse = Invoke-RestMethod", source, StringComparison.Ordinal);
+        Assert.Contains("$releases = @($releaseResponse)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("$releases = @(Invoke-RestMethod", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PublisherAndInstallerIntegrateManagerWithSchemaManifest()
     {
         var publisher = ReadScript("Publish-TechBenchServer.ps1");
