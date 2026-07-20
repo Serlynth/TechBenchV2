@@ -1882,22 +1882,6 @@
                                                    Style="{StaticResource MutedTextStyle}"
                                                    Margin="0,0,0,10" />
                                     </StackPanel>
-                                    <WrapPanel Grid.Column="1" HorizontalAlignment="Right">
-                                        <Button Content="Request Server Sage Sync"
-                                                Command="{Binding SyncSageCustomersCommand}"
-                                                Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                Style="{StaticResource PrimaryButtonStyle}"
-                                                ToolTip="Queue a manual customer refresh on the TechBench server"
-                                                MinWidth="190"
-                                                Margin="0,0,8,8" />
-                                        <Button Content="Confirm Large Removal"
-                                                Command="{Binding SyncSageCustomersCommand}"
-                                                CommandParameter="AllowLargeRemoval"
-                                                Visibility="{Binding CanConfirmLargeSageRemoval, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                ToolTip="Explicitly authorize an unusually large customer removal rejected by the server"
-                                                MinWidth="180"
-                                                Margin="0,0,0,8" />
-                                    </WrapPanel>
                                 </Grid>
                                 <TextBlock Text="Search clients" Style="{StaticResource FieldLabelStyle}" />
                                 <TextBox Text="{Binding ClientSearchText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,12" />
@@ -2993,18 +2977,19 @@
                             <Border Grid.Column="0" Style="{StaticResource CardStyle}">
                                 <StackPanel>
                                     <TextBlock Text="Web Help Desk" Style="{StaticResource SectionHeadingStyle}" />
-                                    <TextBlock Text="Base URL" Style="{StaticResource FieldLabelStyle}" />
-                                    <TextBox Text="{Binding WhdBaseUrl, UpdateSourceTrigger=PropertyChanged}"
-                                             IsEnabled="{Binding CanManageOrganizationSettings}"
+                                     <TextBlock Text="Base URL" Style="{StaticResource FieldLabelStyle}" />
+                                     <TextBox Text="{Binding WhdBaseUrl, UpdateSourceTrigger=PropertyChanged}"
+                                             IsReadOnly="True"
+                                             IsTabStop="False"
                                              Margin="0,0,0,10" />
-                                    <TextBlock Text="Authentication" Style="{StaticResource FieldLabelStyle}" />
-                                    <ComboBox ItemsSource="{Binding WhdAuthenticationModeOptions}"
-                                              SelectedItem="{Binding SelectedWhdAuthenticationMode}"
-                                              IsEnabled="{Binding CanManageOrganizationSettings}"
-                                              Margin="0,0,0,10" />
-                                    <TextBlock Text="The base URL and authentication type are shared organization settings managed by TechBench Admins."
-                                               Style="{StaticResource MutedTextStyle}"
-                                               TextWrapping="Wrap"
+                                     <TextBlock Text="Authentication" Style="{StaticResource FieldLabelStyle}" />
+                                     <ComboBox ItemsSource="{Binding WhdAuthenticationModeOptions}"
+                                               SelectedItem="{Binding SelectedWhdAuthenticationMode}"
+                                               IsEnabled="False"
+                                               Margin="0,0,0,10" />
+                                     <TextBlock Text="The shared WHD connection is configured in TechBench Server Manager. It is shown here because your personal credential uses it when posting work notes."
+                                                Style="{StaticResource MutedTextStyle}"
+                                                TextWrapping="Wrap"
                                                Margin="0,-4,0,10" />
                                     <TextBlock Text="My WHD username" Style="{StaticResource FieldLabelStyle}" />
                                     <TextBox Text="{Binding WhdUsername, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" />
@@ -3016,88 +3001,14 @@
                                                Style="{StaticResource MutedTextStyle}"
                                                TextWrapping="Wrap"
                                                Margin="0,0,0,14" />
-                                    <WrapPanel>
-                                        <Button Content="Test Connection"
-                                                Command="{Binding TestWhdConnectionCommand}"
-                                                MinWidth="126"
-                                                Margin="0,0,8,0" />
-                                        <Button Content="Request Server Sync Now"
-                                                Command="{Binding RequestWhdServerSyncCommand}"
-                                                Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                MinWidth="210"
-                                                Margin="0,0,8,0" />
-                                        <Button Content="Refresh Server Status"
-                                                Command="{Binding RefreshWhdAdministrationCommand}"
-                                                Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                MinWidth="170" />
-                                    </WrapPanel>
-                                    <Border BorderBrush="{DynamicResource BorderBrush}"
-                                            BorderThickness="0,1,0,0"
-                                            Margin="0,14,0,0"
-                                            Padding="0,14,0,0"
-                                            Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                        <StackPanel>
-                                            <TextBlock Text="The server owns organization-wide WHD synchronization. These settings are stored on SQL Server and managed by TechBench Admins."
-                                                       Style="{StaticResource MutedTextStyle}"
-                                                       TextWrapping="Wrap"
-                                                       Margin="0,0,0,10" />
-                                            <CheckBox Content="Auto-sync organization tickets"
-                                                      IsChecked="{Binding WhdAutoSyncEnabled}"
-                                                      IsEnabled="{Binding CanRunSharedSync}"
-                                                      Margin="0,0,0,10" />
-                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                                <TextBlock Text="Every"
-                                                           Foreground="{DynamicResource SecondaryTextBrush}"
-                                                           VerticalAlignment="Center"
-                                                           Margin="0,0,8,0" />
-                                                <TextBox Text="{Binding WhdAutoSyncMinutesText, UpdateSourceTrigger=PropertyChanged}"
-                                                         IsEnabled="{Binding CanRunSharedSync}"
-                                                         Width="58"
-                                                         Margin="0,0,8,0" />
-                                                <TextBlock Text="minutes"
-                                                           Foreground="{DynamicResource SecondaryTextBrush}"
-                                                           VerticalAlignment="Center" />
-                                            </StackPanel>
-                                            <TextBlock Text="{Binding WhdAutoSyncStatusLabel}"
-                                                       Style="{StaticResource MutedTextStyle}"
-                                                       Margin="0,8,0,0"
-                                                       TextWrapping="Wrap" />
-                                            <TextBlock Text="Server service username" Style="{StaticResource FieldLabelStyle}" Margin="0,12,0,0" />
-                                            <TextBox Text="{Binding WhdServiceUsername, UpdateSourceTrigger=PropertyChanged}"
-                                                     Margin="0,0,0,8" />
-                                            <TextBlock Text="Health" Style="{StaticResource FieldLabelStyle}" />
-                                            <TextBlock Text="{Binding WhdSyncServiceHealthLabel}" Style="{StaticResource DetailValueStyle}" TextWrapping="Wrap" />
-                                            <TextBlock Text="Last server run" Style="{StaticResource FieldLabelStyle}" Margin="0,8,0,0" />
-                                            <TextBlock Text="{Binding WhdSyncServiceLastRunLabel}" Style="{StaticResource DetailValueStyle}" />
-                                            <TextBlock Text="Queue" Style="{StaticResource FieldLabelStyle}" Margin="0,8,0,0" />
-                                            <TextBlock Text="{Binding WhdSyncServiceQueueLabel}" Style="{StaticResource DetailValueStyle}" />
-                                        </StackPanel>
-                                    </Border>
-                                    <Border BorderBrush="{DynamicResource BorderBrush}"
-                                            BorderThickness="0,1,0,0"
-                                            Margin="0,14,0,0"
-                                            Padding="0,14,0,0"
-                                            Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                        <StackPanel>
-                                            <TextBlock Text="AD User to WHD Technician Mapping" Style="{StaticResource SectionHeadingStyle}" />
-                                            <TextBlock Text="Select a TechBench user and the WHD technician whose assignments they should see."
-                                                       Style="{StaticResource MutedTextStyle}" TextWrapping="Wrap" Margin="0,0,0,8" />
-                                            <ComboBox ItemsSource="{Binding WhdUserMappings}"
-                                                      SelectedItem="{Binding SelectedWhdUserMapping}"
-                                                      DisplayMemberPath="UserLabel"
-                                                      Margin="0,0,0,8" />
-                                            <ComboBox ItemsSource="{Binding WhdTechnicians}"
-                                                      SelectedItem="{Binding SelectedWhdTechnician}"
-                                                      DisplayMemberPath="DisplayName"
-                                                      Margin="0,0,0,8" />
-                                            <Button Content="Save WHD User Mapping"
-                                                    Command="{Binding SaveWhdUserMappingCommand}"
-                                                    MinWidth="190"
-                                                    HorizontalAlignment="Left" />
-                                        </StackPanel>
-                                    </Border>
-                                </StackPanel>
-                            </Border>
+                                     <WrapPanel>
+                                         <Button Content="Test Connection"
+                                                 Command="{Binding TestWhdConnectionCommand}"
+                                                 MinWidth="126"
+                                                 Margin="0,0,8,0" />
+                                     </WrapPanel>
+                                 </StackPanel>
+                             </Border>
 
                             <Border Grid.Column="2" Style="{StaticResource CardStyle}">
                                 <StackPanel>
@@ -3159,11 +3070,12 @@
                                             <TextBox Text="{Binding SageEmployeeId, UpdateSourceTrigger=PropertyChanged}" />
                                         </StackPanel>
                                         <StackPanel Grid.Row="0" Grid.Column="2">
-                                            <TextBlock Text="Activity Item ID" Style="{StaticResource FieldLabelStyle}" />
-                                            <TextBox Text="{Binding SageActivityItemId, UpdateSourceTrigger=PropertyChanged}"
-                                                     IsEnabled="{Binding CanManageOrganizationSettings}" />
-                                            <TextBlock Text="Shared; managed by TechBench Admins."
-                                                       Style="{StaticResource MutedTextStyle}"
+                                             <TextBlock Text="Activity Item ID" Style="{StaticResource FieldLabelStyle}" />
+                                             <TextBox Text="{Binding SageActivityItemId, UpdateSourceTrigger=PropertyChanged}"
+                                                     IsReadOnly="True"
+                                                     IsTabStop="False" />
+                                             <TextBlock Text="Shared; configured in TechBench Server Manager."
+                                                        Style="{StaticResource MutedTextStyle}"
                                                        TextWrapping="Wrap"
                                                        Margin="0,4,0,0" />
                                         </StackPanel>
@@ -3174,63 +3086,9 @@
                                         </StackPanel>
                                     </Grid>
 
-                                    <Button Content="Check Sage Desktop" Command="{Binding TestSageConnectionCommand}" />
-
-                                    <Border BorderBrush="{DynamicResource BorderBrush}"
-                                            BorderThickness="0,1,0,0"
-                                            Margin="0,16,0,0"
-                                            Padding="0,16,0,0"
-                                            Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                        <StackPanel>
-                                            <TextBlock Text="Server Sage Customer Sync" Style="{StaticResource SectionHeadingStyle}" />
-                                            <TextBlock Text="Customer synchronization is manual-only. An Admin queues it here, and the TechBench service reads Sage and updates SQL Server. No client workstation performs the import."
-                                                       Style="{StaticResource MutedTextStyle}"
-                                                       TextWrapping="Wrap"
-                                                       Margin="0,0,0,12" />
-                                            <TextBlock Text="Server 32-bit System DSN" Style="{StaticResource FieldLabelStyle}" />
-                                            <TextBox Text="{Binding SageServerDsn, UpdateSourceTrigger=PropertyChanged}"
-                                                     IsEnabled="{Binding CanManageOrganizationSettings}"
-                                                     Margin="0,0,0,10" />
-                                            <TextBlock Text="Server Sage ODBC username" Style="{StaticResource FieldLabelStyle}" />
-                                            <TextBox Text="{Binding SageServerUsername, UpdateSourceTrigger=PropertyChanged}"
-                                                     IsEnabled="{Binding CanManageOrganizationSettings}"
-                                                     Margin="0,0,0,6" />
-                                            <TextBlock Text="The password is protected locally on the server and is never stored in SQL Server or sent to clients."
-                                                       Style="{StaticResource MutedTextStyle}"
-                                                       TextWrapping="Wrap"
-                                                       Margin="0,0,0,12" />
-                                            <WrapPanel Margin="0,0,0,12">
-                                                <Button Content="Request Server Sage Sync"
-                                                        Command="{Binding SyncSageCustomersCommand}"
-                                                        Style="{StaticResource PrimaryButtonStyle}"
-                                                        MinWidth="190"
-                                                        Margin="0,0,8,8" />
-                                                <Button Content="Confirm Large Removal"
-                                                        Command="{Binding SyncSageCustomersCommand}"
-                                                        CommandParameter="AllowLargeRemoval"
-                                                        Visibility="{Binding CanConfirmLargeSageRemoval, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                        ToolTip="Rerun the rejected snapshot after explicitly authorizing its unusually large customer removal"
-                                                        MinWidth="180"
-                                                        Margin="0,0,8,8" />
-                                                <Button Content="Refresh Server Status"
-                                                        Command="{Binding RefreshWhdAdministrationCommand}"
-                                                        MinWidth="170"
-                                                        Margin="0,0,0,8" />
-                                            </WrapPanel>
-                                            <TextBlock Text="Health" Style="{StaticResource FieldLabelStyle}" />
-                                            <TextBlock Text="{Binding SageSyncServiceHealthLabel}"
-                                                       Style="{StaticResource DetailValueStyle}"
-                                                       TextWrapping="Wrap" />
-                                            <TextBlock Text="Last server run" Style="{StaticResource FieldLabelStyle}" Margin="0,8,0,0" />
-                                            <TextBlock Text="{Binding SageSyncServiceLastRunLabel}" Style="{StaticResource DetailValueStyle}" />
-                                            <TextBlock Text="Queue" Style="{StaticResource FieldLabelStyle}" Margin="0,8,0,0" />
-                                            <TextBlock Text="{Binding SageSyncServiceQueueLabel}" Style="{StaticResource DetailValueStyle}" />
-                                            <TextBlock Text="Last snapshot" Style="{StaticResource FieldLabelStyle}" Margin="0,8,0,0" />
-                                            <TextBlock Text="{Binding SageSyncServiceCountsLabel}" Style="{StaticResource DetailValueStyle}" />
-                                        </StackPanel>
-                                    </Border>
-                                </StackPanel>
-                            </Border>
+                                     <Button Content="Check Sage Desktop" Command="{Binding TestSageConnectionCommand}" />
+                                 </StackPanel>
+                             </Border>
                         </Grid>
 
                         <Border Style="{StaticResource CardStyle}"

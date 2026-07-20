@@ -98,7 +98,7 @@ public sealed class ServerManagerLauncherScriptTests
             "function Install-VerifiedServicePayload",
             StringComparison.Ordinal);
         var installEnd = manager.IndexOf(
-            "function Assert-RequiredDatabaseSchema",
+            "function New-TechBenchDatabaseConnection",
             installStart,
             StringComparison.Ordinal);
         var install = manager[installStart..installEnd];

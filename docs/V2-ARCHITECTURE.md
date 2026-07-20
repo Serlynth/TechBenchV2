@@ -2,7 +2,7 @@
 
 ## Status
 
-TechBench V2 `2.0.0-alpha.10` implements the conversion from TechBench 1.x's local SQLite design to a shared SQL Server design, including an owner-scoped V1 migration contract, a dedicated Windows service for organization-wide WHD and Sage customer synchronization, an Admin-only read-only user-preview boundary, and a server-local administrator GUI with a reliable launcher, notification-area behavior, and controlled service updates.
+TechBench V2 `2.0.0-alpha.11` implements the conversion from TechBench 1.x's local SQLite design to a shared SQL Server design, including an owner-scoped V1 migration contract, a dedicated Windows service for organization-wide WHD and Sage customer synchronization, an Admin-only read-only user-preview boundary, and a server-local administrator GUI with shared synchronization configuration, a reliable launcher, notification-area behavior, and controlled service updates.
 
 The production WPF runtime uses the SQL Server repository for every business and operational workflow. It packages `Microsoft.Data.Sqlite` only for the explicit, read-only V1 migration reader; production builds still exclude the legacy local repository, database-location service, and local client/ticket providers. V2 has no client-side business-database backup path; SQL Server protection is owned by DBA/operations.
 
@@ -68,11 +68,11 @@ The server and database names are non-secret deployment configuration. Productio
 
 ## Server Manager lifecycle
 
-TechBench Server Manager is a server-local administrator process, not a network service or shared-settings authority. Its Start Menu shortcut invokes a consoleless VBScript shim, which starts the checked PowerShell launcher hidden, in STA mode, and with elevation. The launcher selects 64-bit Windows PowerShell even from an unusual 32-bit caller. Startup failures are shown to the operator. Elevated failures are logged only under the protected Manager data directory; failures detected before elevation may use per-user fallbacks. They are not allowed to disappear with a transient console window.
+TechBench Server Manager is a server-local administrator process, not a network service. It is the sole product UI for organization-wide WHD/Sage synchronization configuration and manual sync requests. It connects to SQL Server with the elevated operator's Windows identity, requires the TechBench Admin role, and uses only the existing stored-procedure boundary; external-system secrets remain machine-protected outside SQL. Its Start Menu shortcut invokes a consoleless VBScript shim, which starts the checked PowerShell launcher hidden, in STA mode, and with elevation. The launcher selects 64-bit Windows PowerShell even from an unusual 32-bit caller. Startup failures are shown to the operator. Elevated failures are logged only under the protected Manager data directory; failures detected before elevation may use per-user fallbacks. They are not allowed to disappear with a transient console window.
 
 The Manager owns one notification-area icon and one exclusive lifetime lock while running. Minimizing clears/remasks entered credentials and hides the form; double-clicking the icon or selecting **Open TechBench Server Manager** restores it. A second launch directs the operator to the existing tray instance. **Exit** and the window X end the process, except that closing is rejected while a service/update operation is active. The icon, context menu, in-memory icon copy, and lifetime lock are explicitly disposed at shutdown. The packaged icon is cloned from memory so the update transaction never retains a file handle on it.
 
-Routine updates treat the Manager script, PowerShell launcher, consoleless shim, and icon as one companion set. Their staged, installed, and rollback paths are journaled before replacement, and interrupted-update recovery classifies every companion before committing or rolling back. On normal startup the alpha.10 Manager also verifies these files against the installed service package and repairs the Start Menu shortcut. That provides the migration path from alpha.9, whose updater knew only about the Manager script. Shared configuration and machine-protected service credentials are not part of this repair.
+Routine updates treat the Manager script, PowerShell launcher, consoleless shim, and icon as one companion set. Their staged, installed, and rollback paths are journaled before replacement, and interrupted-update recovery classifies every companion before committing or rolling back. On normal startup the alpha.11 Manager also verifies these files against the installed service package and repairs the Start Menu shortcut. That provides the migration path from alpha.9, whose updater knew only about the Manager script. Shared configuration and machine-protected service credentials are not part of this repair.
 
 ## Startup, identity, and authorization
 
@@ -259,11 +259,11 @@ The SQL Server 2016 package contains idempotent stages for:
 
 `database/sqlserver2016/Deploy-CSRI-Standalone.sql` combines every numbered stage for SSMS SQLCMD Mode and has no external include paths.
 
-Schema version `2` is recorded as migration `SqlServer2016.OperationalStorage.0002`; schema version `3` adds shared reference data; schema version `4` records the strict Admin-owned boundary; schema version `5` adds owner-scoped, idempotent V1 entity mappings; schema version `6` adds the leased service-only WHD ingestion boundary through `SqlServer2016.WhdServerSync.0006`; and schema version `7` adds server-owned Sage synchronization and Admin read-only preview through `SqlServer2016.ServerOwnedSageAndAdminPreview.0007`. The alpha.10 client and service require exactly schema version 7; alpha.10 introduces no database migration.
+Schema version `2` is recorded as migration `SqlServer2016.OperationalStorage.0002`; schema version `3` adds shared reference data; schema version `4` records the strict Admin-owned boundary; schema version `5` adds owner-scoped, idempotent V1 entity mappings; schema version `6` adds the leased service-only WHD ingestion boundary through `SqlServer2016.WhdServerSync.0006`; and schema version `7` adds server-owned Sage synchronization and Admin read-only preview through `SqlServer2016.ServerOwnedSageAndAdminPreview.0007`. The alpha.11 client and service require exactly schema version 7; alpha.11 introduces no database migration.
 
 The first schema-version-4 Admin startup performs one insert-missing catalog seed and writes the organization setting `WorkspaceDefaults.Initialized=4` with that Admin's real SID. Subsequent startups do not recreate renamed or deleted note templates. The WHD auto-sync enabled/interval rows remain independently insert-missing so required runtime defaults can be repaired without changing an Admin's saved values.
 
-The schema-version-7 database, alpha.10 client, and alpha.10 sync service are a coordinated cutover. Have the DBA back up and verify the database, install the service and both protected credentials, install the matching client, and run smoke tests as one planned operation. Do not leave mixed alpha clients in normal use.
+The schema-version-7 database, alpha.11 client, and alpha.11 sync service are a coordinated cutover. Have the DBA back up and verify the database, install the service and both protected credentials, configure shared WHD/Sage values in Server Manager, install the matching client, and run smoke tests as one planned operation. Do not leave mixed alpha clients in normal use.
 
 The desktop client has no database-backup command and no authority to create a SQL Server backup. Full/log backup scheduling, `DBCC CHECKDB`, retention, monitoring, and restore testing belong to DBA/operations outside TechBench.
 
@@ -290,16 +290,16 @@ Production approval still requires a live SQL Server 2016 exercise. At minimum:
 7. Confirm Personal Notes remain invisible to other users and manager views.
 8. Force a rowversion conflict and verify that the client does not overwrite silently.
 9. Exercise personal WHD/Sage posting attempts and lease expiry/reconciliation.
-10. Queue a Sage customer sync as an Admin, verify its snapshot and row counts, reject malformed/duplicate input without changing customer data, exercise the explicit large-removal confirmation gate, and confirm an ordinary user cannot queue or apply it.
+10. Queue a Sage customer sync from Server Manager as an Admin, verify its snapshot and row counts, reject malformed/duplicate input without changing customer data, exercise the explicit large-removal confirmation gate, and confirm an ordinary user cannot queue or apply it.
 11. Preview an ordinary user as an Admin; verify the mapped WHD view, persistent warning, database write denial, Personal Note redaction, draft denial, and preview-session expiry/revocation.
 12. Verify service lease recovery, direct/group ticket visibility, explicit close/delete handling, and that omission does not close a ticket.
 13. Have the DBA verify SQL Server backup, `DBCC CHECKDB`, and restore procedures independently of the client.
 
-Until those checks pass, alpha.10 is an implementation candidate, not a production release.
+Until those checks pass, alpha.11 is an implementation candidate, not a production release.
 
 ## V1 data migration
 
-Installing alpha.10 does not automatically import V1 data; each authenticated user explicitly uses **Settings > Import V1 Database...** and confirms an import preview for their own account. This is separate from the Admin-only login preview.
+Installing alpha.11 does not automatically import V1 data; each authenticated user explicitly uses **Settings > Import V1 Database...** and confirms an import preview for their own account. This is separate from the Admin-only login preview.
 
 The user must close V1 and select its closed local database or a verified copy. The reader opens SQLite in read-only/query-only mode, rejects active journal/WAL sidecars, runs `quick_check`, validates known schema variants and SQL field limits, and rejects a source whose SHA-256 changes during the read. It extracts work entries, Personal Notes, entry tags, follow-up state, posting state/history, and note links. It does not import shared catalogs/configuration, credentials, editor drafts, active posting attempts, or local caches.
 

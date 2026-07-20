@@ -30,7 +30,7 @@ public sealed class ServerManagerScriptTests
         Assert.Contains("Set-TechBenchSyncCredential.ps1", source, StringComparison.Ordinal);
         Assert.Contains("Set-TechBenchSageSyncCredential.ps1", source, StringComparison.Ordinal);
         Assert.Contains(
-            "WHD username, Sage DSN/username, schedules, and other shared settings remain Admin-managed in SQL.",
+            "Shared WHD/Sage settings are managed on the right. Secrets remain machine-protected on this server.",
             source,
             StringComparison.Ordinal);
         Assert.DoesNotContain("[string]$Password", source, StringComparison.OrdinalIgnoreCase);

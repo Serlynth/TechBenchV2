@@ -87,22 +87,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private string _whdBaseUrl = string.Empty;
     private string _whdUsername = string.Empty;
     private string _whdApiToken = string.Empty;
-    private string _whdServiceUsername = string.Empty;
     private string _selectedWhdAuthenticationMode = "Auto (detect once)";
-    private bool _whdAutoSyncEnabled = true;
-    private string _whdAutoSyncMinutesText = "5";
     private bool _isSageVerificationRunning;
     private bool _isSagePostingRunning;
     private int _sageVerificationCursor;
-    private WhdSyncServiceStatus _whdSyncServiceStatus = new();
-    private SageSyncServiceStatus _sageSyncServiceStatus = new();
     private string _sageEmployeeId = string.Empty;
     private string _sageActivityItemId = string.Empty;
     private string _sageDsn = string.Empty;
     private string _sageUsername = string.Empty;
     private string _sagePassword = string.Empty;
-    private string _sageServerDsn = string.Empty;
-    private string _sageServerUsername = string.Empty;
     private string _sageCompanyPath = string.Empty;
     private bool _sageNativeAutoSave;
     private bool _isLightTheme;
@@ -188,14 +181,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ApplyClientMatchCommand = new RelayCommand(_ => ApplyClientMatch(), _ => CanApplyClientMatch());
         SaveSettingsCommand = new RelayCommand(_ => SaveSettings(), _ => CanWrite);
         TestWhdConnectionCommand = new AsyncRelayCommand(TestWhdConnectionAsync, _ => CanWrite);
-        RequestWhdServerSyncCommand = new AsyncRelayCommand(
-            RequestWhdServerSyncAsync,
-            _ => _currentUser.CanManageSharedConfiguration);
         TestSageConnectionCommand = new RelayCommand(_ => TestSageConnection(), _ => CanWrite);
         TestSageOdbcCommand = new AsyncRelayCommand(TestSageOdbcAsync, _ => CanWrite);
-        SyncSageCustomersCommand = new AsyncRelayCommand(
-            SyncSageCustomersAsync,
-            _ => _currentUser.CanRunSharedSync);
         InitializeNoteFeatures();
         InitializeV1DatabaseImport();
         InitializeCommonLinks();
@@ -247,8 +234,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         LoadSettings();
         RefreshAll();
         PrimeKnownWhdTicketKeys();
-        RefreshWhdSyncServiceStatus();
-        RefreshSageSyncServiceStatus();
         ConfigureSageVerificationTimer();
         ConfigureSharedDataRefreshTimer();
         RunSearch();
@@ -317,10 +302,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public RelayCommand ApplyClientMatchCommand { get; }
     public RelayCommand SaveSettingsCommand { get; }
     public AsyncRelayCommand TestWhdConnectionCommand { get; }
-    public AsyncRelayCommand RequestWhdServerSyncCommand { get; }
     public RelayCommand TestSageConnectionCommand { get; }
     public AsyncRelayCommand TestSageOdbcCommand { get; }
-    public AsyncRelayCommand SyncSageCustomersCommand { get; }
 
     public string DatabasePath => _repository.DatabasePath;
     public bool CanWrite => _currentUser.CanWrite;
@@ -827,88 +810,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    public string WhdServiceUsername
-    {
-        get => _whdServiceUsername;
-        set
-        {
-            if (SetProperty(ref _whdServiceUsername, value))
-            {
-                MarkSettingsDirty();
-            }
-        }
-    }
-
-    public bool CanRunSharedSync => _currentUser.CanRunSharedSync;
-
     public bool CanManageOrganizationSettings =>
         _currentUser.CanManageSharedConfiguration;
-
-    public bool WhdAutoSyncEnabled
-    {
-        get => _whdAutoSyncEnabled;
-        set
-        {
-            if (SetProperty(ref _whdAutoSyncEnabled, value))
-            {
-                MarkSettingsDirty();
-                OnPropertyChanged(nameof(WhdAutoSyncStatusLabel));
-            }
-        }
-    }
-
-    public string WhdAutoSyncMinutesText
-    {
-        get => _whdAutoSyncMinutesText;
-        set
-        {
-            if (SetProperty(ref _whdAutoSyncMinutesText, value))
-            {
-                MarkSettingsDirty();
-                OnPropertyChanged(nameof(WhdAutoSyncStatusLabel));
-            }
-        }
-    }
-
-    public string WhdAutoSyncStatusLabel
-    {
-        get => !WhdAutoSyncEnabled
-            ? "The server schedule is off."
-            : $"Server sync is scheduled every {ResolveWhdAutoSyncIntervalMinutes()} min.";
-    }
-
-    public string WhdSyncServiceHealthLabel => _whdSyncServiceStatus.Summary;
-
-    public string WhdSyncServiceLastRunLabel => _whdSyncServiceStatus.LastRunAt.HasValue
-        ? _whdSyncServiceStatus.LastRunAt.Value.ToString("g")
-        : "No server run recorded";
-
-    public string WhdSyncServiceQueueLabel => _whdSyncServiceStatus.IsRunning
-        ? $"Running; {_whdSyncServiceStatus.QueueDepth} request(s) queued"
-        : $"{_whdSyncServiceStatus.QueueDepth} request(s) queued";
-
-    public string SageSyncServiceHealthLabel => _sageSyncServiceStatus.Summary;
-
-    public string SageSyncServiceLastRunLabel => _sageSyncServiceStatus.LastRunAt.HasValue
-        ? _sageSyncServiceStatus.LastRunAt.Value.ToString("g")
-        : "No server run recorded";
-
-    public string SageSyncServiceQueueLabel => _sageSyncServiceStatus.IsRunning
-        ? $"Running; {_sageSyncServiceStatus.QueueDepth} request(s) queued"
-        : $"{_sageSyncServiceStatus.QueueDepth} request(s) queued";
-
-    public string SageSyncServiceCountsLabel => _sageSyncServiceStatus.LastReadCount.HasValue
-        ? $"Read {_sageSyncServiceStatus.LastReadCount.Value}, saved {_sageSyncServiceStatus.LastSavedCount ?? 0}, stale {_sageSyncServiceStatus.LastStaleCount ?? 0}"
-          + (_sageSyncServiceStatus.ExistingCount.HasValue
-              ? $" from {_sageSyncServiceStatus.ExistingCount.Value} existing mapping(s)"
-              : string.Empty)
-        : "No completed customer snapshot recorded";
-
-    public bool CanConfirmLargeSageRemoval =>
-        CanManageOrganizationSettings
-        && _sageSyncServiceStatus.RequiresLargeRemovalConfirmation
-        && _sageSyncServiceStatus.LatestRequestId.HasValue
-        && !_sageSyncServiceStatus.IsRunning;
 
     public string SageEmployeeId
     {
@@ -1007,30 +910,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    public string SageServerDsn
-    {
-        get => _sageServerDsn;
-        set
-        {
-            if (SetProperty(ref _sageServerDsn, value))
-            {
-                MarkSettingsDirty();
-            }
-        }
-    }
-
-    public string SageServerUsername
-    {
-        get => _sageServerUsername;
-        set
-        {
-            if (SetProperty(ref _sageServerUsername, value))
-            {
-                MarkSettingsDirty();
-            }
-        }
-    }
-
     public string RefreshIntervalMinutesText
     {
         get => _refreshIntervalMinutesText;
@@ -1102,9 +981,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             case "Common Links":
                 RefreshCommonLinks();
                 break;
-            case "Settings":
-                RefreshWhdAdministration();
-                break;
         }
     }
 
@@ -1120,7 +996,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         RefreshHistory();
         RefreshPostingQueue();
         RefreshPostingLogs();
-        RefreshWhdAdministration();
         UpdateTotals();
     }
 
@@ -1176,7 +1051,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     ReloadOrganizationSettings();
                 }
 
-                RefreshWhdAdministration();
             }
             catch (Exception ex) when (
                 ex is SqlException
@@ -1228,7 +1102,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         try
         {
             WhdBaseUrl = settings.GetValueOrDefault("Whd.BaseUrl", string.Empty);
-            WhdServiceUsername = settings.GetValueOrDefault("Whd.ServiceUsername", string.Empty);
             SelectedWhdAuthenticationMode = ToWhdAuthenticationModeLabel(
                 settings.GetValueOrDefault(
                     "Whd.AuthenticationMode",
@@ -1236,28 +1109,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             SageActivityItemId = settings.GetValueOrDefault(
                 "Sage.ActivityItemId",
                 string.Empty);
-            SageServerDsn = settings.GetValueOrDefault(
-                "Sage.SyncDsn",
-                string.Empty);
-            SageServerUsername = settings.GetValueOrDefault(
-                "Sage.SyncUsername",
-                string.Empty);
-            WhdAutoSyncEnabled = bool.TryParse(
-                settings.GetValueOrDefault("Whd.AutoSyncEnabled", "true"),
-                out var autoSyncEnabled)
-                ? autoSyncEnabled
-                : true;
-            WhdAutoSyncMinutesText = settings.GetValueOrDefault(
-                "Whd.AutoSyncMinutes",
-                "5");
         }
         finally
         {
             _isLoadingSettings = wasLoadingSettings;
         }
 
-        RefreshWhdSyncServiceStatus();
-        RefreshSageSyncServiceStatus();
     }
 
     private void RefreshTagSuggestions()
@@ -3427,17 +3284,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             WhdApiToken = CanWrite
                 ? LoadCredentialWithLegacyMigration(settings, "Whd.ApiToken")
                 : string.Empty;
-            WhdServiceUsername = settings.GetValueOrDefault("Whd.ServiceUsername", string.Empty);
             SelectedWhdAuthenticationMode = ToWhdAuthenticationModeLabel(
                 settings.GetValueOrDefault(
                     "Whd.AuthenticationMode",
                     WhdAuthenticationMode.Auto.ToString()));
-            WhdAutoSyncEnabled = bool.TryParse(
-                settings.GetValueOrDefault("Whd.AutoSyncEnabled", "true"),
-                out var autoSyncEnabled)
-                ? autoSyncEnabled
-                : true;
-            WhdAutoSyncMinutesText = settings.GetValueOrDefault("Whd.AutoSyncMinutes", "5");
             SageEmployeeId = settings.GetValueOrDefault("Sage.EmployeeId", string.Empty);
             SageActivityItemId = settings.GetValueOrDefault(
                 "Sage.ActivityItemId",
@@ -3447,8 +3297,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             SagePassword = CanWrite
                 ? LoadCredentialWithLegacyMigration(settings, "Sage.Password")
                 : string.Empty;
-            SageServerDsn = settings.GetValueOrDefault("Sage.SyncDsn", string.Empty);
-            SageServerUsername = settings.GetValueOrDefault("Sage.SyncUsername", string.Empty);
             SageCompanyPath = _localPreferences.SageCompanyPath;
             SageNativeAutoSave = _localPreferences.SageNativeAutoSave;
             RefreshIntervalMinutesText =
@@ -3467,19 +3315,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void SaveSettings()
     {
-        SaveWhdConnectionSettings(saveOrganizationSettings: true);
+        SaveWhdConnectionSettings();
         _repository.SaveSetting("Sage.EmployeeId", SageEmployeeId.Trim());
         _repository.DeleteSetting("Sage.DefaultCustomerId");
-        if (CanManageOrganizationSettings)
-        {
-            _repository.SaveOrganizationSetting(
-                "Sage.ActivityItemId",
-                SageActivityItemId.Trim());
-            _repository.SaveOrganizationSetting("Sage.SyncDsn", SageServerDsn.Trim());
-            _repository.SaveOrganizationSetting(
-                "Sage.SyncUsername",
-                SageServerUsername.Trim());
-        }
 
         SaveSageConnectionSettings();
         _localPreferences.Theme = IsLightTheme ? "Light" : "Dark";
@@ -3519,22 +3357,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task RequestWhdServerSyncAsync(object? parameter)
-    {
-        if (!CanManageOrganizationSettings)
-        {
-            return;
-        }
-
-        var result = await Task.Run(_repository.RequestWhdSync);
-        RefreshWhdSyncServiceStatus();
-        StatusMessage = result.Message;
-        if (!result.Accepted)
-        {
-            _dialogService.Error("Web Help Desk server sync", result.Message);
-        }
-    }
-
     private WhdConnectionSettings BuildWhdConnectionSettings()
     {
         return new WhdConnectionSettings
@@ -3555,48 +3377,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 || !string.IsNullOrWhiteSpace(WhdUsername));
     }
 
-    private void SaveWhdConnectionSettings(bool saveOrganizationSettings = false)
+    private void SaveWhdConnectionSettings()
     {
         _repository.SaveSetting("Whd.Username", WhdUsername.Trim());
         _credentialStore.SetSecret("Whd.ApiToken", WhdApiToken);
         _repository.DeleteSetting("Whd.ApiToken");
-        if (saveOrganizationSettings && CanManageOrganizationSettings)
-        {
-            var autoSyncMinutes = ResolveWhdAutoSyncIntervalMinutes();
-            _repository.SaveOrganizationSetting("Whd.BaseUrl", WhdBaseUrl.Trim());
-            _repository.SaveOrganizationSetting("Whd.ServiceUsername", WhdServiceUsername.Trim());
-            _repository.SaveOrganizationSetting(
-                "Whd.AuthenticationMode",
-                ParseWhdAuthenticationMode(SelectedWhdAuthenticationMode).ToString());
-            _repository.SaveOrganizationSetting(
-                "Whd.AutoSyncEnabled",
-                WhdAutoSyncEnabled.ToString());
-            _repository.SaveOrganizationSetting(
-                "Whd.AutoSyncMinutes",
-                autoSyncMinutes.ToString());
-            var wasLoadingSettings = _isLoadingSettings;
-            _isLoadingSettings = true;
-            try
-            {
-                WhdAutoSyncMinutesText = autoSyncMinutes.ToString();
-            }
-            finally
-            {
-                _isLoadingSettings = wasLoadingSettings;
-            }
-        }
-
-        OnPropertyChanged(nameof(WhdAutoSyncStatusLabel));
-    }
-
-    private int ResolveWhdAutoSyncIntervalMinutes()
-    {
-        if (!int.TryParse(WhdAutoSyncMinutesText, out var minutes))
-        {
-            return 5;
-        }
-
-        return Math.Clamp(minutes, 1, 120);
     }
 
     private void PrimeKnownWhdTicketKeys()
@@ -3677,94 +3462,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task SyncSageCustomersAsync(object? parameter)
-    {
-        if (!EnsureCanRunSharedSync("Sage customer sync"))
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(SageServerDsn))
-        {
-            const string message = "Enter the server's 32-bit Sage System DSN in Settings before requesting customer sync.";
-            StatusMessage = message;
-            _dialogService.Error("Server Sage customer sync", message);
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(SageServerUsername))
-        {
-            const string message = "Enter the server's Sage username in Settings before requesting customer sync.";
-            StatusMessage = message;
-            _dialogService.Error("Server Sage customer sync", message);
-            return;
-        }
-
-        var allowLargeRemoval = string.Equals(
-            parameter?.ToString(),
-            "AllowLargeRemoval",
-            StringComparison.OrdinalIgnoreCase);
-        if (allowLargeRemoval)
-        {
-            if (!_sageSyncServiceStatus.RequiresLargeRemovalConfirmation)
-            {
-                const string noConfirmationMessage = "There is no rejected Sage snapshot waiting for large-removal confirmation.";
-                StatusMessage = noConfirmationMessage;
-                _dialogService.Error("Server Sage customer sync", noConfirmationMessage);
-                return;
-            }
-
-            var staleCount = _sageSyncServiceStatus.LastStaleCount ?? 0;
-            var existingCount = _sageSyncServiceStatus.ExistingCount ?? 0;
-            if (!_sageSyncServiceStatus.LatestRequestId.HasValue)
-            {
-                const string missingProposalMessage = "The rejected Sage snapshot has no request identifier. Refresh server status and request a new unapproved sync.";
-                StatusMessage = missingProposalMessage;
-                _dialogService.Error("Server Sage customer sync", missingProposalMessage);
-                return;
-            }
-
-            if (!_dialogService.Confirm(
-                    "Confirm large Sage customer removal",
-                    $"The last server snapshot would remove {staleCount} of {existingCount} existing Sage customer mapping(s). "
-                    + "No customer data has been changed. Run Sage sync again and explicitly authorize this removal?",
-                    "Authorize and sync",
-                    "Cancel"))
-            {
-                return;
-            }
-        }
-
-        var confirmedRequestId = allowLargeRemoval
-            ? _sageSyncServiceStatus.LatestRequestId
-            : null;
-        StatusMessage = allowLargeRemoval
-            ? "Requesting confirmed Sage customer synchronization from the server..."
-            : "Requesting Sage customer synchronization from the server...";
-        try
-        {
-            _repository.SaveOrganizationSetting("Sage.SyncDsn", SageServerDsn.Trim());
-            _repository.SaveOrganizationSetting(
-                "Sage.SyncUsername",
-                SageServerUsername.Trim());
-            var result = await Task.Run(() => _repository.RequestSageSync(
-                allowLargeRemoval,
-                confirmedRequestId));
-            RefreshSageSyncServiceStatus();
-            StatusMessage = result.Message;
-            if (!result.Accepted)
-            {
-                _dialogService.Error("Server Sage customer sync", result.Message);
-            }
-        }
-        catch (Exception ex) when (ex is SqlException or InvalidOperationException or TimeoutException)
-        {
-            var message = $"The server Sage customer sync request failed: {ex.Message}";
-            StatusMessage = message;
-            _dialogService.Error("Server Sage customer sync", message);
-        }
-    }
-
     private void NotifyNewVisibleWhdTickets()
     {
         if (!CanWrite)
@@ -3805,73 +3502,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             _notificationService.ShowNewWhdTickets(newlyVisible);
         }
-    }
-
-    private void RefreshWhdSyncServiceStatus()
-    {
-        if (!CanManageOrganizationSettings)
-        {
-            return;
-        }
-
-        try
-        {
-            _whdSyncServiceStatus = _repository.GetWhdSyncStatus();
-            OnPropertyChanged(nameof(WhdSyncServiceHealthLabel));
-            OnPropertyChanged(nameof(WhdSyncServiceLastRunLabel));
-            OnPropertyChanged(nameof(WhdSyncServiceQueueLabel));
-        }
-        catch (Exception ex) when (ex is SqlException or InvalidOperationException or TimeoutException)
-        {
-            _whdSyncServiceStatus = new WhdSyncServiceStatus { Health = "Unavailable", Message = ex.Message };
-            OnPropertyChanged(nameof(WhdSyncServiceHealthLabel));
-            OnPropertyChanged(nameof(WhdSyncServiceLastRunLabel));
-            OnPropertyChanged(nameof(WhdSyncServiceQueueLabel));
-        }
-    }
-
-    private void RefreshSageSyncServiceStatus()
-    {
-        if (!CanManageOrganizationSettings)
-        {
-            return;
-        }
-
-        try
-        {
-            _sageSyncServiceStatus = _repository.GetSageSyncStatus();
-            OnPropertyChanged(nameof(SageSyncServiceHealthLabel));
-            OnPropertyChanged(nameof(SageSyncServiceLastRunLabel));
-            OnPropertyChanged(nameof(SageSyncServiceQueueLabel));
-            OnPropertyChanged(nameof(SageSyncServiceCountsLabel));
-            OnPropertyChanged(nameof(CanConfirmLargeSageRemoval));
-        }
-        catch (Exception ex) when (ex is SqlException or InvalidOperationException or TimeoutException)
-        {
-            _sageSyncServiceStatus = new SageSyncServiceStatus
-            {
-                Health = "Unavailable",
-                Message = ex.Message
-            };
-            OnPropertyChanged(nameof(SageSyncServiceHealthLabel));
-            OnPropertyChanged(nameof(SageSyncServiceLastRunLabel));
-            OnPropertyChanged(nameof(SageSyncServiceQueueLabel));
-            OnPropertyChanged(nameof(SageSyncServiceCountsLabel));
-            OnPropertyChanged(nameof(CanConfirmLargeSageRemoval));
-        }
-    }
-
-    private bool EnsureCanRunSharedSync(string operation)
-    {
-        if (CanRunSharedSync)
-        {
-            return true;
-        }
-
-        var message = $"Only a TechBench Admin may run {operation}.";
-        StatusMessage = message;
-        _dialogService.Info("Shared synchronization", message);
-        return false;
     }
 
     private void SaveSageConnectionSettings()

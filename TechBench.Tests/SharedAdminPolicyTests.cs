@@ -61,8 +61,8 @@ public sealed class SharedAdminPolicyTests
         Assert.Null(typeof(MainWindowViewModel).GetProperty("SyncWhdTicketsCommand"));
         Assert.Null(typeof(MainWindowViewModel).GetProperty("SyncWhdClientsCommand"));
         Assert.Null(typeof(MainWindowViewModel).GetProperty("SyncWhdStatusesCommand"));
-        Assert.NotNull(typeof(MainWindowViewModel).GetProperty("RequestWhdServerSyncCommand"));
-        Assert.NotNull(typeof(MainWindowViewModel).GetProperty("RefreshWhdAdministrationCommand"));
+        Assert.Null(typeof(MainWindowViewModel).GetProperty("RequestWhdServerSyncCommand"));
+        Assert.Null(typeof(MainWindowViewModel).GetProperty("RefreshWhdAdministrationCommand"));
         Assert.DoesNotContain(
             typeof(MainWindowViewModel).GetFields(
                 System.Reflection.BindingFlags.Instance
@@ -95,15 +95,15 @@ public sealed class SharedAdminPolicyTests
 
         Assert.NotNull(typeof(SageSyncServiceStatus).GetProperty(
             nameof(SageSyncServiceStatus.RequiresLargeRemovalConfirmation)));
-        Assert.NotNull(typeof(MainWindowViewModel).GetProperty(
-            nameof(MainWindowViewModel.CanConfirmLargeSageRemoval)));
+        Assert.Null(typeof(MainWindowViewModel).GetProperty("SyncSageCustomersCommand"));
+        Assert.Null(typeof(MainWindowViewModel).GetProperty("CanConfirmLargeSageRemoval"));
 
         Assert.Null(typeof(LocalPreferences).GetProperty("SageCustomerSyncMinutes"));
         Assert.Null(typeof(LocalPreferences).GetProperty("SageCustomerAutoSyncEnabled"));
     }
 
     [Fact]
-    public void PeriodicSharedRefreshReloadsServerSageConfiguration()
+    public void PeriodicSharedRefreshDoesNotPollServerSynchronizationOperations()
     {
         var source = File.ReadAllText(FindRepositoryFile(
             "ViewModels",
@@ -127,11 +127,12 @@ public sealed class SharedAdminPolicyTests
         Assert.Contains("ReloadOrganizationSettings();", timerBody);
 
         var reloadBody = source[start..end];
-        Assert.Contains("SageServerDsn = settings.GetValueOrDefault(", reloadBody);
-        Assert.Contains("\"Sage.SyncDsn\"", reloadBody);
-        Assert.Contains("SageServerUsername = settings.GetValueOrDefault(", reloadBody);
-        Assert.Contains("\"Sage.SyncUsername\"", reloadBody);
-        Assert.Contains("RefreshSageSyncServiceStatus();", reloadBody);
+        Assert.Contains("WhdBaseUrl = settings.GetValueOrDefault(", reloadBody);
+        Assert.Contains("SageActivityItemId = settings.GetValueOrDefault(", reloadBody);
+        Assert.DoesNotContain("Sage.SyncDsn", reloadBody);
+        Assert.DoesNotContain("Sage.SyncUsername", reloadBody);
+        Assert.DoesNotContain("RefreshWhdSyncServiceStatus", reloadBody);
+        Assert.DoesNotContain("RefreshSageSyncServiceStatus", reloadBody);
     }
 
     private static string FindRepositoryFile(params string[] relativeParts)

@@ -38,6 +38,9 @@ $script:TrayContextMenu = $null
 $script:TrayExitMenuItem = $null
 $script:NotifyIcon = $null
 $script:ManagerIcon = $null
+$script:OrganizationSettingRowVersions = @{}
+$script:LatestSageSyncStatus = $null
+$script:SynchronizationConfigurationLoaded = $false
 $script:MaximumPackageBytes = 536870912
 $script:MaximumExpandedBytes = 1073741824
 $script:MaximumArchiveEntries = 5000
@@ -657,6 +660,10 @@ function Set-ManagerBusy {
         $script:InstallUpdateButton
     )) {
         $control.Enabled = -not $Busy
+    }
+    if ($null -ne $script:WhdBaseUrlBox) {
+        Set-SynchronizationConfigurationEnabled `
+            -Enabled ((-not $Busy) -and $script:SynchronizationConfigurationLoaded)
     }
     if ($null -ne $script:TrayExitMenuItem) {
         $script:TrayExitMenuItem.Enabled = -not $Busy
@@ -2368,6 +2375,725 @@ function Install-VerifiedServicePayload {
     }
 }
 
+function New-TechBenchDatabaseConnection {
+    $configurationPath = Join-Path $script:InstallDirectory 'appsettings.json'
+    [void](Assert-NoReparsePointInPath `
+        -Path $configurationPath -TrustedRoot $script:ProgramFilesRootPath -AllowLeaf)
+    if (-not (Test-Path -LiteralPath $configurationPath -PathType Leaf)) {
+        throw 'The installed appsettings.json is missing, so TechBench SQL Server cannot be opened.'
+    }
+    $configurationItem = Get-Item -LiteralPath $configurationPath -Force
+    if (($configurationItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+        $configurationItem.PSIsContainer) {
+        throw 'The installed appsettings.json is not a trusted regular file.'
+    }
+
+    try {
+        $settings = Get-Content -LiteralPath $configurationPath -Raw | ConvertFrom-Json
+        $server = [string]$settings.TechBenchSync.SqlServer
+        $database = [string]$settings.TechBenchSync.Database
+        if ([string]::IsNullOrWhiteSpace($server) -or
+            [string]::IsNullOrWhiteSpace($database)) {
+            throw 'SqlServer or Database is blank.'
+        }
+
+        Add-Type -AssemblyName System.Data
+        $builder = [Data.SqlClient.SqlConnectionStringBuilder]::new()
+        $builder.DataSource = $server
+        $builder.InitialCatalog = $database
+        $builder.IntegratedSecurity = $true
+        $builder.ApplicationName = 'TechBench Server Manager'
+        $builder.ConnectTimeout = 15
+        $builder.Encrypt = $true
+        $builder.TrustServerCertificate = [bool]$settings.TechBenchSync.TrustServerCertificate
+        return [Data.SqlClient.SqlConnection]::new($builder.ConnectionString)
+    } catch {
+        throw "The installed SQL configuration could not be read. $($_.Exception.Message)"
+    }
+}
+
+function New-TechBenchStoredProcedureCommand {
+    param(
+        [Parameter(Mandatory = $true)][Data.SqlClient.SqlConnection]$Connection,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Data.SqlClient.SqlTransaction]$Transaction
+    )
+
+    $command = $Connection.CreateCommand()
+    $command.CommandType = [Data.CommandType]::StoredProcedure
+    $command.CommandText = $Name
+    $command.CommandTimeout = 30
+    if ($null -ne $Transaction) {
+        $command.Transaction = $Transaction
+    }
+    return $command
+}
+
+function Get-TechBenchReaderValue {
+    param(
+        [Parameter(Mandatory = $true)]$Reader,
+        [Parameter(Mandatory = $true)][string]$Name,
+        $DefaultValue = $null
+    )
+
+    try {
+        $ordinal = $Reader.GetOrdinal($Name)
+    } catch [IndexOutOfRangeException] {
+        return $DefaultValue
+    }
+    if ($Reader.IsDBNull($ordinal)) {
+        return $DefaultValue
+    }
+    return $Reader.GetValue($ordinal)
+}
+
+function Format-TechBenchUtcValue {
+    param($Value)
+
+    if ($null -eq $Value -or $Value -is [DBNull]) {
+        return 'Never'
+    }
+    $utc = [DateTime]$Value
+    if ($utc.Kind -eq [DateTimeKind]::Unspecified) {
+        $utc = [DateTime]::SpecifyKind($utc, [DateTimeKind]::Utc)
+    }
+    return $utc.ToLocalTime().ToString('g')
+}
+
+function Open-TechBenchAdminDatabaseConnection {
+    $connection = New-TechBenchDatabaseConnection
+    try {
+        $connection.Open()
+        $command = New-TechBenchStoredProcedureCommand `
+            -Connection $connection -Name 'tb_app.GetCurrentUserContext'
+        try {
+            $reader = $command.ExecuteReader()
+            try {
+                if (-not $reader.Read()) {
+                    throw 'tb_app.GetCurrentUserContext returned no row.'
+                }
+                $schemaVersion = [int](Get-TechBenchReaderValue `
+                    -Reader $reader -Name 'SchemaVersion' -DefaultValue 0)
+                $isAdmin = [bool](Get-TechBenchReaderValue `
+                    -Reader $reader -Name 'IsAdmin' -DefaultValue $false)
+                $loginName = [string](Get-TechBenchReaderValue `
+                    -Reader $reader -Name 'AuthenticatedLoginName' -DefaultValue '')
+            } finally {
+                $reader.Dispose()
+            }
+        } finally {
+            $command.Dispose()
+        }
+
+        if ($schemaVersion -ne 7) {
+            throw "Server Manager requires TechBench database schema 7; the installed schema is $schemaVersion."
+        }
+        if (-not $isAdmin) {
+            throw "'$loginName' is not a member of the TechBench Admin role. Sign in with an account in CSRI\TechBench_Admins."
+        }
+        return $connection
+    } catch {
+        $connection.Dispose()
+        throw
+    }
+}
+
+function Add-TechBenchSqlTextParameter {
+    param(
+        [Parameter(Mandatory = $true)][Data.SqlClient.SqlCommand]$Command,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][int]$Size,
+        [AllowEmptyString()][string]$Value
+    )
+
+    $parameter = $Command.Parameters.Add($Name, [Data.SqlDbType]::NVarChar, $Size)
+    $parameter.Value = if ($null -eq $Value) { [DBNull]::Value } else { $Value }
+    return $parameter
+}
+
+function Get-TechBenchSynchronizationConfiguration {
+    $connection = Open-TechBenchAdminDatabaseConnection
+    try {
+        $wantedKeys = @(
+            'Whd.BaseUrl',
+            'Whd.AuthenticationMode',
+            'Whd.ServiceUsername',
+            'Whd.AutoSyncEnabled',
+            'Whd.AutoSyncMinutes',
+            'Sage.SyncDsn',
+            'Sage.SyncUsername',
+            'Sage.ActivityItemId'
+        )
+        $settings = @{}
+        $rowVersions = @{}
+        $command = New-TechBenchStoredProcedureCommand `
+            -Connection $connection -Name 'tb_app.GetSettings'
+        try {
+            $reader = $command.ExecuteReader()
+            try {
+                while ($reader.Read()) {
+                    $key = [string](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'SettingKey' -DefaultValue '')
+                    $scope = [string](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'ScopeType' -DefaultValue '')
+                    if ($wantedKeys -notcontains $key -or
+                        -not $scope.Equals('Organization', [StringComparison]::OrdinalIgnoreCase)) {
+                        continue
+                    }
+                    $settings[$key] = [string](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'SettingValue' -DefaultValue '')
+                    $rowVersion = Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'RowVersion'
+                    if ($null -ne $rowVersion -and $rowVersion -isnot [DBNull]) {
+                        $rowVersions[$key] = [byte[]]$rowVersion
+                    }
+                }
+            } finally {
+                $reader.Dispose()
+            }
+        } finally {
+            $command.Dispose()
+        }
+
+        $whdStatus = [PSCustomObject]@{
+            Status = 'NeverRun'
+            Message = ''
+            QueueDepth = 0
+            LastAttemptAtUtc = $null
+            LastSuccessfulAtUtc = $null
+            LastError = ''
+        }
+        $command = New-TechBenchStoredProcedureCommand `
+            -Connection $connection -Name 'tb_app.GetWhdSyncStatus'
+        try {
+            $reader = $command.ExecuteReader()
+            try {
+                if ($reader.Read()) {
+                    $whdStatus.Status = [string](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'Status' -DefaultValue 'NeverRun')
+                    $whdStatus.Message = [string](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'Message' -DefaultValue '')
+                    $whdStatus.QueueDepth = [int](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'QueueDepth' -DefaultValue 0)
+                    $whdStatus.LastAttemptAtUtc = Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'RequestedAtUtc'
+                    $whdStatus.LastSuccessfulAtUtc = Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'CompletedAtUtc'
+                }
+                if ($reader.NextResult() -and $reader.Read()) {
+                    $whdStatus.LastAttemptAtUtc = Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'LastAttemptAtUtc' `
+                        -DefaultValue $whdStatus.LastAttemptAtUtc
+                    $whdStatus.LastSuccessfulAtUtc = Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'LastSuccessfulAtUtc' `
+                        -DefaultValue $whdStatus.LastSuccessfulAtUtc
+                    $whdStatus.LastError = [string](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'LastError' -DefaultValue '')
+                }
+            } finally {
+                $reader.Dispose()
+            }
+        } finally {
+            $command.Dispose()
+        }
+
+        $sageStatus = [PSCustomObject]@{
+            RequestId = $null
+            Status = 'NeverRun'
+            Message = ''
+            QueueDepth = 0
+            LastAttemptAtUtc = $null
+            LastSuccessfulAtUtc = $null
+            LastError = ''
+            RequiresLargeRemovalConfirmation = $false
+            ExistingCount = 0
+            ReadCount = 0
+            SavedCount = 0
+            StaleCount = 0
+        }
+        $command = New-TechBenchStoredProcedureCommand `
+            -Connection $connection -Name 'tb_app.GetSageSyncStatus'
+        try {
+            $reader = $command.ExecuteReader()
+            try {
+                if ($reader.Read()) {
+                    $sageStatus.RequestId = Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'RequestId'
+                    $sageStatus.Status = [string](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'Status' -DefaultValue 'NeverRun')
+                    $sageStatus.Message = [string](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'Message' -DefaultValue '')
+                    $sageStatus.QueueDepth = [int](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'QueueDepth' -DefaultValue 0)
+                    $sageStatus.LastAttemptAtUtc = Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'RequestedAtUtc'
+                    $sageStatus.LastSuccessfulAtUtc = Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'CompletedAtUtc'
+                    $sageStatus.RequiresLargeRemovalConfirmation = [bool](
+                        Get-TechBenchReaderValue -Reader $reader `
+                            -Name 'RequiresLargeRemovalConfirmation' -DefaultValue $false)
+                    foreach ($countName in @('ExistingCount', 'ReadCount', 'SavedCount', 'StaleCount')) {
+                        $sageStatus.$countName = [int](Get-TechBenchReaderValue `
+                            -Reader $reader -Name $countName -DefaultValue 0)
+                    }
+                }
+                if ($reader.NextResult() -and $reader.Read()) {
+                    $sageStatus.LastAttemptAtUtc = Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'LastAttemptAtUtc' `
+                        -DefaultValue $sageStatus.LastAttemptAtUtc
+                    $sageStatus.LastSuccessfulAtUtc = Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'LastSuccessfulAtUtc' `
+                        -DefaultValue $sageStatus.LastSuccessfulAtUtc
+                    $sageStatus.LastError = [string](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'LastError' -DefaultValue '')
+                }
+            } finally {
+                $reader.Dispose()
+            }
+        } finally {
+            $command.Dispose()
+        }
+
+        $userMappings = @()
+        $command = New-TechBenchStoredProcedureCommand `
+            -Connection $connection -Name 'tb_app.AdminGetWhdUserMappings'
+        try {
+            $reader = $command.ExecuteReader()
+            try {
+                while ($reader.Read()) {
+                    $loginName = [string](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'LoginName' -DefaultValue '')
+                    $displayName = [string](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'DisplayName' -DefaultValue '')
+                    $userMappings += [PSCustomObject]@{
+                        LoginName = $loginName
+                        Label = if ([string]::IsNullOrWhiteSpace($displayName)) {
+                            $loginName
+                        } else {
+                            "$displayName ($loginName)"
+                        }
+                        TechnicianExternalId = [string](Get-TechBenchReaderValue `
+                            -Reader $reader -Name 'TechnicianExternalId' -DefaultValue '')
+                    }
+                }
+            } finally {
+                $reader.Dispose()
+            }
+        } finally {
+            $command.Dispose()
+        }
+
+        $technicians = @([PSCustomObject]@{
+            ExternalId = ''
+            Label = 'No WHD technician (remove mapping)'
+        })
+        $command = New-TechBenchStoredProcedureCommand `
+            -Connection $connection -Name 'tb_app.AdminGetWhdTechnicians'
+        try {
+            $reader = $command.ExecuteReader()
+            try {
+                while ($reader.Read()) {
+                    $externalId = [string](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'ExternalId' -DefaultValue '')
+                    $displayName = [string](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'DisplayName' -DefaultValue $externalId)
+                    $isActive = [bool](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'IsActive' -DefaultValue $true)
+                    $technicians += [PSCustomObject]@{
+                        ExternalId = $externalId
+                        Label = $displayName + $(if ($isActive) { '' } else { ' (inactive)' })
+                    }
+                }
+            } finally {
+                $reader.Dispose()
+            }
+        } finally {
+            $command.Dispose()
+        }
+
+        return [PSCustomObject]@{
+            Settings = $settings
+            RowVersions = $rowVersions
+            WhdStatus = $whdStatus
+            SageStatus = $sageStatus
+            UserMappings = $userMappings
+            Technicians = $technicians
+        }
+    } finally {
+        $connection.Dispose()
+    }
+}
+
+function Save-TechBenchOrganizationSettings {
+    param([Parameter(Mandatory = $true)][hashtable]$Settings)
+
+    $connection = Open-TechBenchAdminDatabaseConnection
+    $newRowVersions = @{}
+    $transaction = $null
+    try {
+        $transaction = $connection.BeginTransaction()
+        foreach ($key in @($Settings.Keys | Sort-Object)) {
+            $command = New-TechBenchStoredProcedureCommand `
+                -Connection $connection `
+                -Name 'tb_app.AdminSaveOrganizationSetting' `
+                -Transaction $transaction
+            try {
+                [void](Add-TechBenchSqlTextParameter `
+                    -Command $command -Name '@SettingKey' -Size 200 -Value $key)
+                [void](Add-TechBenchSqlTextParameter `
+                    -Command $command -Name '@SettingValue' -Size -1 `
+                    -Value ([string]$Settings[$key]))
+                $rowVersionParameter = $command.Parameters.Add(
+                    '@ExpectedRowVersion', [Data.SqlDbType]::Binary, 8)
+                $rowVersionParameter.Value = if (
+                    $script:OrganizationSettingRowVersions.ContainsKey($key)) {
+                    [byte[]]$script:OrganizationSettingRowVersions[$key]
+                } else {
+                    [DBNull]::Value
+                }
+                $requestParameter = $command.Parameters.Add(
+                    '@RequestId', [Data.SqlDbType]::UniqueIdentifier)
+                $requestParameter.Value = [Guid]::NewGuid()
+                $reader = $command.ExecuteReader()
+                try {
+                    if (-not $reader.Read()) {
+                        throw "SQL Server did not return the saved organization setting '$key'."
+                    }
+                    $newRowVersions[$key] = [byte[]](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'RowVersion')
+                } finally {
+                    $reader.Dispose()
+                }
+            } finally {
+                $command.Dispose()
+            }
+        }
+        $transaction.Commit()
+        foreach ($key in $newRowVersions.Keys) {
+            $script:OrganizationSettingRowVersions[$key] = $newRowVersions[$key]
+        }
+    } catch {
+        if ($null -ne $transaction -and $null -ne $transaction.Connection) {
+            try { $transaction.Rollback() } catch { }
+        }
+        throw
+    } finally {
+        if ($null -ne $transaction) { $transaction.Dispose() }
+        $connection.Dispose()
+    }
+}
+
+function Save-WhdSynchronizationConfiguration {
+    $baseUrlText = $script:WhdBaseUrlBox.Text.Trim().TrimEnd('/')
+    $baseUri = $null
+    if (-not [Uri]::TryCreate($baseUrlText, [UriKind]::Absolute, [ref]$baseUri) -or
+        -not $baseUri.Scheme.Equals('https', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Enter the complete HTTPS Web Help Desk base URL.'
+    }
+    $serviceUsername = $script:WhdServiceUsernameBox.Text.Trim()
+    if ([string]::IsNullOrWhiteSpace($serviceUsername)) {
+        throw 'Enter the organization-wide WHD service username.'
+    }
+    $authenticationMode = [string]$script:WhdAuthenticationModeBox.SelectedItem
+    if ($authenticationMode -notin @(
+            'Auto', 'UsernamePassword', 'ApplicationApiKey', 'TechnicianApiKey')) {
+        throw 'Select a supported WHD authentication mode.'
+    }
+    $minutes = 0
+    if (-not [int]::TryParse($script:WhdAutoSyncMinutesBox.Text.Trim(), [ref]$minutes) -or
+        $minutes -lt 1 -or $minutes -gt 120) {
+        throw 'WHD synchronization interval must be from 1 through 120 minutes.'
+    }
+
+    Save-TechBenchOrganizationSettings -Settings @{
+        'Whd.BaseUrl' = $baseUrlText
+        'Whd.AuthenticationMode' = $authenticationMode
+        'Whd.ServiceUsername' = $serviceUsername
+        'Whd.AutoSyncEnabled' = $script:WhdAutoSyncEnabledBox.Checked.ToString()
+        'Whd.AutoSyncMinutes' = $minutes.ToString()
+    }
+    Add-StatusLine 'Shared WHD server configuration saved to SQL Server.'
+}
+
+function Save-SageSynchronizationConfiguration {
+    $dsn = $script:SageSyncDsnBox.Text.Trim()
+    $username = $script:SageSyncUsernameBox.Text.Trim()
+    if ([string]::IsNullOrWhiteSpace($dsn)) {
+        throw 'Enter the server 32-bit Sage System DSN.'
+    }
+    if ([string]::IsNullOrWhiteSpace($username)) {
+        throw 'Enter the organization-wide Sage ODBC username.'
+    }
+    Save-TechBenchOrganizationSettings -Settings @{
+        'Sage.SyncDsn' = $dsn
+        'Sage.SyncUsername' = $username
+        'Sage.ActivityItemId' = $script:SageActivityItemIdBox.Text.Trim()
+    }
+    Add-StatusLine 'Shared Sage server configuration saved to SQL Server.'
+}
+
+function Request-WhdSynchronization {
+    Save-WhdSynchronizationConfiguration
+    $connection = Open-TechBenchAdminDatabaseConnection
+    try {
+        $command = New-TechBenchStoredProcedureCommand `
+            -Connection $connection -Name 'tb_app.AdminRequestWhdSync'
+        try {
+            [void](Add-TechBenchSqlTextParameter `
+                -Command $command -Name '@RequestType' -Size 40 -Value 'Incremental')
+            $requestParameter = $command.Parameters.Add(
+                '@RequestId', [Data.SqlDbType]::UniqueIdentifier)
+            $requestParameter.Value = [Guid]::NewGuid()
+            $reader = $command.ExecuteReader()
+            try {
+                $status = if ($reader.Read()) {
+                    [string](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'Status' -DefaultValue 'Queued')
+                } else {
+                    'Queued'
+                }
+            } finally {
+                $reader.Dispose()
+            }
+        } finally {
+            $command.Dispose()
+        }
+    } finally {
+        $connection.Dispose()
+    }
+    Add-StatusLine $(if ($status -eq 'AlreadyQueued') {
+        'A WHD synchronization is already queued or running.'
+    } else {
+        'WHD organization synchronization queued on the server.'
+    })
+}
+
+function Request-SageSynchronization {
+    param([switch]$AllowLargeRemoval)
+
+    Save-SageSynchronizationConfiguration
+    $confirmedRequestId = $null
+    if ($AllowLargeRemoval) {
+        if ($null -eq $script:LatestSageSyncStatus -or
+            -not $script:LatestSageSyncStatus.RequiresLargeRemovalConfirmation -or
+            $null -eq $script:LatestSageSyncStatus.RequestId) {
+            throw 'There is no rejected Sage snapshot waiting for large-removal confirmation.'
+        }
+        $confirmedRequestId = [Guid]$script:LatestSageSyncStatus.RequestId
+    }
+
+    $connection = Open-TechBenchAdminDatabaseConnection
+    try {
+        $command = New-TechBenchStoredProcedureCommand `
+            -Connection $connection -Name 'tb_app.AdminRequestSageSync'
+        try {
+            $requestParameter = $command.Parameters.Add(
+                '@RequestId', [Data.SqlDbType]::UniqueIdentifier)
+            $requestParameter.Value = [Guid]::NewGuid()
+            $allowParameter = $command.Parameters.Add(
+                '@AllowLargeRemoval', [Data.SqlDbType]::Bit)
+            $allowParameter.Value = [bool]$AllowLargeRemoval
+            $confirmedParameter = $command.Parameters.Add(
+                '@ConfirmedRequestId', [Data.SqlDbType]::UniqueIdentifier)
+            $confirmedParameter.Value = if ($null -eq $confirmedRequestId) {
+                [DBNull]::Value
+            } else {
+                $confirmedRequestId
+            }
+            $reader = $command.ExecuteReader()
+            try {
+                $status = if ($reader.Read()) {
+                    [string](Get-TechBenchReaderValue `
+                        -Reader $reader -Name 'Status' -DefaultValue 'Queued')
+                } else {
+                    'Queued'
+                }
+            } finally {
+                $reader.Dispose()
+            }
+        } finally {
+            $command.Dispose()
+        }
+    } finally {
+        $connection.Dispose()
+    }
+    Add-StatusLine $(if ($status -eq 'AlreadyQueued') {
+        'A Sage customer synchronization is already queued or running.'
+    } elseif ($AllowLargeRemoval) {
+        'Confirmed Sage customer synchronization queued on the server.'
+    } else {
+        'Sage customer synchronization queued on the server.'
+    })
+}
+
+function Save-WhdUserTechnicianMapping {
+    $mapping = $script:WhdUserMappingBox.SelectedItem
+    $technician = $script:WhdTechnicianBox.SelectedItem
+    if ($null -eq $mapping -or [string]::IsNullOrWhiteSpace([string]$mapping.LoginName)) {
+        throw 'Select a TechBench user.'
+    }
+    if ($null -eq $technician) {
+        throw 'Select a WHD technician or the remove-mapping option.'
+    }
+
+    $connection = Open-TechBenchAdminDatabaseConnection
+    try {
+        $command = New-TechBenchStoredProcedureCommand `
+            -Connection $connection -Name 'tb_app.AdminSaveWhdUserMapping'
+        try {
+            [void](Add-TechBenchSqlTextParameter `
+                -Command $command -Name '@WindowsLoginName' -Size 256 `
+                -Value ([string]$mapping.LoginName))
+            $technicianParameter = $command.Parameters.Add(
+                '@TechnicianExternalId', [Data.SqlDbType]::NVarChar, 120)
+            $technicianParameter.Value = if (
+                [string]::IsNullOrWhiteSpace([string]$technician.ExternalId)) {
+                [DBNull]::Value
+            } else {
+                [string]$technician.ExternalId
+            }
+            $reader = $command.ExecuteReader()
+            try {
+                if ($reader.Read()) { }
+            } finally {
+                $reader.Dispose()
+            }
+        } finally {
+            $command.Dispose()
+        }
+    } finally {
+        $connection.Dispose()
+    }
+    Add-StatusLine "WHD technician mapping saved for $($mapping.LoginName)."
+}
+
+function Set-SynchronizationConfigurationEnabled {
+    param([Parameter(Mandatory = $true)][bool]$Enabled)
+
+    foreach ($control in @(
+        $script:WhdBaseUrlBox,
+        $script:WhdAuthenticationModeBox,
+        $script:WhdServiceUsernameBox,
+        $script:WhdAutoSyncEnabledBox,
+        $script:WhdAutoSyncMinutesBox,
+        $script:SaveWhdConfigurationButton,
+        $script:RequestWhdSyncButton,
+        $script:RefreshWhdConfigurationButton,
+        $script:WhdUserMappingBox,
+        $script:WhdTechnicianBox,
+        $script:SaveWhdMappingButton,
+        $script:SageSyncDsnBox,
+        $script:SageSyncUsernameBox,
+        $script:SageActivityItemIdBox,
+        $script:SaveSageConfigurationButton,
+        $script:RequestSageSyncButton,
+        $script:RefreshSageConfigurationButton
+    )) {
+        if ($null -ne $control) { $control.Enabled = $Enabled }
+    }
+    if ($null -ne $script:ConfirmSageRemovalButton) {
+        $script:ConfirmSageRemovalButton.Enabled = $Enabled -and
+            $null -ne $script:LatestSageSyncStatus -and
+            $script:LatestSageSyncStatus.RequiresLargeRemovalConfirmation
+    }
+}
+
+function Refresh-SynchronizationConfiguration {
+    try {
+        $configuration = Get-TechBenchSynchronizationConfiguration
+        $script:OrganizationSettingRowVersions = $configuration.RowVersions
+        $script:LatestSageSyncStatus = $configuration.SageStatus
+
+        $script:WhdBaseUrlBox.Text = [string]$configuration.Settings['Whd.BaseUrl']
+        $authenticationMode = [string]$configuration.Settings['Whd.AuthenticationMode']
+        if ([string]::IsNullOrWhiteSpace($authenticationMode)) { $authenticationMode = 'Auto' }
+        $script:WhdAuthenticationModeBox.SelectedItem = $authenticationMode
+        if ($script:WhdAuthenticationModeBox.SelectedIndex -lt 0) {
+            $script:WhdAuthenticationModeBox.SelectedItem = 'Auto'
+        }
+        $script:WhdServiceUsernameBox.Text = [string]$configuration.Settings['Whd.ServiceUsername']
+        $autoSyncEnabled = $true
+        [void][bool]::TryParse(
+            [string]$configuration.Settings['Whd.AutoSyncEnabled'],
+            [ref]$autoSyncEnabled)
+        $script:WhdAutoSyncEnabledBox.Checked = $autoSyncEnabled
+        $minutes = [string]$configuration.Settings['Whd.AutoSyncMinutes']
+        $script:WhdAutoSyncMinutesBox.Text = if ([string]::IsNullOrWhiteSpace($minutes)) { '5' } else { $minutes }
+
+        $whdStatus = $configuration.WhdStatus
+        $whdHealth = if ([string]::IsNullOrWhiteSpace($whdStatus.LastError)) {
+            $whdStatus.Status
+        } else {
+            'Error: ' + $whdStatus.LastError
+        }
+        $script:WhdSynchronizationStatusValue.Text =
+            "Health: $whdHealth`r`nQueue: $($whdStatus.QueueDepth) | Last attempt: $(Format-TechBenchUtcValue $whdStatus.LastAttemptAtUtc)"
+
+        $selectedLogin = if ($null -ne $script:WhdUserMappingBox.SelectedItem) {
+            [string]$script:WhdUserMappingBox.SelectedItem.LoginName
+        } else { '' }
+        $script:WhdUserMappingBox.Items.Clear()
+        foreach ($mapping in $configuration.UserMappings) {
+            [void]$script:WhdUserMappingBox.Items.Add($mapping)
+        }
+        if ($script:WhdUserMappingBox.Items.Count -gt 0) {
+            $selection = @($configuration.UserMappings | Where-Object {
+                $_.LoginName -eq $selectedLogin
+            } | Select-Object -First 1)
+            $script:WhdUserMappingBox.SelectedItem = if ($selection.Count -eq 1) {
+                $selection[0]
+            } else {
+                $script:WhdUserMappingBox.Items[0]
+            }
+        }
+        $script:WhdTechnicianBox.Items.Clear()
+        foreach ($technician in $configuration.Technicians) {
+            [void]$script:WhdTechnicianBox.Items.Add($technician)
+        }
+        if ($script:WhdTechnicianBox.Items.Count -gt 0) {
+            $selectedMapping = $script:WhdUserMappingBox.SelectedItem
+            $targetExternalId = if ($null -ne $selectedMapping) {
+                [string]$selectedMapping.TechnicianExternalId
+            } else { '' }
+            $selectedTechnician = @($configuration.Technicians | Where-Object {
+                $_.ExternalId -eq $targetExternalId
+            } | Select-Object -First 1)
+            $script:WhdTechnicianBox.SelectedItem = if ($selectedTechnician.Count -eq 1) {
+                $selectedTechnician[0]
+            } else {
+                $script:WhdTechnicianBox.Items[0]
+            }
+        }
+
+        $script:SageSyncDsnBox.Text = [string]$configuration.Settings['Sage.SyncDsn']
+        $script:SageSyncUsernameBox.Text = [string]$configuration.Settings['Sage.SyncUsername']
+        $script:SageActivityItemIdBox.Text = [string]$configuration.Settings['Sage.ActivityItemId']
+        $sageStatus = $configuration.SageStatus
+        $sageHealth = if ([string]::IsNullOrWhiteSpace($sageStatus.LastError)) {
+            $sageStatus.Status
+        } else {
+            'Error: ' + $sageStatus.LastError
+        }
+        $script:SageSynchronizationStatusValue.Text =
+            "Health: $sageHealth`r`nQueue: $($sageStatus.QueueDepth) | Last attempt: $(Format-TechBenchUtcValue $sageStatus.LastAttemptAtUtc)`r`nLast snapshot: read $($sageStatus.ReadCount), saved $($sageStatus.SavedCount), stale $($sageStatus.StaleCount)"
+        $script:SynchronizationConfigurationLoaded = $true
+        Set-SynchronizationConfigurationEnabled -Enabled $true
+        Add-StatusLine 'Shared WHD and Sage configuration refreshed from SQL Server.'
+    } catch {
+        $script:SynchronizationConfigurationLoaded = $false
+        $script:LatestSageSyncStatus = $null
+        Set-SynchronizationConfigurationEnabled -Enabled $false
+        $errorText = "Configuration unavailable: $($_.Exception.Message)"
+        if ($null -ne $script:WhdSynchronizationStatusValue) {
+            $script:WhdSynchronizationStatusValue.Text = $errorText
+        }
+        if ($null -ne $script:SageSynchronizationStatusValue) {
+            $script:SageSynchronizationStatusValue.Text = $errorText
+        }
+        throw
+    }
+}
+
 function Assert-RequiredDatabaseSchema {
     param([Parameter(Mandatory = $true)][int]$RequiredVersion)
 
@@ -2383,17 +3109,7 @@ function Assert-RequiredDatabaseSchema {
             throw 'SqlServer or Database is blank.'
         }
 
-        Add-Type -AssemblyName System.Data
-        $builder = [Data.SqlClient.SqlConnectionStringBuilder]::new()
-        $builder.DataSource = $server
-        $builder.InitialCatalog = $database
-        $builder.IntegratedSecurity = $true
-        $builder.ApplicationName = 'TechBench Server Manager'
-        $builder.ConnectTimeout = 15
-        $builder.Encrypt = $true
-        $builder.TrustServerCertificate = [bool]$settings.TechBenchSync.TrustServerCertificate
-
-        $connection = [Data.SqlClient.SqlConnection]::new($builder.ConnectionString)
+        $connection = New-TechBenchDatabaseConnection
         try {
             $connection.Open()
             $command = $connection.CreateCommand()
@@ -2804,8 +3520,8 @@ try {
 
 $script:MainForm = [Windows.Forms.Form]::new()
 $script:MainForm.Text = 'TechBench Server Manager'
-$script:MainForm.ClientSize = [Drawing.Size]::new(790, 715)
-$script:MainForm.MinimumSize = [Drawing.Size]::new(806, 754)
+$script:MainForm.ClientSize = [Drawing.Size]::new(1190, 715)
+$script:MainForm.MinimumSize = [Drawing.Size]::new(1206, 754)
 $script:MainForm.StartPosition = [Windows.Forms.FormStartPosition]::CenterScreen
 $script:MainForm.AutoScaleMode = [Windows.Forms.AutoScaleMode]::Dpi
 
@@ -2921,14 +3637,14 @@ $script:MainForm.Add_Resize({
 $title = New-Label -Text 'TechBench Server Manager' -X 22 -Y 17 -Width 500 -Height 31 -Bold $true
 $title.Font = [Drawing.Font]::new('Segoe UI', 16, [Drawing.FontStyle]::Bold)
 $subtitle = New-Label `
-    -Text 'Manage the server service and its machine-protected credentials.' `
-    -X 24 -Y 52 -Width 620
+    -Text 'Manage the server service, shared synchronization configuration, and machine-protected credentials.' `
+    -X 24 -Y 52 -Width 900
 
 $serviceGroup = [Windows.Forms.GroupBox]::new()
 $serviceGroup.Text = 'Service'
 $serviceGroup.Location = [Drawing.Point]::new(20, 83)
 $serviceGroup.Size = [Drawing.Size]::new(750, 146)
-$serviceGroup.Anchor = 'Top, Left, Right'
+$serviceGroup.Anchor = 'Top, Left'
 
 $serviceGroup.Controls.Add((New-Label -Text 'Status' -X 18 -Y 27 -Width 90))
 $script:ServiceStatusValue = New-Label -Text 'Loading...' -X 120 -Y 27 -Width 205 -Bold $true
@@ -2955,7 +3671,7 @@ $accountGroup = [Windows.Forms.GroupBox]::new()
 $accountGroup.Text = 'Windows service identity'
 $accountGroup.Location = [Drawing.Point]::new(20, 239)
 $accountGroup.Size = [Drawing.Size]::new(750, 131)
-$accountGroup.Anchor = 'Top, Left, Right'
+$accountGroup.Anchor = 'Top, Left'
 $accountGroup.Controls.Add((New-Label -Text 'Domain account' -X 18 -Y 28 -Width 120))
 $script:ServiceAccountBox = [Windows.Forms.TextBox]::new()
 $script:ServiceAccountBox.Location = [Drawing.Point]::new(144, 25)
@@ -2982,7 +3698,7 @@ $credentialGroup = [Windows.Forms.GroupBox]::new()
 $credentialGroup.Text = 'Protected server credentials'
 $credentialGroup.Location = [Drawing.Point]::new(20, 380)
 $credentialGroup.Size = [Drawing.Size]::new(750, 149)
-$credentialGroup.Anchor = 'Top, Left, Right'
+$credentialGroup.Anchor = 'Top, Left'
 $credentialGroup.Controls.Add((New-Label -Text 'WHD secret' -X 18 -Y 29 -Width 110))
 $script:WhdSecretBox = New-SecretTextBox -X 132 -Y 26 -Width 284
 $credentialGroup.Controls.Add($script:WhdSecretBox)
@@ -3008,7 +3724,7 @@ $credentialGroup.Controls.Add($script:SaveSageButton)
 $script:SageConfiguredValue = New-Label -Text 'Loading...' -X 630 -Y 70 -Width 105
 $credentialGroup.Controls.Add($script:SageConfiguredValue)
 $boundaryLabel = New-Label `
-    -Text 'WHD username, Sage DSN/username, schedules, and other shared settings remain Admin-managed in SQL.' `
+    -Text 'Shared WHD/Sage settings are managed on the right. Secrets remain machine-protected on this server.' `
     -X 18 -Y 108 -Width 710
 $boundaryLabel.ForeColor = [Drawing.SystemColors]::GrayText
 $credentialGroup.Controls.Add($boundaryLabel)
@@ -3017,7 +3733,7 @@ $updateGroup = [Windows.Forms.GroupBox]::new()
 $updateGroup.Text = 'Service updates'
 $updateGroup.Location = [Drawing.Point]::new(20, 539)
 $updateGroup.Size = [Drawing.Size]::new(750, 82)
-$updateGroup.Anchor = 'Top, Left, Right'
+$updateGroup.Anchor = 'Top, Left'
 $script:CheckUpdatesButton = New-Button -Text 'Check for updates' -X 18 -Y 29 -Width 150
 $script:InstallUpdateButton = New-Button -Text 'Download && Install' -X 178 -Y 29 -Width 165
 $script:InstallUpdateButton.Enabled = $false
@@ -3028,9 +3744,135 @@ $updateGroup.Controls.AddRange(@(
     $script:UpdateValue
 ))
 
+$syncGroup = [Windows.Forms.GroupBox]::new()
+$syncGroup.Text = 'Shared synchronization configuration'
+$syncGroup.Location = [Drawing.Point]::new(780, 83)
+$syncGroup.Size = [Drawing.Size]::new(390, 538)
+$syncGroup.Anchor = 'Top, Right'
+
+$syncTabs = [Windows.Forms.TabControl]::new()
+$syncTabs.Location = [Drawing.Point]::new(12, 23)
+$syncTabs.Size = [Drawing.Size]::new(366, 503)
+$syncTabs.Anchor = 'Top, Bottom, Left, Right'
+
+$whdTab = [Windows.Forms.TabPage]::new()
+$whdTab.Text = 'Web Help Desk'
+$whdTab.Padding = [Windows.Forms.Padding]::new(8)
+$whdTab.AutoScroll = $true
+$whdTab.Controls.Add((New-Label -Text 'Base URL' -X 12 -Y 12 -Width 150))
+$script:WhdBaseUrlBox = [Windows.Forms.TextBox]::new()
+$script:WhdBaseUrlBox.Location = [Drawing.Point]::new(12, 34)
+$script:WhdBaseUrlBox.Size = [Drawing.Size]::new(326, 24)
+$whdTab.Controls.Add($script:WhdBaseUrlBox)
+$whdTab.Controls.Add((New-Label -Text 'Authentication mode' -X 12 -Y 67 -Width 180))
+$script:WhdAuthenticationModeBox = [Windows.Forms.ComboBox]::new()
+$script:WhdAuthenticationModeBox.Location = [Drawing.Point]::new(12, 89)
+$script:WhdAuthenticationModeBox.Size = [Drawing.Size]::new(326, 24)
+$script:WhdAuthenticationModeBox.DropDownStyle = [Windows.Forms.ComboBoxStyle]::DropDownList
+[void]$script:WhdAuthenticationModeBox.Items.AddRange([object[]]@(
+    'Auto',
+    'UsernamePassword',
+    'ApplicationApiKey',
+    'TechnicianApiKey'
+))
+$whdTab.Controls.Add($script:WhdAuthenticationModeBox)
+$whdTab.Controls.Add((New-Label -Text 'Organization-wide WHD username' -X 12 -Y 121 -Width 250))
+$script:WhdServiceUsernameBox = [Windows.Forms.TextBox]::new()
+$script:WhdServiceUsernameBox.Location = [Drawing.Point]::new(12, 143)
+$script:WhdServiceUsernameBox.Size = [Drawing.Size]::new(326, 24)
+$whdTab.Controls.Add($script:WhdServiceUsernameBox)
+$script:WhdAutoSyncEnabledBox = [Windows.Forms.CheckBox]::new()
+$script:WhdAutoSyncEnabledBox.Text = 'Automatically synchronize organization tickets'
+$script:WhdAutoSyncEnabledBox.Location = [Drawing.Point]::new(12, 178)
+$script:WhdAutoSyncEnabledBox.Size = [Drawing.Size]::new(326, 24)
+$whdTab.Controls.Add($script:WhdAutoSyncEnabledBox)
+$whdTab.Controls.Add((New-Label -Text 'Every' -X 12 -Y 209 -Width 44))
+$script:WhdAutoSyncMinutesBox = [Windows.Forms.TextBox]::new()
+$script:WhdAutoSyncMinutesBox.Location = [Drawing.Point]::new(57, 206)
+$script:WhdAutoSyncMinutesBox.Size = [Drawing.Size]::new(48, 24)
+$script:WhdAutoSyncMinutesBox.MaxLength = 3
+$whdTab.Controls.Add($script:WhdAutoSyncMinutesBox)
+$whdTab.Controls.Add((New-Label -Text 'minutes (1-120)' -X 112 -Y 209 -Width 130))
+$script:SaveWhdConfigurationButton = New-Button -Text 'Save settings' -X 12 -Y 240 -Width 102
+$script:RequestWhdSyncButton = New-Button -Text 'Sync now' -X 122 -Y 240 -Width 92
+$script:RefreshWhdConfigurationButton = New-Button -Text 'Refresh' -X 222 -Y 240 -Width 92
+$whdTab.Controls.AddRange(@(
+    $script:SaveWhdConfigurationButton,
+    $script:RequestWhdSyncButton,
+    $script:RefreshWhdConfigurationButton
+))
+$script:WhdSynchronizationStatusValue = New-Label `
+    -Text 'Configuration not loaded.' -X 12 -Y 278 -Width 326 -Height 48
+$whdTab.Controls.Add($script:WhdSynchronizationStatusValue)
+$mappingHeader = New-Label -Text 'AD user to WHD technician' -X 12 -Y 333 -Width 260 -Bold $true
+$whdTab.Controls.Add($mappingHeader)
+$script:WhdUserMappingBox = [Windows.Forms.ComboBox]::new()
+$script:WhdUserMappingBox.Location = [Drawing.Point]::new(12, 359)
+$script:WhdUserMappingBox.Size = [Drawing.Size]::new(326, 24)
+$script:WhdUserMappingBox.DropDownStyle = [Windows.Forms.ComboBoxStyle]::DropDownList
+$script:WhdUserMappingBox.DisplayMember = 'Label'
+$whdTab.Controls.Add($script:WhdUserMappingBox)
+$script:WhdTechnicianBox = [Windows.Forms.ComboBox]::new()
+$script:WhdTechnicianBox.Location = [Drawing.Point]::new(12, 392)
+$script:WhdTechnicianBox.Size = [Drawing.Size]::new(326, 24)
+$script:WhdTechnicianBox.DropDownStyle = [Windows.Forms.ComboBoxStyle]::DropDownList
+$script:WhdTechnicianBox.DisplayMember = 'Label'
+$whdTab.Controls.Add($script:WhdTechnicianBox)
+$script:SaveWhdMappingButton = New-Button -Text 'Save user mapping' -X 12 -Y 426 -Width 145
+$whdTab.Controls.Add($script:SaveWhdMappingButton)
+
+$sageTab = [Windows.Forms.TabPage]::new()
+$sageTab.Text = 'Sage 50'
+$sageTab.Padding = [Windows.Forms.Padding]::new(8)
+$sageTab.AutoScroll = $true
+$sageTab.Controls.Add((New-Label -Text 'Server 32-bit System DSN' -X 12 -Y 12 -Width 220))
+$script:SageSyncDsnBox = [Windows.Forms.TextBox]::new()
+$script:SageSyncDsnBox.Location = [Drawing.Point]::new(12, 34)
+$script:SageSyncDsnBox.Size = [Drawing.Size]::new(326, 24)
+$sageTab.Controls.Add($script:SageSyncDsnBox)
+$sageTab.Controls.Add((New-Label -Text 'Organization-wide Sage ODBC username' -X 12 -Y 67 -Width 280))
+$script:SageSyncUsernameBox = [Windows.Forms.TextBox]::new()
+$script:SageSyncUsernameBox.Location = [Drawing.Point]::new(12, 89)
+$script:SageSyncUsernameBox.Size = [Drawing.Size]::new(326, 24)
+$sageTab.Controls.Add($script:SageSyncUsernameBox)
+$sageTab.Controls.Add((New-Label -Text 'Shared activity item ID' -X 12 -Y 122 -Width 200))
+$script:SageActivityItemIdBox = [Windows.Forms.TextBox]::new()
+$script:SageActivityItemIdBox.Location = [Drawing.Point]::new(12, 144)
+$script:SageActivityItemIdBox.Size = [Drawing.Size]::new(326, 24)
+$sageTab.Controls.Add($script:SageActivityItemIdBox)
+$sagePasswordNote = New-Label `
+    -Text 'The Sage password is entered in Protected server credentials on the left.' `
+    -X 12 -Y 176 -Width 326 -Height 38
+$sagePasswordNote.ForeColor = [Drawing.SystemColors]::GrayText
+$sageTab.Controls.Add($sagePasswordNote)
+$script:SaveSageConfigurationButton = New-Button -Text 'Save settings' -X 12 -Y 218 -Width 102
+$script:RequestSageSyncButton = New-Button -Text 'Sync now' -X 122 -Y 218 -Width 92
+$script:RefreshSageConfigurationButton = New-Button -Text 'Refresh' -X 222 -Y 218 -Width 92
+$sageTab.Controls.AddRange(@(
+    $script:SaveSageConfigurationButton,
+    $script:RequestSageSyncButton,
+    $script:RefreshSageConfigurationButton
+))
+$script:ConfirmSageRemovalButton = New-Button `
+    -Text 'Confirm large removal' -X 12 -Y 256 -Width 170
+$script:ConfirmSageRemovalButton.Enabled = $false
+$sageTab.Controls.Add($script:ConfirmSageRemovalButton)
+$script:SageSynchronizationStatusValue = New-Label `
+    -Text 'Configuration not loaded.' -X 12 -Y 296 -Width 326 -Height 92
+$sageTab.Controls.Add($script:SageSynchronizationStatusValue)
+$sageBoundaryNote = New-Label `
+    -Text 'The service performs every organization-wide customer read. Client workstations keep only their own posting settings.' `
+    -X 12 -Y 398 -Width 326 -Height 55
+$sageBoundaryNote.ForeColor = [Drawing.SystemColors]::GrayText
+$sageTab.Controls.Add($sageBoundaryNote)
+
+[void]$syncTabs.TabPages.Add($whdTab)
+[void]$syncTabs.TabPages.Add($sageTab)
+$syncGroup.Controls.Add($syncTabs)
+
 $script:StatusBox = [Windows.Forms.TextBox]::new()
 $script:StatusBox.Location = [Drawing.Point]::new(20, 636)
-$script:StatusBox.Size = [Drawing.Size]::new(750, 58)
+$script:StatusBox.Size = [Drawing.Size]::new(1150, 58)
 $script:StatusBox.Anchor = 'Top, Bottom, Left, Right'
 $script:StatusBox.Multiline = $true
 $script:StatusBox.ReadOnly = $true
@@ -3044,6 +3886,7 @@ $script:MainForm.Controls.AddRange(@(
     $accountGroup,
     $credentialGroup,
     $updateGroup,
+    $syncGroup,
     $script:StatusBox
 ))
 
@@ -3063,6 +3906,25 @@ $script:ShowWhdSecretCheckBox.Add_CheckedChanged({
 $script:ShowSageSecretCheckBox.Add_CheckedChanged({
     $script:SageSecretBox.UseSystemPasswordChar =
         -not $script:ShowSageSecretCheckBox.Checked
+})
+$script:WhdUserMappingBox.Add_SelectedIndexChanged({
+    $mapping = $script:WhdUserMappingBox.SelectedItem
+    if ($null -eq $mapping -or $script:WhdTechnicianBox.Items.Count -eq 0) {
+        return
+    }
+    $targetExternalId = [string]$mapping.TechnicianExternalId
+    $selectedTechnician = $null
+    foreach ($technician in $script:WhdTechnicianBox.Items) {
+        if ([string]$technician.ExternalId -eq $targetExternalId) {
+            $selectedTechnician = $technician
+            break
+        }
+    }
+    $script:WhdTechnicianBox.SelectedItem = if ($null -ne $selectedTechnician) {
+        $selectedTechnician
+    } else {
+        $script:WhdTechnicianBox.Items[0]
+    }
 })
 $script:RefreshButton.Add_Click({ Update-ServiceDisplay; Add-StatusLine 'Service status refreshed.' })
 $script:StartButton.Add_Click({
@@ -3097,6 +3959,62 @@ $script:SaveWhdButton.Add_Click({
 $script:SaveSageButton.Add_Click({
     Invoke-ManagerAction -BusyMessage 'Protecting and saving the Sage credential...' -Action {
         Set-ExternalSecret -Kind Sage
+    }
+})
+$script:SaveWhdConfigurationButton.Add_Click({
+    Invoke-ManagerAction -BusyMessage 'Saving shared WHD configuration to SQL Server...' -Action {
+        Save-WhdSynchronizationConfiguration
+        Refresh-SynchronizationConfiguration
+    }
+})
+$script:RequestWhdSyncButton.Add_Click({
+    Invoke-ManagerAction -BusyMessage 'Saving WHD configuration and queuing server synchronization...' -Action {
+        Request-WhdSynchronization
+        Refresh-SynchronizationConfiguration
+    }
+})
+$script:RefreshWhdConfigurationButton.Add_Click({
+    Invoke-ManagerAction -BusyMessage 'Refreshing shared synchronization configuration...' -Action {
+        Refresh-SynchronizationConfiguration
+    }
+})
+$script:SaveWhdMappingButton.Add_Click({
+    Invoke-ManagerAction -BusyMessage 'Saving the AD user to WHD technician mapping...' -Action {
+        Save-WhdUserTechnicianMapping
+        Refresh-SynchronizationConfiguration
+    }
+})
+$script:SaveSageConfigurationButton.Add_Click({
+    Invoke-ManagerAction -BusyMessage 'Saving shared Sage configuration to SQL Server...' -Action {
+        Save-SageSynchronizationConfiguration
+        Refresh-SynchronizationConfiguration
+    }
+})
+$script:RequestSageSyncButton.Add_Click({
+    Invoke-ManagerAction -BusyMessage 'Saving Sage configuration and queuing customer synchronization...' -Action {
+        Request-SageSynchronization
+        Refresh-SynchronizationConfiguration
+    }
+})
+$script:RefreshSageConfigurationButton.Add_Click({
+    Invoke-ManagerAction -BusyMessage 'Refreshing shared synchronization configuration...' -Action {
+        Refresh-SynchronizationConfiguration
+    }
+})
+$script:ConfirmSageRemovalButton.Add_Click({
+    $status = $script:LatestSageSyncStatus
+    if ($null -eq $status -or -not $status.RequiresLargeRemovalConfirmation) {
+        Show-ManagerMessage `
+            -Text 'There is no rejected Sage customer snapshot waiting for confirmation.'
+        return
+    }
+    $warning = "The last Sage snapshot would remove $($status.StaleCount) of $($status.ExistingCount) existing Sage customer mapping(s). No customer data has changed yet.`r`n`r`nAuthorize that exact rejected snapshot and run Sage synchronization again?"
+    if (Confirm-ManagerAction `
+        -Text $warning -Title 'Confirm large Sage customer removal' -Icon Warning) {
+        Invoke-ManagerAction -BusyMessage 'Queuing the confirmed Sage customer synchronization...' -Action {
+            Request-SageSynchronization -AllowLargeRemoval
+            Refresh-SynchronizationConfiguration
+        }
     }
 })
 $script:CheckUpdatesButton.Add_Click({
@@ -3146,7 +4064,10 @@ $script:MainForm.Add_Shown({
     if ($script:RecoveryBlocked) {
         Add-StatusLine 'Server Manager changes are blocked until an administrator repairs the interrupted update.'
     } else {
-        Add-StatusLine 'Server Manager is ready. Shared configuration remains managed by TechBench Admins in the client.'
+        Invoke-ManagerAction -BusyMessage 'Loading shared WHD and Sage configuration from SQL Server...' -Action {
+            Refresh-SynchronizationConfiguration
+        }
+        Add-StatusLine 'Server Manager is ready. Shared synchronization configuration is Admin-managed here.'
     }
     if (-not [string]::IsNullOrWhiteSpace($script:LaunchIntegrationWarning)) {
         Add-StatusLine "WARNING: The Start Menu launcher could not be repaired. $($script:LaunchIntegrationWarning)"
