@@ -12,6 +12,9 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$RepositoryUrl = 'https://github.com/Serlynth/TechBenchV2-Releases',
 
+    [ValidateRange(1, 2147483647)]
+    [int]$RequiredDatabaseSchemaVersion = 7,
+
     [switch]$Publish,
 
     [switch]$SkipTests,
@@ -106,6 +109,7 @@ function Assert-SafeServicePayload {
         'Install-TechBenchSyncService.ps1',
         'Set-TechBenchSyncCredential.ps1',
         'Set-TechBenchSageSyncCredential.ps1',
+        'TechBench-ServerManager.ps1',
         'Uninstall-TechBenchSyncService.ps1',
         'sage-odbc-worker\TechBench.SageOdbcWorker.exe',
         'sage-odbc-worker\TechBench.SageOdbcWorker.runtimeconfig.json',
@@ -267,6 +271,7 @@ try {
         'Install-TechBenchSyncService.ps1',
         'Set-TechBenchSyncCredential.ps1',
         'Set-TechBenchSageSyncCredential.ps1',
+        'TechBench-ServerManager.ps1',
         'Uninstall-TechBenchSyncService.ps1'
     )) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $scriptName) `
@@ -298,10 +303,12 @@ try {
     })
     $manifest = [ordered]@{
         Product = 'TechBench Sync Service'
+        PackageFormatVersion = 1
         Version = $Version
         Runtime = 'win-x64'
         SageOdbcWorkerRuntime = 'win-x86'
         SelfContained = $true
+        RequiredDatabaseSchemaVersion = $RequiredDatabaseSchemaVersion
         CreatedUtc = [DateTime]::UtcNow.ToString('o')
         Files = $manifestFiles
     }

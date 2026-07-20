@@ -4,7 +4,7 @@ This package creates the shared `TechBench` database used by the TechBench V2
 WPF client and the dedicated TechBench sync service. Both use Windows Integrated
 Authentication; the service has a separate least-privilege database role.
 
-TechBench V2 `2.0.0-alpha.8` requires schema version `7`, including the
+TechBench V2 `2.0.0-alpha.9` requires schema version `7`, including the
 server-owned WHD/Sage synchronization contracts, restricted Admin read-only
 user preview, administrator-only shared-configuration boundary, and
 owner-scoped V1 import contract in this package.

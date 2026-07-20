@@ -60,6 +60,34 @@ public sealed class ServiceInstallerCredentialPromptTests
         Assert.True(prompt > shouldProcess);
     }
 
+    [Fact]
+    public void InstallerStagesAndReverifiesTheManifestBeforeChangingTheService()
+    {
+        var source = File.ReadAllText(FindRepositoryFile(
+            "scripts",
+            "Install-TechBenchSyncService.ps1"));
+
+        Assert.Contains("Assert-ServicePackageManifest", source, StringComparison.Ordinal);
+        Assert.Contains("New-VerifiedAdministratorInstallStage", source, StringComparison.Ordinal);
+        Assert.Contains("Set-AdministratorOnlyDirectoryAcl", source, StringComparison.Ordinal);
+        Assert.Contains("The package manifest changed while it was copied", source, StringComparison.Ordinal);
+        Assert.Contains("$manifest.SageOdbcWorkerRuntime -cne 'win-x86'", source, StringComparison.Ordinal);
+        Assert.Contains("$manifest.SelfContained -isnot [bool]", source, StringComparison.Ordinal);
+        Assert.Contains("Get-PortableExecutableMachine", source, StringComparison.Ordinal);
+        Assert.Contains("Remove-AdministratorInstallStage", source, StringComparison.Ordinal);
+        Assert.Contains("sage-odbc-worker\\TechBench.SageOdbcWorker.runtimeconfig.json", source, StringComparison.Ordinal);
+        Assert.Contains("sage-odbc-worker\\TechBench.SageOdbcWorker.deps.json", source, StringComparison.Ordinal);
+
+        var protectedStage = source.LastIndexOf(
+            "$administratorInstallStage = New-VerifiedAdministratorInstallStage",
+            StringComparison.Ordinal);
+        var serviceChange = source.LastIndexOf(
+            "Stop-AndDeleteExistingService $ServiceName",
+            StringComparison.Ordinal);
+        Assert.True(protectedStage >= 0);
+        Assert.True(serviceChange > protectedStage);
+    }
+
     private static string FindRepositoryFile(params string[] relativeParts)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

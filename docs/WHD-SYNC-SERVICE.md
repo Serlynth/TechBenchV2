@@ -7,19 +7,19 @@
 From the repository root, create a self-contained `win-x64` service package with its isolated self-contained `win-x86` Sage ODBC worker:
 
 ```powershell
-.\scripts\Publish-TechBenchServer.ps1 -Version 2.0.0-alpha.8
+.\scripts\Publish-TechBenchServer.ps1 -Version 2.0.0-alpha.9
 ```
 
-The package is created at `dist\TechBenchSyncService-2.0.0-alpha.8-win-x64.zip`, with a SHA-256 sidecar. It includes the x64 service, x86 Sage worker, `appsettings.json`, runbook, release notes, install/uninstall/credential scripts, and matching standalone SQLCMD deployment under `database`. Do not place either external-system secret in the package or in `appsettings.json`.
+The package is created at `dist\TechBenchSyncService-2.0.0-alpha.9-win-x64.zip`, with a SHA-256 sidecar. It includes the x64 service, x86 Sage worker, `appsettings.json`, TechBench Server Manager GUI, runbook, release notes, install/uninstall/credential scripts, and matching standalone SQLCMD deployment under `database`. Do not place either external-system secret in the package or in `appsettings.json`.
 
 The same command also creates the directly downloadable
-`dist\TechBenchV2-SQLServer2016-2.0.0-alpha.8.sql` and its checksum. After the
-matching client publisher has created GitHub release `v2.0.0-alpha.8`, attach
+`dist\TechBenchV2-SQLServer2016-2.0.0-alpha.9.sql` and its checksum. After the
+matching client publisher has created GitHub release `v2.0.0-alpha.9`, attach
 all four server-side assets with:
 
 ```powershell
 .\scripts\Publish-TechBenchServer.ps1 `
-  -Version 2.0.0-alpha.8 `
+  -Version 2.0.0-alpha.9 `
   -Publish
 ```
 
@@ -29,13 +29,13 @@ server/SQL assets.
 
 ## Deploy the database first
 
-Before installing the service or alpha.8 clients, stop the old V2 service/clients, have the DBA back up `TechBench`, review `database\README-Deploy.md`, and execute `database\Deploy-CSRI-Standalone.sql` in SSMS while connected to `CSRI-SQL` as a SQL Server sysadmin with **Query > SQLCMD Mode** enabled. The script creates or upgrades schema version 7 and verifies the service-only WHD/Sage permissions, ticket row-security policy, and restricted Admin preview boundary. Stop if any verification reports a failure.
+Before installing the service or alpha.9 clients, stop the old V2 service/clients, have the DBA back up `TechBench`, review `database\README-Deploy.md`, and execute `database\Deploy-CSRI-Standalone.sql` in SSMS while connected to `CSRI-SQL` as a SQL Server sysadmin with **Query > SQLCMD Mode** enabled. The script creates or upgrades schema version 7 and verifies the service-only WHD/Sage permissions, ticket row-security policy, and restricted Admin preview boundary. Stop if any verification reports a failure.
 
 If you download the versioned standalone SQL asset instead of taking it from
 the service ZIP, verify its sidecar before opening it in SSMS:
 
 ```powershell
-$sql = '.\TechBenchV2-SQLServer2016-2.0.0-alpha.8.sql'
+$sql = '.\TechBenchV2-SQLServer2016-2.0.0-alpha.9.sql'
 $expectedHash = ((Get-Content "$sql.sha256" -Raw) -split '\s+')[0]
 $actualHash = (Get-FileHash $sql -Algorithm SHA256).Hash
 if ($actualHash -ne $expectedHash) { throw 'TechBench SQL SHA-256 does not match.' }
@@ -74,7 +74,7 @@ line, script, environment variable, or response file.
 Install interactively with:
 
 ```powershell
-$package = '.\TechBenchSyncService-2.0.0-alpha.8-win-x64.zip'
+$package = '.\TechBenchSyncService-2.0.0-alpha.9-win-x64.zip'
 $expectedHash = ((Get-Content "$package.sha256" -Raw) -split '\s+')[0]
 $actualHash = (Get-FileHash $package -Algorithm SHA256).Hash
 if ($actualHash -ne $expectedHash) { throw 'TechBench service package SHA-256 does not match.' }
@@ -95,11 +95,13 @@ Set-Location .\TechBenchSyncService
 
 Download the ZIP and its matching `.sha256` sidecar from the same release. Do not run the scripts if the hash comparison fails. `Unblock-File` removes the Internet mark inherited from the downloaded ZIP; the process-scoped execution-policy setting handles the unsigned internal deployment scripts for only that PowerShell window. If domain policy prevents the process-scoped setting, have your administrator sign or explicitly approve the scripts instead of weakening machine-wide policy.
 
-The predictable alpha.8 server download is
-`https://github.com/Serlynth/TechBenchV2-Releases/releases/download/v2.0.0-alpha.8/TechBenchSyncService-2.0.0-alpha.8-win-x64.zip`.
+Before it changes the Windows service, the elevated installer verifies every extracted file against `package-manifest.json`, copies only those verified files into an Administrators/SYSTEM-only staging directory, and verifies them again there. It rejects an incomplete, altered, wrong-version, or wrong-architecture package.
+
+The predictable alpha.9 server download is
+`https://github.com/Serlynth/TechBenchV2-Releases/releases/download/v2.0.0-alpha.9/TechBenchSyncService-2.0.0-alpha.9-win-x64.zip`.
 Download its `.sha256` sidecar by appending `.sha256` to that URL. The standalone
 SQL asset follows the same pattern with filename
-`TechBenchV2-SQLServer2016-2.0.0-alpha.8.sql`.
+`TechBenchV2-SQLServer2016-2.0.0-alpha.9.sql`.
 
 The prepared CSRI deployment does not use a gMSA. If a future deployment
 switches to one, first redeploy SQL with that exact gMSA (or a dedicated group
@@ -116,6 +118,24 @@ not supply `-Credential`:
 The installer copies binaries to `%ProgramFiles%\CSRI\TechBench Sync Service`, creates `TechBenchWhdSync`, and preserves an existing `appsettings.json` unless `-ReplaceConfiguration` is supplied. It creates `%ProgramData%\CSRI\TechBench Sync Service` with an explicit ACL: SYSTEM and Administrators have Full Control, and the service identity has Modify. It also grants the service identity read-and-execute access to the install directory. Custom install and data directories must remain dedicated child folders under `%ProgramFiles%\CSRI` and `%ProgramData%\CSRI`; the installer rejects root or reparse-point paths before changing permissions.
 
 The service is set to automatic delayed start, is given an SCM description, and restarts after its first three failures (after 60 seconds, 60 seconds, and 5 minutes; the failure counter resets after one day). Start is skipped when `-SkipStart` is specified or when no protected WHD credential has been provisioned yet. Sage can be configured later without preventing WHD synchronization from running.
+
+## Use TechBench Server Manager
+
+Installation places the GUI separately under `%ProgramFiles%\CSRI\TechBench Server Manager` and adds **TechBench Server Manager** under the Start Menu's **CSRI** folder. It requests administrator access when opened and provides:
+
+- current service status, installed version, and Windows service identity;
+- Start, Stop, Restart, and Refresh controls;
+- an Install/Apply Password action for the first installation or for rotating the password of the service's existing domain identity;
+- protected WHD and Sage credential rotation with a separate Show control beside each secret; and
+- Check for Updates and Download & Install actions for the server service.
+
+The service-account password and WHD/Sage secrets are never placed in command-line arguments, configuration, output, or logs. They exist briefly in the visible form field when entered, are converted to `SecureString`, and are cleared immediately after use. The WHD username, Sage System DSN/username, synchronization behavior, and all other shared configuration remain Admin-managed in SQL Server through the TechBench client; Server Manager intentionally cannot edit them.
+
+Routine service updates do not request the service-account password and do not recreate the Windows service. Server Manager downloads the exact versioned ZIP and SHA-256 sidecar from the public release repository, rejects unexpected URLs and unsafe archive paths, verifies the outer hash and every file in `package-manifest.json`, and verifies the required database schema through `tb_app.GetCurrentUserContext` using the current Windows identity. It blocks the update if SQL cannot be verified or the schema does not match; a DBA must apply the matching SQL installer first.
+
+After verification, Server Manager explicitly warns that the alpha package is not digitally signed. The SHA-256 checks prove that the downloaded bytes match the public release, but they are not a Windows publisher signature. If approved, Server Manager stops the service gracefully, stages the new payload in an Administrators/SYSTEM-only directory, preserves the exact installed `appsettings.json` and `%ProgramData%` secrets, swaps only the service files, and has Windows run the service under its configured least-privilege identity for a 15-second running-state stability check. An intentionally stopped service is returned to Stopped. It updates its separately installed GUI last and journals swap phases; if the host is interrupted, recovery runs the next time Server Manager opens. If installation or the stability check fails, it restores the prior service and Manager payloads and the prior running/stopped state automatically.
+
+The Windows service credential is deliberately separate from routine updates. Use the PowerShell installer shown above for the normal first alpha.9 installation; that installation creates the service and adds Server Manager. The Manager can also bootstrap a first installation or recreate a missing Windows service when `TechBench-ServerManager.ps1` is launched directly from the complete extracted, verified package: enter `DOMAIN\Account`, enter its Windows password (or leave it blank for a correctly provisioned gMSA ending in `$`), and select **Install / Apply password**. It will not recreate a service from the mutable installed-binary directory. For an existing ordinary account, the same action validates and rotates the password in place without recreating the service; it intentionally blocks changing the account name or converting an installed service to a gMSA. Perform those identity migrations as a controlled manual reinstall. Passwords are passed in memory and never exposed in the PowerShell command line.
 
 ## Store or rotate the WHD credential
 
@@ -151,4 +171,4 @@ sc.exe qfailure TechBenchWhdSync
 .\Uninstall-TechBenchSyncService.ps1
 ```
 
-Uninstall keeps the protected data directory by default so an upgrade does not discard either credential. To remove service binaries and both credentials permanently, run the uninstall script with `-RemoveCredential`. This operation is irreversible.
+Uninstall removes the service binaries, Server Manager files and Start Menu shortcut, and the separate Manager update-state directory under `%ProgramData%`, including any stale pending-update journal or staged download. It keeps the protected service-data directory by default so an upgrade does not discard either credential. To remove both service credentials permanently, run the uninstall script with `-RemoveCredential`. `-KeepBinaries` also preserves the Manager update state and emits a warning; omit that switch before a clean reinstall. Credential removal is irreversible.

@@ -19,6 +19,9 @@ param(
     [string]$DataDirectory = "$env:ProgramData\CSRI\TechBench Sync Service",
 
     [ValidateNotNullOrEmpty()]
+    [string]$ManagerDirectory = "$env:ProgramFiles\CSRI\TechBench Server Manager",
+
+    [ValidatePattern('^[A-Za-z0-9_.-]+$')]
     [string]$ServiceName = 'TechBenchWhdSync',
 
     [ValidateNotNullOrEmpty()]
@@ -34,9 +37,13 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if (-not [Environment]::Is64BitProcess) {
+    throw 'Run the TechBench Sync Service installer from 64-bit Windows PowerShell.'
+}
 $sourcePath = [IO.Path]::GetFullPath($SourceDirectory)
 $installPath = [IO.Path]::GetFullPath($InstallDirectory)
 $dataPath = [IO.Path]::GetFullPath($DataDirectory)
+$managerPath = [IO.Path]::GetFullPath($ManagerDirectory)
 $allowedInstallRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramFiles 'CSRI')).TrimEnd('\') + '\'
 $allowedDataRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'CSRI')).TrimEnd('\') + '\'
 $sourceExecutable = Join-Path $sourcePath 'TechBench.SyncService.exe'
@@ -51,7 +58,15 @@ if (-not $dataPath.StartsWith($allowedDataRoot, [StringComparison]::OrdinalIgnor
     throw "DataDirectory must be a service-owned child directory under '$allowedDataRoot': $dataPath"
 }
 
-foreach ($protectedPath in @($installPath, $dataPath)) {
+if (-not $managerPath.StartsWith($allowedInstallRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "ManagerDirectory must be a child directory under '$allowedInstallRoot': $managerPath"
+}
+
+if ($managerPath.Equals($installPath, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'ManagerDirectory must be separate from InstallDirectory so Server Manager can update service files safely.'
+}
+
+foreach ($protectedPath in @($installPath, $dataPath, $managerPath)) {
     if ((Test-Path -LiteralPath $protectedPath) -and
         ((Get-Item -LiteralPath $protectedPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
         throw "Refusing to install into a reparse-point directory: $protectedPath"
@@ -383,6 +398,70 @@ namespace TechBench.Deployment
     [Array]::Clear($sidBytes, 0, $sidBytes.Length)
 }
 
+function Install-ServerManagerShortcut {
+    param(
+        [Parameter(Mandatory = $true)][string]$InstalledDirectory,
+        [Parameter(Mandatory = $true)][string]$ManagerDirectory,
+        [Parameter(Mandatory = $true)][string]$ServiceName,
+        [Parameter(Mandatory = $true)][string]$DataDirectory
+    )
+
+    $sourceManagerPath = Join-Path $InstalledDirectory 'TechBench-ServerManager.ps1'
+    if (-not (Test-Path -LiteralPath $sourceManagerPath -PathType Leaf)) {
+        Write-Warning 'TechBench Server Manager was not present, so its Start Menu shortcut was not created.'
+        return
+    }
+
+    New-Item -ItemType Directory -Path $ManagerDirectory -Force | Out-Null
+    $managerSecurity = [Security.AccessControl.DirectorySecurity]::new()
+    $managerSecurity.SetAccessRuleProtection($true, $false)
+    $inheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    $propagation = [Security.AccessControl.PropagationFlags]::None
+    $allow = [Security.AccessControl.AccessControlType]::Allow
+    foreach ($entry in @(
+        [PSCustomObject]@{
+            Sid = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+            Rights = [Security.AccessControl.FileSystemRights]::FullControl
+        },
+        [PSCustomObject]@{
+            Sid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+            Rights = [Security.AccessControl.FileSystemRights]::FullControl
+        },
+        [PSCustomObject]@{
+            Sid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+            Rights = [Security.AccessControl.FileSystemRights]'ReadAndExecute, Synchronize'
+        }
+    )) {
+        [void]$managerSecurity.AddAccessRule(
+            [Security.AccessControl.FileSystemAccessRule]::new(
+                $entry.Sid, $entry.Rights, $inheritance, $propagation, $allow))
+    }
+    Set-Acl -LiteralPath $ManagerDirectory -AclObject $managerSecurity
+    $managerPath = Join-Path $ManagerDirectory 'TechBench-ServerManager.ps1'
+    Copy-Item -LiteralPath $sourceManagerPath -Destination $managerPath -Force
+
+    $shortcutDirectory = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\CSRI'
+    New-Item -ItemType Directory -Path $shortcutDirectory -Force | Out-Null
+    $shortcutPath = Join-Path $shortcutDirectory 'TechBench Server Manager.lnk'
+    $shell = New-Object -ComObject WScript.Shell
+    try {
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = Join-Path $env:SystemRoot `
+            'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -ServiceName "{1}" -InstallDirectory "{2}" -DataDirectory "{3}" -ManagerDirectory "{4}"' -f `
+            $managerPath, $ServiceName, $InstalledDirectory, $DataDirectory, $ManagerDirectory
+        $shortcut.WorkingDirectory = $ManagerDirectory
+        $shortcut.IconLocation = '{0},0' -f (Join-Path $InstalledDirectory 'TechBench.SyncService.exe')
+        $shortcut.Description = 'Manage and update the TechBench Sync Service'
+        $shortcut.Save()
+    } finally {
+        if ($null -ne $shortcut) {
+            [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcut) | Out-Null
+        }
+        [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) | Out-Null
+    }
+}
+
 function Stop-AndDeleteExistingService {
     param([Parameter(Mandatory = $true)][string]$Name)
 
@@ -407,6 +486,297 @@ function Stop-AndDeleteExistingService {
     if (Get-Service -Name $Name -ErrorAction SilentlyContinue) {
         throw "Service '$Name' is still pending deletion. Close Services.msc and retry."
     }
+}
+
+function Get-SafePackageFilePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$RelativePath
+    )
+
+    $normalizedRelativePath = $RelativePath.Replace('/', '\').TrimEnd('\')
+    if ([string]::IsNullOrWhiteSpace($normalizedRelativePath) -or
+        [IO.Path]::IsPathRooted($RelativePath) -or
+        $RelativePath.IndexOf([char]0) -ge 0 -or
+        $RelativePath.Contains(':')) {
+        throw "The service package manifest contains an unsafe path: $RelativePath"
+    }
+
+    foreach ($component in $normalizedRelativePath.Split('\')) {
+        if ([string]::IsNullOrWhiteSpace($component) -or
+            $component -eq '.' -or $component -eq '..' -or
+            $component.EndsWith(' ', [StringComparison]::Ordinal) -or
+            $component.EndsWith('.', [StringComparison]::Ordinal) -or
+            [IO.Path]::GetFileNameWithoutExtension($component) -match
+                '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$') {
+            throw "The service package manifest contains an unsafe Windows path: $RelativePath"
+        }
+    }
+
+    $rootPath = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    $fullPath = [IO.Path]::GetFullPath((Join-Path $Root $normalizedRelativePath))
+    if (-not $fullPath.StartsWith($rootPath, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "The service package manifest points outside its package directory: $RelativePath"
+    }
+    return $fullPath
+}
+
+function Get-PortableExecutableMachine {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $stream = [IO.File]::Open(
+        $Path,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::Read)
+    $reader = [IO.BinaryReader]::new($stream)
+    try {
+        if ($reader.ReadUInt16() -ne 0x5A4D) {
+            throw "The package executable is not a valid Windows PE file: $Path"
+        }
+        $stream.Position = 0x3C
+        $peOffset = $reader.ReadInt32()
+        if ($peOffset -lt 0x40 -or $peOffset -gt ($stream.Length - 6)) {
+            throw "The package executable has an invalid PE header offset: $Path"
+        }
+        $stream.Position = $peOffset
+        if ($reader.ReadUInt32() -ne 0x00004550) {
+            throw "The package executable has an invalid PE signature: $Path"
+        }
+        return $reader.ReadUInt16()
+    } finally {
+        $reader.Dispose()
+        $stream.Dispose()
+    }
+}
+
+function Assert-ServicePackageManifest {
+    param([Parameter(Mandatory = $true)][string]$PackageDirectory)
+
+    $packagePath = [IO.Path]::GetFullPath($PackageDirectory).TrimEnd('\')
+    if ((Get-Item -LiteralPath $packagePath -Force).Attributes -band
+        [IO.FileAttributes]::ReparsePoint) {
+        throw "Refusing to install from a reparse-point package directory: $packagePath"
+    }
+    $packageReparsePoint = Get-ChildItem -LiteralPath $packagePath -Recurse -Force |
+        Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint } |
+        Select-Object -First 1
+    if ($null -ne $packageReparsePoint) {
+        throw "The service package contains a reparse point: $($packageReparsePoint.FullName)"
+    }
+
+    $manifestPath = Join-Path $packagePath 'package-manifest.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw 'The service package does not contain package-manifest.json. Install only from the complete verified release ZIP.'
+    }
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    if ($manifest.Product -cne 'TechBench Sync Service' -or
+        [int]$manifest.PackageFormatVersion -ne 1 -or
+        $manifest.Runtime -cne 'win-x64' -or
+        $manifest.SageOdbcWorkerRuntime -cne 'win-x86' -or
+        $manifest.SelfContained -isnot [bool] -or
+        -not [bool]$manifest.SelfContained -or
+        [string]::IsNullOrWhiteSpace([string]$manifest.Version) -or
+        [int]$manifest.RequiredDatabaseSchemaVersion -lt 1) {
+        throw 'The service package manifest does not identify a supported TechBench Sync Service release.'
+    }
+
+    $seenPaths = New-Object 'Collections.Generic.HashSet[string]' `
+        ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($file in @($manifest.Files)) {
+        $relativePath = [string]$file.Path
+        if ($relativePath.Equals('package-manifest.json', [StringComparison]::OrdinalIgnoreCase) -or
+            -not $seenPaths.Add($relativePath)) {
+            throw "The service package manifest contains an invalid or duplicate path: $relativePath"
+        }
+        $fullPath = Get-SafePackageFilePath -Root $packagePath -RelativePath $relativePath
+        if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+            throw "The service package is missing a manifest file: $relativePath"
+        }
+        $item = Get-Item -LiteralPath $fullPath
+        if ($item.Length -ne [int64]$file.Length -or
+            [string]$file.Sha256 -notmatch '^[0-9A-Fa-f]{64}$' -or
+            -not (Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash.Equals(
+                [string]$file.Sha256, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "The service package failed manifest verification: $relativePath"
+        }
+    }
+
+    $unexpectedFile = Get-ChildItem -LiteralPath $packagePath -Recurse -File |
+        Where-Object {
+            -not $_.FullName.Equals($manifestPath, [StringComparison]::OrdinalIgnoreCase)
+        } |
+        Where-Object {
+            $relativePath = $_.FullName.Substring($packagePath.Length).TrimStart('\')
+            -not $seenPaths.Contains($relativePath)
+        } |
+        Select-Object -First 1
+    if ($null -ne $unexpectedFile) {
+        throw "The service package contains a file not covered by its manifest: $($unexpectedFile.FullName)"
+    }
+
+    foreach ($requiredFile in @(
+        'TechBench.SyncService.exe',
+        'TechBench.SyncService.runtimeconfig.json',
+        'TechBench.SyncService.deps.json',
+        'appsettings.json',
+        'Install-TechBenchSyncService.ps1',
+        'Set-TechBenchSyncCredential.ps1',
+        'Set-TechBenchSageSyncCredential.ps1',
+        'TechBench-ServerManager.ps1',
+        'Uninstall-TechBenchSyncService.ps1',
+        'sage-odbc-worker\TechBench.SageOdbcWorker.exe',
+        'sage-odbc-worker\TechBench.SageOdbcWorker.runtimeconfig.json',
+        'sage-odbc-worker\TechBench.SageOdbcWorker.deps.json',
+        'README-WHD-SYNC-SERVICE.md',
+        'RELEASE-NOTES.md',
+        'database\Deploy-CSRI-Standalone.sql',
+        'database\README-Deploy.md'
+    )) {
+        if (-not $seenPaths.Contains($requiredFile)) {
+            throw "The service package manifest is missing required file: $requiredFile"
+        }
+    }
+
+    $expectedVersion = [string]$manifest.Version
+    $serviceExecutable = Join-Path $packagePath 'TechBench.SyncService.exe'
+    $workerExecutable = Join-Path $packagePath 'sage-odbc-worker\TechBench.SageOdbcWorker.exe'
+    foreach ($executable in @($serviceExecutable, $workerExecutable)) {
+        $productVersion = (Get-Item -LiteralPath $executable).VersionInfo.ProductVersion
+        if ([string]::IsNullOrWhiteSpace($productVersion) -or
+            $productVersion.Split('+', 2)[0] -cne $expectedVersion) {
+            throw "The package executable version does not match release ${expectedVersion}: $executable"
+        }
+    }
+    if ((Get-PortableExecutableMachine -Path $serviceExecutable) -ne 0x8664) {
+        throw 'The TechBench Sync Service executable is not x64.'
+    }
+    if ((Get-PortableExecutableMachine -Path $workerExecutable) -ne 0x014C) {
+        throw 'The Sage ODBC worker executable is not x86.'
+    }
+
+    return $manifest
+}
+
+function Update-InstalledPackageManifestConfigurationEntry {
+    param([Parameter(Mandatory = $true)][string]$PackageDirectory)
+
+    $manifestPath = Join-Path $PackageDirectory 'package-manifest.json'
+    $configurationPath = Join-Path $PackageDirectory 'appsettings.json'
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    $configurationEntries = @($manifest.Files | Where-Object {
+        ([string]$_.Path).Equals(
+            'appsettings.json', [StringComparison]::OrdinalIgnoreCase)
+    })
+    if ($configurationEntries.Count -ne 1) {
+        throw 'The installed package manifest must contain exactly one appsettings.json entry.'
+    }
+
+    $configurationItem = Get-Item -LiteralPath $configurationPath
+    $configurationEntries[0].Length = [int64]$configurationItem.Length
+    $configurationEntries[0].Sha256 =
+        (Get-FileHash -LiteralPath $configurationPath -Algorithm SHA256).Hash
+    $manifest | ConvertTo-Json -Depth 5 |
+        Set-Content -LiteralPath $manifestPath -Encoding UTF8
+
+    # The source release was verified before it entered the Administrator-only
+    # stage. Revalidate the installed copy after replacing its one intentionally
+    # mutable, machine-local configuration file and recording that exact hash.
+    [void](Assert-ServicePackageManifest -PackageDirectory $PackageDirectory)
+}
+
+function Set-AdministratorOnlyDirectoryAcl {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $security = [Security.AccessControl.DirectorySecurity]::new()
+    $security.SetAccessRuleProtection($true, $false)
+    $inheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    $propagation = [Security.AccessControl.PropagationFlags]::None
+    $allow = [Security.AccessControl.AccessControlType]::Allow
+    foreach ($sidValue in @('S-1-5-18', 'S-1-5-32-544')) {
+        $sid = [Security.Principal.SecurityIdentifier]::new($sidValue)
+        [void]$security.AddAccessRule(
+            [Security.AccessControl.FileSystemAccessRule]::new(
+                $sid,
+                [Security.AccessControl.FileSystemRights]::FullControl,
+                $inheritance,
+                $propagation,
+                $allow))
+    }
+    Set-Acl -LiteralPath $Path -AclObject $security
+}
+
+function New-VerifiedAdministratorInstallStage {
+    param([Parameter(Mandatory = $true)][string]$PackageDirectory)
+
+    $sourceManifest = Assert-ServicePackageManifest -PackageDirectory $PackageDirectory
+    $sourceManifestPath = Join-Path $PackageDirectory 'package-manifest.json'
+    $sourceManifestHash = (Get-FileHash -LiteralPath $sourceManifestPath -Algorithm SHA256).Hash
+    $managerDataRoot = [IO.Path]::GetFullPath(
+        (Join-Path $env:ProgramData 'CSRI\TechBench Server Manager')).TrimEnd('\')
+    if (-not $managerDataRoot.StartsWith($allowedDataRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "The protected installer staging directory must remain under '$allowedDataRoot'."
+    }
+    if ((Test-Path -LiteralPath $managerDataRoot) -and
+        ((Get-Item -LiteralPath $managerDataRoot -Force).Attributes -band
+            [IO.FileAttributes]::ReparsePoint)) {
+        throw "Refusing to stage the service package in a reparse-point directory: $managerDataRoot"
+    }
+
+    New-Item -ItemType Directory -Path $managerDataRoot -Force | Out-Null
+    Set-AdministratorOnlyDirectoryAcl -Path $managerDataRoot
+    $stagePath = Join-Path $managerDataRoot `
+        ("Install-{0}" -f [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $stagePath | Out-Null
+    try {
+        foreach ($file in @($sourceManifest.Files)) {
+            $relativePath = [string]$file.Path
+            $sourceFile = Get-SafePackageFilePath `
+                -Root $PackageDirectory -RelativePath $relativePath
+            $destinationFile = Get-SafePackageFilePath `
+                -Root $stagePath -RelativePath $relativePath
+            $destinationDirectory = Split-Path -Parent $destinationFile
+            New-Item -ItemType Directory -Path $destinationDirectory -Force | Out-Null
+            Copy-Item -LiteralPath $sourceFile -Destination $destinationFile -Force
+        }
+        $stagedManifestPath = Join-Path $stagePath 'package-manifest.json'
+        Copy-Item -LiteralPath $sourceManifestPath -Destination $stagedManifestPath -Force
+        if (-not (Get-FileHash -LiteralPath $stagedManifestPath -Algorithm SHA256).Hash.Equals(
+                $sourceManifestHash, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'The package manifest changed while it was copied into protected staging.'
+        }
+        [void](Assert-ServicePackageManifest -PackageDirectory $stagePath)
+        return $stagePath
+    } catch {
+        if (Test-Path -LiteralPath $stagePath) {
+            Remove-Item -LiteralPath $stagePath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        throw
+    }
+}
+
+function Remove-AdministratorInstallStage {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $allowedRoot = [IO.Path]::GetFullPath(
+        (Join-Path $env:ProgramData 'CSRI\TechBench Server Manager')).TrimEnd('\') + '\'
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    if (-not $fullPath.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        -not [IO.Path]::GetFileName($fullPath).StartsWith(
+            'Install-', [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove an unverified installer staging directory: $fullPath"
+    }
+    if ((Get-Item -LiteralPath $fullPath -Force).Attributes -band
+        [IO.FileAttributes]::ReparsePoint) {
+        throw "Refusing to remove a reparse-point installer staging directory: $fullPath"
+    }
+    $nestedReparsePoint = Get-ChildItem -LiteralPath $fullPath -Recurse -Force |
+        Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint } |
+        Select-Object -First 1
+    if ($null -ne $nestedReparsePoint) {
+        throw "Refusing to remove installer staging that contains a reparse point: $($nestedReparsePoint.FullName)"
+    }
+    Remove-Item -LiteralPath $fullPath -Recurse -Force
 }
 
 if (-not (Test-Path -LiteralPath $sourceExecutable)) {
@@ -435,14 +805,21 @@ if ($isManagedServiceAccount) {
 }
 
 if ($PSCmdlet.ShouldProcess($DisplayName, "Install Windows service as $ServiceAccount")) {
-    if (-not $isManagedServiceAccount -and $null -eq $Credential) {
-        $Credential = Read-ServiceAccountCredential -AccountName $ServiceAccount
-        if (-not $Credential.UserName.Equals($ServiceAccount, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "The credential user '$($Credential.UserName)' does not match -ServiceAccount '$ServiceAccount'."
-        }
-    }
+    $administratorInstallStage = $null
+    try {
+        $administratorInstallStage = New-VerifiedAdministratorInstallStage `
+            -PackageDirectory $sourcePath
+        $sourcePath = $administratorInstallStage
+        $sourceExecutable = Join-Path $sourcePath 'TechBench.SyncService.exe'
 
-    Stop-AndDeleteExistingService $ServiceName
+        if (-not $isManagedServiceAccount -and $null -eq $Credential) {
+            $Credential = Read-ServiceAccountCredential -AccountName $ServiceAccount
+            if (-not $Credential.UserName.Equals($ServiceAccount, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "The credential user '$($Credential.UserName)' does not match -ServiceAccount '$ServiceAccount'."
+            }
+        }
+
+        Stop-AndDeleteExistingService $ServiceName
 
     New-Item -ItemType Directory -Path $installPath -Force | Out-Null
     $preservedConfiguration = $null
@@ -453,7 +830,7 @@ if ($PSCmdlet.ShouldProcess($DisplayName, "Install Windows service as $ServiceAc
 
     if (-not $sourcePath.Equals($installPath, [StringComparison]::OrdinalIgnoreCase)) {
         Get-ChildItem -LiteralPath $sourcePath | Where-Object {
-            $_.Name -notmatch '(?i)\.sha256$' -and $_.Name -ne 'package-manifest.json'
+            $_.Name -notmatch '(?i)\.sha256$'
         } | ForEach-Object {
             Copy-Item -LiteralPath $_.FullName -Destination $installPath -Recurse -Force
         }
@@ -481,6 +858,14 @@ if ($PSCmdlet.ShouldProcess($DisplayName, "Install Windows service as $ServiceAc
     }
     $installedSettings | ConvertTo-Json -Depth 8 |
         Set-Content -LiteralPath $installedConfiguration -Encoding UTF8
+    Update-InstalledPackageManifestConfigurationEntry -PackageDirectory $installPath
+
+    try {
+        Install-ServerManagerShortcut -InstalledDirectory $installPath `
+            -ManagerDirectory $managerPath -ServiceName $ServiceName -DataDirectory $dataPath
+    } catch {
+        Write-Warning "The service was installed, but its Server Manager Start Menu shortcut could not be created. Run TechBench-ServerManager.ps1 from '$installPath'. $($_.Exception.Message)"
+    }
 
     Add-ServiceReadAcl -Path $installPath -ServiceSid $serviceSid
     Set-SecretDirectoryAcl -Path $dataPath -ServiceSid $serviceSid
@@ -535,7 +920,14 @@ if ($PSCmdlet.ShouldProcess($DisplayName, "Install Windows service as $ServiceAc
             [TimeSpan]::FromSeconds(30))
     }
 
-    $Credential = $null
-    Write-Host "Installed '$DisplayName' as $ServiceAccount."
-    Write-Host "Protected sync-service data directory: $dataPath"
+        $Credential = $null
+        Write-Host "Installed '$DisplayName' as $ServiceAccount."
+        Write-Host "Protected sync-service data directory: $dataPath"
+    } finally {
+        $Credential = $null
+        if ($null -ne $administratorInstallStage -and
+            (Test-Path -LiteralPath $administratorInstallStage)) {
+            Remove-AdministratorInstallStage -Path $administratorInstallStage
+        }
+    }
 }
