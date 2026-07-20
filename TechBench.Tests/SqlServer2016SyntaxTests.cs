@@ -341,6 +341,44 @@ public sealed partial class SqlServer2016SyntaxTests
     }
 
     [Fact]
+    public void V0007VerifierAllowsOnlyDatabaseConnectAndApprovedPreviewExecutions()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindSqlDirectory(),
+            "96-V0007-ServerOwnedSageAndAdminPreviewVerify.sql"));
+        const string failureMessage =
+            "PRINT N'FAIL: the preview reader has data/control or unexpected execution grants.';";
+        var failureIndex = source.IndexOf(failureMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.True(failureIndex >= 0);
+
+        var predicateStart = source.LastIndexOf(
+            "IF EXISTS",
+            failureIndex,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.True(predicateStart >= 0);
+
+        var predicate = Regex.Replace(
+            source[predicateStart..failureIndex],
+            @"\s+",
+            string.Empty);
+        Assert.Contains(
+            "(permission_row.[class]=0" +
+            "ANDpermission_row.[major_id]=0" +
+            "ANDpermission_row.[minor_id]=0" +
+            "ANDpermission_row.[permission_name]=N'CONNECT')",
+            predicate,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "(permission_row.[class]=1" +
+            "ANDpermission_row.[minor_id]=0" +
+            "ANDpermission_row.[permission_name]=N'EXECUTE'" +
+            "ANDEXISTS",
+            predicate,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ANDNOT", predicate, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void V0007RefreshesPreviewEligibilityAndReplacesRlsAtomically()
     {
         var source = File.ReadAllText(Path.Combine(

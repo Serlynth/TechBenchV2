@@ -375,14 +375,24 @@ IF EXISTS
     SELECT 1 FROM sys.database_permissions AS permission_row
     WHERE permission_row.[grantee_principal_id] = DATABASE_PRINCIPAL_ID(N'tb_preview_reader')
       AND permission_row.[state] IN (N'G', N'W')
-      AND
+      AND NOT
       (
-          permission_row.[permission_name] <> N'EXECUTE'
-          OR permission_row.[class] <> 1
-          OR NOT EXISTS
           (
-              SELECT 1 FROM @PreviewReadProcedures AS allowed
-              WHERE OBJECT_ID(allowed.[ObjectName], N'P') = permission_row.[major_id]
+              permission_row.[class] = 0
+              AND permission_row.[major_id] = 0
+              AND permission_row.[minor_id] = 0
+              AND permission_row.[permission_name] = N'CONNECT'
+          )
+          OR
+          (
+              permission_row.[class] = 1
+              AND permission_row.[minor_id] = 0
+              AND permission_row.[permission_name] = N'EXECUTE'
+              AND EXISTS
+              (
+                  SELECT 1 FROM @PreviewReadProcedures AS allowed
+                  WHERE OBJECT_ID(allowed.[ObjectName], N'P') = permission_row.[major_id]
+              )
           )
       )
 )
