@@ -54,7 +54,24 @@ if ($actualHash -ne $expectedHash) { throw 'TechBench SQL SHA-256 does not match
 
 ## Install
 
-For a normal domain account, PowerShell prompts for the Windows service account password without writing it to a command line or a file:
+For a normal domain account, the installer opens a credential dialog for the
+Windows service account password. The password is hidden initially. Select
+**Show password while I verify it** to reveal what you typed, then clear the
+check box to hide it again before continuing. Revealing it affects only the
+on-screen password field; the installer does not write it to the command line,
+a file, PowerShell output, or a log. Clipboard shortcuts are disabled in that
+field to reduce accidental disclosure. Avoid revealing it while anyone else
+can see or record the server screen. `-WhatIf` reports the proposed installation
+without prompting for any credential.
+
+If Windows cannot open the dialog (for example, on Server Core or through a
+non-GUI remote session), the installer falls back to PowerShell's standard
+protected, masked credential prompt. For unattended installation, obtain a
+`PSCredential` from the organization's approved secret-management process and
+pass that object with `-Credential`; never put the password itself in a command
+line, script, environment variable, or response file.
+
+Install interactively with:
 
 ```powershell
 $package = '.\TechBenchSyncService-2.0.0-alpha.8-win-x64.zip'
