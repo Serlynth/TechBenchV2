@@ -35,8 +35,10 @@ public sealed class ServerManagerSynchronizationConfigurationScriptTests
     {
         var source = ReadRepositoryFile("scripts", "TechBench-ServerManager.ps1");
 
-        Assert.Contains("$builder.IntegratedSecurity = $true", source, StringComparison.Ordinal);
-        Assert.Contains("$builder.Encrypt = $true", source, StringComparison.Ordinal);
+        Assert.Contains("$builder['Data Source'] = $server", source, StringComparison.Ordinal);
+        Assert.Contains("$builder['Integrated Security'] = $true", source, StringComparison.Ordinal);
+        Assert.Contains("$builder['Encrypt'] = $true", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("$builder.DataSource", source, StringComparison.Ordinal);
         Assert.Contains("tb_app.GetCurrentUserContext", source, StringComparison.Ordinal);
         Assert.Contains("if (-not $isAdmin)", source, StringComparison.Ordinal);
         Assert.Contains("tb_app.GetSettings", source, StringComparison.Ordinal);

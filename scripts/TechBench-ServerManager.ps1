@@ -2403,13 +2403,16 @@ function New-TechBenchDatabaseConnection {
 
         Add-Type -AssemblyName System.Data
         $builder = [Data.SqlClient.SqlConnectionStringBuilder]::new()
-        $builder.DataSource = $server
-        $builder.InitialCatalog = $database
-        $builder.IntegratedSecurity = $true
-        $builder.ApplicationName = 'TechBench Server Manager'
-        $builder.ConnectTimeout = 15
-        $builder.Encrypt = $true
-        $builder.TrustServerCertificate = [bool]$settings.TechBenchSync.TrustServerCertificate
+        # Windows PowerShell 5.1 routes dotted assignments on this IDictionary-
+        # derived builder through its keyword indexer (for example DataSource),
+        # which rejects the property spelling. Use canonical SQL keywords.
+        $builder['Data Source'] = $server
+        $builder['Initial Catalog'] = $database
+        $builder['Integrated Security'] = $true
+        $builder['Application Name'] = 'TechBench Server Manager'
+        $builder['Connect Timeout'] = 15
+        $builder['Encrypt'] = $true
+        $builder['TrustServerCertificate'] = [bool]$settings.TechBenchSync.TrustServerCertificate
         return [Data.SqlClient.SqlConnection]::new($builder.ConnectionString)
     } catch {
         throw "The installed SQL configuration could not be read. $($_.Exception.Message)"
