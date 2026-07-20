@@ -18,6 +18,14 @@ public sealed class SyncServiceCoreTests
     }
 
     [Fact]
+    public void SageServiceConfigurationRequiresDsnAndUsername()
+    {
+        Assert.True(new SageSyncConfiguration("techbench", "sage-user").IsConfigured);
+        Assert.False(new SageSyncConfiguration(" ", "sage-user").IsConfigured);
+        Assert.False(new SageSyncConfiguration("techbench", " ").IsConfigured);
+    }
+
+    [Fact]
     public void OptionsClampOperationalLimitsAndResolveCustomSecretPath()
     {
         var customPath = Path.Combine(
@@ -32,7 +40,11 @@ public sealed class SyncServiceCoreTests
             DeltaOverlapMinutes = 90,
             CommandTimeoutSeconds = 5,
             WhdRequestTimeoutSeconds = 1,
-            SecretPath = customPath
+            SageOdbcTimeoutSeconds = 1,
+            FinalizationTimeoutSeconds = 1,
+            SecretPath = customPath,
+            SageSecretPath = customPath + ".sage",
+            SageOdbcWorkerPath = customPath + ".exe"
         };
 
         Assert.Equal(TimeSpan.FromSeconds(5), options.PollInterval);
@@ -40,7 +52,11 @@ public sealed class SyncServiceCoreTests
         Assert.Equal(TimeSpan.FromMinutes(60), options.DeltaOverlap);
         Assert.Equal(30, options.EffectiveCommandTimeoutSeconds);
         Assert.Equal(TimeSpan.FromSeconds(15), options.WhdRequestTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(30), options.SageOdbcTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(5), options.FinalizationTimeout);
         Assert.Equal(Path.GetFullPath(customPath), options.ResolveSecretPath());
+        Assert.Equal(Path.GetFullPath(customPath + ".sage"), options.ResolveSageSecretPath());
+        Assert.Equal(Path.GetFullPath(customPath + ".exe"), options.ResolveSageOdbcWorkerPath());
         Assert.False(options.TrustServerCertificate);
     }
 
@@ -102,6 +118,68 @@ public sealed class SyncServiceCoreTests
         var missing = Assert.Throws<InvalidOperationException>(() => store.Read());
         Assert.Contains("has not been configured", missing.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Throws<ArgumentException>(() => store.Write("  "));
+    }
+
+    [Fact]
+    public void SageSecretStoreProtectsRoundTripsAndUsesDistinctEntropy()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "TechBench.Tests",
+            Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(directory, "sage.secret");
+        var options = Options.Create(new SyncServiceOptions
+        {
+            SecretPath = path,
+            SageSecretPath = path
+        });
+        var sageStore = new SageSecretStore(options);
+        const string secret = "sage-test-secret-1!";
+
+        try
+        {
+            sageStore.Write(secret);
+            Assert.Equal(secret, sageStore.Read());
+            Assert.False(ContainsSequence(
+                File.ReadAllBytes(path),
+                Encoding.UTF8.GetBytes(secret)));
+
+            var whdStore = new WhdSecretStore(options);
+            var error = Assert.Throws<InvalidOperationException>(() => whdStore.Read());
+            Assert.Contains("decrypt", error.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task SageProcessClientRejectsMissingX86WorkerBeforeSendingCredentials()
+    {
+        var missingPath = Path.Combine(
+            Path.GetTempPath(),
+            "TechBench.Tests",
+            Guid.NewGuid().ToString("N"),
+            "TechBench.SageOdbcWorker.exe");
+        var client = new SageOdbcWorkerProcessClient(Options.Create(new SyncServiceOptions
+        {
+            SageOdbcWorkerPath = missingPath
+        }));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            client.ReadCustomersAsync("techbench", "sage-user", "secret", CancellationToken.None));
+
+        Assert.Contains("32-bit", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("secret", error.Message, StringComparison.Ordinal);
     }
 
     private static WhdServiceConfiguration Configuration(string baseUrl, string username) => new(

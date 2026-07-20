@@ -240,6 +240,7 @@ public sealed partial class MainWindowViewModel
         }
 
         RefreshWhdSyncServiceStatus();
+        RefreshSageSyncServiceStatus();
         try
         {
             RefreshWhdUserMappings();

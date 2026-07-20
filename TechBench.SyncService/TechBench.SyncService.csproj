@@ -9,7 +9,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>TechBench.SyncService</AssemblyName>
     <RootNamespace>TechBench.SyncService</RootNamespace>
-    <Version>2.0.0-alpha.6</Version>
+    <Version>2.0.0-alpha.8</Version>
     <AssemblyVersion>2.0.0.0</AssemblyVersion>
     <FileVersion>2.0.0.0</FileVersion>
   </PropertyGroup>
@@ -22,6 +22,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TechBench.WHD\TechBench.WHD.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TechBench.Tests" />
   </ItemGroup>
 
   <ItemGroup>

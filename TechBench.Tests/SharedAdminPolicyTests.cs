@@ -80,6 +80,78 @@ public sealed class SharedAdminPolicyTests
         Assert.NotNull(typeof(ITechBenchRepository).GetMethod(nameof(ITechBenchRepository.GetWhdTechnicians)));
     }
 
+    [Fact]
+    public void RepositoryExposesManualServerSageQueueAndStatusContracts()
+    {
+        var requestMethod = typeof(ITechBenchRepository).GetMethod(
+            nameof(ITechBenchRepository.RequestSageSync));
+        Assert.NotNull(requestMethod);
+        var requestParameters = requestMethod!.GetParameters();
+        Assert.Equal(2, requestParameters.Length);
+        Assert.Equal(typeof(bool), requestParameters[0].ParameterType);
+        Assert.Equal(typeof(Guid?), requestParameters[1].ParameterType);
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
+            nameof(ITechBenchRepository.GetSageSyncStatus)));
+
+        Assert.NotNull(typeof(SageSyncServiceStatus).GetProperty(
+            nameof(SageSyncServiceStatus.RequiresLargeRemovalConfirmation)));
+        Assert.NotNull(typeof(MainWindowViewModel).GetProperty(
+            nameof(MainWindowViewModel.CanConfirmLargeSageRemoval)));
+
+        Assert.Null(typeof(LocalPreferences).GetProperty("SageCustomerSyncMinutes"));
+        Assert.Null(typeof(LocalPreferences).GetProperty("SageCustomerAutoSyncEnabled"));
+    }
+
+    [Fact]
+    public void PeriodicSharedRefreshReloadsServerSageConfiguration()
+    {
+        var source = File.ReadAllText(FindRepositoryFile(
+            "ViewModels",
+            "MainWindowViewModel.cs"));
+        var timerStart = source.IndexOf(
+            "private void HandleSharedDataRefreshTimerTick",
+            StringComparison.Ordinal);
+        var start = source.IndexOf(
+            "private void ReloadOrganizationSettings()",
+            StringComparison.Ordinal);
+        var end = source.IndexOf(
+            "private void RefreshTagSuggestions()",
+            start,
+            StringComparison.Ordinal);
+
+        Assert.True(start >= 0 && end > start);
+        Assert.True(timerStart >= 0 && start > timerStart);
+        var timerBody = source[timerStart..start];
+        Assert.Contains("CurrentSection.Equals(\"Settings\"", timerBody);
+        Assert.Contains("if (!_settingsHaveUnsavedChanges)", timerBody);
+        Assert.Contains("ReloadOrganizationSettings();", timerBody);
+
+        var reloadBody = source[start..end];
+        Assert.Contains("SageServerDsn = settings.GetValueOrDefault(", reloadBody);
+        Assert.Contains("\"Sage.SyncDsn\"", reloadBody);
+        Assert.Contains("SageServerUsername = settings.GetValueOrDefault(", reloadBody);
+        Assert.Contains("\"Sage.SyncUsername\"", reloadBody);
+        Assert.Contains("RefreshSageSyncServiceStatus();", reloadBody);
+    }
+
+    private static string FindRepositoryFile(params string[] relativeParts)
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var candidateParts = new[] { directory.FullName }.Concat(relativeParts).ToArray();
+            var candidate = Path.Combine(candidateParts);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate the TechBenchV2 repository root.");
+    }
+
     private static CurrentUserContext CreateUser(
         bool isAdmin,
         bool isSyncOperator) =>

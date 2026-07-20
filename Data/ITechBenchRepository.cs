@@ -66,10 +66,6 @@ public interface ITechBenchRepository
         DateTime syncedAt,
         bool reconcileMissing = false);
 
-    (int SavedCount, int StaleCount) SynchronizeSageCustomers(
-        IReadOnlyList<SageCustomer> customers,
-        DateTime syncedAt);
-
     IReadOnlyList<WorkEntry> GetWorkEntries(WorkEntryQuery query);
 
     IReadOnlyList<string> GetDistinctTags();
@@ -143,6 +139,12 @@ public interface ITechBenchRepository
     WhdSyncServiceStatus GetWhdSyncStatus();
 
     WhdSyncRequestResult RequestWhdSync();
+
+    SageSyncServiceStatus GetSageSyncStatus();
+
+    SageSyncRequestResult RequestSageSync(
+        bool allowLargeRemoval = false,
+        Guid? confirmedRequestId = null);
 
     IReadOnlyList<WhdUserMapping> GetWhdUserMappings();
 

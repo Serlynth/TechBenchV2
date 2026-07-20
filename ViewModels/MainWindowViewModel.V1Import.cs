@@ -12,7 +12,7 @@ public sealed partial class MainWindowViewModel
     {
         ImportV1DatabaseCommand = new AsyncRelayCommand(
             _ => ImportV1DatabaseAsync(),
-            _ => !IsEntryOperationRunning);
+            _ => CanWrite && !IsEntryOperationRunning);
     }
 
     private async Task ImportV1DatabaseAsync()

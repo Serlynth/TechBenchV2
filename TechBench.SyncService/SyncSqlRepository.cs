@@ -30,7 +30,7 @@ public sealed class SyncSqlRepository
             TrustServerCertificate = _options.TrustServerCertificate,
             MultipleActiveResultSets = false,
             ConnectTimeout = 15,
-            ApplicationName = "TechBench V2 WHD Sync Service"
+            ApplicationName = "TechBench V2 Sync Service"
         }.ConnectionString;
     }
 
@@ -60,6 +60,22 @@ public sealed class SyncSqlRepository
             ParseCursor(GetString(reader, "CursorValue")));
     }
 
+    public async Task<SageSyncConfiguration> GetSageConfigurationAsync(
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = CreateCommand(connection, "[tb_service].[GetSageSyncConfiguration]");
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException("SQL Server returned no Sage synchronization configuration.");
+        }
+
+        return new SageSyncConfiguration(
+            GetString(reader, "Dsn"),
+            GetString(reader, "Username"));
+    }
+
     public async Task<WhdSyncWork?> ClaimWorkAsync(
         Guid workerId,
         CancellationToken cancellationToken)
@@ -86,6 +102,27 @@ public sealed class SyncSqlRepository
             GetDateTimeOffset(reader, "ExpiresAtUtc"));
     }
 
+    public async Task<SageSyncWork?> ClaimSageWorkAsync(
+        Guid workerId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = CreateCommand(connection, "[tb_service].[ClaimSageSyncWork]");
+        Add(command, "@WorkerId", SqlDbType.UniqueIdentifier, workerId);
+        Add(command, "@LeaseSeconds", SqlDbType.Int, _options.EffectiveLeaseSeconds);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        return new SageSyncWork(
+            GetGuid(reader, "WorkId"),
+            GetGuid(reader, "LeaseId"),
+            GetDateTimeOffset(reader, "ExpiresAtUtc"),
+            GetBoolean(reader, "AllowLargeRemoval", false));
+    }
+
     public async Task RenewLeaseAsync(
         WhdSyncWork work,
         Guid workerId,
@@ -94,6 +131,18 @@ public sealed class SyncSqlRepository
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = CreateCommand(connection, "[tb_service].[RenewWhdSyncLease]");
         AddWorkIdentity(command, work, workerId);
+        Add(command, "@LeaseSeconds", SqlDbType.Int, _options.EffectiveLeaseSeconds);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task RenewSageLeaseAsync(
+        SageSyncWork work,
+        Guid workerId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = CreateCommand(connection, "[tb_service].[RenewSageSyncLease]");
+        AddSageWorkIdentity(command, work, workerId);
         Add(command, "@LeaseSeconds", SqlDbType.Int, _options.EffectiveLeaseSeconds);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -138,6 +187,35 @@ public sealed class SyncSqlRepository
         CancellationToken cancellationToken) =>
         ApplyJsonAsync("[tb_service].[ApplyWhdTechGroupSnapshot]", work, workerId, json, syncedAt, cancellationToken);
 
+    public async Task<SageSyncCounts> ApplySageCustomersAsync(
+        SageSyncWork work,
+        Guid workerId,
+        string json,
+        DateTimeOffset syncedAt,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = CreateCommand(connection, "[tb_service].[ApplySageCustomerSnapshot]");
+        AddSageWorkIdentity(command, work, workerId);
+        Add(command, "@Json", SqlDbType.NVarChar, json, -1);
+        Add(command, "@SyncedAtUtc", SqlDbType.DateTime2, syncedAt.UtcDateTime);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException(
+                "SQL Server returned no result for the Sage customer snapshot.");
+        }
+
+        return new SageSyncCounts(
+            GetInt32(reader, "ReadCount", 0),
+            GetInt32(reader, "SavedCount", 0),
+            GetInt32(reader, "StaleCount", 0),
+            GetInt32(reader, "MatchedCount", 0),
+            GetInt32(reader, "ExistingCount", 0),
+            GetBoolean(reader, "RequiresLargeRemovalConfirmation", false),
+            GetString(reader, "Message"));
+    }
+
     public async Task CompleteWorkAsync(
         WhdSyncWork work,
         Guid workerId,
@@ -156,6 +234,21 @@ public sealed class SyncSqlRepository
             SqlDbType.NVarChar,
             nextCursorUtc?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
             400);
+        Add(command, "@Message", SqlDbType.NVarChar, Truncate(message, 2000), 2000);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task CompleteSageWorkAsync(
+        SageSyncWork work,
+        Guid workerId,
+        bool succeeded,
+        string? message,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = CreateCommand(connection, "[tb_service].[CompleteSageSyncWork]");
+        AddSageWorkIdentity(command, work, workerId);
+        Add(command, "@Succeeded", SqlDbType.Bit, succeeded);
         Add(command, "@Message", SqlDbType.NVarChar, Truncate(message, 2000), 2000);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -198,6 +291,13 @@ public sealed class SyncSqlRepository
     };
 
     private static void AddWorkIdentity(SqlCommand command, WhdSyncWork work, Guid workerId)
+    {
+        Add(command, "@WorkId", SqlDbType.UniqueIdentifier, work.WorkId);
+        Add(command, "@LeaseId", SqlDbType.UniqueIdentifier, work.LeaseId);
+        Add(command, "@WorkerId", SqlDbType.UniqueIdentifier, workerId);
+    }
+
+    private static void AddSageWorkIdentity(SqlCommand command, SageSyncWork work, Guid workerId)
     {
         Add(command, "@WorkId", SqlDbType.UniqueIdentifier, work.WorkId);
         Add(command, "@LeaseId", SqlDbType.UniqueIdentifier, work.LeaseId);

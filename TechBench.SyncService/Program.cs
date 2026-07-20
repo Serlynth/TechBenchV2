@@ -10,35 +10,78 @@ builder.Configuration
 builder.Services.Configure<SyncServiceOptions>(
     builder.Configuration.GetSection(SyncServiceOptions.SectionName));
 
-if (args.Any(static value => value.Equals("--set-whd-secret", StringComparison.OrdinalIgnoreCase)
+var hasWhdSecretCommand = args.Any(static value =>
+    value.Equals("--set-whd-secret", StringComparison.OrdinalIgnoreCase)
     || value.Equals("--delete-whd-secret", StringComparison.OrdinalIgnoreCase)
-    || value.Equals("--check-whd-secret", StringComparison.OrdinalIgnoreCase)))
+    || value.Equals("--check-whd-secret", StringComparison.OrdinalIgnoreCase));
+var hasSageSecretCommand = args.Any(static value =>
+    value.Equals("--set-sage-secret", StringComparison.OrdinalIgnoreCase)
+    || value.Equals("--delete-sage-secret", StringComparison.OrdinalIgnoreCase)
+    || value.Equals("--check-sage-secret", StringComparison.OrdinalIgnoreCase));
+if (hasWhdSecretCommand || hasSageSecretCommand)
 {
-    using var commandHost = builder.Build();
-    var store = new WhdSecretStore(commandHost.Services.GetRequiredService<IOptions<SyncServiceOptions>>());
-    if (args.Any(static value => value.Equals("--set-whd-secret", StringComparison.OrdinalIgnoreCase)))
+    if (hasWhdSecretCommand && hasSageSecretCommand)
     {
-        var secret = ReadSecret();
-        try
-        {
-            store.Write(secret);
-            Console.WriteLine($"Protected WHD credential saved at {store.Path}.");
-        }
-        finally
-        {
-            secret = string.Empty;
-        }
+        throw new InvalidOperationException("Run one credential-management command at a time.");
     }
-    else if (args.Any(static value => value.Equals("--delete-whd-secret", StringComparison.OrdinalIgnoreCase)))
+
+    using var commandHost = builder.Build();
+    var options = commandHost.Services.GetRequiredService<IOptions<SyncServiceOptions>>();
+    if (hasWhdSecretCommand)
     {
-        store.Delete();
-        Console.WriteLine("Protected WHD credential removed.");
+        var store = new WhdSecretStore(options);
+        if (args.Any(static value => value.Equals("--set-whd-secret", StringComparison.OrdinalIgnoreCase)))
+        {
+            var secret = ReadSecret("WHD API key, token, or password: ");
+            try
+            {
+                store.Write(secret);
+                Console.WriteLine($"Protected WHD credential saved at {store.Path}.");
+            }
+            finally
+            {
+                secret = string.Empty;
+            }
+        }
+        else if (args.Any(static value => value.Equals("--delete-whd-secret", StringComparison.OrdinalIgnoreCase)))
+        {
+            store.Delete();
+            Console.WriteLine("Protected WHD credential removed.");
+        }
+        else
+        {
+            Console.WriteLine(store.Exists
+                ? $"A protected WHD credential exists at {store.Path}."
+                : $"No protected WHD credential exists at {store.Path}.");
+        }
     }
     else
     {
-        Console.WriteLine(store.Exists
-            ? $"A protected WHD credential exists at {store.Path}."
-            : $"No protected WHD credential exists at {store.Path}.");
+        var store = new SageSecretStore(options);
+        if (args.Any(static value => value.Equals("--set-sage-secret", StringComparison.OrdinalIgnoreCase)))
+        {
+            var secret = ReadSecret("Sage ODBC password: ");
+            try
+            {
+                store.Write(secret);
+                Console.WriteLine($"Protected Sage ODBC credential saved at {store.Path}.");
+            }
+            finally
+            {
+                secret = string.Empty;
+            }
+        }
+        else if (args.Any(static value => value.Equals("--delete-sage-secret", StringComparison.OrdinalIgnoreCase)))
+        {
+            store.Delete();
+            Console.WriteLine("Protected Sage ODBC credential removed.");
+        }
+        else
+        {
+            Console.WriteLine(store.Exists
+                ? $"A protected Sage ODBC credential exists at {store.Path}."
+                : $"No protected Sage ODBC credential exists at {store.Path}.");
+        }
     }
 
     return;
@@ -46,34 +89,38 @@ if (args.Any(static value => value.Equals("--set-whd-secret", StringComparison.O
 
 builder.Services.AddWindowsService(options =>
 {
-    options.ServiceName = "TechBench WHD Sync Service";
+    options.ServiceName = "TechBench Sync Service";
 });
 builder.Services.AddSingleton<WhdSecretStore>();
+builder.Services.AddSingleton<SageSecretStore>();
 builder.Services.AddSingleton<SyncSqlRepository>();
+builder.Services.AddSingleton<ISageOdbcWorkerProcessClient, SageOdbcWorkerProcessClient>();
 builder.Services.AddSingleton(serviceProvider =>
 {
     var options = serviceProvider.GetRequiredService<IOptions<SyncServiceOptions>>().Value;
     return new WhdRestClient(new HttpClient { Timeout = options.WhdRequestTimeout });
 });
 builder.Services.AddSingleton<WhdSyncEngine>();
+builder.Services.AddSingleton<SageCustomerSyncEngine>();
 builder.Services.AddHostedService<WhdSyncWorker>();
+builder.Services.AddHostedService<SageCustomerSyncWorker>();
 
 await builder.Build().RunAsync();
 
-static string ReadSecret()
+static string ReadSecret(string prompt)
 {
     if (Console.IsInputRedirected)
     {
         var redirected = Console.In.ReadToEnd().TrimEnd('\r', '\n');
         if (string.IsNullOrWhiteSpace(redirected))
         {
-            throw new InvalidOperationException("No WHD credential was provided on standard input.");
+            throw new InvalidOperationException("No credential was provided on standard input.");
         }
 
         return redirected;
     }
 
-    Console.Write("WHD API key, token, or password: ");
+    Console.Write(prompt);
     var characters = new List<char>();
     while (true)
     {
@@ -104,7 +151,7 @@ static string ReadSecret()
     characters.Clear();
     if (string.IsNullOrWhiteSpace(value))
     {
-        throw new InvalidOperationException("A nonempty WHD credential is required.");
+        throw new InvalidOperationException("A nonempty credential is required.");
     }
 
     return value;

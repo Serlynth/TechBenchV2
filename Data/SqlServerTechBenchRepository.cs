@@ -104,6 +104,8 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
             "[tb_app].[AdminDeleteOrganizationSetting]";
         public const string GetWhdSyncStatus = "[tb_app].[GetWhdSyncStatus]";
         public const string RequestWhdSync = "[tb_app].[AdminRequestWhdSync]";
+        public const string GetSageSyncStatus = "[tb_app].[GetSageSyncStatus]";
+        public const string RequestSageSync = "[tb_app].[AdminRequestSageSync]";
         public const string GetWhdUserMappings = "[tb_app].[AdminGetWhdUserMappings]";
         public const string GetWhdTechnicians = "[tb_app].[AdminGetWhdTechnicians]";
         public const string SaveWhdUserMapping = "[tb_app].[AdminSaveWhdUserMapping]";
@@ -131,8 +133,6 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         public const string ApplyWhdTicketSnapshot = "[tb_app].[SyncApplyTicketSnapshot]";
         public const string ApplyTicketStatusSnapshot =
             "[tb_app].[SyncApplyTicketStatusSnapshot]";
-        public const string ApplySageCustomerSnapshot =
-            "[tb_app].[SyncApplySageCustomerSnapshot]";
         public const string BeginImportBatch = "[tb_app].[BeginImportBatch]";
         public const string AddImportLegacyMapping = "[tb_app].[AddImportLegacyMapping]";
         public const string CompleteImportBatch = "[tb_app].[CompleteImportBatch]";
@@ -433,6 +433,9 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         GetValue(reader, columnName) is { } value
             ? Convert.ToInt32(value, CultureInfo.InvariantCulture)
             : null;
+
+    private static Guid? GetNullableGuid(SqlDataReader reader, string columnName) =>
+        GetValue(reader, columnName) is Guid value ? value : null;
 
     private static long GetInt64(
         SqlDataReader reader,

@@ -7,9 +7,9 @@ namespace TechBench.Tests;
 public sealed class SqlServerTechBenchRepositoryContractTests
 {
     [Fact]
-    public void ClientTargetsV0005Schema()
+    public void ClientTargetsV0007Schema()
     {
-        Assert.Equal(6, SqlServerConnectionFactory.SupportedSchemaVersion);
+        Assert.Equal(7, SqlServerConnectionFactory.SupportedSchemaVersion);
     }
 
     [Fact]
@@ -143,5 +143,51 @@ public sealed class SqlServerTechBenchRepositoryContractTests
         Assert.Equal("[tb_app].[AdminGetWhdUserMappings]", SqlServerTechBenchRepository.Procedures.GetWhdUserMappings);
         Assert.Equal("[tb_app].[AdminSaveWhdUserMapping]", SqlServerTechBenchRepository.Procedures.SaveWhdUserMapping);
         Assert.Equal("[tb_app].[AdminGetWhdTechnicians]", SqlServerTechBenchRepository.Procedures.GetWhdTechnicians);
+    }
+
+    [Fact]
+    public void SageCustomerSyncUsesOnlyTheAdminServerQueueContract()
+    {
+        Assert.Equal(
+            "[tb_app].[AdminRequestSageSync]",
+            SqlServerTechBenchRepository.Procedures.RequestSageSync);
+        Assert.Equal(
+            "[tb_app].[GetSageSyncStatus]",
+            SqlServerTechBenchRepository.Procedures.GetSageSyncStatus);
+        var requestMethod = typeof(ITechBenchRepository).GetMethod(
+            nameof(ITechBenchRepository.RequestSageSync));
+        Assert.NotNull(requestMethod);
+        var requestParameters = requestMethod!.GetParameters();
+        Assert.Equal(2, requestParameters.Length);
+        Assert.Equal(typeof(bool), requestParameters[0].ParameterType);
+        Assert.Equal(typeof(Guid?), requestParameters[1].ParameterType);
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
+            nameof(ITechBenchRepository.GetSageSyncStatus)));
+
+        var repositorySource = File.ReadAllText(FindRepositoryFile(
+            "Data",
+            "SqlServerTechBenchRepository.WhdSync.cs"));
+        Assert.Contains(
+            "alreadyQueued && !approvalNotQueued",
+            repositorySource,
+            StringComparison.Ordinal);
+    }
+
+    private static string FindRepositoryFile(params string[] relativeParts)
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(
+                new[] { directory.FullName }.Concat(relativeParts).ToArray());
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate the TechBenchV2 repository root.");
     }
 }

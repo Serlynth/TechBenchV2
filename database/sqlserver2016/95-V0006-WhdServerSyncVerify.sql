@@ -7,6 +7,10 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
 DECLARE @FailureCount int = 0;
+DECLARE @InstalledSchemaVersion int =
+(
+    SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]
+);
 
 IF NOT EXISTS
 (
@@ -21,9 +25,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) <> 6
+IF @InstalledSchemaVersion NOT IN (6, 7)
 BEGIN
-    PRINT N'FAIL: installed schema version is not 6.';
+    PRINT N'FAIL: V0006 verification supports installed schema version 6 or 7.';
     SET @FailureCount += 1;
 END;
 
@@ -261,6 +265,16 @@ INSERT INTO @ServiceProcedures([ObjectName]) VALUES
     (N'tb_service.ApplyWhdTechnicianSnapshot'),
     (N'tb_service.ApplyWhdTechGroupSnapshot'),
     (N'tb_service.CompleteWhdSyncWork');
+
+IF @InstalledSchemaVersion >= 7
+BEGIN
+    INSERT INTO @ServiceProcedures([ObjectName]) VALUES
+        (N'tb_service.GetSageSyncConfiguration'),
+        (N'tb_service.ClaimSageSyncWork'),
+        (N'tb_service.RenewSageSyncLease'),
+        (N'tb_service.ApplySageCustomerSnapshot'),
+        (N'tb_service.CompleteSageSyncWork');
+END;
 
 IF EXISTS
 (

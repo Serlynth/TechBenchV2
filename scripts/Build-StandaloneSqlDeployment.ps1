@@ -22,6 +22,7 @@ $orderedScripts = @(
     '23-V0004-AdminOwnedSharedConfig.sql'
     '24-V0005-TechBenchV1ImportSchema.sql'
     '25-V0006-WhdServerSyncSchema.sql'
+    '26-V0007-ServerOwnedSageAndAdminPreviewSchema.sql'
     '30-Security.sql'
     '40-StoredProcedures.sql'
     '41-V0002-WorkProcedures.sql'
@@ -32,17 +33,20 @@ $orderedScripts = @(
     '46-V0004-AdminSharedProcedures.sql'
     '47-V0005-TechBenchV1ImportProcedures.sql'
     '48-V0006-WhdServerSyncProcedures.sql'
+    '49-V0007-ServerOwnedSageAndAdminPreviewProcedures.sql'
     '50-Grants.sql'
     '51-V0002-OperationalGrants.sql'
     '52-V0004-AdminSharedGrants.sql'
     '53-V0005-TechBenchV1ImportGrants.sql'
     '54-V0006-WhdServerSyncGrants.sql'
+    '55-V0007-ServerOwnedSageAndAdminPreviewGrants.sql'
     '90-Verify.sql'
     '91-V0002-OperationalVerify.sql'
     '92-V0003-SharedReferenceVerify.sql'
     '93-V0004-AdminSharedVerify.sql'
     '94-V0005-TechBenchV1ImportVerify.sql'
     '95-V0006-WhdServerSyncVerify.sql'
+    '96-V0007-ServerOwnedSageAndAdminPreviewVerify.sql'
 )
 
 $sections = [System.Collections.Generic.List[string]]::new()

@@ -10,11 +10,26 @@ public sealed record CurrentUserContext(
     bool IsTechnician,
     bool IsManager,
     bool IsAdmin,
-    bool IsSyncOperator)
+    bool IsSyncOperator,
+    byte[]? AuthenticatedUserSid = null,
+    string? AuthenticatedLoginName = null,
+    string? AuthenticatedDisplayName = null,
+    bool IsReadOnlyPreview = false,
+    Guid? PreviewSessionId = null,
+    DateTime? PreviewExpiresAtUtc = null)
 {
-    public bool CanManageClients => IsAdmin;
+    public byte[] CredentialOwnerSid => AuthenticatedUserSid ?? UserSid;
 
-    public bool CanRunSharedSync => IsAdmin;
+    public string AuthenticationLabel =>
+        AuthenticatedDisplayName
+        ?? AuthenticatedLoginName
+        ?? DisplayName;
 
-    public bool CanManageSharedConfiguration => IsAdmin;
+    public bool CanWrite => !IsReadOnlyPreview;
+
+    public bool CanManageClients => IsAdmin && CanWrite;
+
+    public bool CanRunSharedSync => IsAdmin && CanWrite;
+
+    public bool CanManageSharedConfiguration => IsAdmin && CanWrite;
 }

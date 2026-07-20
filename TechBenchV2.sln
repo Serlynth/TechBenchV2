@@ -11,6 +11,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TechBench.WHD", "TechBench.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TechBench.SyncService", "TechBench.SyncService\TechBench.SyncService.csproj", "{74BE8AD7-08E1-4986-B533-3FD6364912DB}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TechBench.SageOdbcWorker", "TechBench.SageOdbcWorker\TechBench.SageOdbcWorker.csproj", "{F8BF69BD-E8FC-44DA-9C91-E202C147BC71}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -36,5 +38,9 @@ Global
 		{74BE8AD7-08E1-4986-B533-3FD6364912DB}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{74BE8AD7-08E1-4986-B533-3FD6364912DB}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{74BE8AD7-08E1-4986-B533-3FD6364912DB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F8BF69BD-E8FC-44DA-9C91-E202C147BC71}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F8BF69BD-E8FC-44DA-9C91-E202C147BC71}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F8BF69BD-E8FC-44DA-9C91-E202C147BC71}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F8BF69BD-E8FC-44DA-9C91-E202C147BC71}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

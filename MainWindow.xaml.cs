@@ -14,6 +14,9 @@ public partial class MainWindow : Window
 {
     private readonly WindowsNotificationService _notificationService;
     private readonly LocalPreferences _localPreferences;
+    private DispatcherTimer? _previewExpiryTimer;
+    private DateTime _previewExpiryDeadlineUtc;
+    private bool _previewExpiryHandled;
     private MarkdownEditorWindow? _markdownEditorWindow;
 
     public MainWindow(
@@ -34,6 +37,11 @@ public partial class MainWindow : Window
         var whdRestClient = new WhdRestClient();
         var sageOdbcClient = new SageOdbcProcessClient();
         _notificationService = new WindowsNotificationService();
+        ICredentialStore credentialStore = currentUser.IsReadOnlyPreview
+            ? ReadOnlyPreviewCredentialStore.Instance
+            : new WindowsCredentialStore(LocalUserDataPath.ResolveCredentialScope(
+                currentUser.DatabaseInstanceId,
+                currentUser.CredentialOwnerSid));
 
         var viewModel = new MainWindowViewModel(
             repository,
@@ -45,18 +53,27 @@ public partial class MainWindow : Window
             sageOdbcClient,
             new AppDialogService(),
             _notificationService,
-            new WindowsCredentialStore(LocalUserDataPath.ResolveCredentialScope(
-                currentUser.DatabaseInstanceId,
-                currentUser.UserSid)),
+            credentialStore,
             currentUser,
             _localPreferences,
             new V2AppUpdateService(),
             () => System.Windows.Application.Current.Shutdown());
 
         DataContext = viewModel;
-        viewModel.StatusMessage =
-            $"Connected to {connectionFactory.Options.Server}/{connectionFactory.Options.Database} "
-            + $"as {currentUser.DisplayName}. Server-backed workspace ready.";
+        if (currentUser.IsReadOnlyPreview)
+        {
+            Title = $"TechBench V2 - READ-ONLY PREVIEW: {currentUser.LoginName}";
+            viewModel.StatusMessage =
+                $"READ-ONLY PREVIEW of {currentUser.DisplayName} ({currentUser.LoginName}); "
+                + $"authenticated as {currentUser.AuthenticationLabel}.";
+            StartPreviewExpiryMonitor(currentUser);
+        }
+        else
+        {
+            viewModel.StatusMessage =
+                $"Connected to {connectionFactory.Options.Server}/{connectionFactory.Options.Database} "
+                + $"as {currentUser.DisplayName}. Server-backed workspace ready.";
+        }
         if (!string.IsNullOrWhiteSpace(App.UpdateCompletionVersion))
         {
             viewModel.Updates.MarkUpdateCompleted(App.UpdateCompletionVersion);
@@ -69,6 +86,8 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _previewExpiryTimer?.Stop();
+        _previewExpiryTimer = null;
         SaveWindowPreferences();
         if (DataContext is IDisposable disposable)
         {
@@ -77,6 +96,59 @@ public partial class MainWindow : Window
 
         _notificationService.Dispose();
         base.OnClosed(e);
+    }
+
+    internal static TimeSpan ResolvePreviewTimeRemaining(CurrentUserContext currentUser)
+    {
+        if (!currentUser.IsReadOnlyPreview
+            || currentUser.PreviewExpiresAtUtc is not DateTime expiresAtUtc)
+        {
+            return TimeSpan.Zero;
+        }
+
+        return expiresAtUtc - currentUser.ServerUtc;
+    }
+
+    private void StartPreviewExpiryMonitor(CurrentUserContext currentUser)
+    {
+        var remaining = ResolvePreviewTimeRemaining(currentUser);
+        // Leave a small safety margin so the client closes before a new SQL
+        // connection can race the server's hard session expiry.
+        _previewExpiryDeadlineUtc = DateTime.UtcNow.Add(remaining).AddSeconds(-2);
+        _previewExpiryTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(1)
+        };
+        _previewExpiryTimer.Tick += PreviewExpiryTimer_Tick;
+        _previewExpiryTimer.Start();
+
+        if (remaining <= TimeSpan.FromSeconds(2))
+        {
+            Dispatcher.BeginInvoke(HandlePreviewExpiry);
+        }
+    }
+
+    private void PreviewExpiryTimer_Tick(object? sender, EventArgs e)
+    {
+        if (DateTime.UtcNow >= _previewExpiryDeadlineUtc)
+        {
+            HandlePreviewExpiry();
+        }
+    }
+
+    private void HandlePreviewExpiry()
+    {
+        if (_previewExpiryHandled)
+        {
+            return;
+        }
+
+        _previewExpiryHandled = true;
+        _previewExpiryTimer?.Stop();
+        AppDialogWindow.Info(
+            "Read-only preview expired",
+            "This 30-minute user preview has expired. TechBench V2 will close; reopen it to start another preview.");
+        Close();
     }
 
     private void ApplyWindowPreferences()

@@ -25,9 +25,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6)
+IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7)
 BEGIN
-    PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, 5, or 6.';
+    PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, 5, 6, or 7.';
     SET @FailureCount += 1;
 END;
 
@@ -638,9 +638,16 @@ BEGIN
         (N'tb_role_admin', N'tb_app.EnsureWorkspaceDefaults'),
         (N'tb_role_admin', N'tb_app.SaveTemplate'),
         (N'tb_role_admin', N'tb_app.SaveCommonLink'),
-        (N'tb_role_admin', N'tb_app.SaveClientAlias'),
-        (N'tb_role_admin', N'tb_app.AcquireSyncLease'),
-        (N'tb_role_admin', N'tb_app.SyncApplySageCustomerSnapshot');
+        (N'tb_role_admin', N'tb_app.SaveClientAlias');
+
+    /* V0007 moves organization-wide Sage snapshot application to the service. */
+    IF @InstalledSchemaVersion < 7
+    BEGIN
+        INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
+        VALUES
+            (N'tb_role_admin', N'tb_app.AcquireSyncLease'),
+            (N'tb_role_admin', N'tb_app.SyncApplySageCustomerSnapshot');
+    END;
 
     /* V0006 moves organization-wide WHD snapshot application to the service. */
     IF @InstalledSchemaVersion < 6

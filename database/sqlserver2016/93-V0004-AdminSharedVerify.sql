@@ -26,9 +26,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (4, 5, 6)
+IF @InstalledSchemaVersion NOT IN (4, 5, 6, 7)
 BEGIN
-    PRINT N'FAIL: V0004 verification supports installed schema version 4, 5, or 6.';
+    PRINT N'FAIL: V0004 verification supports installed schema version 4, 5, 6, or 7.';
     SET @FailureCount += 1;
 END;
 
@@ -499,15 +499,22 @@ VALUES
     (N'tb_role_admin', N'tb_app.AdminSaveExternalMapping'),
     (N'tb_role_admin', N'tb_app.AdminMergeClients'),
     (N'tb_role_admin', N'tb_app.ReconcileClientMatches'),
-    (N'tb_role_admin', N'tb_app.AcquireSyncLease'),
-    (N'tb_role_admin', N'tb_app.ReleaseSyncLease'),
-    (N'tb_role_admin', N'tb_app.BeginSyncRun'),
-    (N'tb_role_admin', N'tb_app.CompleteSyncRun'),
-    (N'tb_role_admin', N'tb_app.SyncApplySageCustomerSnapshot'),
-    (N'tb_role_admin', N'tb_app.SyncUpsertSageCustomer'),
-    (N'tb_role_admin', N'tb_app.SyncRemoveStaleSageCustomers'),
-    (N'tb_role_admin', N'tb_app.SyncUpsertClientExternalIdentity'),
     (N'tb_role_sync_operator', N'tb_app.GetSyncRuns');
+
+/* V0007 moves organization-wide Sage ingestion to tb_role_sync_service. */
+IF @InstalledSchemaVersion < 7
+BEGIN
+    INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
+    VALUES
+        (N'tb_role_admin', N'tb_app.AcquireSyncLease'),
+        (N'tb_role_admin', N'tb_app.ReleaseSyncLease'),
+        (N'tb_role_admin', N'tb_app.BeginSyncRun'),
+        (N'tb_role_admin', N'tb_app.CompleteSyncRun'),
+        (N'tb_role_admin', N'tb_app.SyncApplySageCustomerSnapshot'),
+        (N'tb_role_admin', N'tb_app.SyncUpsertSageCustomer'),
+        (N'tb_role_admin', N'tb_app.SyncRemoveStaleSageCustomers'),
+        (N'tb_role_admin', N'tb_app.SyncUpsertClientExternalIdentity');
+END;
 
 /* V0006 moves organization-wide WHD mutations to tb_role_sync_service. */
 IF @InstalledSchemaVersion < 6

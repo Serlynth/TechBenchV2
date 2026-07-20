@@ -385,28 +385,6 @@ public sealed partial class SqlServerTechBenchRepository
         return result.MatchedCount;
     }
 
-    public (int SavedCount, int StaleCount) SynchronizeSageCustomers(
-        IReadOnlyList<SageCustomer> customers,
-        DateTime syncedAt) =>
-        SynchronizeSageCustomersAsync(customers, syncedAt).GetAwaiter().GetResult();
-
-    public async Task<(int SavedCount, int StaleCount)> SynchronizeSageCustomersAsync(
-        IReadOnlyList<SageCustomer> customers,
-        DateTime syncedAt,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(customers);
-        var result = await ApplySyncSnapshotAsync(
-                "Sage-Customers",
-                Procedures.ApplySageCustomerSnapshot,
-                customers,
-                syncedAt,
-                reconcileMissing: true,
-                cancellationToken)
-            .ConfigureAwait(false);
-        return (result.SavedCount, result.StaleCount);
-    }
-
     public async Task ApplyTicketStatusSnapshotAsync(
         IReadOnlyList<WhdStatusType> statuses,
         DateTime syncedAt,

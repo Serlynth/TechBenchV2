@@ -547,10 +547,21 @@
                 </Grid>
             </Border>
 
-            <Border Grid.Row="1"
-                    BorderThickness="0,0,0,1"
-                    Padding="24,12"
-                    Visibility="{Binding Updates.IsBannerVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <StackPanel Grid.Row="1">
+                <Border Background="{DynamicResource WarningBrush}"
+                        BorderBrush="{DynamicResource WarningBrush}"
+                        BorderThickness="0,0,0,1"
+                        Padding="24,12"
+                        Visibility="{Binding IsReadOnlyPreview, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <TextBlock Text="{Binding ReadOnlyPreviewLabel}"
+                               Foreground="White"
+                               FontWeight="Bold"
+                               TextWrapping="Wrap" />
+                </Border>
+
+                <Border BorderThickness="0,0,0,1"
+                        Padding="24,12"
+                        Visibility="{Binding Updates.IsBannerVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Border.Style>
                     <Style TargetType="{x:Type Border}">
                         <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
@@ -606,7 +617,8 @@
                                 MinWidth="72" />
                     </StackPanel>
                 </Grid>
-            </Border>
+                </Border>
+            </StackPanel>
 
             <Grid Grid.Row="2" Margin="24">
                 <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Today}">
@@ -1871,11 +1883,19 @@
                                                    Margin="0,0,0,10" />
                                     </StackPanel>
                                     <WrapPanel Grid.Column="1" HorizontalAlignment="Right">
-                                        <Button Content="Sync Sage Customers"
+                                        <Button Content="Request Server Sage Sync"
                                                 Command="{Binding SyncSageCustomersCommand}"
                                                 Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                 Style="{StaticResource PrimaryButtonStyle}"
-                                                MinWidth="152"
+                                                ToolTip="Queue a manual customer refresh on the TechBench server"
+                                                MinWidth="190"
+                                                Margin="0,0,8,8" />
+                                        <Button Content="Confirm Large Removal"
+                                                Command="{Binding SyncSageCustomersCommand}"
+                                                CommandParameter="AllowLargeRemoval"
+                                                Visibility="{Binding CanConfirmLargeSageRemoval, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                ToolTip="Explicitly authorize an unusually large customer removal rejected by the server"
+                                                MinWidth="180"
                                                 Margin="0,0,0,8" />
                                     </WrapPanel>
                                 </Grid>
@@ -3081,7 +3101,11 @@
 
                             <Border Grid.Column="2" Style="{StaticResource CardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="Sage 50 Time Tickets" Style="{StaticResource SectionHeadingStyle}" />
+                                    <TextBlock Text="My Sage 50 Time Tickets" Style="{StaticResource SectionHeadingStyle}" />
+                                    <TextBlock Text="These workstation settings are used only to create and verify your own Sage time tickets. Shared customer synchronization runs on the server."
+                                               Style="{StaticResource MutedTextStyle}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,0,0,12" />
                                     <CheckBox Content="Save and verify tickets automatically"
                                               IsChecked="{Binding SageNativeAutoSave}"
                                               Margin="0,0,0,12" />
@@ -3097,16 +3121,16 @@
                                         </Grid.RowDefinitions>
 
                                         <StackPanel Grid.Row="0" Grid.Column="0">
-                                            <TextBlock Text="ODBC DSN" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBlock Text="My workstation ODBC DSN" Style="{StaticResource FieldLabelStyle}" />
                                             <TextBox Text="{Binding SageDsn, UpdateSourceTrigger=PropertyChanged}" />
                                         </StackPanel>
                                         <StackPanel Grid.Row="0" Grid.Column="2">
-                                            <TextBlock Text="ODBC username" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBlock Text="My ODBC username" Style="{StaticResource FieldLabelStyle}" />
                                             <TextBox Text="{Binding SageUsername, UpdateSourceTrigger=PropertyChanged}" />
                                         </StackPanel>
 
                                         <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,10,0,0">
-                                            <TextBlock Text="ODBC password" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBlock Text="My ODBC password" Style="{StaticResource FieldLabelStyle}" />
                                             <PasswordBox x:Name="SagePasswordBox"
                                                          PasswordChanged="SagePasswordBox_PasswordChanged" />
                                         </StackPanel>
@@ -3116,12 +3140,6 @@
                                         <Button Content="Test Sage ODBC"
                                                 Command="{Binding TestSageOdbcCommand}"
                                                 MinWidth="130"
-                                                Margin="0,0,8,8" />
-                                        <Button Content="Sync Sage Customers Now"
-                                                Command="{Binding SyncSageCustomersCommand}"
-                                                Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                Style="{StaticResource PrimaryButtonStyle}"
-                                                MinWidth="178"
                                                 Margin="0,0,8,8" />
                                     </WrapPanel>
 
@@ -3157,6 +3175,60 @@
                                     </Grid>
 
                                     <Button Content="Check Sage Desktop" Command="{Binding TestSageConnectionCommand}" />
+
+                                    <Border BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="0,1,0,0"
+                                            Margin="0,16,0,0"
+                                            Padding="0,16,0,0"
+                                            Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <StackPanel>
+                                            <TextBlock Text="Server Sage Customer Sync" Style="{StaticResource SectionHeadingStyle}" />
+                                            <TextBlock Text="Customer synchronization is manual-only. An Admin queues it here, and the TechBench service reads Sage and updates SQL Server. No client workstation performs the import."
+                                                       Style="{StaticResource MutedTextStyle}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,0,0,12" />
+                                            <TextBlock Text="Server 32-bit System DSN" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBox Text="{Binding SageServerDsn, UpdateSourceTrigger=PropertyChanged}"
+                                                     IsEnabled="{Binding CanManageOrganizationSettings}"
+                                                     Margin="0,0,0,10" />
+                                            <TextBlock Text="Server Sage ODBC username" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBox Text="{Binding SageServerUsername, UpdateSourceTrigger=PropertyChanged}"
+                                                     IsEnabled="{Binding CanManageOrganizationSettings}"
+                                                     Margin="0,0,0,6" />
+                                            <TextBlock Text="The password is protected locally on the server and is never stored in SQL Server or sent to clients."
+                                                       Style="{StaticResource MutedTextStyle}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,0,0,12" />
+                                            <WrapPanel Margin="0,0,0,12">
+                                                <Button Content="Request Server Sage Sync"
+                                                        Command="{Binding SyncSageCustomersCommand}"
+                                                        Style="{StaticResource PrimaryButtonStyle}"
+                                                        MinWidth="190"
+                                                        Margin="0,0,8,8" />
+                                                <Button Content="Confirm Large Removal"
+                                                        Command="{Binding SyncSageCustomersCommand}"
+                                                        CommandParameter="AllowLargeRemoval"
+                                                        Visibility="{Binding CanConfirmLargeSageRemoval, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                        ToolTip="Rerun the rejected snapshot after explicitly authorizing its unusually large customer removal"
+                                                        MinWidth="180"
+                                                        Margin="0,0,8,8" />
+                                                <Button Content="Refresh Server Status"
+                                                        Command="{Binding RefreshWhdAdministrationCommand}"
+                                                        MinWidth="170"
+                                                        Margin="0,0,0,8" />
+                                            </WrapPanel>
+                                            <TextBlock Text="Health" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBlock Text="{Binding SageSyncServiceHealthLabel}"
+                                                       Style="{StaticResource DetailValueStyle}"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock Text="Last server run" Style="{StaticResource FieldLabelStyle}" Margin="0,8,0,0" />
+                                            <TextBlock Text="{Binding SageSyncServiceLastRunLabel}" Style="{StaticResource DetailValueStyle}" />
+                                            <TextBlock Text="Queue" Style="{StaticResource FieldLabelStyle}" Margin="0,8,0,0" />
+                                            <TextBlock Text="{Binding SageSyncServiceQueueLabel}" Style="{StaticResource DetailValueStyle}" />
+                                            <TextBlock Text="Last snapshot" Style="{StaticResource FieldLabelStyle}" Margin="0,8,0,0" />
+                                            <TextBlock Text="{Binding SageSyncServiceCountsLabel}" Style="{StaticResource DetailValueStyle}" />
+                                        </StackPanel>
+                                    </Border>
                                 </StackPanel>
                             </Border>
                         </Grid>

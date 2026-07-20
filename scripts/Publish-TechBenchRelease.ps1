@@ -153,13 +153,18 @@ try {
     New-Item -ItemType Directory -Path $distDirectory -Force | Out-Null
 
     $repositoryUri = [Uri]$RepositoryUrl
-    if ($repositoryUri.Scheme -ne 'https' -or $repositoryUri.Host -ne 'github.com') {
-        throw 'The V2 release repository must be an HTTPS GitHub repository URL.'
+    $repositorySlug = $repositoryUri.AbsolutePath.Trim('/')
+    if ($repositoryUri.Scheme -ne 'https' `
+        -or -not $repositoryUri.Host.Equals('github.com', [StringComparison]::OrdinalIgnoreCase) `
+        -or -not $repositoryUri.IsDefaultPort `
+        -or -not [string]::IsNullOrEmpty($repositoryUri.Query) `
+        -or -not [string]::IsNullOrEmpty($repositoryUri.Fragment) `
+        -or $repositorySlug -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
+        throw 'The V2 release repository must be an HTTPS GitHub repository URL in https://github.com/owner/repository form.'
     }
 
     $existingReleases = @()
     if ($Publish) {
-        $repositorySlug = $repositoryUri.AbsolutePath.Trim('/')
         $releaseListJson = gh release list --repo $repositorySlug --limit 100 --json tagName
         if ($LASTEXITCODE -ne 0) {
             throw 'Unable to read existing V2 GitHub releases.'
@@ -262,7 +267,35 @@ try {
             '--releaseName', "TechBench V2 $Version"
         )
 
+        $releaseAssetsJson = gh release view "v$Version" `
+            --repo $repositorySlug `
+            --json assets
+        if ($LASTEXITCODE -ne 0) {
+            throw "The client release was uploaded, but GitHub release v$Version could not be read to attach the stable installer links."
+        }
+
+        try {
+            $releaseAssets = (($releaseAssetsJson -join '') | ConvertFrom-Json).assets
+        } catch {
+            throw "GitHub returned an invalid asset response for release v${Version}: $($_.Exception.Message)"
+        }
+
+        $existingAssetNames = @($releaseAssets | ForEach-Object { $_.name })
+        $directInstallerAssets = @($distSetupPath, $distChecksumPath)
+        $missingDirectInstallerAssets = @($directInstallerAssets | Where-Object {
+            $existingAssetNames -notcontains [IO.Path]::GetFileName($_)
+        })
+        if ($missingDirectInstallerAssets.Count -gt 0) {
+            Invoke-Checked 'gh' (@(
+                'release', 'upload', "v$Version"
+            ) + $missingDirectInstallerAssets + @(
+                '--repo', $repositorySlug
+            ))
+        }
+
         Write-Host "Published TechBench V2 $Version to $RepositoryUrl/releases/tag/v$Version"
+        Write-Host "Stable installer: $RepositoryUrl/releases/download/v$Version/TechBenchV2Setup.exe"
+        Write-Host "Installer checksum: $RepositoryUrl/releases/download/v$Version/TechBenchV2Setup.exe.sha256"
     } else {
         Write-Host "Built TechBench V2 $Version locally. Configure a V2 repository before using -Publish."
     }

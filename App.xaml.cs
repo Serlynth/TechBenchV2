@@ -2,7 +2,6 @@ using System.IO;
 using System.Text.Json;
 using System.Threading;
 using System.Windows;
-using Microsoft.Data.SqlClient;
 using TechBench.Data;
 using TechBench.Models;
 using TechBench.Services;
@@ -18,6 +17,7 @@ public partial class App : System.Windows.Application
     private const string SingleInstanceMutexName = @"Local\CSRI.TechBenchV2.SingleInstance.v2";
 #endif
     private Mutex? _singleInstanceMutex;
+    private SqlServerConnectionFactory? _connectionFactory;
 
     internal static string? UpdateCompletionVersion { get; private set; }
 
@@ -31,7 +31,7 @@ public partial class App : System.Windows.Application
         app.Run();
     }
 
-    protected override async void OnStartup(StartupEventArgs e)
+    protected override void OnStartup(StartupEventArgs e)
     {
         UpdateCompletionVersion = ReadArgumentValue(e.Args, "--updated-to");
 
@@ -58,26 +58,10 @@ public partial class App : System.Windows.Application
 
         base.OnStartup(e);
         SqlServerConnectionOptions? connectionOptions = null;
-        SqlServerConnectionFactory? connectionFactory = null;
-        CurrentUserContext? currentUser = null;
         string? connectionStatus = null;
         try
         {
             connectionOptions = SqlServerConnectionConfig.Resolve();
-            if (connectionOptions is not null)
-            {
-                connectionFactory = new SqlServerConnectionFactory(connectionOptions);
-                currentUser = await connectionFactory.GetCurrentUserContextAsync();
-            }
-        }
-        catch (SqlException ex)
-        {
-            connectionStatus = ResolveSqlConnectionError(ex);
-        }
-        catch (TaskCanceledException)
-        {
-            connectionStatus =
-                "The saved SQL Server connection did not complete before it was cancelled.";
         }
         catch (Exception ex) when (
             ex is ArgumentException
@@ -92,26 +76,26 @@ public partial class App : System.Windows.Application
                 $"The saved SQL Server configuration could not be read: {ex.Message}";
         }
 
-        if (currentUser is null)
+        // This lightweight connection screen is intentionally shown on every
+        // interactive launch. Windows remains the authenticated identity; the
+        // optional username only requests an Admin-only, read-only preview.
+        var connectionWindow = new DatabaseConnectionWindow(
+            connectionOptions,
+            connectionStatus);
+        if (connectionWindow.ShowDialog() != true
+            || connectionWindow.ConnectionFactory is null
+            || connectionWindow.CurrentUser is null)
         {
-            var connectionWindow = new DatabaseConnectionWindow(
-                connectionOptions,
-                connectionStatus);
-            if (connectionWindow.ShowDialog() != true
-                || connectionWindow.ConnectionFactory is null
-                || connectionWindow.CurrentUser is null)
-            {
-                Shutdown();
-                return;
-            }
-
-            connectionFactory = connectionWindow.ConnectionFactory;
-            currentUser = connectionWindow.CurrentUser;
+            Shutdown();
+            return;
         }
+
+        _connectionFactory = connectionWindow.ConnectionFactory;
+        CurrentUserContext currentUser = connectionWindow.CurrentUser;
 
         try
         {
-            MainWindow = new MainWindow(connectionFactory!, currentUser);
+            MainWindow = new MainWindow(_connectionFactory, currentUser);
         }
         catch (Exception ex)
         {
@@ -129,6 +113,24 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        if (_connectionFactory?.IsReadOnlyPreview == true)
+        {
+            try
+            {
+                using var cleanupTimeout = new CancellationTokenSource(
+                    TimeSpan.FromSeconds(5));
+                _connectionFactory.EndUserPreviewAsync(cleanupTimeout.Token)
+                    .GetAwaiter()
+                    .GetResult();
+            }
+            catch
+            {
+                // Preview sessions are server-expiring. Application shutdown
+                // must continue if best-effort early revocation is unavailable.
+            }
+        }
+
+        _connectionFactory = null;
         _singleInstanceMutex?.ReleaseMutex();
         _singleInstanceMutex?.Dispose();
         _singleInstanceMutex = null;
@@ -148,16 +150,4 @@ public partial class App : System.Windows.Application
         return null;
     }
 
-    private static string ResolveSqlConnectionError(SqlException exception)
-    {
-        return exception.Number switch
-        {
-            -2 => "The saved SQL Server did not respond before the connection timed out.",
-            53 => "The saved SQL Server or instance could not be found.",
-            229 => "Your Windows account does not have permission to use TechBench.",
-            4060 => "The saved TechBench database could not be opened.",
-            18456 => "SQL Server did not accept your Windows domain identity.",
-            _ => $"The saved SQL Server connection failed: {exception.Message}"
-        };
-    }
 }

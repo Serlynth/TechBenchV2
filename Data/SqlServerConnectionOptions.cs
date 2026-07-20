@@ -55,7 +55,9 @@ public sealed record SqlServerConnectionOptions(
         };
     }
 
-    public string BuildConnectionString()
+    public string BuildConnectionString(
+        bool pooling = true,
+        string? applicationName = null)
     {
         var options = NormalizeAndValidate();
         var builder = new SqlConnectionStringBuilder
@@ -64,9 +66,11 @@ public sealed record SqlServerConnectionOptions(
             InitialCatalog = options.Database,
             IntegratedSecurity = true,
             PersistSecurityInfo = false,
-            ApplicationName = DefaultApplicationName,
+            ApplicationName = string.IsNullOrWhiteSpace(applicationName)
+                ? DefaultApplicationName
+                : applicationName.Trim(),
             ConnectTimeout = options.ConnectTimeoutSeconds,
-            Pooling = true,
+            Pooling = pooling,
             MultipleActiveResultSets = false,
             TrustServerCertificate = options.TrustServerCertificate
         };

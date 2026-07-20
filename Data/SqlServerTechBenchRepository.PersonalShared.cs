@@ -458,6 +458,14 @@ public sealed partial class SqlServerTechBenchRepository
                         continue;
                     }
 
+                    if (_connectionFactory.IsReadOnlyPreview
+                        && IsPersonalSecretSetting(key))
+                    {
+                        // Never expose or migrate another user's legacy secret
+                        // while an Admin is previewing that user's workspace.
+                        continue;
+                    }
+
                     settings[key] = GetString(
                         reader,
                         "SettingValue",
@@ -474,6 +482,10 @@ public sealed partial class SqlServerTechBenchRepository
             },
             cancellationToken).ConfigureAwait(false);
     }
+
+    private static bool IsPersonalSecretSetting(string key) =>
+        key.Equals("Whd.ApiToken", StringComparison.OrdinalIgnoreCase)
+        || key.Equals("Sage.Password", StringComparison.OrdinalIgnoreCase);
 
     public string GetSetting(string key, string fallback = "") =>
         GetSettingAsync(key, fallback).GetAwaiter().GetResult();

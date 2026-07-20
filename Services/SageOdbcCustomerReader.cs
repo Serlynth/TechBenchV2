@@ -61,7 +61,8 @@ public sealed class SageOdbcCustomerReader
         string username,
         string password,
         int maxRows = 0,
-        bool includeInactive = false)
+        bool includeInactive = false,
+        bool preserveInvalidRows = false)
     {
         if (string.IsNullOrWhiteSpace(dsn))
         {
@@ -102,7 +103,7 @@ public sealed class SageOdbcCustomerReader
         while (reader.Read())
         {
             var customerId = ReadText(reader, customerIdColumn);
-            if (string.IsNullOrWhiteSpace(customerId))
+            if (!preserveInvalidRows && string.IsNullOrWhiteSpace(customerId))
             {
                 continue;
             }
@@ -119,7 +120,9 @@ public sealed class SageOdbcCustomerReader
             customers.Add(new SageCustomer
             {
                 CustomerId = customerId.Trim(),
-                CustomerName = string.IsNullOrWhiteSpace(customerName) ? customerId.Trim() : customerName.Trim(),
+                CustomerName = preserveInvalidRows
+                    ? customerName.Trim()
+                    : string.IsNullOrWhiteSpace(customerName) ? customerId.Trim() : customerName.Trim(),
                 ContactName = string.IsNullOrWhiteSpace(contactName) ? null : contactName.Trim(),
                 Telephone = string.IsNullOrWhiteSpace(telephone) ? null : telephone.Trim(),
                 IsActive = isActive

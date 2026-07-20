@@ -68,6 +68,20 @@ public sealed class TechBenchRepository : ITechBenchRepository
         Message = "WHD organization sync requires the SQL Server workspace."
     };
 
+    public SageSyncServiceStatus GetSageSyncStatus() => new()
+    {
+        Health = "Unavailable",
+        Message = "Server-side Sage synchronization requires the V2 SQL Server workspace."
+    };
+
+    public SageSyncRequestResult RequestSageSync(
+        bool allowLargeRemoval = false,
+        Guid? confirmedRequestId = null) => new()
+    {
+        Accepted = false,
+        Message = "Server-side Sage synchronization requires the V2 SQL Server workspace."
+    };
+
     public IReadOnlyList<WhdUserMapping> GetWhdUserMappings() => Array.Empty<WhdUserMapping>();
 
     public IReadOnlyList<WhdTechnician> GetWhdTechnicians() => Array.Empty<WhdTechnician>();
@@ -941,55 +955,6 @@ public sealed class TechBenchRepository : ITechBenchRepository
 
         transaction.Commit();
         return matchedCount;
-    }
-
-    public (int SavedCount, int StaleCount) SynchronizeSageCustomers(
-        IReadOnlyList<SageCustomer> customers,
-        DateTime syncedAt)
-    {
-        using var connection = _connectionFactory.CreateConnection();
-        connection.Open();
-        using var transaction = connection.BeginTransaction();
-        var clients = ReadAllClients(connection, transaction);
-        var activeSageIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var savedCount = 0;
-
-        foreach (var customer in customers)
-        {
-            if (string.IsNullOrWhiteSpace(customer.CustomerId)
-                || string.IsNullOrWhiteSpace(customer.CustomerName))
-            {
-                continue;
-            }
-
-            activeSageIds.Add(customer.CustomerId.Trim());
-            var incoming = new Client
-            {
-                Name = customer.CustomerName,
-                Source = "Sage",
-                IsActive = customer.IsActive,
-                LastSyncedAt = syncedAt,
-                SageCustomerId = customer.CustomerId,
-                SageCustomerName = customer.CustomerName,
-                SageContactName = customer.ContactName,
-                SageTelephone = customer.Telephone
-            };
-            var existing = FindClientForSync(clients, incoming);
-            var merged = existing is null ? incoming : MergeClient(existing, incoming);
-            SaveClient(connection, transaction, merged);
-            if (existing is null)
-            {
-                clients.Add(merged);
-            }
-
-            savedCount++;
-        }
-
-        var staleCount = activeSageIds.Count == 0
-            ? 0
-            : RemoveStaleSageCustomers(connection, transaction, clients, activeSageIds, syncedAt);
-        transaction.Commit();
-        return (savedCount, staleCount);
     }
 
     public IReadOnlyList<WorkEntry> GetWorkEntries(WorkEntryQuery query)

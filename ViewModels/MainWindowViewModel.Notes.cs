@@ -218,26 +218,28 @@ public sealed partial class MainWindowViewModel
         InsertRecentNoteCommand = new RelayCommand(InsertRecentNote, parameter => parameter is WorkEntry && IsEditorEditable);
         ToggleNoteLinkPickerCommand = new RelayCommand(
             _ => IsNoteLinkPickerOpen = !IsNoteLinkPickerOpen,
-            _ => Editor.Id > 0 && !IsEntryOperationRunning && !IsEditorLocked);
+            _ => CanWrite && Editor.Id > 0 && !IsEntryOperationRunning && !IsEditorLocked);
         LinkExistingNoteCommand = new RelayCommand(
             LinkExistingNote,
-            parameter => parameter is WorkEntry { Id: > 0 } && Editor.Id > 0 && !IsEntryOperationRunning && !IsEditorLocked);
+            parameter => CanWrite && parameter is WorkEntry { Id: > 0 } && Editor.Id > 0 && !IsEntryOperationRunning && !IsEditorLocked);
         RemoveNoteLinkCommand = new RelayCommand(
             RemoveNoteLink,
-            parameter => parameter is WorkEntryLink { Id: > 0 } && !IsEntryOperationRunning && !IsEditorLocked);
+            parameter => CanWrite && parameter is WorkEntryLink { Id: > 0 } && !IsEntryOperationRunning && !IsEditorLocked);
         OpenRelatedNoteCommand = new RelayCommand(
             OpenRelatedNote,
             parameter => parameter is WorkEntryLink or WorkEntry);
         ContinueThisWorkCommand = new RelayCommand(
             _ => ContinueThisWork(),
-            _ => Editor.Id > 0 && !IsEntryOperationRunning);
+            _ => CanWrite && Editor.Id > 0 && !IsEntryOperationRunning);
         CancelPendingNoteLinkCommand = new RelayCommand(
             _ => CancelPendingNoteLink(),
-            _ => HasPendingFollowUp);
-        ImportGoogleSheetsCommand = new RelayCommand(_ => ImportGoogleSheetsCsv(), _ => !IsEntryOperationRunning);
+            _ => CanWrite && HasPendingFollowUp);
+        ImportGoogleSheetsCommand = new RelayCommand(
+            _ => ImportGoogleSheetsCsv(),
+            _ => CanWrite && !IsEntryOperationRunning);
         NewNoteTemplateCommand = new RelayCommand(
             _ => StartNewNoteTemplate(),
-            _ => _currentUser.IsAdmin);
+            _ => _currentUser.IsAdmin && CanWrite);
         SaveNoteTemplateCommand = new RelayCommand(_ => SaveManagedNoteTemplate(), _ => CanSaveManagedNoteTemplate());
         DeleteNoteTemplateCommand = new RelayCommand(
             _ => DeleteManagedNoteTemplate(),
@@ -308,7 +310,7 @@ public sealed partial class MainWindowViewModel
 
     private void PersistEditorRecoveryDraft()
     {
-        if (_isPersistingEditorDraft || IsEntryOperationRunning || IsEditorLocked || !Editor.IsDirty)
+        if (!CanWrite || _isPersistingEditorDraft || IsEntryOperationRunning || IsEditorLocked || !Editor.IsDirty)
         {
             return;
         }
@@ -336,6 +338,12 @@ public sealed partial class MainWindowViewModel
 
     private void RestoreEditorDraft()
     {
+        if (!CanWrite)
+        {
+            EditorSaveStatus = "Read-only preview";
+            return;
+        }
+
         var draft = _repository.GetEditorDraft();
         if (draft is null)
         {
@@ -396,7 +404,7 @@ public sealed partial class MainWindowViewModel
     private void PersistEditorDraftBeforeExit()
     {
         _editorDraftTimer.Stop();
-        if (!Editor.IsDirty)
+        if (!CanWrite || !Editor.IsDirty)
         {
             return;
         }
@@ -737,7 +745,8 @@ public sealed partial class MainWindowViewModel
 
     private bool CanSaveManagedNoteTemplate()
     {
-        return CanEditManagedNoteTemplate
+        return CanWrite
+            && CanEditManagedNoteTemplate
             && !string.IsNullOrWhiteSpace(TemplateName)
             && !string.IsNullOrWhiteSpace(TemplateText)
             && (ManagedNoteTemplate is null
@@ -785,6 +794,7 @@ public sealed partial class MainWindowViewModel
 
     private bool CanManageNoteTemplate(NoteTemplate template) =>
         _currentUser.IsAdmin
+        && CanWrite
         && template.ScopeType.Equals(
             "Organization",
             StringComparison.OrdinalIgnoreCase);

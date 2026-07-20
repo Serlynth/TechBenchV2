@@ -65,12 +65,17 @@ if ($PSCmdlet.ShouldProcess($ServiceName, 'Stop and remove the Windows service')
 }
 
 if ($RemoveCredential -and (Test-Path -LiteralPath $dataPath)) {
-    if ($PSCmdlet.ShouldProcess($dataPath, 'Permanently remove the protected WHD credential and service data')) {
+    if ($PSCmdlet.ShouldProcess($dataPath, 'Permanently remove the protected WHD/Sage credentials and service data')) {
         $helper = Join-Path $installPath 'TechBench.SyncService.exe'
         if (Test-Path -LiteralPath $helper) {
             & $helper --delete-whd-secret
             if ($LASTEXITCODE -ne 0) {
-                throw 'The TechBench credential helper could not remove the protected credential.'
+                throw 'The TechBench credential helper could not remove the protected WHD credential.'
+            }
+
+            & $helper --delete-sage-secret
+            if ($LASTEXITCODE -ne 0) {
+                throw 'The TechBench credential helper could not remove the protected Sage credential.'
             }
         }
 
@@ -85,6 +90,6 @@ if (-not $KeepBinaries -and (Test-Path -LiteralPath $installPath)) {
 }
 
 if (-not $RemoveCredential -and (Test-Path -LiteralPath $dataPath)) {
-    Write-Host "The protected WHD credential was preserved at '$dataPath'."
-    Write-Host 'Run this script again with -RemoveCredential to delete it permanently.'
+    Write-Host "Protected WHD/Sage credentials and service data were preserved at '$dataPath'."
+    Write-Host 'Run this script again with -RemoveCredential to delete them permanently.'
 }

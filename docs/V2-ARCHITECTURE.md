@@ -2,24 +2,24 @@
 
 ## Status
 
-TechBench V2 `2.0.0-alpha.6` implements the conversion from TechBench 1.x's local SQLite design to a shared SQL Server design, including an owner-scoped V1 migration contract and a dedicated Windows service for organization-wide WHD synchronization.
+TechBench V2 `2.0.0-alpha.8` implements the conversion from TechBench 1.x's local SQLite design to a shared SQL Server design, including an owner-scoped V1 migration contract, a dedicated Windows service for organization-wide WHD and Sage customer synchronization, and an Admin-only read-only user-preview boundary.
 
 The production WPF runtime uses the SQL Server repository for every business and operational workflow. It packages `Microsoft.Data.Sqlite` only for the explicit, read-only V1 migration reader; production builds still exclude the legacy local repository, database-location service, and local client/ticket providers. V2 has no client-side business-database backup path; SQL Server protection is owned by DBA/operations.
 
-The implementation is still an alpha until the schema-version-6 upgrade, service, and client are exercised against the actual SQL Server 2016 instance, real domain identities, and the live WHD server. "Implemented" does not mean "approved for production."
+The implementation is still an alpha until the schema-version-7 upgrade, service, and client are exercised against the actual SQL Server 2016 instance, real domain identities, the live WHD server, and the live Sage ODBC data source. "Implemented" does not mean "approved for production."
 
 ## Fixed boundaries
 
 - TechBench V1 remains unchanged, independently buildable, and independently installable.
-- TechBench V2 remains a Windows WPF application because Sage UI automation and Sage ODBC execute on the technician workstation.
-- There is no TechBench API, web application, or container. One internal x64 Windows service owns organization-wide WHD reads.
+- TechBench V2 remains a Windows WPF application because personal Sage time-ticket UI automation and verification execute on the technician workstation.
+- There is no TechBench API, web application, or container. One internal x64 Windows service owns organization-wide WHD reads and Sage customer synchronization; it launches an isolated x86 ODBC worker for the 32-bit Sage driver.
 - Each client connects directly to SQL Server using Windows Integrated Authentication over encrypted TDS.
 - Active Directory membership maps to database roles.
 - SQL Server owns all business, user, worklog, draft, posting, synchronization, import, and audit state.
 - The workstation owns only non-business connection/device preferences, protected external-system secrets, updater artifacts, and user-created temporary/export files.
 - V2 has no offline business-data store and never uses a SQLite database on a network share.
 - The client never creates, schedules, verifies, or restores a SQL Server database backup.
-- Personal WHD/Sage posting credentials remain in each user's Windows Credential Manager. The organization WHD credential is machine-protected on the service host and never stored in SQL Server, client JSON, packages, or source control.
+- Personal WHD/Sage posting credentials remain in each user's Windows Credential Manager. The organization WHD and Sage synchronization credentials are separately machine-protected on the service host and never stored in SQL Server, client JSON, packages, or source control.
 
 ## Runtime topology
 
@@ -27,21 +27,29 @@ The implementation is still an alpha until the schema-version-6 upgrade, service
 WHD server
     | HTTPS / dedicated WHD service identity
     v
-TechBench WHD Sync Service (domain-joined Windows Server, x64)
+TechBench Sync Service (domain-joined Windows Server, x64)
+    ^
+    | private stdin/stdout JSON / no shell
+Sage ODBC worker (self-contained x86 process)
+    ^
+    | 32-bit Sage System DSN / server Sage read identity
+Sage 50 customer data
+
+TechBench Sync Service
     | tb_service procedures / Windows authentication / Encrypt=True
     v
 CSRI-SQL.CSRI.local
     SQL Server 2016
     TechBench database
     compatibility level 130
-    schema version 6
+    schema version 7
     ^
     | tb_app procedures / Windows authentication / Encrypt=True
     |
 TechBench V2 WPF clients (domain-joined workstations, x86)
 ~~~
 
-The client and service open short-lived pooled connections for stored-procedure calls. Neither holds a database transaction open during WHD HTTP, Sage ODBC, or Sage desktop automation.
+The client and service open short-lived pooled connections for normal stored-procedure calls. Read-only preview connections deliberately disable pooling, activate a short-lived server session, and switch to a restricted database user before any application read. Neither the client nor service holds a database transaction open during WHD HTTP, Sage ODBC, or Sage desktop automation.
 
 A representative production connection string is:
 
@@ -62,13 +70,13 @@ The server and database names are non-secret deployment configuration. Productio
 
 At startup the client:
 
-1. Loads the non-secret SQL endpoint configuration.
-2. Opens an integrated-authentication SQL connection.
-3. Calls `tb_app.GetCurrentUserContext`.
-4. Verifies that the database reports schema version `6`.
-5. Receives the caller's Windows SID, login/display name, database instance ID, server UTC time, and effective role flags.
-6. When the caller is an Admin, performs the one-time insert-missing template/Common Link seed if its server marker is absent and independently repairs missing WHD auto-sync defaults without overwriting Admin values.
-7. Refuses startup when the database is unreachable, the schema is incompatible, or the caller has no TechBench role.
+1. Shows the connection screen, including the optional Admin-only username-preview field.
+2. Loads the non-secret SQL endpoint configuration and opens an integrated-authentication SQL connection.
+3. Calls `tb_app.GetCurrentUserContext` and verifies schema version `7`.
+4. Receives the caller's Windows SID, login/display name, database instance ID, server UTC time, and effective role flags.
+5. When the caller requests another username, requires the real caller to be a TechBench Admin, creates a short-lived server preview session, disables connection pooling, activates that session on every connection, and executes as `tb_preview_reader`.
+6. When the effective caller is an authenticated, writable Admin, performs the insert-missing template/Common Link/default initialization without overwriting Admin values.
+7. Refuses startup when the database is unreachable, the schema is incompatible, the caller has no TechBench role, or preview authorization fails.
 
 The Windows SID is the durable user/owner key. Login names are retained for display and audit history but are not the ownership key because names can change.
 
@@ -86,11 +94,13 @@ The database role meanings are:
 - `tb_role_manager`: read approved team-level work and reports.
 - `tb_role_admin`: manage organization-scoped clients, matching, aliases, Common Links, templates, shared configuration, synchronization, and audit views.
 - `tb_role_sync_operator`: retained for upgrade compatibility and synchronization-history inspection; it grants no shared mutation authority by itself.
-- `tb_role_sync_service`: claim/renew leased WHD work and apply validated WHD batches; it grants no interactive application or Admin authority.
+- `tb_role_sync_service`: claim/renew leased WHD or Sage work and apply validated snapshots; it grants no interactive application or Admin authority.
 
 Authorization is enforced in stored procedures, with a SQL Server row-level-security policy adding table-level defense for WHD tickets. The application principals do not receive `db_owner`, `db_datareader`, `db_datawriter`, `db_ddladmin`, or direct application-table DML permission. UI visibility is not a security boundary.
 
-Shared mutation and synchronization require the effective Admin role even if the caller has another technical role. Ordinary users can read shared catalogs but cannot change customer matching or aliases, Common Links, note templates, organization defaults, the WHD automatic-sync schedule, or WHD/Sage snapshot state.
+Shared mutation and manual synchronization requests require the effective Admin role even if the caller has another technical role. Ordinary users can read shared catalogs but cannot change customer matching or aliases, Common Links, note templates, organization defaults, the WHD automatic-sync schedule, or WHD/Sage snapshot state. Preview targets are registered, enabled non-Admin technicians who have opened TechBench V2 within the past hour; Admin accounts are deliberately excluded because their role can be tested directly. A real user's normal connection refreshes the stored role flags before access is allowed or denied, and a zero-role refresh revokes active preview sessions before returning the denial.
+
+The preview session is an observation tool, not alternate authentication. SQL records the authenticated Admin SID, target user SID, client instance, expiry, and revocation state. The restricted principal receives only approved read procedure execution and has no direct table rights or mutation procedures. Preview-safe work-entry procedures redact `PersonalNote` and `IncludePersonalNoteInWhd`, and the restricted principal cannot load editor drafts or local credentials.
 
 ## Client persistence contract
 
@@ -123,7 +133,7 @@ The `TechBench` database owns:
 - organization-wide Common Links
 - administrator-managed organization settings, including WHD/Sage defaults and the WHD automatic-sync enabled state and interval, plus owner-scoped user identity settings
 - posting logs, attempts, outstanding-result state, and posting leases
-- WHD and Sage synchronization leases and runs
+- WHD and Sage synchronization requests, leases, runs, cursors, and health
 - staged/imported records and legacy-ID mappings
 - audit events
 - database instance and schema migration metadata
@@ -138,7 +148,7 @@ Drafts and user settings are scoped by the current SID. Common Links, canonical 
 
 Settings intentionally contains no separate manual Sage customer-mapping editor. Administrators perform matching in the dedicated Client Matching workspace, which uses the same shared, audited server contract as the rest of client administration.
 
-This milestone enforces those rules through the stored-procedure boundary, the absence of direct table permissions, and `tb_security.WhdTicketAccessPolicy`. That policy filters WHD rows to the mapped technician or technician group for ordinary users and applies insert/update block predicates; Admins, the dedicated sync service, and database owners retain the access required for their roles.
+This milestone enforces those rules through the stored-procedure boundary, the absence of direct table permissions, `tb_security.WhdTicketAccessPolicy`, and the V7 read-only preview execution context. The ticket policy filters WHD rows to the mapped technician or technician group for ordinary users and applies insert/update block predicates. A valid preview target takes precedence over the authenticated Admin's normal all-ticket bypass, while the dedicated sync service and database owners retain the access required for their roles.
 
 ### Optimistic concurrency and immutability
 
@@ -161,24 +171,26 @@ Local JSON files under `%LOCALAPPDATA%\TechBenchV2` contain no work entries, not
 - theme and window bounds/state
 - shared-data view refresh interval
 - update-check and skipped-version state
-- Sage DSN/company-path/native-automation choices
+- personal Sage time-ticket DSN/company-path/native-automation choices
 - the Microsoft admin-link browser preference
 
 The local refresh interval drives a client timer that reloads shared clients, tickets, statuses, matching, links, tags, and templates. It does not create a cache or overwrite an active editor.
 
-The WHD automatic-sync enabled state and interval are organization settings stored in SQL Server, so every Admin sees one schedule. The Windows service claims durable SQL work under an expiring lease. It performs one initial full import, overlapping ticket deltas at the configured interval, and reference snapshots for clients, statuses, technicians, and group membership at least daily. No Admin workstation needs to remain open.
+The WHD automatic-sync enabled state and interval are organization settings stored in SQL Server, so every Admin sees one schedule. The Windows service claims durable SQL work under an expiring lease. It performs one initial full import, overlapping ticket deltas every five minutes, and reference snapshots for clients, statuses, technicians, and group membership at least daily. An Admin may also queue an immediate WHD run. No Admin workstation needs to remain open.
 
 Ticket synchronization uses WHD's organization `Tickets` resource, requests UTC timestamps and explicit deletion state, and pages until completion. Deltas use the durable cursor minus an overlap window, and the cursor advances only after a complete ticket batch is durably applied. Explicit closed or deleted records update the shared snapshot. Omission is not authoritative—permissions, paging, or concurrent changes can omit a ticket—so absence never closes a ticket. Personal credential testing continues to use the permission-light `Tickets/mine` probe.
 
+Sage customer synchronization has no timer and no automatic enqueue path. Only an authenticated TechBench Admin can create a durable request. The Windows service reads the shared DSN and username from SQL, reads the separate server password from its machine-protected secret, and invokes the packaged x86 worker. SQL Server preserves and validates every JSON array element before projection, rejecting the entire snapshot for an empty array, non-object row, missing/malformed/over-length field, or duplicate normalized customer ID. Before any shared customer mutation, it also computes the proposed stale delta. Removing at least 10 and at least 25 percent of an established set of 20 or more Sage mappings requires a second, explicitly confirmed Admin request; the rejected attempt retains the read, existing, and proposed-stale counts for review. That approval references the rejected request, expires after one hour, and applies only if the fresh read has exactly the same read, existing, and stale counts. Any difference produces a new no-write proposal that must be reviewed again. Failed, rejected, or abandoned work is visible in server health and can be retried without allowing a client to submit customer rows.
+
 `sql-server.json` contains the SQL Server address, database name, timeouts, and certificate-trust choice. It contains no username or password.
 
-Personal WHD tokens and Sage passwords use the V2-specific Windows Credential Manager namespace. The service's organization credential uses machine-scoped DPAPI under an ACL restricted to SYSTEM, Administrators, and the service identity. Update packages, installed files, logs, and user-selected exports are operational files rather than an alternate business datastore.
+Personal WHD tokens and Sage passwords use the V2-specific Windows Credential Manager namespace. The service's separate organization WHD and Sage credentials use machine-scoped DPAPI under an ACL restricted to SYSTEM, Administrators, and the service identity. Update packages, installed files, logs, and user-selected exports are operational files rather than an alternate business datastore.
 
 If an emergency local draft cache is ever introduced, it must be recovery-only and separately approved. It must not create an offline worklog or synchronization system.
 
 ## Posting and synchronization
 
-Personal WHD posting and Sage external calls run on the workstation. Organization-wide WHD reads run only in the Windows service. SQL Server owns coordination and durable results for both paths.
+Personal WHD posting and Sage time-ticket calls run on the workstation. Organization-wide WHD reads and Sage customer reads run only in the Windows service. SQL Server owns coordination and durable results for both paths.
 
 The posting protocol is:
 
@@ -205,6 +217,18 @@ The legacy sync-operator role never grants a non-Admin permission to start or ap
 
 The service uses one dedicated WHD identity with permission to read the full organization ticket set. The secret never reaches a desktop client. Ticket absence is deliberately non-authoritative: TechBench updates open/closed/deleted state explicitly returned by WHD but never closes a shared ticket merely because it was omitted.
 
+Organization Sage synchronization uses:
+
+- an Admin-only request and monitor boundary with no automatic schedule
+- the same dedicated Windows service principal, but a separate Sage ODBC identity and protected secret
+- a serialized durable queue plus renewable lease
+- a server-local 32-bit System DSN and a packaged self-contained x86 worker
+- a validated, nonempty, transactionally applied customer snapshot
+- lossless row validation and an explicit Admin confirmation gate for unusually large customer removals
+- service health and row counts stored in SQL Server
+
+Admins configure only the non-secret server DSN and username in TechBench. They provision or rotate the Sage password on the service host; ordinary clients never receive it and cannot call the service apply procedures.
+
 ## Database deployment and versioning
 
 Database creation and schema changes are DBA operations. Ordinary clients never create or migrate the production database.
@@ -219,18 +243,19 @@ The SQL Server 2016 package contains idempotent stages for:
 6. schema-version-4 Admin-owned shared configuration
 7. schema-version-5 owner-scoped TechBench V1 import storage
 8. schema-version-6 server WHD synchronization storage
-9. security and AD-role mappings
-10. baseline and versioned stored procedures
-11. procedure grants
-12. baseline and versioned verification
+9. schema-version-7 server Sage synchronization and Admin preview storage
+10. security and AD-role mappings
+11. baseline and versioned stored procedures
+12. procedure grants
+13. baseline and versioned verification
 
 `database/sqlserver2016/Deploy-CSRI-Standalone.sql` combines every numbered stage for SSMS SQLCMD Mode and has no external include paths.
 
-Schema version `2` is recorded as migration `SqlServer2016.OperationalStorage.0002`; schema version `3` adds shared reference data; schema version `4` records the strict Admin-owned boundary; schema version `5` adds owner-scoped, idempotent V1 entity mappings; and schema version `6` adds the leased service-only WHD ingestion boundary through `SqlServer2016.WhdServerSync.0006`. The alpha.6 client requires exactly schema version 6.
+Schema version `2` is recorded as migration `SqlServer2016.OperationalStorage.0002`; schema version `3` adds shared reference data; schema version `4` records the strict Admin-owned boundary; schema version `5` adds owner-scoped, idempotent V1 entity mappings; schema version `6` adds the leased service-only WHD ingestion boundary through `SqlServer2016.WhdServerSync.0006`; and schema version `7` adds server-owned Sage synchronization and Admin read-only preview through `SqlServer2016.ServerOwnedSageAndAdminPreview.0007`. The alpha.8 client and service require exactly schema version 7.
 
 The first schema-version-4 Admin startup performs one insert-missing catalog seed and writes the organization setting `WorkspaceDefaults.Initialized=4` with that Admin's real SID. Subsequent startups do not recreate renamed or deleted note templates. The WHD auto-sync enabled/interval rows remain independently insert-missing so required runtime defaults can be repaired without changing an Admin's saved values.
 
-The schema-version-6 database, alpha.6 client, and alpha.6 sync service are a coordinated cutover. Have the DBA back up and upgrade the database, install the service and its protected credential, install the matching client, and run smoke tests as one planned operation. Do not leave mixed alpha clients in normal use.
+The schema-version-7 database, alpha.8 client, and alpha.8 sync service are a coordinated cutover. Have the DBA back up and upgrade the database, install the service and both protected credentials, install the matching client, and run smoke tests as one planned operation. Do not leave mixed alpha clients in normal use.
 
 The desktop client has no database-backup command and no authority to create a SQL Server backup. Full/log backup scheduling, `DBCC CHECKDB`, retention, monitoring, and restore testing belong to DBA/operations outside TechBench.
 
@@ -249,22 +274,24 @@ Code-level validation covers:
 Production approval still requires a live SQL Server 2016 exercise. At minimum:
 
 1. Run the complete standalone upgrade on a backed-up `TechBench` database.
-2. Confirm schema version 6 and successful verification output.
-3. Install the service under its distinct principal, configure the protected WHD credential, and verify initial full plus incremental synchronization.
+2. Confirm schema version 7 and successful verification output.
+3. Install the service under its distinct principal, configure the protected WHD and Sage credentials, and verify initial full plus incremental WHD synchronization.
 4. Connect as a member of `CSRI\TechBench_Users` and as a member of `CSRI\TechBench_Admins`.
 5. Confirm ordinary users and a sync-operator-only test identity cannot change shared configuration, matching, aliases, links, templates, schedules, or snapshot state.
 6. Confirm two workstations see shared client, ticket, matching, alias, tag, template, link, and entry changes after automatic refresh.
 7. Confirm Personal Notes remain invisible to other users and manager views.
 8. Force a rowversion conflict and verify that the client does not overwrite silently.
 9. Exercise personal WHD/Sage posting attempts and lease expiry/reconciliation.
-10. Verify service lease recovery, direct/group ticket visibility, explicit close/delete handling, and that omission does not close a ticket.
-11. Have the DBA verify SQL Server backup, `DBCC CHECKDB`, and restore procedures independently of the client.
+10. Queue a Sage customer sync as an Admin, verify its snapshot and row counts, reject malformed/duplicate input without changing customer data, exercise the explicit large-removal confirmation gate, and confirm an ordinary user cannot queue or apply it.
+11. Preview an ordinary user as an Admin; verify the mapped WHD view, persistent warning, database write denial, Personal Note redaction, draft denial, and preview-session expiry/revocation.
+12. Verify service lease recovery, direct/group ticket visibility, explicit close/delete handling, and that omission does not close a ticket.
+13. Have the DBA verify SQL Server backup, `DBCC CHECKDB`, and restore procedures independently of the client.
 
-Until those checks pass, alpha.6 is an implementation candidate, not a production release.
+Until those checks pass, alpha.8 is an implementation candidate, not a production release.
 
 ## V1 data migration
 
-Installing alpha.6 does not automatically import V1 data; each authenticated user explicitly uses **Settings > Import V1 Database...** and confirms a preview for their own account.
+Installing alpha.8 does not automatically import V1 data; each authenticated user explicitly uses **Settings > Import V1 Database...** and confirms an import preview for their own account. This is separate from the Admin-only login preview.
 
 The user must close V1 and select its closed local database or a verified copy. The reader opens SQLite in read-only/query-only mode, rejects active journal/WAL sidecars, runs `quick_check`, validates known schema variants and SQL field limits, and rejects a source whose SHA-256 changes during the read. It extracts work entries, Personal Notes, entry tags, follow-up state, posting state/history, and note links. It does not import shared catalogs/configuration, credentials, editor drafts, active posting attempts, or local caches.
 

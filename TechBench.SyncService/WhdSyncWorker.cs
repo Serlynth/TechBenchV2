@@ -79,56 +79,67 @@ public sealed class WhdSyncWorker : BackgroundService
 
         using var executionCancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         var heartbeat = RenewLeaseUntilCancelledAsync(work, executionCancellation, stoppingToken);
-        try
-        {
-            var result = await _engine
-                .ExecuteAsync(work, _workerId, executionCancellation.Token)
-                .ConfigureAwait(false);
-            executionCancellation.Cancel();
-            await ObserveHeartbeatAsync(heartbeat).ConfigureAwait(false);
-            await _repository.CompleteWorkAsync(
-                work,
-                _workerId,
-                succeeded: true,
-                result.NextCursorUtc,
-                result.Message,
-                CancellationToken.None).ConfigureAwait(false);
-            _logger.LogInformation(
-                "Completed WHD {WorkType} work {WorkId}: {Message}",
-                work.WorkType,
-                work.WorkId,
-                result.Message);
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            executionCancellation.Cancel();
-            await ObserveHeartbeatAsync(heartbeat).ConfigureAwait(false);
-            // Leave the durable lease to expire so another service process can
-            // retry the idempotent work after an orderly server shutdown.
-            _logger.LogInformation("WHD work {WorkId} was interrupted by service shutdown.", work.WorkId);
-        }
-        catch (Exception ex)
-        {
-            executionCancellation.Cancel();
-            await ObserveHeartbeatAsync(heartbeat).ConfigureAwait(false);
-            _logger.LogError(ex, "WHD {WorkType} work {WorkId} failed.", work.WorkType, work.WorkId);
-            try
-            {
-                await _repository.CompleteWorkAsync(
+        var lifecycle = await SyncWorkLifecycle.RunAsync(
+                token => _engine.ExecuteAsync(work, _workerId, token),
+                heartbeat,
+                executionCancellation,
+                stoppingToken,
+                _options.FinalizationTimeout,
+                (result, token) => _repository.CompleteWorkAsync(
+                    work,
+                    _workerId,
+                    succeeded: true,
+                    result.NextCursorUtc,
+                    result.Message,
+                    token),
+                (failure, token) => _repository.CompleteWorkAsync(
                     work,
                     _workerId,
                     succeeded: false,
                     nextCursorUtc: null,
-                    ex.Message,
-                    CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception completionException)
-            {
+                    failure.Message,
+                    token))
+            .ConfigureAwait(false);
+
+        switch (lifecycle.Outcome)
+        {
+            case SyncWorkLifecycleOutcome.Succeeded:
+                _logger.LogInformation(
+                    "Completed WHD {WorkType} work {WorkId}: {Message}",
+                    work.WorkType,
+                    work.WorkId,
+                    lifecycle.ExecutionResult!.Message);
+                break;
+            case SyncWorkLifecycleOutcome.Interrupted:
+                _logger.LogInformation(
+                    "WHD work {WorkId} was interrupted by service shutdown.",
+                    work.WorkId);
+                break;
+            case SyncWorkLifecycleOutcome.Failed:
                 _logger.LogError(
-                    completionException,
+                    lifecycle.Failure,
+                    "WHD {WorkType} work {WorkId} failed.",
+                    work.WorkType,
+                    work.WorkId);
+                break;
+            case SyncWorkLifecycleOutcome.FailureNotFinalized:
+                _logger.LogError(
+                    lifecycle.Failure,
+                    "WHD {WorkType} work {WorkId} failed.",
+                    work.WorkType,
+                    work.WorkId);
+                _logger.LogError(
+                    lifecycle.FinalizationFailure,
                     "Could not record failure for WHD work {WorkId}; its lease will expire for retry.",
                     work.WorkId);
-            }
+                break;
+            case SyncWorkLifecycleOutcome.AppliedButNotFinalized:
+                _logger.LogError(
+                    lifecycle.Failure,
+                    "WHD {WorkType} work {WorkId} applied data but could not record successful completion; its lease will expire for idempotent retry.",
+                    work.WorkType,
+                    work.WorkId);
+                break;
         }
     }
 
@@ -162,15 +173,4 @@ public sealed class WhdSyncWorker : BackgroundService
         }
     }
 
-    private static async Task ObserveHeartbeatAsync(Task heartbeat)
-    {
-        try
-        {
-            await heartbeat.ConfigureAwait(false);
-        }
-        catch
-        {
-            // The execution path reports the actionable lease error.
-        }
-    }
 }

@@ -22,11 +22,13 @@ param(
     [string]$ServiceName = 'TechBenchWhdSync',
 
     [ValidateNotNullOrEmpty()]
-    [string]$DisplayName = 'TechBench WHD Sync Service',
+    [string]$DisplayName = 'TechBench Sync Service',
 
     [switch]$ReplaceConfiguration,
 
     [switch]$ConfigureWhdCredential,
+
+    [switch]$ConfigureSageCredential,
 
     [switch]$SkipStart
 )
@@ -331,6 +333,12 @@ if ($PSCmdlet.ShouldProcess($DisplayName, "Install Windows service as $ServiceAc
     } else {
         $installedSettings.TechBenchSync | Add-Member -NotePropertyName SecretPath -NotePropertyValue $configuredSecretPath
     }
+    $configuredSageSecretPath = Join-Path $dataPath 'sage.secret'
+    if ($installedSettings.TechBenchSync.PSObject.Properties.Name -contains 'SageSecretPath') {
+        $installedSettings.TechBenchSync.SageSecretPath = $configuredSageSecretPath
+    } else {
+        $installedSettings.TechBenchSync | Add-Member -NotePropertyName SageSecretPath -NotePropertyValue $configuredSageSecretPath
+    }
     $installedSettings | ConvertTo-Json -Depth 8 |
         Set-Content -LiteralPath $installedConfiguration -Encoding UTF8
 
@@ -351,20 +359,25 @@ if ($PSCmdlet.ShouldProcess($DisplayName, "Install Windows service as $ServiceAc
         New-Service -Name $ServiceName `
             -BinaryPathName "`"$installedExecutable`"" `
             -DisplayName $DisplayName `
-            -Description 'Synchronizes organization-wide Web Help Desk data into TechBench SQL Server.' `
+            -Description 'Synchronizes organization-wide Web Help Desk and Sage customer data into TechBench SQL Server.' `
             -StartupType Automatic `
             -Credential $Credential | Out-Null
         [void](Invoke-ScChecked @('config', $ServiceName, 'start=', 'delayed-auto'))
     }
 
     [void](Invoke-ScChecked @('description', $ServiceName,
-        'Synchronizes organization-wide Web Help Desk data into TechBench SQL Server.'))
+        'Synchronizes organization-wide Web Help Desk and Sage customer data into TechBench SQL Server.'))
     [void](Invoke-ScChecked @('failure', $ServiceName,
         'reset=', '86400', 'actions=', 'restart/60000/restart/60000/restart/300000'))
     [void](Invoke-ScChecked @('failureflag', $ServiceName, '1'))
 
     if ($ConfigureWhdCredential) {
         & (Join-Path $installPath 'Set-TechBenchSyncCredential.ps1') `
+            -InstallDirectory $installPath -ServiceName $ServiceName -NoRestart
+    }
+
+    if ($ConfigureSageCredential) {
+        & (Join-Path $installPath 'Set-TechBenchSageSyncCredential.ps1') `
             -InstallDirectory $installPath -ServiceName $ServiceName -NoRestart
     }
 
@@ -384,5 +397,5 @@ if ($PSCmdlet.ShouldProcess($DisplayName, "Install Windows service as $ServiceAc
 
     $Credential = $null
     Write-Host "Installed '$DisplayName' as $ServiceAccount."
-    Write-Host "Protected WHD data directory: $dataPath"
+    Write-Host "Protected sync-service data directory: $dataPath"
 }

@@ -8,6 +8,8 @@ namespace TechBench;
 
 public partial class DatabaseConnectionWindow : Window
 {
+    private readonly Guid _clientInstanceId = Guid.NewGuid();
+
     public DatabaseConnectionWindow(
         SqlServerConnectionOptions? initialOptions,
         string? initialStatus = null)
@@ -39,11 +41,14 @@ public partial class DatabaseConnectionWindow : Window
 
     public CurrentUserContext? CurrentUser { get; private set; }
 
+    public CurrentUserContext? AuthenticatedUser { get; private set; }
+
     private async void ConnectButton_Click(object sender, RoutedEventArgs e)
     {
         ConnectButton.IsEnabled = false;
         StatusTextBlock.Text =
             $"Connecting as {WindowsIdentityTextBlock.Text}...";
+        SqlServerConnectionFactory? previewFactory = null;
         try
         {
             var options = new SqlServerConnectionOptions(
@@ -52,11 +57,44 @@ public partial class DatabaseConnectionWindow : Window
                 TrustServerCertificateCheckBox.IsChecked == true)
                 .NormalizeAndValidate();
             var connectionFactory = new SqlServerConnectionFactory(options);
-            var currentUser = await connectionFactory.GetCurrentUserContextAsync();
+            var authenticatedUser = await connectionFactory.GetCurrentUserContextAsync();
+            var currentUser = authenticatedUser;
+
+            if (PreviewAnotherUserCheckBox.IsChecked == true)
+            {
+                if (!authenticatedUser.IsAdmin)
+                {
+                    throw new UnauthorizedAccessException(
+                        "Only a TechBench Admin may preview another user.");
+                }
+
+                var targetLoginName = SqlServerConnectionFactory.NormalizePreviewLoginName(
+                    PreviewUsernameTextBox.Text,
+                    authenticatedUser.LoginName);
+
+                StatusTextBlock.Text =
+                    $"Opening a read-only preview of {targetLoginName}...";
+                var previewSession = await connectionFactory.BeginUserPreviewAsync(
+                    targetLoginName,
+                    _clientInstanceId);
+                previewFactory = connectionFactory.CreateReadOnlyPreviewFactory(
+                    previewSession,
+                    authenticatedUser);
+                currentUser = await previewFactory.GetCurrentUserContextAsync();
+                if (!currentUser.IsReadOnlyPreview)
+                {
+                    throw new UnauthorizedAccessException(
+                        "SQL Server did not place the connection in read-only preview mode.");
+                }
+
+                connectionFactory = previewFactory;
+            }
+
             SqlServerConnectionConfig.Save(options);
 
             ConnectionFactory = connectionFactory;
             CurrentUser = currentUser;
+            AuthenticatedUser = authenticatedUser;
             DialogResult = true;
         }
         catch (SqlException ex)
@@ -77,6 +115,19 @@ public partial class DatabaseConnectionWindow : Window
         }
         finally
         {
+            if (DialogResult != true && previewFactory is not null)
+            {
+                try
+                {
+                    await previewFactory.EndUserPreviewAsync();
+                }
+                catch
+                {
+                    // The server session expires automatically. Preserve the
+                    // original connection error if best-effort cleanup fails.
+                }
+            }
+
             ConnectButton.IsEnabled = true;
         }
     }
@@ -95,6 +146,7 @@ public partial class DatabaseConnectionWindow : Window
             229 => "Your Windows account does not have permission to use TechBench.",
             4060 => "The TechBench database could not be opened.",
             18456 => "SQL Server did not accept your Windows domain identity.",
+            51913 => "That non-Admin user must have opened TechBench V2 within the past hour and still have TechBench access.",
             _ => $"Could not connect to SQL Server: {exception.Message}"
         };
     }

@@ -55,7 +55,7 @@ public sealed partial class MainWindowViewModel
 
     private bool CanSyncWhdNote(object? parameter)
     {
-        if (IsEntryOperationRunning)
+        if (!CanWrite || IsEntryOperationRunning)
         {
             return false;
         }

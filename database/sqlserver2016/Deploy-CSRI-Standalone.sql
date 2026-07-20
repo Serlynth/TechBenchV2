@@ -2405,6 +2405,295 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 26-V0007-ServerOwnedSageAndAdminPreviewSchema.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.WhdServerSync.0006'
+      AND [SchemaVersion] = 6
+)
+BEGIN
+    RAISERROR(N'V0006 must be installed before ServerOwnedSageAndAdminPreview.0007.', 16, 1);
+    RETURN;
+END;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF DATABASE_PRINCIPAL_ID(N'tb_preview_reader') IS NULL
+        CREATE USER [tb_preview_reader] WITHOUT LOGIN;
+
+    IF OBJECT_ID(N'tb_sync.SageSyncRequests', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_sync].[SageSyncRequests]
+        (
+            [RequestId] uniqueidentifier NOT NULL,
+            [RequestedByWindowsSid] varbinary(85) NOT NULL,
+            [RequestedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_SageSyncRequests_Requested] DEFAULT (SYSUTCDATETIME()),
+            [StartedAtUtc] datetime2(3) NULL,
+            [CompletedAtUtc] datetime2(3) NULL,
+            [Status] nvarchar(30) NOT NULL
+                CONSTRAINT [DF_SageSyncRequests_Status] DEFAULT (N'Queued'),
+            [AllowLargeRemoval] bit NOT NULL
+                CONSTRAINT [DF_SageSyncRequests_AllowLargeRemoval] DEFAULT (0),
+            [RequiresLargeRemovalConfirmation] bit NOT NULL
+                CONSTRAINT [DF_SageSyncRequests_RequiresLargeRemovalConfirmation] DEFAULT (0),
+            [ConfirmedRequestId] uniqueidentifier NULL,
+            [ExistingCount] int NOT NULL
+                CONSTRAINT [DF_SageSyncRequests_ExistingCount] DEFAULT (0),
+            [ReadCount] int NOT NULL
+                CONSTRAINT [DF_SageSyncRequests_ReadCount] DEFAULT (0),
+            [SavedCount] int NOT NULL
+                CONSTRAINT [DF_SageSyncRequests_SavedCount] DEFAULT (0),
+            [StaleCount] int NOT NULL
+                CONSTRAINT [DF_SageSyncRequests_StaleCount] DEFAULT (0),
+            [AttemptCount] int NOT NULL
+                CONSTRAINT [DF_SageSyncRequests_AttemptCount] DEFAULT (0),
+            [Message] nvarchar(2000) NULL,
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_SageSyncRequests] PRIMARY KEY CLUSTERED ([RequestId]),
+            CONSTRAINT [FK_SageSyncRequests_Requester]
+                FOREIGN KEY ([RequestedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_SageSyncRequests_ConfirmedRequest]
+                FOREIGN KEY ([ConfirmedRequestId])
+                REFERENCES [tb_sync].[SageSyncRequests]([RequestId]),
+            CONSTRAINT [CK_SageSyncRequests_Status]
+                CHECK ([Status] IN (N'Queued', N'Running', N'Completed', N'Failed')),
+            CONSTRAINT [CK_SageSyncRequests_ConfirmationBinding]
+                CHECK
+                (
+                    ([AllowLargeRemoval] = 0 AND [ConfirmedRequestId] IS NULL)
+                    OR ([AllowLargeRemoval] = 1 AND [ConfirmedRequestId] IS NOT NULL)
+                ),
+            CONSTRAINT [CK_SageSyncRequests_Counts]
+                CHECK
+                (
+                    [ExistingCount] >= 0
+                    AND [ReadCount] >= 0
+                    AND [SavedCount] >= 0
+                    AND [StaleCount] >= 0
+                    AND [AttemptCount] >= 0
+                ),
+            CONSTRAINT [CK_SageSyncRequests_Times]
+                CHECK
+                (
+                    ([StartedAtUtc] IS NULL OR [StartedAtUtc] >= [RequestedAtUtc])
+                    AND
+                    (
+                        [CompletedAtUtc] IS NULL
+                        OR
+                        (
+                            [StartedAtUtc] IS NOT NULL
+                            AND [CompletedAtUtc] >= [StartedAtUtc]
+                        )
+                    )
+                )
+        );
+    END;
+
+    /* Keep the stage rerunnable across pre-release V7 database rehearsals. */
+    IF COL_LENGTH(N'tb_sync.SageSyncRequests', N'AllowLargeRemoval') IS NULL
+        ALTER TABLE [tb_sync].[SageSyncRequests]
+            ADD [AllowLargeRemoval] bit NOT NULL
+                CONSTRAINT [DF_SageSyncRequests_AllowLargeRemoval] DEFAULT (0) WITH VALUES;
+
+    IF COL_LENGTH(N'tb_sync.SageSyncRequests', N'RequiresLargeRemovalConfirmation') IS NULL
+        ALTER TABLE [tb_sync].[SageSyncRequests]
+            ADD [RequiresLargeRemovalConfirmation] bit NOT NULL
+                CONSTRAINT [DF_SageSyncRequests_RequiresLargeRemovalConfirmation] DEFAULT (0) WITH VALUES;
+
+    IF COL_LENGTH(N'tb_sync.SageSyncRequests', N'ExistingCount') IS NULL
+        ALTER TABLE [tb_sync].[SageSyncRequests]
+            ADD [ExistingCount] int NOT NULL
+                CONSTRAINT [DF_SageSyncRequests_ExistingCount] DEFAULT (0) WITH VALUES;
+
+    IF COL_LENGTH(N'tb_sync.SageSyncRequests', N'ConfirmedRequestId') IS NULL
+        ALTER TABLE [tb_sync].[SageSyncRequests]
+            ADD [ConfirmedRequestId] uniqueidentifier NULL;
+
+    IF OBJECT_ID(N'tb_sync.CK_SageSyncRequests_ConfirmationBinding', N'C') IS NULL
+    BEGIN
+        UPDATE [tb_sync].[SageSyncRequests]
+        SET [AllowLargeRemoval] = 0
+        WHERE [ConfirmedRequestId] IS NULL AND [AllowLargeRemoval] <> 0;
+
+        ALTER TABLE [tb_sync].[SageSyncRequests] WITH CHECK
+            ADD CONSTRAINT [CK_SageSyncRequests_ConfirmationBinding]
+                CHECK
+                (
+                    ([AllowLargeRemoval] = 0 AND [ConfirmedRequestId] IS NULL)
+                    OR ([AllowLargeRemoval] = 1 AND [ConfirmedRequestId] IS NOT NULL)
+                );
+    END;
+
+    IF OBJECT_ID(N'tb_sync.FK_SageSyncRequests_ConfirmedRequest', N'F') IS NULL
+        ALTER TABLE [tb_sync].[SageSyncRequests] WITH CHECK
+            ADD CONSTRAINT [FK_SageSyncRequests_ConfirmedRequest]
+                FOREIGN KEY ([ConfirmedRequestId])
+                REFERENCES [tb_sync].[SageSyncRequests]([RequestId]);
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.indexes
+        WHERE [object_id] = OBJECT_ID(N'tb_sync.SageSyncRequests')
+          AND [name] = N'IX_SageSyncRequests_StatusRequested'
+    )
+        CREATE INDEX [IX_SageSyncRequests_StatusRequested]
+            ON [tb_sync].[SageSyncRequests]([Status], [RequestedAtUtc], [RequestId])
+            INCLUDE
+            (
+                [StartedAtUtc], [CompletedAtUtc], [AllowLargeRemoval],
+                [RequiresLargeRemovalConfirmation], [ConfirmedRequestId],
+                [ExistingCount], [ReadCount],
+                [SavedCount], [StaleCount], [AttemptCount]
+            );
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.indexes
+        WHERE [object_id] = OBJECT_ID(N'tb_sync.SageSyncRequests')
+          AND [name] = N'IX_SageSyncRequests_RequestedAt'
+    )
+        CREATE INDEX [IX_SageSyncRequests_RequestedAt]
+            ON [tb_sync].[SageSyncRequests]([RequestedAtUtc] DESC, [RequestId])
+            INCLUDE
+            (
+                [Status], [CompletedAtUtc], [AllowLargeRemoval],
+                [RequiresLargeRemovalConfirmation], [ConfirmedRequestId], [ExistingCount],
+                [ReadCount], [SavedCount], [StaleCount]
+            );
+
+    IF OBJECT_ID(N'tb_sync.SageSyncLeases', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_sync].[SageSyncLeases]
+        (
+            [RequestId] uniqueidentifier NOT NULL,
+            [LeaseId] uniqueidentifier NOT NULL,
+            [WorkerId] uniqueidentifier NOT NULL,
+            [AcquiredAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_SageSyncLeases_Acquired] DEFAULT (SYSUTCDATETIME()),
+            [ExpiresAtUtc] datetime2(3) NOT NULL,
+            CONSTRAINT [PK_SageSyncLeases] PRIMARY KEY CLUSTERED ([RequestId]),
+            CONSTRAINT [UQ_SageSyncLeases_LeaseId] UNIQUE ([LeaseId]),
+            CONSTRAINT [FK_SageSyncLeases_Request]
+                FOREIGN KEY ([RequestId])
+                REFERENCES [tb_sync].[SageSyncRequests]([RequestId]),
+            CONSTRAINT [CK_SageSyncLeases_Expiry]
+                CHECK ([ExpiresAtUtc] > [AcquiredAtUtc])
+        );
+    END;
+
+    IF OBJECT_ID(N'tb_sync.SageSyncHealth', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_sync].[SageSyncHealth]
+        (
+            [HealthId] tinyint NOT NULL
+                CONSTRAINT [PK_SageSyncHealth] PRIMARY KEY
+                CONSTRAINT [CK_SageSyncHealth_OneRow] CHECK ([HealthId] = 1),
+            [LastAttemptAtUtc] datetime2(3) NULL,
+            [LastSuccessfulAtUtc] datetime2(3) NULL,
+            [LastError] nvarchar(2000) NULL,
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_SageSyncHealth_Updated] DEFAULT (SYSUTCDATETIME())
+        );
+    END;
+
+    IF NOT EXISTS (SELECT 1 FROM [tb_sync].[SageSyncHealth] WHERE [HealthId] = 1)
+        INSERT INTO [tb_sync].[SageSyncHealth]([HealthId]) VALUES (1);
+
+    IF OBJECT_ID(N'tb_security.AdminUserPreviewSessions', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_security].[AdminUserPreviewSessions]
+        (
+            [PreviewSessionId] uniqueidentifier NOT NULL,
+            [ActorWindowsSid] varbinary(85) NOT NULL,
+            [TargetWindowsSid] varbinary(85) NOT NULL,
+            [ClientInstanceId] uniqueidentifier NOT NULL,
+            [StartedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_AdminUserPreviewSessions_Started] DEFAULT (SYSUTCDATETIME()),
+            [ExpiresAtUtc] datetime2(3) NOT NULL,
+            [EndedAtUtc] datetime2(3) NULL,
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_AdminUserPreviewSessions]
+                PRIMARY KEY CLUSTERED ([PreviewSessionId]),
+            CONSTRAINT [FK_AdminUserPreviewSessions_Actor]
+                FOREIGN KEY ([ActorWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_AdminUserPreviewSessions_Target]
+                FOREIGN KEY ([TargetWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [CK_AdminUserPreviewSessions_DifferentUsers]
+                CHECK ([ActorWindowsSid] <> [TargetWindowsSid]),
+            CONSTRAINT [CK_AdminUserPreviewSessions_Expiry]
+                CHECK ([ExpiresAtUtc] > [StartedAtUtc]),
+            CONSTRAINT [CK_AdminUserPreviewSessions_Ended]
+                CHECK ([EndedAtUtc] IS NULL OR [EndedAtUtc] >= [StartedAtUtc])
+        );
+    END;
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.indexes
+        WHERE [object_id] = OBJECT_ID(N'tb_security.AdminUserPreviewSessions')
+          AND [name] = N'IX_AdminUserPreviewSessions_ActorActive'
+    )
+        CREATE INDEX [IX_AdminUserPreviewSessions_ActorActive]
+            ON [tb_security].[AdminUserPreviewSessions]
+                ([ActorWindowsSid], [EndedAtUtc], [ExpiresAtUtc] DESC)
+            INCLUDE ([TargetWindowsSid], [ClientInstanceId]);
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.indexes
+        WHERE [object_id] = OBJECT_ID(N'tb_security.AdminUserPreviewSessions')
+          AND [name] = N'IX_AdminUserPreviewSessions_Expires'
+    )
+        CREATE INDEX [IX_AdminUserPreviewSessions_Expires]
+            ON [tb_security].[AdminUserPreviewSessions]([ExpiresAtUtc], [PreviewSessionId])
+            INCLUDE ([EndedAtUtc]);
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_deploy].[SchemaMigrations]
+        WHERE [MigrationId] = N'SqlServer2016.ServerOwnedSageAndAdminPreview.0007'
+    )
+    BEGIN
+        INSERT INTO [tb_deploy].[SchemaMigrations]
+            ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+        VALUES
+            (N'SqlServer2016.ServerOwnedSageAndAdminPreview.0007', 7, N'2.0.0-alpha.8', NULL);
+    END;
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0
+        ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+PRINT N'SqlServer2016.ServerOwnedSageAndAdminPreview.0007 is installed.';
+GO
+
+-- ============================================================================
+-- END 26-V0007-ServerOwnedSageAndAdminPreviewSchema.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 30-Security.sql
 -- ============================================================================
 
@@ -16344,6 +16633,1746 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 49-V0007-ServerOwnedSageAndAdminPreviewProcedures.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+GO
+
+/*
+    V0007 moves Sage customer synchronization behind the Windows service and
+    adds short-lived, server-issued, read-only Admin preview sessions.
+*/
+
+ALTER PROCEDURE [tb_security].[EnsureCurrentUser]
+    @UserSid varbinary(85) OUTPUT,
+    @LoginName nvarchar(256) OUTPUT,
+    @DisplayName nvarchar(160) OUTPUT,
+    @IsTechnician bit OUTPUT,
+    @IsManager bit OUTPUT,
+    @IsAdmin bit OUTPUT,
+    @IsSyncOperator bit OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @PreviewContext sql_variant = SESSION_CONTEXT(N'TechBench.PreviewSessionId');
+
+    IF @PreviewContext IS NOT NULL
+    BEGIN
+        DECLARE @PreviewSessionId uniqueidentifier =
+            TRY_CONVERT(uniqueidentifier, CONVERT(nvarchar(36), @PreviewContext));
+
+        IF @PreviewSessionId IS NULL OR USER_NAME() <> N'tb_preview_reader'
+            THROW 51900, N'The read-only user preview context is invalid.', 1;
+
+        SELECT
+            @UserSid = target_user.[WindowsSid],
+            @LoginName = target_user.[LoginName],
+            @DisplayName = target_user.[DisplayName],
+            @IsTechnician = target_user.[IsTechnician],
+            @IsManager = target_user.[IsManager],
+            @IsAdmin = target_user.[IsAdmin],
+            @IsSyncOperator = target_user.[IsSyncOperator]
+        FROM [tb_security].[AdminUserPreviewSessions] AS preview_session
+        INNER JOIN [tb_security].[Users] AS actor_user
+            ON actor_user.[WindowsSid] = preview_session.[ActorWindowsSid]
+        INNER JOIN [tb_security].[Users] AS target_user
+            ON target_user.[WindowsSid] = preview_session.[TargetWindowsSid]
+        WHERE preview_session.[PreviewSessionId] = @PreviewSessionId
+          AND preview_session.[ActorWindowsSid] = SUSER_SID(ORIGINAL_LOGIN())
+          AND preview_session.[EndedAtUtc] IS NULL
+          AND preview_session.[ExpiresAtUtc] > SYSUTCDATETIME()
+          AND actor_user.[IsAdmin] = 1
+          AND target_user.[IsTechnician] = 1
+          AND target_user.[IsAdmin] = 0
+          AND target_user.[LastSeenAtUtc] >= DATEADD(hour, -1, SYSUTCDATETIME());
+
+        IF @UserSid IS NULL
+            THROW 51901, N'The read-only user preview session is missing, expired, or no longer authorized.', 1;
+
+        RETURN;
+    END;
+
+    IF USER_NAME() = N'tb_preview_reader'
+        THROW 51902, N'The preview reader cannot be used without a valid server-issued session.', 1;
+
+    SET @UserSid = SUSER_SID(ORIGINAL_LOGIN());
+    SET @LoginName = CONVERT(nvarchar(256), ORIGINAL_LOGIN());
+    SET @IsTechnician =
+        CONVERT(bit, CASE WHEN IS_ROLEMEMBER(N'tb_role_user') = 1 THEN 1 ELSE 0 END);
+    SET @IsManager =
+        CONVERT(bit, CASE WHEN IS_ROLEMEMBER(N'tb_role_manager') = 1 THEN 1 ELSE 0 END);
+    SET @IsAdmin =
+        CONVERT(bit, CASE WHEN IS_ROLEMEMBER(N'tb_role_admin') = 1 THEN 1 ELSE 0 END);
+    SET @IsSyncOperator =
+        CONVERT(bit, CASE WHEN IS_ROLEMEMBER(N'tb_role_sync_operator') = 1 THEN 1 ELSE 0 END);
+
+    IF @UserSid IS NULL
+       OR DATALENGTH(@UserSid) NOT BETWEEN 8 AND 85
+       OR NULLIF(LTRIM(RTRIM(@LoginName)), N'') IS NULL
+        THROW 51000, N'SQL Server did not provide a valid authenticated Windows identity.', 1;
+
+    DECLARE @HasApplicationRole bit = CONVERT
+    (
+        bit,
+        CASE
+            WHEN @IsTechnician = 1 OR @IsManager = 1 OR @IsAdmin = 1 OR @IsSyncOperator = 1
+                THEN 1
+            ELSE 0
+        END
+    );
+
+    IF @IsAdmin = 1
+    BEGIN
+        SET @IsManager = 1;
+        SET @IsTechnician = 1;
+    END
+    ELSE IF @IsManager = 1
+        SET @IsTechnician = 1;
+
+    SET @DisplayName =
+        CASE
+            WHEN CHARINDEX(N'\', @LoginName) > 0
+                THEN RIGHT(@LoginName, LEN(@LoginName) - CHARINDEX(N'\', @LoginName))
+            ELSE @LoginName
+        END;
+    SET @DisplayName = LEFT(@DisplayName, 160);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        UPDATE [tb_security].[Users] WITH (UPDLOCK, HOLDLOCK)
+        SET
+            [LoginName] = @LoginName,
+            [DisplayName] =
+                CASE
+                    WHEN NULLIF(LTRIM(RTRIM([DisplayName])), N'') IS NULL
+                      OR [DisplayName] = [LoginName]
+                      OR [DisplayName] =
+                         CASE
+                             WHEN CHARINDEX(N'\', [LoginName]) > 0
+                                 THEN RIGHT([LoginName], LEN([LoginName]) - CHARINDEX(N'\', [LoginName]))
+                             ELSE [LoginName]
+                         END
+                        THEN @DisplayName
+                    ELSE [DisplayName]
+                END,
+            [IsTechnician] = @IsTechnician,
+            [IsManager] = @IsManager,
+            [IsAdmin] = @IsAdmin,
+            [IsSyncOperator] = @IsSyncOperator,
+            [LastSeenAtUtc] = SYSUTCDATETIME()
+        WHERE [WindowsSid] = @UserSid;
+
+        IF @@ROWCOUNT = 0 AND @HasApplicationRole = 1
+        BEGIN
+            INSERT INTO [tb_security].[Users]
+            (
+                [WindowsSid], [LoginName], [DisplayName], [IsTechnician],
+                [IsManager], [IsAdmin], [IsSyncOperator]
+            )
+            VALUES
+            (
+                @UserSid, @LoginName, @DisplayName, @IsTechnician,
+                @IsManager, @IsAdmin, @IsSyncOperator
+            );
+        END;
+
+        /* A role refresh is authoritative. Immediately terminate sessions
+           whose actor/target is no longer eligible, including the all-zero
+           role state that is persisted before the access-denied THROW. */
+        UPDATE [tb_security].[AdminUserPreviewSessions]
+        SET [EndedAtUtc] = COALESCE([EndedAtUtc], SYSUTCDATETIME())
+        WHERE [EndedAtUtc] IS NULL
+          AND
+          (
+              ([ActorWindowsSid] = @UserSid AND @IsAdmin = 0)
+              OR
+              (
+                  [TargetWindowsSid] = @UserSid
+                  AND (@IsTechnician = 0 OR @IsAdmin = 1)
+              )
+          );
+
+        SELECT @DisplayName = [DisplayName]
+        FROM [tb_security].[Users]
+        WHERE [WindowsSid] = @UserSid;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    IF @HasApplicationRole = 0
+        THROW 51002, N'The Windows login is not assigned to a TechBench application role.', 1;
+END;
+GO
+
+ALTER PROCEDURE [tb_app].[GetCurrentUserContext]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85), @LoginName nvarchar(256), @DisplayName nvarchar(160);
+    DECLARE @IsTechnician bit, @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    DECLARE @DatabaseInstanceId uniqueidentifier, @SchemaVersion int;
+    DECLARE @AuthenticatedUserSid varbinary(85) = SUSER_SID(ORIGINAL_LOGIN());
+    DECLARE @AuthenticatedLoginName nvarchar(256) = CONVERT(nvarchar(256), ORIGINAL_LOGIN());
+    DECLARE @AuthenticatedDisplayName nvarchar(160);
+    DECLARE @PreviewSessionId uniqueidentifier = TRY_CONVERT
+    (
+        uniqueidentifier,
+        CONVERT(nvarchar(36), SESSION_CONTEXT(N'TechBench.PreviewSessionId'))
+    );
+    DECLARE @PreviewExpiresAtUtc datetime2(3);
+
+    EXEC [tb_security].[EnsureCurrentUser]
+        @UserSid = @UserSid OUTPUT,
+        @LoginName = @LoginName OUTPUT,
+        @DisplayName = @DisplayName OUTPUT,
+        @IsTechnician = @IsTechnician OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SELECT @DatabaseInstanceId = TRY_CONVERT(uniqueidentifier, [Value])
+    FROM [tb_data].[ServerMetadata]
+    WHERE [Key] = N'Server.InstanceId';
+
+    SELECT @SchemaVersion = MAX([SchemaVersion])
+    FROM [tb_deploy].[SchemaMigrations];
+
+    SELECT @AuthenticatedDisplayName = [DisplayName]
+    FROM [tb_security].[Users]
+    WHERE [WindowsSid] = @AuthenticatedUserSid;
+
+    SET @AuthenticatedDisplayName = COALESCE
+    (
+        NULLIF(LTRIM(RTRIM(@AuthenticatedDisplayName)), N''),
+        CASE
+            WHEN CHARINDEX(N'\', @AuthenticatedLoginName) > 0
+                THEN RIGHT(@AuthenticatedLoginName, LEN(@AuthenticatedLoginName) - CHARINDEX(N'\', @AuthenticatedLoginName))
+            ELSE @AuthenticatedLoginName
+        END
+    );
+
+    IF USER_NAME() = N'tb_preview_reader'
+    BEGIN
+        SELECT @PreviewExpiresAtUtc = [ExpiresAtUtc]
+        FROM [tb_security].[AdminUserPreviewSessions]
+        WHERE [PreviewSessionId] = @PreviewSessionId
+          AND [ActorWindowsSid] = @AuthenticatedUserSid
+          AND [TargetWindowsSid] = @UserSid
+          AND [EndedAtUtc] IS NULL
+          AND [ExpiresAtUtc] > SYSUTCDATETIME();
+    END
+    ELSE
+        SET @PreviewSessionId = NULL;
+
+    IF @DatabaseInstanceId IS NULL OR @SchemaVersion IS NULL
+        THROW 51020, N'The TechBench database metadata is incomplete.', 1;
+
+    SELECT
+        @UserSid AS [UserSid],
+        @LoginName AS [LoginName],
+        @DisplayName AS [DisplayName],
+        @DatabaseInstanceId AS [DatabaseInstanceId],
+        @SchemaVersion AS [SchemaVersion],
+        SYSUTCDATETIME() AS [ServerUtc],
+        @IsTechnician AS [IsTechnician],
+        @IsManager AS [IsManager],
+        @IsAdmin AS [IsAdmin],
+        @IsSyncOperator AS [IsSyncOperator],
+        @AuthenticatedUserSid AS [AuthenticatedUserSid],
+        @AuthenticatedLoginName AS [AuthenticatedLoginName],
+        @AuthenticatedDisplayName AS [AuthenticatedDisplayName],
+        CONVERT(bit, CASE WHEN @PreviewSessionId IS NULL THEN 0 ELSE 1 END) AS [IsReadOnlyPreview],
+        @PreviewSessionId AS [PreviewSessionId],
+        @PreviewExpiresAtUtc AS [PreviewExpiresAtUtc];
+END;
+GO
+
+ALTER PROCEDURE [tb_app].[GetRepositoryCapabilities]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid = @UserSid OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    SELECT
+        CONVERT(int, 7) AS [SchemaVersion],
+        CONVERT(bit, 0) AS [FullTextSearchAvailable],
+        CONVERT(bit, 1) AS [SupportsTickets],
+        CONVERT(bit, 1) AS [SupportsWorkEntries],
+        CONVERT(bit, 1) AS [SupportsPrivateNotes],
+        CONVERT(bit, 1) AS [SupportsPostingLeases],
+        CONVERT(bit, 1) AS [SupportsSyncLeases],
+        CONVERT(bit, 1) AS [SupportsImports],
+        CONVERT(bit, 1) AS [SupportsTechBenchV1Import],
+        CONVERT(bit, 1) AS [SupportsServerSageSync],
+        CONVERT(bit, 1) AS [SupportsAdminUserPreview];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminListPreviewUsers', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminListPreviewUsers];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminListPreviewUsers]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @Login nvarchar(256), @Display nvarchar(160);
+    DECLARE @Tech bit, @Manager bit, @Admin bit, @Sync bit;
+    EXEC [tb_security].[EnsureCurrentUser]
+        @UserSid=@ActorSid OUTPUT, @LoginName=@Login OUTPUT, @DisplayName=@Display OUTPUT,
+        @IsTechnician=@Tech OUTPUT, @IsManager=@Manager OUTPUT,
+        @IsAdmin=@Admin OUTPUT, @IsSyncOperator=@Sync OUTPUT;
+
+    IF @Admin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 51910, N'Only a currently authorized TechBench Admin may list preview users.', 1;
+
+    SELECT
+        [WindowsSid] AS [UserSid], [LoginName], [DisplayName],
+        [IsTechnician], [IsManager], [IsAdmin], [IsSyncOperator]
+    FROM [tb_security].[Users]
+    WHERE [WindowsSid] <> @ActorSid
+      AND [IsTechnician] = 1
+      AND [IsAdmin] = 0
+      AND [LastSeenAtUtc] >= DATEADD(hour, -1, SYSUTCDATETIME())
+    ORDER BY [DisplayName], [LoginName];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminBeginUserPreview', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminBeginUserPreview];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminBeginUserPreview]
+    @TargetLoginName nvarchar(256),
+    @ClientInstanceId uniqueidentifier
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @Login nvarchar(256), @Display nvarchar(160);
+    DECLARE @Tech bit, @Manager bit, @Admin bit, @Sync bit;
+    EXEC [tb_security].[EnsureCurrentUser]
+        @UserSid=@ActorSid OUTPUT, @LoginName=@Login OUTPUT, @DisplayName=@Display OUTPUT,
+        @IsTechnician=@Tech OUTPUT, @IsManager=@Manager OUTPUT,
+        @IsAdmin=@Admin OUTPUT, @IsSyncOperator=@Sync OUTPUT;
+
+    IF @Admin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 51911, N'Only a currently authorized TechBench Admin may begin a user preview.', 1;
+
+    SET @TargetLoginName = NULLIF(LTRIM(RTRIM(@TargetLoginName)), N'');
+    IF @TargetLoginName IS NULL OR @ClientInstanceId IS NULL
+        THROW 51912, N'TargetLoginName and ClientInstanceId are required.', 1;
+
+    DECLARE @TargetSid varbinary(85), @PreviewSessionId uniqueidentifier = NEWID();
+    DECLARE @Now datetime2(3) = SYSUTCDATETIME(), @Expires datetime2(3);
+    SET @Expires = DATEADD(minute, 30, @Now);
+
+    SELECT @TargetSid = [WindowsSid]
+    FROM [tb_security].[Users]
+    WHERE [LoginName] = @TargetLoginName
+      AND [IsTechnician] = 1
+      AND [IsAdmin] = 0
+      AND [LastSeenAtUtc] >= DATEADD(hour, -1, @Now);
+
+    IF @TargetSid IS NULL OR @TargetSid = @ActorSid
+        THROW 51913, N'The selected non-Admin technician must have opened TechBench V2 within the past hour and still be authorized.', 1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        UPDATE [tb_security].[AdminUserPreviewSessions]
+        SET [EndedAtUtc] = @Now
+        WHERE [ActorWindowsSid] = @ActorSid
+          AND [ClientInstanceId] = @ClientInstanceId
+          AND [EndedAtUtc] IS NULL;
+
+        INSERT INTO [tb_security].[AdminUserPreviewSessions]
+        (
+            [PreviewSessionId], [ActorWindowsSid], [TargetWindowsSid],
+            [ClientInstanceId], [StartedAtUtc], [ExpiresAtUtc]
+        )
+        VALUES
+        (
+            @PreviewSessionId, @ActorSid, @TargetSid,
+            @ClientInstanceId, @Now, @Expires
+        );
+
+        DECLARE @AuditJson nvarchar(max) =
+        (
+            SELECT @TargetLoginName AS [targetLoginName], @ClientInstanceId AS [clientInstanceId],
+                   @Expires AS [expiresAtUtc]
+            FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+        );
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'AdminUserPreviewStarted', @EntityType=N'UserPreview',
+            @EntityId=@TargetLoginName, @RequestId=@PreviewSessionId, @DataJson=@AuditJson;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        @PreviewSessionId AS [PreviewSessionId],
+        target_user.[WindowsSid] AS [UserSid], target_user.[LoginName], target_user.[DisplayName],
+        target_user.[IsTechnician], target_user.[IsManager], target_user.[IsAdmin],
+        target_user.[IsSyncOperator], @Expires AS [ExpiresAtUtc]
+    FROM [tb_security].[Users] AS target_user
+    WHERE target_user.[WindowsSid] = @TargetSid;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.ActivateReadOnlyPreview', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[ActivateReadOnlyPreview];
+GO
+
+CREATE PROCEDURE [tb_app].[ActivateReadOnlyPreview]
+    @PreviewSessionId uniqueidentifier
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF SESSION_CONTEXT(N'TechBench.PreviewSessionId') IS NOT NULL
+        THROW 51914, N'This SQL connection already has a preview context.', 1;
+
+    DECLARE @ActorSid varbinary(85), @Login nvarchar(256), @Display nvarchar(160);
+    DECLARE @Tech bit, @Manager bit, @Admin bit, @Sync bit;
+    EXEC [tb_security].[EnsureCurrentUser]
+        @UserSid=@ActorSid OUTPUT, @LoginName=@Login OUTPUT, @DisplayName=@Display OUTPUT,
+        @IsTechnician=@Tech OUTPUT, @IsManager=@Manager OUTPUT,
+        @IsAdmin=@Admin OUTPUT, @IsSyncOperator=@Sync OUTPUT;
+
+    IF @PreviewSessionId IS NULL OR @Admin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 51915, N'Only a currently authorized TechBench Admin may activate a user preview.', 1;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_security].[AdminUserPreviewSessions] AS preview_session
+        INNER JOIN [tb_security].[Users] AS target_user
+            ON target_user.[WindowsSid] = preview_session.[TargetWindowsSid]
+        WHERE preview_session.[PreviewSessionId] = @PreviewSessionId
+          AND preview_session.[ActorWindowsSid] = @ActorSid
+          AND preview_session.[EndedAtUtc] IS NULL
+          AND preview_session.[ExpiresAtUtc] > SYSUTCDATETIME()
+          AND target_user.[IsTechnician] = 1
+          AND target_user.[IsAdmin] = 0
+          AND target_user.[LastSeenAtUtc] >= DATEADD(hour, -1, SYSUTCDATETIME())
+    )
+        THROW 51916, N'The user preview session is missing, expired, or no longer authorized.', 1;
+
+    EXEC sys.sp_set_session_context
+        @key=N'TechBench.PreviewSessionId', @value=@PreviewSessionId, @read_only=1;
+
+    SELECT [PreviewSessionId], [TargetWindowsSid] AS [UserSid], [ExpiresAtUtc]
+    FROM [tb_security].[AdminUserPreviewSessions]
+    WHERE [PreviewSessionId] = @PreviewSessionId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminEndUserPreview', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminEndUserPreview];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminEndUserPreview]
+    @PreviewSessionId uniqueidentifier
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @Login nvarchar(256), @Display nvarchar(160);
+    DECLARE @Tech bit, @Manager bit, @Admin bit, @Sync bit;
+    EXEC [tb_security].[EnsureCurrentUser]
+        @UserSid=@ActorSid OUTPUT, @LoginName=@Login OUTPUT, @DisplayName=@Display OUTPUT,
+        @IsTechnician=@Tech OUTPUT, @IsManager=@Manager OUTPUT,
+        @IsAdmin=@Admin OUTPUT, @IsSyncOperator=@Sync OUTPUT;
+
+    IF @PreviewSessionId IS NULL OR @Admin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 51917, N'Only a currently authorized TechBench Admin may end a user preview.', 1;
+
+    DECLARE @TargetLogin nvarchar(256);
+    SELECT @TargetLogin = target_user.[LoginName]
+    FROM [tb_security].[AdminUserPreviewSessions] AS preview_session
+    INNER JOIN [tb_security].[Users] AS target_user
+        ON target_user.[WindowsSid] = preview_session.[TargetWindowsSid]
+    WHERE preview_session.[PreviewSessionId] = @PreviewSessionId
+      AND preview_session.[ActorWindowsSid] = @ActorSid;
+
+    UPDATE [tb_security].[AdminUserPreviewSessions]
+    SET [EndedAtUtc] = COALESCE([EndedAtUtc], SYSUTCDATETIME())
+    WHERE [PreviewSessionId] = @PreviewSessionId
+      AND [ActorWindowsSid] = @ActorSid
+      AND [EndedAtUtc] IS NULL;
+
+    IF @TargetLogin IS NOT NULL
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'AdminUserPreviewEnded', @EntityType=N'UserPreview',
+            @EntityId=@TargetLogin, @RequestId=@PreviewSessionId, @DataJson=NULL;
+
+    SELECT @PreviewSessionId AS [PreviewSessionId],
+           CONVERT(bit, CASE WHEN @TargetLogin IS NULL THEN 0 ELSE 1 END) AS [Ended];
+END;
+GO
+
+/* A preview reproduces the target user's shared work view but never exposes
+   their personal-note payload, personal-note flag, rowversion, or draft. */
+ALTER PROCEDURE [tb_app].[SearchWorkEntries]
+    @StartDate date = NULL,
+    @EndDate date = NULL,
+    @ClientId int = NULL,
+    @TicketId int = NULL,
+    @ExcludeId int = NULL,
+    @TicketText nvarchar(120) = NULL,
+    @PostingStatus nvarchar(40) = NULL,
+    @Keyword nvarchar(240) = NULL,
+    @Tags nvarchar(500) = NULL,
+    @FollowUpState nvarchar(30) = NULL,
+    @OpenFollowUpsOnly bit = 0,
+    @PendingWhdOnly bit = 0,
+    @PendingSageOnly bit = 0,
+    @PendingAnyOnly bit = 0,
+    @IncludeAllUsers bit = 0,
+    @Limit int = 500
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85), @LoginName nvarchar(256), @DisplayName nvarchar(160);
+    DECLARE @IsTechnician bit, @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[EnsureCurrentUser]
+        @UserSid=@UserSid OUTPUT, @LoginName=@LoginName OUTPUT, @DisplayName=@DisplayName OUTPUT,
+        @IsTechnician=@IsTechnician OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    DECLARE @IsReadOnlyPreview bit =
+        CONVERT(bit, CASE WHEN USER_NAME() = N'tb_preview_reader' THEN 1 ELSE 0 END);
+
+    IF @IncludeAllUsers = 1 AND @IsManager <> 1 AND @IsAdmin <> 1
+        THROW 51120, N'Only a Manager or Admin may search other users'' work entries.', 1;
+
+    SET @Limit = CASE WHEN @Limit IS NULL OR @Limit < 1 THEN 1 WHEN @Limit > 2000 THEN 2000 ELSE @Limit END;
+    SET @TicketText = NULLIF(LTRIM(RTRIM(@TicketText)), N'');
+    SET @PostingStatus = NULLIF(LTRIM(RTRIM(@PostingStatus)), N'');
+    SET @Keyword = NULLIF(LTRIM(RTRIM(@Keyword)), N'');
+    SET @Tags = NULLIF(LTRIM(RTRIM(@Tags)), N'');
+    SET @FollowUpState = NULLIF(LTRIM(RTRIM(@FollowUpState)), N'');
+
+    DECLARE @KeywordPattern nvarchar(500) = CASE WHEN @Keyword IS NULL THEN NULL ELSE N'%' + @Keyword + N'%' END;
+    DECLARE @TicketPattern nvarchar(300) = CASE WHEN @TicketText IS NULL THEN NULL ELSE N'%' + @TicketText + N'%' END;
+    DECLARE @TagPattern nvarchar(700) = CASE WHEN @Tags IS NULL THEN NULL ELSE N'%' + @Tags + N'%' END;
+
+    SELECT TOP (@Limit)
+        work_entry.[Id], work_entry.[OwnerWindowsSid], work_entry.[WorkDate],
+        work_entry.[ClientId], work_entry.[ManualClientName], work_entry.[TicketId],
+        work_entry.[TicketNumberText], work_entry.[HasTimeRange], work_entry.[StartTime],
+        work_entry.[EndTime], work_entry.[DurationMinutes], work_entry.[Billable],
+        work_entry.[Note],
+        CASE WHEN @IsReadOnlyPreview = 0 AND work_entry.[OwnerWindowsSid] = @UserSid
+             THEN personal_note.[Note] ELSE NULL END AS [InternalNote],
+        CASE WHEN @IsReadOnlyPreview = 0 AND work_entry.[OwnerWindowsSid] = @UserSid
+             THEN personal_note.[Note] ELSE NULL END AS [PersonalNote],
+        CASE WHEN @IsReadOnlyPreview = 0 AND work_entry.[OwnerWindowsSid] = @UserSid
+             THEN COALESCE(personal_note.[IncludeInWhd], 0)
+             ELSE CONVERT(bit, 0) END AS [IncludePersonalNoteInWhd],
+        work_entry.[Tags], work_entry.[FollowUpState], work_entry.[FollowUpDueDate],
+        work_entry.[WhdPosted], work_entry.[WhdPostedAtUtc] AS [WhdPostedAt],
+        work_entry.[SagePosted], work_entry.[SagePostedAtUtc] AS [SagePostedAt],
+        work_entry.[SageTicketNumber], work_entry.[PostingStatus],
+        CASE WHEN @IsReadOnlyPreview = 1 THEN NULL ELSE work_entry.[LastError] END AS [LastError],
+        work_entry.[CreatedAtUtc] AS [CreatedAt], work_entry.[UpdatedAtUtc] AS [UpdatedAt],
+        client.[Name] AS [ClientName], ticket.[TicketNumber], ticket.[Subject] AS [TicketSubject],
+        work_entry.[RowVersion],
+        CASE WHEN @IsReadOnlyPreview = 0 AND work_entry.[OwnerWindowsSid] = @UserSid
+             THEN personal_note.[RowVersion] ELSE NULL END AS [PersonalNoteRowVersion]
+    FROM [tb_data].[WorkEntries] AS work_entry
+    LEFT JOIN [tb_data].[Clients] AS client ON client.[Id] = work_entry.[ClientId]
+    LEFT JOIN [tb_data].[Tickets] AS ticket ON ticket.[Id] = work_entry.[TicketId]
+    LEFT JOIN [tb_private].[WorkEntryPersonalNotes] AS personal_note
+        ON personal_note.[WorkEntryId] = work_entry.[Id]
+       AND personal_note.[OwnerWindowsSid] = @UserSid
+       AND @IsReadOnlyPreview = 0
+    WHERE (@IncludeAllUsers = 1 OR work_entry.[OwnerWindowsSid] = @UserSid)
+      AND (@StartDate IS NULL OR work_entry.[WorkDate] >= @StartDate)
+      AND (@EndDate IS NULL OR work_entry.[WorkDate] <= @EndDate)
+      AND (@ClientId IS NULL OR work_entry.[ClientId] = @ClientId)
+      AND (@TicketId IS NULL OR work_entry.[TicketId] = @TicketId)
+      AND (@ExcludeId IS NULL OR work_entry.[Id] <> @ExcludeId)
+      AND (@TicketPattern IS NULL OR ticket.[TicketNumber] LIKE @TicketPattern OR work_entry.[TicketNumberText] LIKE @TicketPattern)
+      AND (@PostingStatus IS NULL OR work_entry.[PostingStatus] = @PostingStatus)
+      AND (@TagPattern IS NULL OR work_entry.[Tags] LIKE @TagPattern)
+      AND (@FollowUpState IS NULL OR work_entry.[FollowUpState] = @FollowUpState)
+      AND (@OpenFollowUpsOnly = 0 OR work_entry.[FollowUpState] IN (N'FollowUp', N'Waiting'))
+      AND
+      (
+          @PendingWhdOnly = 0
+          OR
+          (
+              (work_entry.[TicketId] IS NOT NULL OR NULLIF(LTRIM(RTRIM(work_entry.[TicketNumberText])), N'') IS NOT NULL)
+              AND work_entry.[SagePosted] = 0
+              AND
+              (
+                  work_entry.[WhdPosted] = 0 OR work_entry.[WhdPostedAtUtc] IS NULL
+                  OR work_entry.[UpdatedAtUtc] > work_entry.[WhdPostedAtUtc]
+                  OR work_entry.[LastError] LIKE N'WHD sync conflict:%'
+              )
+          )
+      )
+      AND (@PendingSageOnly = 0 OR (work_entry.[Billable] = 1 AND work_entry.[SagePosted] = 0))
+      AND
+      (
+          @PendingAnyOnly = 0
+          OR (work_entry.[Billable] = 1 AND work_entry.[SagePosted] = 0)
+          OR
+          (
+              (work_entry.[TicketId] IS NOT NULL OR NULLIF(LTRIM(RTRIM(work_entry.[TicketNumberText])), N'') IS NOT NULL)
+              AND work_entry.[SagePosted] = 0
+              AND
+              (
+                  work_entry.[WhdPosted] = 0 OR work_entry.[WhdPostedAtUtc] IS NULL
+                  OR work_entry.[UpdatedAtUtc] > work_entry.[WhdPostedAtUtc]
+                  OR work_entry.[LastError] LIKE N'WHD sync conflict:%'
+              )
+          )
+      )
+      AND
+      (
+          @KeywordPattern IS NULL
+          OR work_entry.[Note] LIKE @KeywordPattern OR work_entry.[Tags] LIKE @KeywordPattern
+          OR work_entry.[ManualClientName] LIKE @KeywordPattern OR work_entry.[TicketNumberText] LIKE @KeywordPattern
+          OR client.[Name] LIKE @KeywordPattern OR ticket.[TicketNumber] LIKE @KeywordPattern
+          OR ticket.[Subject] LIKE @KeywordPattern
+          OR
+          (
+              @IsReadOnlyPreview = 0 AND work_entry.[OwnerWindowsSid] = @UserSid
+              AND personal_note.[Note] LIKE @KeywordPattern
+          )
+      )
+    ORDER BY work_entry.[WorkDate] DESC, work_entry.[StartTime] DESC, work_entry.[Id] DESC;
+END;
+GO
+
+ALTER PROCEDURE [tb_app].[GetWorkEntry]
+    @Id int,
+    @IncludeAllUsers bit = 0
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85), @LoginName nvarchar(256), @DisplayName nvarchar(160);
+    DECLARE @IsTechnician bit, @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[EnsureCurrentUser]
+        @UserSid=@UserSid OUTPUT, @LoginName=@LoginName OUTPUT, @DisplayName=@DisplayName OUTPUT,
+        @IsTechnician=@IsTechnician OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    DECLARE @IsReadOnlyPreview bit =
+        CONVERT(bit, CASE WHEN USER_NAME() = N'tb_preview_reader' THEN 1 ELSE 0 END);
+
+    IF @IncludeAllUsers = 1 AND @IsManager <> 1 AND @IsAdmin <> 1
+        THROW 51120, N'Only a Manager or Admin may read another user''s work entry.', 1;
+
+    DECLARE @CanReadAll bit = CONVERT
+    (
+        bit,
+        CASE WHEN @IncludeAllUsers = 1 AND (@IsManager = 1 OR @IsAdmin = 1) THEN 1 ELSE 0 END
+    );
+
+    SELECT
+        work_entry.[Id], work_entry.[OwnerWindowsSid], work_entry.[WorkDate],
+        work_entry.[ClientId], work_entry.[ManualClientName], work_entry.[TicketId],
+        work_entry.[TicketNumberText], work_entry.[HasTimeRange], work_entry.[StartTime],
+        work_entry.[EndTime], work_entry.[DurationMinutes], work_entry.[Billable],
+        work_entry.[Note],
+        CASE WHEN @IsReadOnlyPreview = 0 AND work_entry.[OwnerWindowsSid] = @UserSid
+             THEN personal_note.[Note] END AS [InternalNote],
+        CASE WHEN @IsReadOnlyPreview = 0 AND work_entry.[OwnerWindowsSid] = @UserSid
+             THEN personal_note.[Note] END AS [PersonalNote],
+        CASE WHEN @IsReadOnlyPreview = 0 AND work_entry.[OwnerWindowsSid] = @UserSid
+             THEN COALESCE(personal_note.[IncludeInWhd], 0)
+             ELSE CONVERT(bit, 0) END AS [IncludePersonalNoteInWhd],
+        work_entry.[Tags], work_entry.[FollowUpState], work_entry.[FollowUpDueDate],
+        work_entry.[WhdPosted], work_entry.[WhdPostedAtUtc] AS [WhdPostedAt],
+        work_entry.[SagePosted], work_entry.[SagePostedAtUtc] AS [SagePostedAt],
+        work_entry.[SageTicketNumber], work_entry.[PostingStatus],
+        CASE WHEN @IsReadOnlyPreview = 1 THEN NULL ELSE work_entry.[LastError] END AS [LastError],
+        work_entry.[CreatedAtUtc] AS [CreatedAt], work_entry.[UpdatedAtUtc] AS [UpdatedAt],
+        client.[Name] AS [ClientName], ticket.[TicketNumber], ticket.[Subject] AS [TicketSubject],
+        work_entry.[RowVersion],
+        CASE WHEN @IsReadOnlyPreview = 0 AND work_entry.[OwnerWindowsSid] = @UserSid
+             THEN personal_note.[RowVersion] END AS [PersonalNoteRowVersion]
+    FROM [tb_data].[WorkEntries] AS work_entry
+    LEFT JOIN [tb_data].[Clients] AS client ON client.[Id] = work_entry.[ClientId]
+    LEFT JOIN [tb_data].[Tickets] AS ticket ON ticket.[Id] = work_entry.[TicketId]
+    LEFT JOIN [tb_private].[WorkEntryPersonalNotes] AS personal_note
+        ON personal_note.[WorkEntryId] = work_entry.[Id]
+       AND personal_note.[OwnerWindowsSid] = @UserSid
+       AND @IsReadOnlyPreview = 0
+    WHERE work_entry.[Id] = @Id
+      AND (work_entry.[OwnerWindowsSid] = @UserSid OR @CanReadAll = 1);
+END;
+GO
+
+/* Organization settings remain visible in preview, but target-owned settings
+   (including legacy credential-migration values) are never returned. */
+ALTER PROCEDURE [tb_app].[GetSettings]
+    @ScopeType nvarchar(40) = NULL,
+    @DeviceId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@UserSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    DECLARE @IsReadOnlyPreview bit =
+        CONVERT(bit, CASE WHEN USER_NAME() = N'tb_preview_reader' THEN 1 ELSE 0 END);
+
+    ;WITH settings AS
+    (
+        SELECT
+            CONVERT(nvarchar(20), N'Organization') AS [ScopeType], [SettingKey], [SettingValue],
+            [UpdatedAtUtc], [RowVersion], CONVERT(int, 1) AS [ScopePriority]
+        FROM [tb_data].[OrganizationSettings]
+
+        UNION ALL
+
+        SELECT
+            CONVERT(nvarchar(20), N'User') AS [ScopeType], [SettingKey], [SettingValue],
+            [UpdatedAtUtc], [RowVersion], CONVERT(int, 2) AS [ScopePriority]
+        FROM [tb_user].[UserSettings]
+        WHERE [OwnerWindowsSid] = @UserSid
+          AND @IsReadOnlyPreview = 0
+    ),
+    ranked AS
+    (
+        SELECT [ScopeType], [SettingKey], [SettingValue], [UpdatedAtUtc], [RowVersion],
+               ROW_NUMBER() OVER (PARTITION BY [SettingKey] ORDER BY [ScopePriority] DESC) AS [Rank]
+        FROM settings
+    )
+    SELECT [ScopeType], [SettingKey], [SettingValue], [UpdatedAtUtc] AS [UpdatedAt], [RowVersion]
+    FROM ranked
+    WHERE [Rank] = 1
+    ORDER BY [SettingKey];
+END;
+GO
+
+/* Posting payloads contain the exact rendered outbound note and can therefore
+   contain Personal Notes. Error messages may echo the same content. Preview
+   mode returns safe status metadata only and cannot use keyword search as a
+   content-existence oracle for either protected field. */
+ALTER PROCEDURE [tb_app].[GetPostingLogs]
+    @Destination nvarchar(40) = NULL,
+    @Success bit = NULL,
+    @Keyword nvarchar(240) = NULL,
+    @StartDate date = NULL,
+    @EndDate date = NULL,
+    @Limit int = 250,
+    @IncludeAllUsers bit = 0
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@UserSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    DECLARE @IsReadOnlyPreview bit =
+        CONVERT(bit, CASE WHEN USER_NAME() = N'tb_preview_reader' THEN 1 ELSE 0 END);
+
+    IF @IncludeAllUsers = 1 AND @IsManager <> 1 AND @IsAdmin <> 1
+        THROW 51330, N'Only a Manager or Admin may read other users'' posting logs.', 1;
+
+    SET @Limit = CASE WHEN @Limit IS NULL OR @Limit < 1 THEN 1 WHEN @Limit > 1000 THEN 1000 ELSE @Limit END;
+    SET @Destination = NULLIF(LTRIM(RTRIM(@Destination)), N'');
+    IF @Destination = N'Any' SET @Destination = NULL;
+    SET @Keyword = NULLIF(LTRIM(RTRIM(@Keyword)), N'');
+    DECLARE @KeywordPattern nvarchar(500) =
+        CASE WHEN @Keyword IS NULL THEN NULL ELSE N'%' + @Keyword + N'%' END;
+
+    SELECT TOP (@Limit)
+        posting_log.[Id],
+        posting_log.[WorkEntryId],
+        posting_log.[Destination],
+        CASE WHEN @IsReadOnlyPreview = 1 THEN N'' ELSE posting_log.[Payload] END AS [Payload],
+        posting_log.[Success],
+        CASE
+            WHEN @IsReadOnlyPreview = 0 THEN posting_log.[Message]
+            WHEN posting_log.[Success] = 1 THEN N'Posting succeeded.'
+            ELSE N'Posting failed.'
+        END AS [Message],
+        posting_log.[ExternalReference],
+        posting_log.[CreatedAtUtc] AS [CreatedAt]
+    FROM [tb_ops].[PostingLogs] AS posting_log
+    WHERE (@IncludeAllUsers = 1 OR posting_log.[OwnerWindowsSid] = @UserSid)
+      AND (@Destination IS NULL OR posting_log.[Destination] = @Destination)
+      AND (@Success IS NULL OR posting_log.[Success] = @Success)
+      AND (@StartDate IS NULL OR posting_log.[CreatedAtUtc] >= @StartDate)
+      AND (@EndDate IS NULL OR posting_log.[CreatedAtUtc] < DATEADD(day, 1, CONVERT(datetime2(3), @EndDate)))
+      AND
+      (
+          @KeywordPattern IS NULL
+          OR posting_log.[Destination] LIKE @KeywordPattern
+          OR posting_log.[ExternalReference] LIKE @KeywordPattern
+          OR CONVERT(nvarchar(30), posting_log.[WorkEntryId]) LIKE @KeywordPattern
+          OR
+          (
+              @IsReadOnlyPreview = 0
+              AND
+              (
+                  posting_log.[Message] LIKE @KeywordPattern
+                  OR posting_log.[Payload] LIKE @KeywordPattern
+              )
+          )
+      )
+    ORDER BY posting_log.[CreatedAtUtc] DESC, posting_log.[Id] DESC;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminRequestSageSync', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminRequestSageSync];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminRequestSageSync]
+    @RequestId uniqueidentifier = NULL,
+    @AllowLargeRemoval bit = 0,
+    @ConfirmedRequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 51920, N'Only a currently authorized TechBench Admin may request a Sage customer sync.', 1;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_data].[OrganizationSettings]
+        WHERE [SettingKey] = N'Sage.SyncDsn'
+          AND NULLIF(LTRIM(RTRIM([SettingValue])), N'') IS NOT NULL
+    )
+        THROW 51923, N'Configure the server Sage System DSN before requesting a Sage customer sync.', 1;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_data].[OrganizationSettings]
+        WHERE [SettingKey] = N'Sage.SyncUsername'
+          AND NULLIF(LTRIM(RTRIM([SettingValue])), N'') IS NOT NULL
+    )
+        THROW 51924, N'Configure the server Sage username before requesting a Sage customer sync.', 1;
+
+    SET @RequestId = COALESCE(@RequestId, NEWID());
+    SET @AllowLargeRemoval = COALESCE(@AllowLargeRemoval, 0);
+    IF @AllowLargeRemoval = 0 AND @ConfirmedRequestId IS NOT NULL
+        THROW 51925, N'ConfirmedRequestId is valid only for an explicit large-removal approval.', 1;
+    IF @AllowLargeRemoval = 1 AND @ConfirmedRequestId IS NULL
+        THROW 51926, N'Large-removal approval must reference the rejected Sage sync request whose counts were reviewed.', 1;
+    DECLARE @Status nvarchar(30), @Now datetime2(3) = SYSUTCDATETIME();
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        DECLARE @QueueLockResult int;
+        EXEC @QueueLockResult = sys.sp_getapplock
+            @Resource=N'TechBench.Sage.CustomerSyncQueue', @LockMode=N'Exclusive',
+            @LockOwner=N'Transaction', @LockTimeout=5000;
+        IF @QueueLockResult < 0
+            THROW 51921, N'Could not acquire the Sage customer synchronization queue lock.', 1;
+
+        IF @AllowLargeRemoval = 1
+           AND NOT EXISTS
+           (
+               SELECT 1
+               FROM [tb_sync].[SageSyncRequests] WITH (UPDLOCK, HOLDLOCK)
+               WHERE [RequestId] = @ConfirmedRequestId
+                 AND [Status] = N'Failed'
+                 AND [RequiresLargeRemovalConfirmation] = 1
+                 AND [CompletedAtUtc] >= DATEADD(hour, -1, @Now)
+           )
+            THROW 51927, N'The referenced Sage removal proposal is missing, no longer eligible, or more than one hour old. Request a new unapproved sync.', 1;
+
+        DECLARE @ExistingRequestId uniqueidentifier, @AuditEntityId nvarchar(120);
+        SELECT TOP (1) @ExistingRequestId = [RequestId]
+        FROM [tb_sync].[SageSyncRequests] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [Status] IN (N'Queued', N'Running')
+        ORDER BY [RequestedAtUtc], [RequestId];
+
+        IF @ExistingRequestId IS NOT NULL
+        BEGIN
+            SET @RequestId = @ExistingRequestId;
+            SET @Status = N'AlreadyQueued';
+        END
+        ELSE
+        BEGIN
+            INSERT INTO [tb_sync].[SageSyncRequests]
+                (
+                    [RequestId], [RequestedByWindowsSid], [RequestedAtUtc], [Status],
+                    [AllowLargeRemoval], [ConfirmedRequestId]
+                )
+            VALUES
+                (@RequestId, @ActorSid, @Now, N'Queued', @AllowLargeRemoval, @ConfirmedRequestId);
+            SET @Status = N'Queued';
+
+            SET @AuditEntityId = CONVERT(nvarchar(36), @RequestId);
+            DECLARE @AuditData nvarchar(max) = CASE WHEN @AllowLargeRemoval = 1
+                THEN N'{"allowLargeRemoval":true,"confirmedRequestId":"'
+                     + CONVERT(nvarchar(36), @ConfirmedRequestId) + N'"}'
+                ELSE N'{"allowLargeRemoval":false}' END;
+            EXEC [tb_security].[WriteAuditEvent]
+                @Action=N'SageCustomerSyncRequested', @EntityType=N'SageSyncRequest',
+                @EntityId=@AuditEntityId, @RequestId=@RequestId, @DataJson=@AuditData;
+        END;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT request_row.[RequestId], @Status AS [Status], CONVERT(int, 1) AS [QueueDepth],
+           request_row.[AllowLargeRemoval], request_row.[ConfirmedRequestId]
+    FROM [tb_sync].[SageSyncRequests] AS request_row
+    WHERE request_row.[RequestId] = @RequestId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.GetSageSyncStatus', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[GetSageSyncStatus];
+GO
+
+CREATE PROCEDURE [tb_app].[GetSageSyncStatus]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 51922, N'Only a currently authorized TechBench Admin may view Sage sync status.', 1;
+
+    DECLARE @QueueDepth int =
+    (
+        SELECT COUNT(*) FROM [tb_sync].[SageSyncRequests]
+        WHERE [Status] IN (N'Queued', N'Running')
+    );
+
+    ;WITH latest AS
+    (
+        SELECT TOP (1)
+            [RequestId], [ConfirmedRequestId], [Status], [Message], [RequestedAtUtc], [CompletedAtUtc],
+            [AllowLargeRemoval], [RequiresLargeRemovalConfirmation],
+            [ExistingCount], [ReadCount], [SavedCount], [StaleCount]
+        FROM [tb_sync].[SageSyncRequests]
+        ORDER BY [RequestedAtUtc] DESC, [RequestId] DESC
+    )
+    SELECT
+        [RequestId], [ConfirmedRequestId], COALESCE([Status], N'NeverRun') AS [Status], [Message],
+        @QueueDepth AS [QueueDepth], [RequestedAtUtc], [CompletedAtUtc],
+        COALESCE([AllowLargeRemoval], 0) AS [AllowLargeRemoval],
+        COALESCE([RequiresLargeRemovalConfirmation], 0) AS [RequiresLargeRemovalConfirmation],
+        COALESCE([ExistingCount], 0) AS [ExistingCount],
+        COALESCE([ReadCount], 0) AS [ReadCount],
+        COALESCE([SavedCount], 0) AS [SavedCount],
+        COALESCE([StaleCount], 0) AS [StaleCount]
+    FROM latest
+    RIGHT JOIN (SELECT CONVERT(bit, 1) AS [OneRow]) AS singleton ON 1 = 1;
+
+    SELECT [LastAttemptAtUtc], [LastSuccessfulAtUtc], [LastError]
+    FROM [tb_sync].[SageSyncHealth]
+    WHERE [HealthId] = 1;
+END;
+GO
+
+IF OBJECT_ID(N'tb_service.GetSageSyncConfiguration', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_service].[GetSageSyncConfiguration];
+GO
+
+CREATE PROCEDURE [tb_service].[GetSageSyncConfiguration]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    SELECT
+        COALESCE(MAX(CASE WHEN [SettingKey] = N'Sage.SyncDsn' THEN [SettingValue] END), N'') AS [Dsn],
+        COALESCE(MAX(CASE WHEN [SettingKey] = N'Sage.SyncUsername' THEN [SettingValue] END), N'') AS [Username]
+    FROM [tb_data].[OrganizationSettings]
+    WHERE [SettingKey] IN (N'Sage.SyncDsn', N'Sage.SyncUsername');
+END;
+GO
+
+IF OBJECT_ID(N'tb_service.ClaimSageSyncWork', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_service].[ClaimSageSyncWork];
+GO
+
+CREATE PROCEDURE [tb_service].[ClaimSageSyncWork]
+    @WorkerId uniqueidentifier,
+    @LeaseSeconds int
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF @WorkerId IS NULL OR @LeaseSeconds NOT BETWEEN 15 AND 3600
+        THROW 51930, N'WorkerId and a lease from 15 to 3600 seconds are required.', 1;
+
+    DECLARE @WorkId uniqueidentifier, @LeaseId uniqueidentifier = NEWID();
+    DECLARE @Now datetime2(3) = SYSUTCDATETIME(), @Until datetime2(3);
+    SET @Until = DATEADD(second, @LeaseSeconds, @Now);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        DECLARE @QueueLockResult int;
+        EXEC @QueueLockResult = sys.sp_getapplock
+            @Resource=N'TechBench.Sage.CustomerSyncQueue', @LockMode=N'Exclusive',
+            @LockOwner=N'Transaction', @LockTimeout=5000;
+        IF @QueueLockResult < 0
+            THROW 51931, N'Could not acquire the Sage customer synchronization queue lock.', 1;
+
+        SELECT TOP (1) @WorkId = request_row.[RequestId]
+        FROM [tb_sync].[SageSyncRequests] AS request_row WITH (UPDLOCK, READPAST, READCOMMITTEDLOCK, ROWLOCK)
+        LEFT JOIN [tb_sync].[SageSyncLeases] AS lease WITH (UPDLOCK, HOLDLOCK)
+            ON lease.[RequestId] = request_row.[RequestId]
+        WHERE request_row.[Status] = N'Queued'
+           OR (request_row.[Status] = N'Running' AND (lease.[RequestId] IS NULL OR lease.[ExpiresAtUtc] <= @Now))
+        ORDER BY request_row.[RequestedAtUtc], request_row.[RequestId];
+
+        IF @WorkId IS NOT NULL
+        BEGIN
+            DELETE FROM [tb_sync].[SageSyncLeases] WHERE [RequestId] = @WorkId;
+            INSERT INTO [tb_sync].[SageSyncLeases]
+                ([RequestId], [LeaseId], [WorkerId], [AcquiredAtUtc], [ExpiresAtUtc])
+            VALUES
+                (@WorkId, @LeaseId, @WorkerId, @Now, @Until);
+
+            UPDATE [tb_sync].[SageSyncRequests]
+            SET [Status] = N'Running', [StartedAtUtc] = COALESCE([StartedAtUtc], @Now),
+                [CompletedAtUtc] = NULL, [AttemptCount] = [AttemptCount] + 1,
+                [ExistingCount] = 0, [ReadCount] = 0, [SavedCount] = 0, [StaleCount] = 0,
+                [RequiresLargeRemovalConfirmation] = 0, [Message] = NULL
+            WHERE [RequestId] = @WorkId;
+        END;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT request_row.[RequestId] AS [WorkId], lease.[LeaseId], lease.[WorkerId],
+           lease.[ExpiresAtUtc], request_row.[AllowLargeRemoval]
+    FROM [tb_sync].[SageSyncRequests] AS request_row
+    INNER JOIN [tb_sync].[SageSyncLeases] AS lease ON lease.[RequestId] = request_row.[RequestId]
+    WHERE request_row.[RequestId] = @WorkId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_service.RenewSageSyncLease', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_service].[RenewSageSyncLease];
+GO
+
+CREATE PROCEDURE [tb_service].[RenewSageSyncLease]
+    @WorkId uniqueidentifier,
+    @LeaseId uniqueidentifier,
+    @WorkerId uniqueidentifier,
+    @LeaseSeconds int
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF @WorkId IS NULL OR @LeaseId IS NULL OR @WorkerId IS NULL OR @LeaseSeconds NOT BETWEEN 15 AND 3600
+        THROW 51932, N'WorkId, LeaseId, WorkerId, and a lease from 15 to 3600 seconds are required.', 1;
+
+    DECLARE @Now datetime2(3) = SYSUTCDATETIME(), @Until datetime2(3);
+    SET @Until = DATEADD(second, @LeaseSeconds, @Now);
+
+    UPDATE lease
+    SET [ExpiresAtUtc] = @Until
+    FROM [tb_sync].[SageSyncLeases] AS lease
+    INNER JOIN [tb_sync].[SageSyncRequests] AS request_row
+        ON request_row.[RequestId] = lease.[RequestId]
+    WHERE lease.[RequestId] = @WorkId
+      AND lease.[LeaseId] = @LeaseId
+      AND lease.[WorkerId] = @WorkerId
+      AND lease.[ExpiresAtUtc] > @Now
+      AND request_row.[Status] = N'Running';
+
+    IF @@ROWCOUNT <> 1
+        THROW 51933, N'The Sage sync lease is missing, expired, or owned by another worker.', 1;
+
+    SELECT @WorkId AS [WorkId], @LeaseId AS [LeaseId], @WorkerId AS [WorkerId], @Until AS [ExpiresAtUtc];
+END;
+GO
+
+IF OBJECT_ID(N'tb_service.ApplySageCustomerSnapshot', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_service].[ApplySageCustomerSnapshot];
+GO
+
+CREATE PROCEDURE [tb_service].[ApplySageCustomerSnapshot]
+    @WorkId uniqueidentifier,
+    @LeaseId uniqueidentifier,
+    @WorkerId uniqueidentifier,
+    @Json nvarchar(max),
+    @SyncedAtUtc datetime2(3)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF @WorkId IS NULL OR @LeaseId IS NULL OR @WorkerId IS NULL
+        THROW 51934, N'WorkId, LeaseId, and WorkerId are required.', 1;
+    IF COALESCE(ISJSON(@Json), 0) <> 1
+       OR LEFT(LTRIM(@Json), 1) <> N'['
+       OR RIGHT(RTRIM(@Json), 1) <> N']'
+       OR @SyncedAtUtc IS NULL
+        THROW 51935, N'A non-empty Sage customer JSON array and SyncedAtUtc are required.', 1;
+
+    DECLARE @ActorSid varbinary(85) =
+    (
+        SELECT [WindowsSid]
+        FROM [tb_security].[Users]
+        WHERE [LoginName] = N'$(SyncServicePrincipal)'
+    );
+    IF @ActorSid IS NULL
+        THROW 51936, N'The configured sync service principal has no TechBench service actor.', 1;
+
+    /* Preserve every array element until it has been validated. OPENJSON WITH
+       would truncate over-length values and the old filter/ranking path could
+       silently discard malformed or duplicate customers before reconciliation. */
+    DECLARE @RawSnapshot TABLE
+    (
+        [Ordinal] int NOT NULL PRIMARY KEY,
+        [JsonText] nvarchar(max) NULL,
+        [JsonType] int NOT NULL
+    );
+
+    INSERT INTO @RawSnapshot([Ordinal], [JsonText], [JsonType])
+    SELECT TRY_CONVERT(int, json_row.[key]), json_row.[value], json_row.[type]
+    FROM OPENJSON(@Json) AS json_row;
+
+    DECLARE @ReadCount int = (SELECT COUNT(*) FROM @RawSnapshot);
+    IF @ReadCount = 0
+        THROW 51937, N'The Sage customer snapshot was empty; no data was changed.', 1;
+    IF EXISTS (SELECT 1 FROM @RawSnapshot WHERE [JsonType] <> 5 OR [Ordinal] IS NULL)
+        THROW 51942, N'Every Sage customer snapshot element must be a JSON object; no data was changed.', 1;
+
+    DECLARE @ExtractedSnapshot TABLE
+    (
+        [Ordinal] int NOT NULL PRIMARY KEY,
+        [CustomerId] nvarchar(max) NULL,
+        [CustomerIdCount] int NOT NULL,
+        [CustomerIdType] int NULL,
+        [CustomerName] nvarchar(max) NULL,
+        [CustomerNameCount] int NOT NULL,
+        [CustomerNameType] int NULL,
+        [ContactName] nvarchar(max) NULL,
+        [ContactNameCount] int NOT NULL,
+        [ContactNameType] int NULL,
+        [Telephone] nvarchar(max) NULL,
+        [TelephoneCount] int NOT NULL,
+        [TelephoneType] int NULL,
+        [IsActiveText] nvarchar(max) NULL,
+        [IsActiveCount] int NOT NULL,
+        [IsActiveType] int NULL
+    );
+
+    INSERT INTO @ExtractedSnapshot
+    (
+        [Ordinal], [CustomerId], [CustomerIdCount], [CustomerIdType],
+        [CustomerName], [CustomerNameCount], [CustomerNameType],
+        [ContactName], [ContactNameCount], [ContactNameType],
+        [Telephone], [TelephoneCount], [TelephoneType],
+        [IsActiveText], [IsActiveCount], [IsActiveType]
+    )
+    SELECT
+        raw.[Ordinal],
+        MAX(CASE WHEN property_row.[key] = N'customerId' THEN property_row.[value] END),
+        SUM(CASE WHEN property_row.[key] = N'customerId' THEN 1 ELSE 0 END),
+        MAX(CASE WHEN property_row.[key] = N'customerId' THEN property_row.[type] END),
+        MAX(CASE WHEN property_row.[key] = N'customerName' THEN property_row.[value] END),
+        SUM(CASE WHEN property_row.[key] = N'customerName' THEN 1 ELSE 0 END),
+        MAX(CASE WHEN property_row.[key] = N'customerName' THEN property_row.[type] END),
+        MAX(CASE WHEN property_row.[key] = N'contactName' THEN property_row.[value] END),
+        SUM(CASE WHEN property_row.[key] = N'contactName' THEN 1 ELSE 0 END),
+        MAX(CASE WHEN property_row.[key] = N'contactName' THEN property_row.[type] END),
+        MAX(CASE WHEN property_row.[key] = N'telephone' THEN property_row.[value] END),
+        SUM(CASE WHEN property_row.[key] = N'telephone' THEN 1 ELSE 0 END),
+        MAX(CASE WHEN property_row.[key] = N'telephone' THEN property_row.[type] END),
+        MAX(CASE WHEN property_row.[key] = N'isActive' THEN property_row.[value] END),
+        SUM(CASE WHEN property_row.[key] = N'isActive' THEN 1 ELSE 0 END),
+        MAX(CASE WHEN property_row.[key] = N'isActive' THEN property_row.[type] END)
+    FROM @RawSnapshot AS raw
+    OUTER APPLY OPENJSON(raw.[JsonText]) AS property_row
+    GROUP BY raw.[Ordinal];
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM @ExtractedSnapshot
+        WHERE [CustomerIdCount] <> 1 OR [CustomerIdType] <> 1
+           OR NULLIF(LTRIM(RTRIM([CustomerId])), N'') IS NULL
+           OR LEN(LTRIM(RTRIM([CustomerId]))) > 120
+           OR [CustomerNameCount] <> 1 OR [CustomerNameType] <> 1
+           OR NULLIF(LTRIM(RTRIM([CustomerName])), N'') IS NULL
+           OR LEN(LTRIM(RTRIM([CustomerName]))) > 240
+           OR [ContactNameCount] > 1
+           OR ([ContactNameCount] = 1 AND [ContactNameType] NOT IN (0, 1))
+           OR LEN(LTRIM(RTRIM(COALESCE([ContactName], N'')))) > 240
+           OR [TelephoneCount] > 1
+           OR ([TelephoneCount] = 1 AND [TelephoneType] NOT IN (0, 1))
+           OR LEN(LTRIM(RTRIM(COALESCE([Telephone], N'')))) > 80
+           OR [IsActiveCount] <> 1 OR [IsActiveType] <> 3
+           OR [IsActiveText] NOT IN (N'true', N'false')
+    )
+        THROW 51943, N'The Sage customer snapshot contains a missing, malformed, or over-length field; no data was changed.', 1;
+
+    IF EXISTS
+    (
+        SELECT NULLIF(LTRIM(RTRIM([CustomerId])), N'')
+        FROM @ExtractedSnapshot
+        GROUP BY NULLIF(LTRIM(RTRIM([CustomerId])), N'')
+        HAVING COUNT(*) > 1
+    )
+        THROW 51944, N'The Sage customer snapshot contains duplicate customer IDs; no data was changed.', 1;
+
+    DECLARE @Snapshot TABLE
+    (
+        [CustomerId] nvarchar(120) NOT NULL PRIMARY KEY,
+        [CustomerName] nvarchar(240) NOT NULL,
+        [ContactName] nvarchar(240) NULL,
+        [Telephone] nvarchar(80) NULL,
+        [IsActive] bit NOT NULL
+    );
+
+    INSERT INTO @Snapshot([CustomerId], [CustomerName], [ContactName], [Telephone], [IsActive])
+    SELECT
+        LTRIM(RTRIM([CustomerId])),
+        LTRIM(RTRIM([CustomerName])),
+        NULLIF(LTRIM(RTRIM([ContactName])), N''),
+        NULLIF(LTRIM(RTRIM([Telephone])), N''),
+        CONVERT(bit, CASE WHEN [IsActiveText] = N'true' THEN 1 ELSE 0 END)
+    FROM @ExtractedSnapshot;
+
+    DECLARE @ExistingCount int = 0, @SavedCount int = 0, @StaleCount int = 0, @MatchedCount int = 0;
+    DECLARE @AllowLargeRemoval bit = 0, @RequiresLargeRemovalConfirmation bit = 0;
+    DECLARE @ConfirmedRequestId uniqueidentifier = NULL, @ConfirmationMatches bit = 0;
+    DECLARE @ResultMessage nvarchar(2000) = NULL;
+    DECLARE @Now datetime2(3) = SYSUTCDATETIME();
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        SELECT @AllowLargeRemoval = request_row.[AllowLargeRemoval],
+               @ConfirmedRequestId = request_row.[ConfirmedRequestId]
+        FROM [tb_sync].[SageSyncLeases] AS lease WITH (UPDLOCK, HOLDLOCK)
+        INNER JOIN [tb_sync].[SageSyncRequests] AS request_row WITH (UPDLOCK, HOLDLOCK)
+            ON request_row.[RequestId] = lease.[RequestId]
+        WHERE lease.[RequestId] = @WorkId
+          AND lease.[LeaseId] = @LeaseId
+          AND lease.[WorkerId] = @WorkerId
+          AND lease.[ExpiresAtUtc] > @Now
+          AND request_row.[Status] = N'Running';
+
+        IF @@ROWCOUNT <> 1
+            THROW 51938, N'A valid unexpired Sage sync lease is required to apply a customer snapshot.', 1;
+
+        SELECT @ExistingCount = COUNT(*)
+        FROM [tb_data].[ClientExternalIdentities] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [SourceSystem] = N'Sage';
+
+        SELECT @StaleCount = COUNT(*)
+        FROM [tb_data].[ClientExternalIdentities] AS identity_row WITH (UPDLOCK, HOLDLOCK)
+        WHERE identity_row.[SourceSystem] = N'Sage'
+          AND NOT EXISTS
+          (
+              SELECT 1
+              FROM @Snapshot AS snapshot
+              WHERE snapshot.[CustomerId] = identity_row.[ExternalId]
+          );
+
+        IF @AllowLargeRemoval = 1
+           AND @ConfirmedRequestId IS NOT NULL
+           AND EXISTS
+           (
+               SELECT 1
+               FROM [tb_sync].[SageSyncRequests] AS confirmed_request WITH (UPDLOCK, HOLDLOCK)
+               WHERE confirmed_request.[RequestId] = @ConfirmedRequestId
+                 AND confirmed_request.[Status] = N'Failed'
+                 AND confirmed_request.[RequiresLargeRemovalConfirmation] = 1
+                 AND confirmed_request.[CompletedAtUtc] >= DATEADD(hour, -1, @Now)
+                 AND confirmed_request.[ExistingCount] = @ExistingCount
+                 AND confirmed_request.[ReadCount] = @ReadCount
+                 AND confirmed_request.[StaleCount] = @StaleCount
+           )
+            SET @ConfirmationMatches = 1;
+
+        /* First imports and small cleanups proceed normally. A snapshot that
+           would remove at least ten and at least 25 percent of an established
+           Sage identity set requires a new, explicitly confirmed Admin request. */
+        IF @ConfirmationMatches <> 1
+           AND @ExistingCount >= 20
+           AND @StaleCount >= 10
+           AND CONVERT(bigint, @StaleCount) * 100 >= CONVERT(bigint, @ExistingCount) * 25
+        BEGIN
+            SET @RequiresLargeRemovalConfirmation = 1;
+            SET @ResultMessage =
+                N'Sage returned ' + CONVERT(nvarchar(20), @ReadCount)
+                + N' active customer(s), which would remove '
+                + CONVERT(nvarchar(20), @StaleCount) + N' of '
+                + CONVERT(nvarchar(20), @ExistingCount)
+                + N' existing Sage customer mapping(s). No customer data was changed. An Admin must explicitly confirm these exact counts; any changed rerun requires a new confirmation.';
+
+            UPDATE [tb_sync].[SageSyncRequests]
+            SET [ExistingCount] = @ExistingCount, [ReadCount] = @ReadCount,
+                [SavedCount] = 0, [StaleCount] = @StaleCount,
+                [RequiresLargeRemovalConfirmation] = 1, [Message] = @ResultMessage
+            WHERE [RequestId] = @WorkId AND [Status] = N'Running';
+
+            COMMIT TRANSACTION;
+
+            SELECT @ReadCount AS [ReadCount], CONVERT(int, 0) AS [SavedCount],
+                   @StaleCount AS [StaleCount], CONVERT(int, 0) AS [MatchedCount],
+                   @ExistingCount AS [ExistingCount],
+                   @RequiresLargeRemovalConfirmation AS [RequiresLargeRemovalConfirmation],
+                   @ResultMessage AS [Message];
+            RETURN;
+        END;
+
+        /* Upgrade legacy Sage columns into the canonical identity table before
+           matching the server snapshot. One canonical client wins per ID. */
+        ;WITH legacy_candidates AS
+        (
+            SELECT
+                client.[Id] AS [ClientId], client.[SageCustomerId],
+                ROW_NUMBER() OVER (PARTITION BY client.[SageCustomerId] ORDER BY client.[Id]) AS [RowNumber]
+            FROM [tb_data].[Clients] AS client
+            INNER JOIN @Snapshot AS snapshot ON snapshot.[CustomerId] = client.[SageCustomerId]
+            WHERE NULLIF(LTRIM(RTRIM(client.[SageCustomerId])), N'') IS NOT NULL
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientExternalIdentities] AS existing WITH (UPDLOCK, HOLDLOCK)
+                  WHERE existing.[SourceSystem] = N'Sage'
+                    AND existing.[ExternalId] = client.[SageCustomerId]
+              )
+        )
+        INSERT INTO [tb_data].[ClientExternalIdentities]
+        (
+            [ClientId], [SourceSystem], [ExternalId], [ExternalName], [LastSyncedAtUtc],
+            [CreatedByWindowsSid], [UpdatedByWindowsSid], [CreatedAtUtc], [UpdatedAtUtc]
+        )
+        SELECT
+            legacy.[ClientId], N'Sage', snapshot.[CustomerId], snapshot.[CustomerName], @SyncedAtUtc,
+            @ActorSid, @ActorSid, @Now, @Now
+        FROM legacy_candidates AS legacy
+        INNER JOIN @Snapshot AS snapshot ON snapshot.[CustomerId] = legacy.[SageCustomerId]
+        WHERE legacy.[RowNumber] = 1;
+
+        UPDATE identity_row
+        SET [ExternalName] = snapshot.[CustomerName], [LastSyncedAtUtc] = @SyncedAtUtc,
+            [UpdatedByWindowsSid] = @ActorSid, [UpdatedAtUtc] = @Now
+        FROM [tb_data].[ClientExternalIdentities] AS identity_row
+        INNER JOIN @Snapshot AS snapshot ON snapshot.[CustomerId] = identity_row.[ExternalId]
+        WHERE identity_row.[SourceSystem] = N'Sage';
+
+        DECLARE @NewClients TABLE
+        (
+            [CustomerId] nvarchar(120) NOT NULL PRIMARY KEY,
+            [ClientId] int NOT NULL
+        );
+
+        INSERT INTO [tb_data].[Clients]
+        (
+            [Name], [Source], [ExternalId], [IsActive], [LastSyncedAtUtc],
+            [SageCustomerId], [SageCustomerName], [SageContactName], [SageTelephone],
+            [MatchStatus], [CreatedByWindowsSid], [UpdatedByWindowsSid],
+            [CreatedAtUtc], [UpdatedAtUtc]
+        )
+        OUTPUT inserted.[SageCustomerId], inserted.[Id]
+            INTO @NewClients([CustomerId], [ClientId])
+        SELECT
+            snapshot.[CustomerName], N'Sage', snapshot.[CustomerId], snapshot.[IsActive], @SyncedAtUtc,
+            snapshot.[CustomerId], snapshot.[CustomerName], snapshot.[ContactName], snapshot.[Telephone],
+            N'Unmatched', @ActorSid, @ActorSid, @Now, @Now
+        FROM @Snapshot AS snapshot
+        WHERE NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[ClientExternalIdentities] AS existing WITH (UPDLOCK, HOLDLOCK)
+            WHERE existing.[SourceSystem] = N'Sage'
+              AND existing.[ExternalId] = snapshot.[CustomerId]
+        );
+
+        INSERT INTO [tb_data].[ClientExternalIdentities]
+        (
+            [ClientId], [SourceSystem], [ExternalId], [ExternalName], [LastSyncedAtUtc],
+            [CreatedByWindowsSid], [UpdatedByWindowsSid], [CreatedAtUtc], [UpdatedAtUtc]
+        )
+        SELECT
+            new_client.[ClientId], N'Sage', snapshot.[CustomerId], snapshot.[CustomerName], @SyncedAtUtc,
+            @ActorSid, @ActorSid, @Now, @Now
+        FROM @NewClients AS new_client
+        INNER JOIN @Snapshot AS snapshot ON snapshot.[CustomerId] = new_client.[CustomerId];
+
+        UPDATE client
+        SET
+            [Name] = CASE WHEN whd_identity.[ClientId] IS NULL THEN snapshot.[CustomerName] ELSE client.[Name] END,
+            [Source] = CASE WHEN whd_identity.[ClientId] IS NULL THEN N'Sage' ELSE N'Both' END,
+            [ExternalId] = CASE WHEN whd_identity.[ClientId] IS NULL THEN snapshot.[CustomerId] ELSE client.[ExternalId] END,
+            [IsActive] = CASE WHEN whd_identity.[ClientId] IS NULL THEN snapshot.[IsActive] ELSE client.[IsActive] END,
+            [LastSyncedAtUtc] = @SyncedAtUtc,
+            [SageCustomerId] = snapshot.[CustomerId], [SageCustomerName] = snapshot.[CustomerName],
+            [SageContactName] = snapshot.[ContactName], [SageTelephone] = snapshot.[Telephone],
+            [MatchStatus] = CASE WHEN whd_identity.[ClientId] IS NULL THEN N'Unmatched' ELSE N'Matched' END,
+            [UpdatedByWindowsSid] = @ActorSid, [UpdatedAtUtc] = @Now
+        FROM [tb_data].[Clients] AS client
+        INNER JOIN [tb_data].[ClientExternalIdentities] AS sage_identity
+            ON sage_identity.[ClientId] = client.[Id] AND sage_identity.[SourceSystem] = N'Sage'
+        INNER JOIN @Snapshot AS snapshot ON snapshot.[CustomerId] = sage_identity.[ExternalId]
+        OUTER APPLY
+        (
+            SELECT TOP (1) whd.[ClientId]
+            FROM [tb_data].[ClientExternalIdentities] AS whd
+            WHERE whd.[ClientId] = client.[Id] AND whd.[SourceSystem] = N'WHD'
+        ) AS whd_identity;
+
+        SET @SavedCount = @ReadCount;
+
+        DECLARE @StaleIdentities TABLE
+        (
+            [IdentityId] bigint NOT NULL PRIMARY KEY,
+            [ClientId] int NOT NULL
+        );
+
+        INSERT INTO @StaleIdentities([IdentityId], [ClientId])
+        SELECT identity_row.[Id], identity_row.[ClientId]
+        FROM [tb_data].[ClientExternalIdentities] AS identity_row
+        WHERE identity_row.[SourceSystem] = N'Sage'
+          AND NOT EXISTS
+          (
+              SELECT 1 FROM @Snapshot AS snapshot
+              WHERE snapshot.[CustomerId] = identity_row.[ExternalId]
+          );
+        SET @StaleCount = @@ROWCOUNT;
+
+        DELETE identity_row
+        FROM [tb_data].[ClientExternalIdentities] AS identity_row
+        INNER JOIN @StaleIdentities AS stale ON stale.[IdentityId] = identity_row.[Id];
+
+        ;WITH removed_clients AS
+        (
+            SELECT DISTINCT stale.[ClientId]
+            FROM @StaleIdentities AS stale
+            WHERE NOT EXISTS
+            (
+                SELECT 1 FROM [tb_data].[ClientExternalIdentities] AS remaining_sage
+                WHERE remaining_sage.[ClientId] = stale.[ClientId]
+                  AND remaining_sage.[SourceSystem] = N'Sage'
+            )
+        )
+        UPDATE client
+        SET
+            [Source] = CASE WHEN whd_identity.[ClientId] IS NULL THEN N'Sage' ELSE N'WHD' END,
+            [IsActive] = CASE WHEN whd_identity.[ClientId] IS NULL THEN CONVERT(bit, 0) ELSE client.[IsActive] END,
+            [SageCustomerId] = NULL, [SageCustomerName] = NULL,
+            [SageContactName] = NULL, [SageTelephone] = NULL,
+            [MatchStatus] = N'Unmatched', [LastSyncedAtUtc] = @SyncedAtUtc,
+            [UpdatedByWindowsSid] = @ActorSid, [UpdatedAtUtc] = @Now
+        FROM [tb_data].[Clients] AS client
+        INNER JOIN removed_clients AS removed ON removed.[ClientId] = client.[Id]
+        OUTER APPLY
+        (
+            SELECT TOP (1) whd.[ClientId]
+            FROM [tb_data].[ClientExternalIdentities] AS whd
+            WHERE whd.[ClientId] = client.[Id] AND whd.[SourceSystem] = N'WHD'
+        ) AS whd_identity;
+
+        SELECT @MatchedCount = COUNT(DISTINCT client.[Id])
+        FROM [tb_data].[Clients] AS client
+        INNER JOIN [tb_data].[ClientExternalIdentities] AS sage_identity
+            ON sage_identity.[ClientId] = client.[Id] AND sage_identity.[SourceSystem] = N'Sage'
+        INNER JOIN @Snapshot AS snapshot ON snapshot.[CustomerId] = sage_identity.[ExternalId]
+        WHERE client.[Source] = N'Both';
+
+        UPDATE [tb_sync].[SageSyncRequests]
+        SET [ExistingCount] = @ExistingCount, [ReadCount] = @ReadCount,
+            [SavedCount] = @SavedCount, [StaleCount] = @StaleCount,
+            [RequiresLargeRemovalConfirmation] = 0, [Message] = NULL
+        WHERE [RequestId] = @WorkId AND [Status] = N'Running';
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT @ReadCount AS [ReadCount], @SavedCount AS [SavedCount],
+           @StaleCount AS [StaleCount], @MatchedCount AS [MatchedCount],
+           @ExistingCount AS [ExistingCount],
+           @RequiresLargeRemovalConfirmation AS [RequiresLargeRemovalConfirmation],
+           @ResultMessage AS [Message];
+END;
+GO
+
+IF OBJECT_ID(N'tb_service.CompleteSageSyncWork', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_service].[CompleteSageSyncWork];
+GO
+
+CREATE PROCEDURE [tb_service].[CompleteSageSyncWork]
+    @WorkId uniqueidentifier,
+    @LeaseId uniqueidentifier,
+    @WorkerId uniqueidentifier,
+    @Succeeded bit,
+    @Message nvarchar(2000) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF @WorkId IS NULL OR @LeaseId IS NULL OR @WorkerId IS NULL OR @Succeeded IS NULL
+        THROW 51939, N'WorkId, LeaseId, WorkerId, and Succeeded are required.', 1;
+
+    SET @Message = NULLIF(LTRIM(RTRIM(@Message)), N'');
+    DECLARE @Now datetime2(3) = SYSUTCDATETIME(), @ReadCount int;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        SELECT @ReadCount = request_row.[ReadCount]
+        FROM [tb_sync].[SageSyncLeases] AS lease WITH (UPDLOCK, HOLDLOCK)
+        INNER JOIN [tb_sync].[SageSyncRequests] AS request_row WITH (UPDLOCK, HOLDLOCK)
+            ON request_row.[RequestId] = lease.[RequestId]
+        WHERE lease.[RequestId] = @WorkId
+          AND lease.[LeaseId] = @LeaseId
+          AND lease.[WorkerId] = @WorkerId
+          AND lease.[ExpiresAtUtc] > @Now
+          AND request_row.[Status] = N'Running';
+
+        IF @ReadCount IS NULL
+            THROW 51940, N'A valid unexpired Sage sync lease is required to complete this work.', 1;
+        IF @Succeeded = 1 AND @ReadCount = 0
+            THROW 51941, N'A Sage sync cannot succeed before a non-empty customer snapshot is applied.', 1;
+
+        UPDATE [tb_sync].[SageSyncRequests]
+        SET [Status] = CASE WHEN @Succeeded = 1 THEN N'Completed' ELSE N'Failed' END,
+            [CompletedAtUtc] = @Now,
+            [Message] = CASE WHEN @Succeeded = 1 THEN @Message ELSE COALESCE(@Message, N'Sage customer synchronization failed.') END
+        WHERE [RequestId] = @WorkId;
+
+        UPDATE [tb_sync].[SageSyncHealth]
+        SET [LastAttemptAtUtc] = @Now,
+            [LastSuccessfulAtUtc] = CASE WHEN @Succeeded = 1 THEN @Now ELSE [LastSuccessfulAtUtc] END,
+            [LastError] = CASE WHEN @Succeeded = 1 THEN NULL ELSE COALESCE(@Message, N'Sage customer synchronization failed.') END,
+            [UpdatedAtUtc] = @Now
+        WHERE [HealthId] = 1;
+
+        DELETE FROM [tb_sync].[SageSyncLeases]
+        WHERE [RequestId] = @WorkId AND [LeaseId] = @LeaseId AND [WorkerId] = @WorkerId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT [RequestId] AS [WorkId], [Status], [Message],
+           [ReadCount], [SavedCount], [StaleCount], [CompletedAtUtc]
+    FROM [tb_sync].[SageSyncRequests]
+    WHERE [RequestId] = @WorkId;
+END;
+GO
+
+/* Rebuild WHD row-level security so a valid preview is scoped to the target
+   technician and the Admin's ordinary bypass cannot win after impersonation.
+   All DDL participates in one transaction: any ALTER FUNCTION or CREATE
+   POLICY failure rolls the original enabled policy back instead of leaving a
+   fail-open interval after DROP SECURITY POLICY. */
+IF OBJECT_ID(N'tb_security.FilterWhdTicketAccess', N'IF') IS NULL
+    THROW 51950, N'The V0006 WHD ticket access function is missing.', 1;
+
+DECLARE @RlsFunctionSql nvarchar(max) = N'
+ALTER FUNCTION [tb_security].[FilterWhdTicketAccess]
+(
+    @Source nvarchar(40),
+    @AssignedTechExternalId nvarchar(120),
+    @AssignedGroupExternalId nvarchar(120)
+)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN
+(
+    SELECT CONVERT(bit, 1) AS [AccessAllowed]
+    WHERE @Source <> N''WHD''
+       OR
+       (
+           USER_NAME() = N''tb_preview_reader''
+           AND EXISTS
+           (
+               SELECT 1
+               FROM [tb_security].[AdminUserPreviewSessions] AS preview_session
+               INNER JOIN [tb_security].[Users] AS actor_user
+                   ON actor_user.[WindowsSid] = preview_session.[ActorWindowsSid]
+               INNER JOIN [tb_security].[Users] AS target_user
+                   ON target_user.[WindowsSid] = preview_session.[TargetWindowsSid]
+               INNER JOIN [tb_whd].[UserTechnicianMappings] AS mapping
+                   ON mapping.[WindowsSid] = preview_session.[TargetWindowsSid]
+               WHERE preview_session.[PreviewSessionId] = TRY_CONVERT
+                     (
+                         uniqueidentifier,
+                         CONVERT(nvarchar(36), SESSION_CONTEXT(N''TechBench.PreviewSessionId''))
+                     )
+                 AND preview_session.[ActorWindowsSid] = SUSER_SID(ORIGINAL_LOGIN())
+                 AND preview_session.[EndedAtUtc] IS NULL
+                 AND preview_session.[ExpiresAtUtc] > SYSUTCDATETIME()
+                 AND actor_user.[IsAdmin] = 1
+                 AND target_user.[IsTechnician] = 1
+                 AND target_user.[IsAdmin] = 0
+                 AND target_user.[LastSeenAtUtc] >= DATEADD(hour, -1, SYSUTCDATETIME())
+                 AND
+                 (
+                     mapping.[TechnicianExternalId] = @AssignedTechExternalId
+                     OR EXISTS
+                     (
+                         SELECT 1
+                         FROM [tb_whd].[TechnicianGroupMemberships] AS membership
+                         WHERE membership.[TechnicianExternalId] = mapping.[TechnicianExternalId]
+                           AND membership.[GroupExternalId] = @AssignedGroupExternalId
+                     )
+                 )
+           )
+       )
+       OR
+       (
+           USER_NAME() <> N''tb_preview_reader''
+           AND SESSION_CONTEXT(N''TechBench.PreviewSessionId'') IS NULL
+           AND
+           (
+               USER_NAME() = N''dbo''
+               OR IS_ROLEMEMBER(N''db_owner'') = 1
+               OR IS_ROLEMEMBER(N''tb_role_admin'') = 1
+               OR IS_ROLEMEMBER(N''tb_role_sync_service'') = 1
+               OR EXISTS
+               (
+                   SELECT 1
+                   FROM [tb_whd].[UserTechnicianMappings] AS mapping
+                   WHERE mapping.[WindowsSid] = SUSER_SID(ORIGINAL_LOGIN())
+                     AND
+                     (
+                         mapping.[TechnicianExternalId] = @AssignedTechExternalId
+                         OR EXISTS
+                         (
+                             SELECT 1
+                             FROM [tb_whd].[TechnicianGroupMemberships] AS membership
+                             WHERE membership.[TechnicianExternalId] = mapping.[TechnicianExternalId]
+                               AND membership.[GroupExternalId] = @AssignedGroupExternalId
+                         )
+                     )
+               )
+           )
+       )
+);';
+
+DECLARE @RlsPolicySql nvarchar(max) = N'
+CREATE SECURITY POLICY [tb_security].[WhdTicketAccessPolicy]
+    ADD FILTER PREDICATE [tb_security].[FilterWhdTicketAccess]
+        ([Source], [AssignedTechExternalId], [AssignedGroupExternalId])
+        ON [tb_data].[Tickets],
+    ADD BLOCK PREDICATE [tb_security].[FilterWhdTicketAccess]
+        ([Source], [AssignedTechExternalId], [AssignedGroupExternalId])
+        ON [tb_data].[Tickets] AFTER INSERT,
+    ADD BLOCK PREDICATE [tb_security].[FilterWhdTicketAccess]
+        ([Source], [AssignedTechExternalId], [AssignedGroupExternalId])
+        ON [tb_data].[Tickets] AFTER UPDATE
+    WITH (STATE = ON, SCHEMABINDING = ON);';
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM sys.security_policies AS policy
+        INNER JOIN sys.schemas AS schema_row ON schema_row.[schema_id] = policy.[schema_id]
+        WHERE schema_row.[name] = N'tb_security'
+          AND policy.[name] = N'WhdTicketAccessPolicy'
+    )
+    BEGIN
+        EXEC sys.sp_executesql
+            N'ALTER SECURITY POLICY [tb_security].[WhdTicketAccessPolicy] WITH (STATE = OFF);';
+        EXEC sys.sp_executesql
+            N'DROP SECURITY POLICY [tb_security].[WhdTicketAccessPolicy];';
+    END;
+
+    EXEC sys.sp_executesql @RlsFunctionSql;
+    EXEC sys.sp_executesql @RlsPolicySql;
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+GO
+
+PRINT N'TechBench V0007 server-owned Sage sync and read-only Admin preview procedures created.';
+GO
+
+-- ============================================================================
+-- END 49-V0007-ServerOwnedSageAndAdminPreviewProcedures.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 50-Grants.sql
 -- ============================================================================
 
@@ -16896,6 +18925,104 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 55-V0007-ServerOwnedSageAndAdminPreviewGrants.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+/* Sage ingestion is service-owned in V0007. Admins may enqueue and inspect
+   work, but cannot run any legacy workstation-side Sage apply lifecycle. */
+REVOKE EXECUTE ON OBJECT::[tb_app].[AcquireSyncLease] FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_app].[ReleaseSyncLease] FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_app].[BeginSyncRun] FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_app].[CompleteSyncRun] FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncUpsertClient] FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncUpsertSageCustomer] FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncRemoveStaleSageCustomers] FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncUpsertClientExternalIdentity] FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncApplySageCustomerSnapshot] FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncApplyClientSnapshot] FROM [tb_role_admin];
+
+REVOKE EXECUTE ON OBJECT::[tb_app].[AcquireSyncLease] FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[ReleaseSyncLease] FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[BeginSyncRun] FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[CompleteSyncRun] FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncUpsertClient] FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncUpsertSageCustomer] FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncRemoveStaleSageCustomers] FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncUpsertClientExternalIdentity] FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncApplySageCustomerSnapshot] FROM [tb_role_sync_operator];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SyncApplyClientSnapshot] FROM [tb_role_sync_operator];
+
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminRequestSageSync] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetSageSyncStatus] TO [tb_role_admin];
+
+GRANT EXECUTE ON OBJECT::[tb_service].[GetSageSyncConfiguration] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[ClaimSageSyncWork] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[RenewSageSyncLease] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[ApplySageCustomerSnapshot] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[CompleteSageSyncWork] TO [tb_role_sync_service];
+
+/* Admin preview is server-issued and activated per physical SQL connection.
+   Only the Admin role may impersonate the WITHOUT LOGIN reader principal. */
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminListPreviewUsers] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminBeginUserPreview] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[ActivateReadOnlyPreview] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminEndUserPreview] TO [tb_role_admin];
+GRANT IMPERSONATE ON USER::[tb_preview_reader] TO [tb_role_admin];
+
+REVOKE IMPERSONATE ON USER::[tb_preview_reader] FROM [tb_role_user];
+REVOKE IMPERSONATE ON USER::[tb_preview_reader] FROM [tb_role_manager];
+REVOKE IMPERSONATE ON USER::[tb_preview_reader] FROM [tb_role_sync_operator];
+REVOKE IMPERSONATE ON USER::[tb_preview_reader] FROM [tb_role_sync_service];
+
+GRANT EXECUTE ON OBJECT::[tb_app].[GetCurrentUserContext] TO [tb_preview_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetRepositoryCapabilities] TO [tb_preview_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[SearchClients] TO [tb_preview_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetClient] TO [tb_preview_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[SearchTickets] TO [tb_preview_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetTicket] TO [tb_preview_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetTicketStatusOptions] TO [tb_preview_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[SearchWorkEntries] TO [tb_preview_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetWorkEntry] TO [tb_preview_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetDistinctTags] TO [tb_preview_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetWorkEntryLinks] TO [tb_preview_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetTemplates] TO [tb_preview_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetCommonLinks] TO [tb_preview_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetSettings] TO [tb_preview_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetPostingLogs] TO [tb_preview_reader];
+
+/* Defense in depth: the reader has no private-data or mutation entry point. */
+REVOKE EXECUTE ON OBJECT::[tb_app].[GetEditorDraft] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SaveEditorDraft] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[DeleteEditorDraft] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SaveWorkEntry] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[DeleteWorkEntry] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SaveWorkEntryLink] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[DeleteWorkEntryLink] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SaveTicket] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SaveUserSetting] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[DeleteUserSetting] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminRequestSageSync] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminBeginUserPreview] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[ActivateReadOnlyPreview] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminEndUserPreview] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminListPreviewUsers] FROM [tb_preview_reader];
+
+PRINT N'TechBench V0007 server-owned Sage sync and read-only Admin preview grants applied.';
+GO
+
+-- ============================================================================
+-- END 55-V0007-ServerOwnedSageAndAdminPreviewGrants.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 90-Verify.sql
 -- ============================================================================
 
@@ -17325,9 +19452,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6)
+IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7)
 BEGIN
-    PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, 5, or 6.';
+    PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, 5, 6, or 7.';
     SET @FailureCount += 1;
 END;
 
@@ -17938,9 +20065,16 @@ BEGIN
         (N'tb_role_admin', N'tb_app.EnsureWorkspaceDefaults'),
         (N'tb_role_admin', N'tb_app.SaveTemplate'),
         (N'tb_role_admin', N'tb_app.SaveCommonLink'),
-        (N'tb_role_admin', N'tb_app.SaveClientAlias'),
-        (N'tb_role_admin', N'tb_app.AcquireSyncLease'),
-        (N'tb_role_admin', N'tb_app.SyncApplySageCustomerSnapshot');
+        (N'tb_role_admin', N'tb_app.SaveClientAlias');
+
+    /* V0007 moves organization-wide Sage snapshot application to the service. */
+    IF @InstalledSchemaVersion < 7
+    BEGIN
+        INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
+        VALUES
+            (N'tb_role_admin', N'tb_app.AcquireSyncLease'),
+            (N'tb_role_admin', N'tb_app.SyncApplySageCustomerSnapshot');
+    END;
 
     /* V0006 moves organization-wide WHD snapshot application to the service. */
     IF @InstalledSchemaVersion < 6
@@ -18071,9 +20205,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6)
+IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7)
 BEGIN
-    PRINT N'FAIL: V0003 verification supports installed schema version 3, 4, 5, or 6.';
+    PRINT N'FAIL: V0003 verification supports installed schema version 3, 4, 5, 6, or 7.';
     SET @FailureCount += 1;
 END;
 
@@ -18557,9 +20691,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (4, 5, 6)
+IF @InstalledSchemaVersion NOT IN (4, 5, 6, 7)
 BEGIN
-    PRINT N'FAIL: V0004 verification supports installed schema version 4, 5, or 6.';
+    PRINT N'FAIL: V0004 verification supports installed schema version 4, 5, 6, or 7.';
     SET @FailureCount += 1;
 END;
 
@@ -19030,15 +21164,22 @@ VALUES
     (N'tb_role_admin', N'tb_app.AdminSaveExternalMapping'),
     (N'tb_role_admin', N'tb_app.AdminMergeClients'),
     (N'tb_role_admin', N'tb_app.ReconcileClientMatches'),
-    (N'tb_role_admin', N'tb_app.AcquireSyncLease'),
-    (N'tb_role_admin', N'tb_app.ReleaseSyncLease'),
-    (N'tb_role_admin', N'tb_app.BeginSyncRun'),
-    (N'tb_role_admin', N'tb_app.CompleteSyncRun'),
-    (N'tb_role_admin', N'tb_app.SyncApplySageCustomerSnapshot'),
-    (N'tb_role_admin', N'tb_app.SyncUpsertSageCustomer'),
-    (N'tb_role_admin', N'tb_app.SyncRemoveStaleSageCustomers'),
-    (N'tb_role_admin', N'tb_app.SyncUpsertClientExternalIdentity'),
     (N'tb_role_sync_operator', N'tb_app.GetSyncRuns');
+
+/* V0007 moves organization-wide Sage ingestion to tb_role_sync_service. */
+IF @InstalledSchemaVersion < 7
+BEGIN
+    INSERT INTO @ExpectedGrants([RoleName], [ObjectName])
+    VALUES
+        (N'tb_role_admin', N'tb_app.AcquireSyncLease'),
+        (N'tb_role_admin', N'tb_app.ReleaseSyncLease'),
+        (N'tb_role_admin', N'tb_app.BeginSyncRun'),
+        (N'tb_role_admin', N'tb_app.CompleteSyncRun'),
+        (N'tb_role_admin', N'tb_app.SyncApplySageCustomerSnapshot'),
+        (N'tb_role_admin', N'tb_app.SyncUpsertSageCustomer'),
+        (N'tb_role_admin', N'tb_app.SyncRemoveStaleSageCustomers'),
+        (N'tb_role_admin', N'tb_app.SyncUpsertClientExternalIdentity');
+END;
 
 /* V0006 moves organization-wide WHD mutations to tb_role_sync_service. */
 IF @InstalledSchemaVersion < 6
@@ -19267,9 +21408,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (5, 6)
+IF @InstalledSchemaVersion NOT IN (5, 6, 7)
 BEGIN
-    PRINT N'FAIL: V0005 verification supports installed schema version 5 or 6.';
+    PRINT N'FAIL: V0005 verification supports installed schema version 5, 6, or 7.';
     SET @FailureCount += 1;
 END;
 
@@ -20456,6 +22597,10 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
 DECLARE @FailureCount int = 0;
+DECLARE @InstalledSchemaVersion int =
+(
+    SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]
+);
 
 IF NOT EXISTS
 (
@@ -20470,9 +22615,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) <> 6
+IF @InstalledSchemaVersion NOT IN (6, 7)
 BEGIN
-    PRINT N'FAIL: installed schema version is not 6.';
+    PRINT N'FAIL: V0006 verification supports installed schema version 6 or 7.';
     SET @FailureCount += 1;
 END;
 
@@ -20710,6 +22855,16 @@ INSERT INTO @ServiceProcedures([ObjectName]) VALUES
     (N'tb_service.ApplyWhdTechnicianSnapshot'),
     (N'tb_service.ApplyWhdTechGroupSnapshot'),
     (N'tb_service.CompleteWhdSyncWork');
+
+IF @InstalledSchemaVersion >= 7
+BEGIN
+    INSERT INTO @ServiceProcedures([ObjectName]) VALUES
+        (N'tb_service.GetSageSyncConfiguration'),
+        (N'tb_service.ClaimSageSyncWork'),
+        (N'tb_service.RenewSageSyncLease'),
+        (N'tb_service.ApplySageCustomerSnapshot'),
+        (N'tb_service.CompleteSageSyncWork');
+END;
 
 IF EXISTS
 (
@@ -20957,6 +23112,625 @@ GO
 
 -- ============================================================================
 -- END 95-V0006-WhdServerSyncVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 96-V0007-ServerOwnedSageAndAdminPreviewVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @FailureCount int = 0;
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.ServerOwnedSageAndAdminPreview.0007'
+      AND [SchemaVersion] = 7
+      AND [ReleaseVersion] = N'2.0.0-alpha.8'
+)
+BEGIN
+    PRINT N'FAIL: V0007 migration marker is missing or invalid.';
+    SET @FailureCount += 1;
+END;
+
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) <> 7
+BEGIN
+    PRINT N'FAIL: installed schema version is not 7.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @RequiredObjects TABLE
+(
+    [ObjectName] nvarchar(300) NOT NULL PRIMARY KEY,
+    [ObjectType] char(2) NOT NULL
+);
+INSERT INTO @RequiredObjects([ObjectName], [ObjectType]) VALUES
+    (N'tb_sync.SageSyncRequests', N'U'),
+    (N'tb_sync.SageSyncLeases', N'U'),
+    (N'tb_sync.SageSyncHealth', N'U'),
+    (N'tb_security.AdminUserPreviewSessions', N'U'),
+    (N'tb_app.AdminRequestSageSync', N'P'),
+    (N'tb_app.GetSageSyncStatus', N'P'),
+    (N'tb_service.GetSageSyncConfiguration', N'P'),
+    (N'tb_service.ClaimSageSyncWork', N'P'),
+    (N'tb_service.RenewSageSyncLease', N'P'),
+    (N'tb_service.ApplySageCustomerSnapshot', N'P'),
+    (N'tb_service.CompleteSageSyncWork', N'P'),
+    (N'tb_app.AdminListPreviewUsers', N'P'),
+    (N'tb_app.AdminBeginUserPreview', N'P'),
+    (N'tb_app.ActivateReadOnlyPreview', N'P'),
+    (N'tb_app.AdminEndUserPreview', N'P'),
+    (N'tb_security.FilterWhdTicketAccess', N'IF');
+
+IF EXISTS
+(
+    SELECT 1 FROM @RequiredObjects AS required
+    WHERE OBJECT_ID(required.[ObjectName], required.[ObjectType]) IS NULL
+)
+BEGIN
+    PRINT N'FAIL: one or more V0007 objects are missing.';
+    SET @FailureCount += 1;
+END;
+
+IF DATABASE_PRINCIPAL_ID(N'tb_preview_reader') IS NULL
+BEGIN
+    PRINT N'FAIL: the WITHOUT LOGIN preview reader is missing.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @RequiredColumns TABLE
+(
+    [ObjectName] nvarchar(300) NOT NULL,
+    [ColumnName] sysname NOT NULL,
+    PRIMARY KEY ([ObjectName], [ColumnName])
+);
+INSERT INTO @RequiredColumns([ObjectName], [ColumnName]) VALUES
+    (N'tb_sync.SageSyncRequests', N'RequestId'),
+    (N'tb_sync.SageSyncRequests', N'RequestedByWindowsSid'),
+    (N'tb_sync.SageSyncRequests', N'RequestedAtUtc'),
+    (N'tb_sync.SageSyncRequests', N'StartedAtUtc'),
+    (N'tb_sync.SageSyncRequests', N'CompletedAtUtc'),
+    (N'tb_sync.SageSyncRequests', N'Status'),
+    (N'tb_sync.SageSyncRequests', N'AllowLargeRemoval'),
+    (N'tb_sync.SageSyncRequests', N'RequiresLargeRemovalConfirmation'),
+    (N'tb_sync.SageSyncRequests', N'ConfirmedRequestId'),
+    (N'tb_sync.SageSyncRequests', N'ExistingCount'),
+    (N'tb_sync.SageSyncRequests', N'ReadCount'),
+    (N'tb_sync.SageSyncRequests', N'SavedCount'),
+    (N'tb_sync.SageSyncRequests', N'StaleCount'),
+    (N'tb_sync.SageSyncRequests', N'AttemptCount'),
+    (N'tb_sync.SageSyncRequests', N'Message'),
+    (N'tb_sync.SageSyncLeases', N'RequestId'),
+    (N'tb_sync.SageSyncLeases', N'LeaseId'),
+    (N'tb_sync.SageSyncLeases', N'WorkerId'),
+    (N'tb_sync.SageSyncLeases', N'ExpiresAtUtc'),
+    (N'tb_sync.SageSyncHealth', N'LastAttemptAtUtc'),
+    (N'tb_sync.SageSyncHealth', N'LastSuccessfulAtUtc'),
+    (N'tb_sync.SageSyncHealth', N'LastError'),
+    (N'tb_security.AdminUserPreviewSessions', N'PreviewSessionId'),
+    (N'tb_security.AdminUserPreviewSessions', N'ActorWindowsSid'),
+    (N'tb_security.AdminUserPreviewSessions', N'TargetWindowsSid'),
+    (N'tb_security.AdminUserPreviewSessions', N'ClientInstanceId'),
+    (N'tb_security.AdminUserPreviewSessions', N'ExpiresAtUtc'),
+    (N'tb_security.AdminUserPreviewSessions', N'EndedAtUtc');
+
+IF EXISTS
+(
+    SELECT 1 FROM @RequiredColumns AS required
+    WHERE COL_LENGTH(required.[ObjectName], required.[ColumnName]) IS NULL
+)
+BEGIN
+    PRINT N'FAIL: a required V0007 column is missing.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @RequiredIndexes TABLE
+(
+    [ObjectName] nvarchar(300) NOT NULL,
+    [IndexName] sysname NOT NULL,
+    PRIMARY KEY ([ObjectName], [IndexName])
+);
+INSERT INTO @RequiredIndexes([ObjectName], [IndexName]) VALUES
+    (N'tb_sync.SageSyncRequests', N'IX_SageSyncRequests_StatusRequested'),
+    (N'tb_sync.SageSyncRequests', N'IX_SageSyncRequests_RequestedAt'),
+    (N'tb_security.AdminUserPreviewSessions', N'IX_AdminUserPreviewSessions_ActorActive'),
+    (N'tb_security.AdminUserPreviewSessions', N'IX_AdminUserPreviewSessions_Expires');
+
+IF EXISTS
+(
+    SELECT 1 FROM @RequiredIndexes AS required
+    WHERE NOT EXISTS
+    (
+        SELECT 1 FROM sys.indexes AS index_row
+        WHERE index_row.[object_id] = OBJECT_ID(required.[ObjectName], N'U')
+          AND index_row.[name] = required.[IndexName]
+          AND index_row.[is_disabled] = 0
+    )
+)
+BEGIN
+    PRINT N'FAIL: a required V0007 index is missing or disabled.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @RequiredParameters TABLE
+(
+    [ProcedureName] nvarchar(300) NOT NULL,
+    [ParameterName] sysname NOT NULL,
+    PRIMARY KEY ([ProcedureName], [ParameterName])
+);
+INSERT INTO @RequiredParameters([ProcedureName], [ParameterName]) VALUES
+    (N'tb_app.AdminRequestSageSync', N'@RequestId'),
+    (N'tb_app.AdminRequestSageSync', N'@AllowLargeRemoval'),
+    (N'tb_app.AdminRequestSageSync', N'@ConfirmedRequestId'),
+    (N'tb_service.ClaimSageSyncWork', N'@WorkerId'),
+    (N'tb_service.ClaimSageSyncWork', N'@LeaseSeconds'),
+    (N'tb_service.RenewSageSyncLease', N'@WorkId'),
+    (N'tb_service.RenewSageSyncLease', N'@LeaseId'),
+    (N'tb_service.RenewSageSyncLease', N'@WorkerId'),
+    (N'tb_service.RenewSageSyncLease', N'@LeaseSeconds'),
+    (N'tb_service.ApplySageCustomerSnapshot', N'@WorkId'),
+    (N'tb_service.ApplySageCustomerSnapshot', N'@LeaseId'),
+    (N'tb_service.ApplySageCustomerSnapshot', N'@WorkerId'),
+    (N'tb_service.ApplySageCustomerSnapshot', N'@Json'),
+    (N'tb_service.ApplySageCustomerSnapshot', N'@SyncedAtUtc'),
+    (N'tb_service.CompleteSageSyncWork', N'@WorkId'),
+    (N'tb_service.CompleteSageSyncWork', N'@LeaseId'),
+    (N'tb_service.CompleteSageSyncWork', N'@WorkerId'),
+    (N'tb_service.CompleteSageSyncWork', N'@Succeeded'),
+    (N'tb_service.CompleteSageSyncWork', N'@Message'),
+    (N'tb_app.AdminBeginUserPreview', N'@TargetLoginName'),
+    (N'tb_app.AdminBeginUserPreview', N'@ClientInstanceId'),
+    (N'tb_app.ActivateReadOnlyPreview', N'@PreviewSessionId'),
+    (N'tb_app.AdminEndUserPreview', N'@PreviewSessionId');
+
+IF EXISTS
+(
+    SELECT 1 FROM @RequiredParameters AS required
+    WHERE NOT EXISTS
+    (
+        SELECT 1 FROM sys.parameters AS parameter_row
+        WHERE parameter_row.[object_id] = OBJECT_ID(required.[ProcedureName], N'P')
+          AND parameter_row.[name] = required.[ParameterName]
+    )
+)
+BEGIN
+    PRINT N'FAIL: the V0007 procedure parameter contract is incomplete.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @RequiredAdminProcedures TABLE ([ObjectName] nvarchar(300) NOT NULL PRIMARY KEY);
+INSERT INTO @RequiredAdminProcedures([ObjectName]) VALUES
+    (N'tb_app.AdminRequestSageSync'),
+    (N'tb_app.GetSageSyncStatus'),
+    (N'tb_app.AdminListPreviewUsers'),
+    (N'tb_app.AdminBeginUserPreview'),
+    (N'tb_app.ActivateReadOnlyPreview'),
+    (N'tb_app.AdminEndUserPreview');
+
+IF EXISTS
+(
+    SELECT 1 FROM @RequiredAdminProcedures AS required
+    WHERE NOT EXISTS
+    (
+        SELECT 1 FROM sys.database_permissions AS permission_row
+        WHERE permission_row.[grantee_principal_id] = DATABASE_PRINCIPAL_ID(N'tb_role_admin')
+          AND permission_row.[class] = 1
+          AND permission_row.[major_id] = OBJECT_ID(required.[ObjectName], N'P')
+          AND permission_row.[permission_name] = N'EXECUTE'
+          AND permission_row.[state] IN (N'G', N'W')
+    )
+)
+BEGIN
+    PRINT N'FAIL: a required V0007 Admin EXECUTE grant is missing.';
+    SET @FailureCount += 1;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.database_permissions AS permission_row
+    WHERE permission_row.[grantee_principal_id] = DATABASE_PRINCIPAL_ID(N'tb_role_admin')
+      AND permission_row.[class] = 4
+      AND permission_row.[major_id] = DATABASE_PRINCIPAL_ID(N'tb_preview_reader')
+      AND permission_row.[permission_name] = N'IMPERSONATE'
+      AND permission_row.[state] IN (N'G', N'W')
+)
+BEGIN
+    PRINT N'FAIL: the Admin role lacks the narrow preview-reader IMPERSONATE grant.';
+    SET @FailureCount += 1;
+END;
+
+IF EXISTS
+(
+    SELECT 1 FROM sys.database_permissions AS permission_row
+    INNER JOIN sys.database_principals AS grantee
+        ON grantee.[principal_id] = permission_row.[grantee_principal_id]
+    WHERE permission_row.[class] = 4
+      AND permission_row.[major_id] = DATABASE_PRINCIPAL_ID(N'tb_preview_reader')
+      AND permission_row.[permission_name] = N'IMPERSONATE'
+      AND permission_row.[state] IN (N'G', N'W')
+      AND grantee.[name] <> N'tb_role_admin'
+)
+BEGIN
+    PRINT N'FAIL: a principal other than the Admin role can impersonate the preview reader.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @LegacySageAdminProcedures TABLE ([ObjectName] nvarchar(300) NOT NULL PRIMARY KEY);
+INSERT INTO @LegacySageAdminProcedures([ObjectName]) VALUES
+    (N'tb_app.AcquireSyncLease'),
+    (N'tb_app.ReleaseSyncLease'),
+    (N'tb_app.BeginSyncRun'),
+    (N'tb_app.CompleteSyncRun'),
+    (N'tb_app.SyncUpsertClient'),
+    (N'tb_app.SyncUpsertSageCustomer'),
+    (N'tb_app.SyncRemoveStaleSageCustomers'),
+    (N'tb_app.SyncUpsertClientExternalIdentity'),
+    (N'tb_app.SyncApplySageCustomerSnapshot'),
+    (N'tb_app.SyncApplyClientSnapshot');
+
+IF EXISTS
+(
+    SELECT 1 FROM @LegacySageAdminProcedures AS legacy
+    INNER JOIN sys.database_permissions AS permission_row
+        ON permission_row.[class] = 1
+       AND permission_row.[major_id] = OBJECT_ID(legacy.[ObjectName], N'P')
+       AND permission_row.[permission_name] = N'EXECUTE'
+       AND permission_row.[state] IN (N'G', N'W')
+    WHERE permission_row.[grantee_principal_id] = DATABASE_PRINCIPAL_ID(N'tb_role_admin')
+)
+BEGIN
+    PRINT N'FAIL: Admin retains a legacy workstation-side Sage ingestion grant.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @ServiceProcedures TABLE ([ObjectName] nvarchar(300) NOT NULL PRIMARY KEY);
+INSERT INTO @ServiceProcedures([ObjectName]) VALUES
+    (N'tb_service.GetWhdSyncConfiguration'),
+    (N'tb_service.ClaimWhdSyncWork'),
+    (N'tb_service.RenewWhdSyncLease'),
+    (N'tb_service.ApplyWhdClientSnapshot'),
+    (N'tb_service.ApplyWhdTicketBatch'),
+    (N'tb_service.ApplyWhdTicketStatusSnapshot'),
+    (N'tb_service.ApplyWhdTechnicianSnapshot'),
+    (N'tb_service.ApplyWhdTechGroupSnapshot'),
+    (N'tb_service.CompleteWhdSyncWork'),
+    (N'tb_service.GetSageSyncConfiguration'),
+    (N'tb_service.ClaimSageSyncWork'),
+    (N'tb_service.RenewSageSyncLease'),
+    (N'tb_service.ApplySageCustomerSnapshot'),
+    (N'tb_service.CompleteSageSyncWork');
+
+IF EXISTS
+(
+    SELECT 1 FROM @ServiceProcedures AS required
+    WHERE NOT EXISTS
+    (
+        SELECT 1 FROM sys.database_permissions AS permission_row
+        WHERE permission_row.[grantee_principal_id] = DATABASE_PRINCIPAL_ID(N'tb_role_sync_service')
+          AND permission_row.[class] = 1
+          AND permission_row.[major_id] = OBJECT_ID(required.[ObjectName], N'P')
+          AND permission_row.[permission_name] = N'EXECUTE'
+          AND permission_row.[state] IN (N'G', N'W')
+    )
+)
+BEGIN
+    PRINT N'FAIL: a required WHD/Sage service EXECUTE grant is missing.';
+    SET @FailureCount += 1;
+END;
+
+IF EXISTS
+(
+    SELECT 1 FROM sys.database_permissions AS permission_row
+    WHERE permission_row.[grantee_principal_id] = DATABASE_PRINCIPAL_ID(N'tb_role_sync_service')
+      AND permission_row.[state] IN (N'G', N'W')
+      AND
+      (
+          permission_row.[permission_name] IN
+              (N'SELECT', N'INSERT', N'UPDATE', N'DELETE', N'ALTER', N'CONTROL', N'TAKE OWNERSHIP', N'IMPERSONATE')
+          OR
+          (
+              permission_row.[permission_name] = N'EXECUTE'
+              AND
+              (
+                  permission_row.[class] <> 1
+                  OR NOT EXISTS
+                  (
+                      SELECT 1 FROM @ServiceProcedures AS allowed
+                      WHERE OBJECT_ID(allowed.[ObjectName], N'P') = permission_row.[major_id]
+                  )
+              )
+          )
+      )
+)
+BEGIN
+    PRINT N'FAIL: the sync service role has direct data/control or unexpected execution grants.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @PreviewReadProcedures TABLE ([ObjectName] nvarchar(300) NOT NULL PRIMARY KEY);
+INSERT INTO @PreviewReadProcedures([ObjectName]) VALUES
+    (N'tb_app.GetCurrentUserContext'),
+    (N'tb_app.GetRepositoryCapabilities'),
+    (N'tb_app.SearchClients'),
+    (N'tb_app.GetClient'),
+    (N'tb_app.SearchTickets'),
+    (N'tb_app.GetTicket'),
+    (N'tb_app.GetTicketStatusOptions'),
+    (N'tb_app.SearchWorkEntries'),
+    (N'tb_app.GetWorkEntry'),
+    (N'tb_app.GetWorkEntryLinks'),
+    (N'tb_app.GetDistinctTags'),
+    (N'tb_app.GetTemplates'),
+    (N'tb_app.GetCommonLinks'),
+    (N'tb_app.GetSettings'),
+    (N'tb_app.GetPostingLogs');
+
+IF EXISTS
+(
+    SELECT 1 FROM @PreviewReadProcedures AS required
+    WHERE NOT EXISTS
+    (
+        SELECT 1 FROM sys.database_permissions AS permission_row
+        WHERE permission_row.[grantee_principal_id] = DATABASE_PRINCIPAL_ID(N'tb_preview_reader')
+          AND permission_row.[class] = 1
+          AND permission_row.[major_id] = OBJECT_ID(required.[ObjectName], N'P')
+          AND permission_row.[permission_name] = N'EXECUTE'
+          AND permission_row.[state] IN (N'G', N'W')
+    )
+)
+BEGIN
+    PRINT N'FAIL: a required preview-safe read EXECUTE grant is missing.';
+    SET @FailureCount += 1;
+END;
+
+IF EXISTS
+(
+    SELECT 1 FROM sys.database_permissions AS permission_row
+    WHERE permission_row.[grantee_principal_id] = DATABASE_PRINCIPAL_ID(N'tb_preview_reader')
+      AND permission_row.[state] IN (N'G', N'W')
+      AND
+      (
+          permission_row.[permission_name] <> N'EXECUTE'
+          OR permission_row.[class] <> 1
+          OR NOT EXISTS
+          (
+              SELECT 1 FROM @PreviewReadProcedures AS allowed
+              WHERE OBJECT_ID(allowed.[ObjectName], N'P') = permission_row.[major_id]
+          )
+      )
+)
+BEGIN
+    PRINT N'FAIL: the preview reader has data/control or unexpected execution grants.';
+    SET @FailureCount += 1;
+END;
+
+IF EXISTS
+(
+    SELECT 1 FROM sys.database_role_members
+    WHERE [member_principal_id] = DATABASE_PRINCIPAL_ID(N'tb_preview_reader')
+)
+BEGIN
+    PRINT N'FAIL: the preview reader must not be a member of any database role.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @EnsureDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_security.EnsureCurrentUser', N'P'));
+DECLARE @ContextDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetCurrentUserContext', N'P'));
+DECLARE @ListPreviewDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminListPreviewUsers', N'P'));
+DECLARE @BeginPreviewDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminBeginUserPreview', N'P'));
+DECLARE @ActivatePreviewDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.ActivateReadOnlyPreview', N'P'));
+DECLARE @TicketAccessDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_security.FilterWhdTicketAccess', N'IF'));
+DECLARE @SearchWorkDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SearchWorkEntries', N'P'));
+DECLARE @GetWorkDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetWorkEntry', N'P'));
+DECLARE @SettingsDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetSettings', N'P'));
+DECLARE @PostingLogsDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetPostingLogs', N'P'));
+
+SELECT @EnsureDefinition = REPLACE(REPLACE(REPLACE(@EnsureDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @ContextDefinition = REPLACE(REPLACE(REPLACE(@ContextDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @ListPreviewDefinition = REPLACE(REPLACE(REPLACE(@ListPreviewDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @BeginPreviewDefinition = REPLACE(REPLACE(REPLACE(@BeginPreviewDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @ActivatePreviewDefinition = REPLACE(REPLACE(REPLACE(@ActivatePreviewDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @TicketAccessDefinition = REPLACE(REPLACE(REPLACE(@TicketAccessDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @SearchWorkDefinition = REPLACE(REPLACE(REPLACE(@SearchWorkDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @GetWorkDefinition = REPLACE(REPLACE(REPLACE(@GetWorkDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @SettingsDefinition = REPLACE(REPLACE(REPLACE(@SettingsDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @PostingLogsDefinition = REPLACE(REPLACE(REPLACE(@PostingLogsDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+
+IF CHARINDEX(N'SESSION_CONTEXT(N''TechBench.PreviewSessionId'')', @EnsureDefinition) = 0
+   OR CHARINDEX(N'IFUSER_NAME()=N''tb_preview_reader''', @EnsureDefinition) = 0
+   OR CHARINDEX(N'AdminUserPreviewSessions', @EnsureDefinition) = 0
+   OR CHARINDEX(N'target_user.[IsAdmin]=0', @EnsureDefinition) = 0
+   OR CHARINDEX(N'target_user.[LastSeenAtUtc]>=DATEADD(hour,-1,SYSUTCDATETIME())', @EnsureDefinition) = 0
+BEGIN
+    PRINT N'FAIL: EnsureCurrentUser does not securely resolve the server-issued preview target.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @RoleRefreshPosition int = CHARINDEX(N'UPDATE[tb_security].[Users]WITH(UPDLOCK,HOLDLOCK)', @EnsureDefinition);
+DECLARE @ZeroRoleThrowPosition int = CHARINDEX(N'IF@HasApplicationRole=0THROW51002', @EnsureDefinition);
+IF @RoleRefreshPosition = 0
+   OR @ZeroRoleThrowPosition <= @RoleRefreshPosition
+   OR CHARINDEX(N'[IsTechnician]=@IsTechnician', @EnsureDefinition) = 0
+   OR CHARINDEX(N'[IsManager]=@IsManager', @EnsureDefinition) = 0
+   OR CHARINDEX(N'[IsAdmin]=@IsAdmin', @EnsureDefinition) = 0
+   OR CHARINDEX(N'[IsSyncOperator]=@IsSyncOperator', @EnsureDefinition) = 0
+BEGIN
+    PRINT N'FAIL: EnsureCurrentUser does not persist refreshed zero role flags before denying access.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'AuthenticatedUserSid', @ContextDefinition) = 0
+   OR CHARINDEX(N'IsReadOnlyPreview', @ContextDefinition) = 0
+   OR CHARINDEX(N'PreviewSessionId', @ContextDefinition) = 0
+   OR CHARINDEX(N'PreviewExpiresAtUtc', @ContextDefinition) = 0
+BEGIN
+    PRINT N'FAIL: GetCurrentUserContext lacks authenticated/preview context fields.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'IS_ROLEMEMBER(N''tb_role_admin'')<>1', @BeginPreviewDefinition) = 0
+   OR CHARINDEX(N'[IsTechnician]=1', @BeginPreviewDefinition) = 0
+   OR CHARINDEX(N'[IsAdmin]=0', @BeginPreviewDefinition) = 0
+   OR CHARINDEX(N'[LastSeenAtUtc]>=DATEADD(hour,-1,@Now)', @BeginPreviewDefinition) = 0
+   OR CHARINDEX(N'DATEADD(minute,30,@Now)', @BeginPreviewDefinition) = 0
+BEGIN
+    PRINT N'FAIL: AdminBeginUserPreview lacks live Admin, target, or expiry validation.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'sp_set_session_context', @ActivatePreviewDefinition) = 0
+   OR CHARINDEX(N'@read_only=1', @ActivatePreviewDefinition) = 0
+   OR CHARINDEX(N'IS_ROLEMEMBER(N''tb_role_admin'')<>1', @ActivatePreviewDefinition) = 0
+   OR CHARINDEX(N'target_user.[LastSeenAtUtc]>=DATEADD(hour,-1,SYSUTCDATETIME())', @ActivatePreviewDefinition) = 0
+BEGIN
+    PRINT N'FAIL: ActivateReadOnlyPreview does not set a read-only server-issued context after live Admin validation.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'[LastSeenAtUtc]>=DATEADD(hour,-1,SYSUTCDATETIME())', @ListPreviewDefinition) = 0
+BEGIN
+    PRINT N'FAIL: AdminListPreviewUsers includes authorization records older than one hour.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'USER_NAME()=N''tb_preview_reader''', @TicketAccessDefinition) = 0
+   OR CHARINDEX(N'USER_NAME()<>N''tb_preview_reader''', @TicketAccessDefinition) = 0
+   OR CHARINDEX(N'SESSION_CONTEXT(N''TechBench.PreviewSessionId'')ISNULL', @TicketAccessDefinition) = 0
+   OR CHARINDEX(N'AdminUserPreviewSessions', @TicketAccessDefinition) = 0
+   OR CHARINDEX(N'mapping.[WindowsSid]=preview_session.[TargetWindowsSid]', @TicketAccessDefinition) = 0
+   OR CHARINDEX(N'target_user.[LastSeenAtUtc]>=DATEADD(hour,-1,SYSUTCDATETIME())', @TicketAccessDefinition) = 0
+BEGIN
+    PRINT N'FAIL: WHD row security does not prevent the authenticated Admin bypass from winning in preview.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'@IsReadOnlyPreview=0', @SearchWorkDefinition) = 0
+   OR CHARINDEX(N'@IsReadOnlyPreview=0', @GetWorkDefinition) = 0
+   OR CHARINDEX(N'@IsReadOnlyPreview=0', @SettingsDefinition) = 0
+   OR CHARINDEX(N'WHEN@IsReadOnlyPreview=1THENNULLELSEwork_entry.[LastError]ENDAS[LastError]', @SearchWorkDefinition) = 0
+   OR CHARINDEX(N'WHEN@IsReadOnlyPreview=1THENNULLELSEwork_entry.[LastError]ENDAS[LastError]', @GetWorkDefinition) = 0
+BEGIN
+    PRINT N'FAIL: preview-safe reads do not mask personal notes, posting errors, or user-owned settings.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'WHEN@IsReadOnlyPreview=1THENN''''ELSEposting_log.[Payload]', @PostingLogsDefinition) = 0
+   OR CHARINDEX(N'WHEN@IsReadOnlyPreview=0THENposting_log.[Message]', @PostingLogsDefinition) = 0
+   OR CHARINDEX(N'@IsReadOnlyPreview=0AND(posting_log.[Message]LIKE@KeywordPatternORposting_log.[Payload]LIKE@KeywordPattern)', @PostingLogsDefinition) = 0
+BEGIN
+    PRINT N'FAIL: preview-safe posting history does not redact payload/message content or block keyword inference.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @RequestSageDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminRequestSageSync', N'P'));
+DECLARE @ClaimSageDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ClaimSageSyncWork', N'P'));
+DECLARE @ApplySageDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplySageCustomerSnapshot', N'P'));
+DECLARE @CompleteSageDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_service.CompleteSageSyncWork', N'P'));
+DECLARE @SageConfigDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_service.GetSageSyncConfiguration', N'P'));
+SELECT @RequestSageDefinition = REPLACE(REPLACE(REPLACE(@RequestSageDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @ClaimSageDefinition = REPLACE(REPLACE(REPLACE(@ClaimSageDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @ApplySageDefinition = REPLACE(REPLACE(REPLACE(@ApplySageDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @CompleteSageDefinition = REPLACE(REPLACE(REPLACE(@CompleteSageDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @SageConfigDefinition = REPLACE(REPLACE(REPLACE(@SageConfigDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+
+IF CHARINDEX(N'IS_ROLEMEMBER(N''tb_role_admin'')<>1', @RequestSageDefinition) = 0
+   OR CHARINDEX(N'sp_getapplock', @RequestSageDefinition) = 0
+   OR CHARINDEX(N'INSERTINTO[tb_sync].[SageSyncRequests]', @RequestSageDefinition) = 0
+   OR CHARINDEX(N'@AllowLargeRemovalbit=0', @RequestSageDefinition) = 0
+   OR CHARINDEX(N'@ConfirmedRequestIduniqueidentifier=NULL', @RequestSageDefinition) = 0
+   OR CHARINDEX(N'[AllowLargeRemoval]', @RequestSageDefinition) = 0
+   OR CHARINDEX(N'[RequiresLargeRemovalConfirmation]=1', @RequestSageDefinition) = 0
+   OR CHARINDEX(N'[CompletedAtUtc]>=DATEADD(hour,-1,@Now)', @RequestSageDefinition) = 0
+BEGIN
+    PRINT N'FAIL: the Admin-only Sage request queue is incomplete.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'sp_getapplock', @ClaimSageDefinition) = 0
+   OR CHARINDEX(N'READCOMMITTEDLOCK', @ClaimSageDefinition) = 0
+   OR CHARINDEX(N'INSERTINTO[tb_sync].[SageSyncRequests]', @ClaimSageDefinition) > 0
+BEGIN
+    PRINT N'FAIL: ClaimSageSyncWork is not a manual-queue-only, RCSI-safe lease claim.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'COALESCE(ISJSON(@Json),0)<>1', @ApplySageDefinition) = 0
+   OR CHARINDEX(N'@ReadCount=0', @ApplySageDefinition) = 0
+   OR CHARINDEX(N'SageSyncLeases', @ApplySageDefinition) = 0
+   OR CHARINDEX(N'BEGINTRANSACTION', @ApplySageDefinition) = 0
+   OR CHARINDEX(N'ClientExternalIdentities', @ApplySageDefinition) = 0
+   OR CHARINDEX(N'@RawSnapshotTABLE', @ApplySageDefinition) = 0
+   OR CHARINDEX(N'[JsonType]<>5', @ApplySageDefinition) = 0
+   OR CHARINDEX(N'[CustomerIdCount]<>1', @ApplySageDefinition) = 0
+   OR CHARINDEX(N'LEN(LTRIM(RTRIM([CustomerId])))>120', @ApplySageDefinition) = 0
+   OR CHARINDEX(N'HAVINGCOUNT(*)>1', @ApplySageDefinition) = 0
+   OR CHARINDEX(N'@ConfirmationMatches<>1', @ApplySageDefinition) = 0
+   OR CHARINDEX(N'@ExistingCount>=20', @ApplySageDefinition) = 0
+   OR CHARINDEX(N'@StaleCount>=10', @ApplySageDefinition) = 0
+   OR CHARINDEX(N'confirmed_request.[ExistingCount]=@ExistingCount', @ApplySageDefinition) = 0
+   OR CHARINDEX(N'confirmed_request.[ReadCount]=@ReadCount', @ApplySageDefinition) = 0
+   OR CHARINDEX(N'confirmed_request.[StaleCount]=@StaleCount', @ApplySageDefinition) = 0
+   OR CHARINDEX(N'[RequiresLargeRemovalConfirmation]=1', @ApplySageDefinition) = 0
+BEGIN
+    PRINT N'FAIL: ApplySageCustomerSnapshot lacks lossless validation, destructive-delta confirmation, lease enforcement, or atomic identity reconciliation.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'@Succeeded=1AND@ReadCount=0', @CompleteSageDefinition) = 0
+   OR CHARINDEX(N'[tb_sync].[SageSyncHealth]', @CompleteSageDefinition) = 0
+   OR CHARINDEX(N'DELETEFROM[tb_sync].[SageSyncLeases]', @CompleteSageDefinition) = 0
+BEGIN
+    PRINT N'FAIL: CompleteSageSyncWork lacks apply-before-success, health, or lease completion safeguards.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'Sage.SyncDsn', @SageConfigDefinition) = 0
+   OR CHARINDEX(N'Sage.SyncUsername', @SageConfigDefinition) = 0
+BEGIN
+    PRINT N'FAIL: the service-owned Sage configuration contract is incomplete.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'CONVERT(int,7)', REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities')), N' ', N'')) = 0
+BEGIN
+    PRINT N'FAIL: GetRepositoryCapabilities does not report schema version 7.';
+    SET @FailureCount += 1;
+END;
+
+IF NOT EXISTS (SELECT 1 FROM [tb_sync].[SageSyncHealth] WHERE [HealthId] = 1)
+BEGIN
+    PRINT N'FAIL: the Sage synchronization health singleton is missing.';
+    SET @FailureCount += 1;
+END;
+
+IF @FailureCount > 0
+BEGIN
+    RAISERROR(
+        N'TechBench V0007 server-owned Sage and Admin-preview verification failed with %d issue(s).',
+        16, 1, @FailureCount);
+    RETURN;
+END;
+
+PRINT N'TechBench V0007 server-owned Sage and Admin-preview verification passed.';
+SELECT
+    DB_NAME() AS [DatabaseName],
+    MAX([SchemaVersion]) AS [SchemaVersion],
+    MAX(CASE
+        WHEN [MigrationId] = N'SqlServer2016.ServerOwnedSageAndAdminPreview.0007'
+            THEN [AppliedAtUtc]
+        END) AS [ServerOwnedSageAndAdminPreviewAppliedAtUtc]
+FROM [tb_deploy].[SchemaMigrations];
+GO
+
+-- ============================================================================
+-- END 96-V0007-ServerOwnedSageAndAdminPreviewVerify.sql
 -- ============================================================================
 
 PRINT N'TechBench deployment completed successfully on CSRI-SQL.';

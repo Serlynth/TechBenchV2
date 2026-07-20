@@ -3,13 +3,14 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Connect TechBench V2"
         Width="520"
-        Height="470"
+        Height="610"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBackgroundBrush}"
         Foreground="{DynamicResource PrimaryTextBrush}">
     <Grid Margin="34">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -58,14 +59,43 @@
                       Content="Trust the SQL Server certificate (temporary/test use)" />
         </StackPanel>
 
+        <Border Grid.Row="4"
+                Margin="0,2,0,14"
+                Padding="14"
+                CornerRadius="8"
+                Background="{DynamicResource PanelBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="1">
+            <StackPanel>
+                <CheckBox x:Name="PreviewAnotherUserCheckBox"
+                          FontWeight="SemiBold"
+                          Content="Admin: preview a registered non-Admin user (read-only)" />
+                <TextBlock Margin="24,6,0,10"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           TextWrapping="Wrap"
+                           Text="The user must have opened TechBench V2 within the past hour so SQL Server has a recent authorization check. This does not sign in as that person: your Windows identity remains authenticated, and SQL Server restricts the preview to read-only access." />
+                <TextBlock Margin="24,0,0,6"
+                           FontWeight="SemiBold"
+                           Text="Domain username or short username" />
+                <TextBox x:Name="PreviewUsernameTextBox"
+                         Height="38"
+                         Margin="24,0,0,0"
+                         Padding="10,7"
+                         MaxLength="256"
+                         IsEnabled="{Binding IsChecked, ElementName=PreviewAnotherUserCheckBox}"
+                         VerticalContentAlignment="Center"
+                         ToolTip="For example: username or CSRI\username" />
+            </StackPanel>
+        </Border>
+
         <TextBlock x:Name="StatusTextBlock"
-                   Grid.Row="4"
+                   Grid.Row="5"
                    MinHeight="42"
                    Margin="0,2,0,14"
                    Foreground="{DynamicResource SecondaryTextBrush}"
                    TextWrapping="Wrap" />
 
-        <StackPanel Grid.Row="5"
+        <StackPanel Grid.Row="6"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right">
             <Button Width="100"

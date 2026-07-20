@@ -9,6 +9,11 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$Configuration = 'Release',
 
+    [ValidateNotNullOrEmpty()]
+    [string]$RepositoryUrl = 'https://github.com/Serlynth/TechBenchV2-Releases',
+
+    [switch]$Publish,
+
     [switch]$SkipTests,
 
     [switch]$AllowDirty
@@ -18,12 +23,17 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $repoPrefix = $repoRoot.TrimEnd('\') + '\'
 $projectPath = Join-Path $repoRoot 'TechBench.SyncService\TechBench.SyncService.csproj'
+$sageWorkerProjectPath = Join-Path $repoRoot 'TechBench.SageOdbcWorker\TechBench.SageOdbcWorker.csproj'
 $solutionPath = Join-Path $repoRoot 'TechBenchV2.sln'
 $publishDirectory = Join-Path $repoRoot 'artifacts\server\win-x64'
+$sageWorkerPublishDirectory = Join-Path $publishDirectory 'sage-odbc-worker'
 $distDirectory = Join-Path $repoRoot 'dist'
 $packageName = "TechBenchSyncService-$Version-win-x64"
 $packagePath = Join-Path $distDirectory "$packageName.zip"
 $checksumPath = "$packagePath.sha256"
+$sqlAssetName = "TechBenchV2-SQLServer2016-$Version.sql"
+$sqlAssetPath = Join-Path $distDirectory $sqlAssetName
+$sqlChecksumPath = "$sqlAssetPath.sha256"
 $numericVersion = ($Version -split '-', 2)[0]
 
 $userDotNet = Join-Path $env:USERPROFILE '.dotnet\dotnet.exe'
@@ -46,6 +56,28 @@ function Invoke-Checked {
     if ($LASTEXITCODE -ne 0) {
         throw "Command failed with exit code $($LASTEXITCODE): $FilePath $($Arguments -join ' ')"
     }
+}
+
+function Resolve-GitHubRepositorySlug {
+    param([Parameter(Mandatory = $true)][string]$Url)
+
+    try {
+        $uri = [Uri]$Url
+    } catch {
+        throw "The V2 release repository is not a valid URL: $Url"
+    }
+
+    $slug = $uri.AbsolutePath.Trim('/')
+    if ($uri.Scheme -ne 'https' `
+        -or -not $uri.Host.Equals('github.com', [StringComparison]::OrdinalIgnoreCase) `
+        -or -not $uri.IsDefaultPort `
+        -or -not [string]::IsNullOrEmpty($uri.Query) `
+        -or -not [string]::IsNullOrEmpty($uri.Fragment) `
+        -or $slug -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
+        throw 'The V2 release repository must be an HTTPS GitHub repository URL in https://github.com/owner/repository form.'
+    }
+
+    return $slug
 }
 
 function Reset-RepositoryDirectory {
@@ -73,7 +105,11 @@ function Assert-SafeServicePayload {
         'appsettings.json',
         'Install-TechBenchSyncService.ps1',
         'Set-TechBenchSyncCredential.ps1',
+        'Set-TechBenchSageSyncCredential.ps1',
         'Uninstall-TechBenchSyncService.ps1',
+        'sage-odbc-worker\TechBench.SageOdbcWorker.exe',
+        'sage-odbc-worker\TechBench.SageOdbcWorker.runtimeconfig.json',
+        'sage-odbc-worker\TechBench.SageOdbcWorker.deps.json',
         'README-WHD-SYNC-SERVICE.md',
         'database\Deploy-CSRI-Standalone.sql',
         'database\README-Deploy.md'
@@ -115,6 +151,22 @@ function Assert-SafeServicePayload {
     if ($settingsText -match '(?i)Data Source\s*=.*(?:Password|Pwd)\s*=') {
         throw 'Published appsettings.json contains a SQL password. The service must use Windows integrated authentication.'
     }
+
+    $workerExecutable = Join-Path $Path 'sage-odbc-worker\TechBench.SageOdbcWorker.exe'
+    $workerBytes = [IO.File]::ReadAllBytes($workerExecutable)
+    if ($workerBytes.Length -lt 64) {
+        throw "The Sage ODBC worker executable is too small to contain a valid PE header: $workerExecutable"
+    }
+
+    $peOffset = [BitConverter]::ToInt32($workerBytes, 0x3c)
+    if ($peOffset -lt 0 -or $peOffset + 6 -gt $workerBytes.Length) {
+        throw "The Sage ODBC worker executable has an invalid PE header: $workerExecutable"
+    }
+
+    $machine = [BitConverter]::ToUInt16($workerBytes, $peOffset + 4)
+    if ($machine -ne 0x014c) {
+        throw ("The Sage ODBC worker is not x86 (PE machine 0x{0:X4}): {1}" -f $machine, $workerExecutable)
+    }
 }
 
 function Assert-StandaloneSqlIsCurrent {
@@ -139,6 +191,8 @@ function Assert-StandaloneSqlIsCurrent {
 
 Push-Location $repoRoot
 try {
+    $repositorySlug = Resolve-GitHubRepositorySlug $RepositoryUrl
+
     if (-not $AllowDirty) {
         $dirtyFiles = @(git status --porcelain)
         if ($LASTEXITCODE -ne 0) {
@@ -153,6 +207,9 @@ try {
     if (-not (Test-Path -LiteralPath $projectPath)) {
         throw "The sync-service project was not found: $projectPath"
     }
+    if (-not (Test-Path -LiteralPath $sageWorkerProjectPath)) {
+        throw "The Sage ODBC worker project was not found: $sageWorkerProjectPath"
+    }
 
     Assert-StandaloneSqlIsCurrent
 
@@ -164,7 +221,12 @@ try {
     Reset-RepositoryDirectory $publishDirectory
     New-Item -ItemType Directory -Path $distDirectory -Force | Out-Null
 
-    foreach ($existingOutput in @($packagePath, $checksumPath)) {
+    foreach ($existingOutput in @(
+        $packagePath,
+        $checksumPath,
+        $sqlAssetPath,
+        $sqlChecksumPath
+    )) {
         if (Test-Path -LiteralPath $existingOutput) {
             Remove-Item -LiteralPath $existingOutput -Force
         }
@@ -185,9 +247,26 @@ try {
         "-p:FileVersion=$numericVersion.0"
     )
 
+    New-Item -ItemType Directory -Path $sageWorkerPublishDirectory -Force | Out-Null
+    Invoke-Checked $dotnet @(
+        'publish', $sageWorkerProjectPath,
+        '-c', $Configuration,
+        '-r', 'win-x86',
+        '--self-contained', 'true',
+        '-o', $sageWorkerPublishDirectory,
+        '-p:PublishSingleFile=false',
+        '-p:PublishTrimmed=false',
+        '-p:DebugType=None',
+        '-p:DebugSymbols=false',
+        "-p:Version=$Version",
+        "-p:AssemblyVersion=$numericVersion.0",
+        "-p:FileVersion=$numericVersion.0"
+    )
+
     foreach ($scriptName in @(
         'Install-TechBenchSyncService.ps1',
         'Set-TechBenchSyncCredential.ps1',
+        'Set-TechBenchSageSyncCredential.ps1',
         'Uninstall-TechBenchSyncService.ps1'
     )) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $scriptName) `
@@ -218,9 +297,10 @@ try {
         }
     })
     $manifest = [ordered]@{
-        Product = 'TechBench WHD Sync Service'
+        Product = 'TechBench Sync Service'
         Version = $Version
         Runtime = 'win-x64'
+        SageOdbcWorkerRuntime = 'win-x86'
         SelfContained = $true
         CreatedUtc = [DateTime]::UtcNow.ToString('o')
         Files = $manifestFiles
@@ -233,8 +313,50 @@ try {
     "$packageHash  $([IO.Path]::GetFileName($packagePath))" |
         Set-Content -LiteralPath $checksumPath -Encoding ASCII
 
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'database\sqlserver2016\Deploy-CSRI-Standalone.sql') `
+        -Destination $sqlAssetPath -Force
+    $sqlAssetHash = (Get-FileHash -LiteralPath $sqlAssetPath -Algorithm SHA256).Hash
+    "$sqlAssetHash  $([IO.Path]::GetFileName($sqlAssetPath))" |
+        Set-Content -LiteralPath $sqlChecksumPath -Encoding ASCII
+
+    if ($Publish) {
+        $releaseJson = & gh release view "v$Version" `
+            --repo $repositorySlug `
+            --json tagName,isDraft,assets
+        if ($LASTEXITCODE -ne 0) {
+            throw "GitHub release v$Version could not be read from $RepositoryUrl. Confirm gh authentication and publish the matching client release first with Publish-TechBenchRelease.ps1 -Publish."
+        }
+
+        try {
+            $release = (($releaseJson -join '') | ConvertFrom-Json)
+        } catch {
+            throw "GitHub returned an invalid response for release v${Version}: $($_.Exception.Message)"
+        }
+
+        if ($release.tagName -ne "v$Version" -or $release.isDraft) {
+            throw "GitHub release v$Version must be the already-published, non-draft client release before server assets can be attached."
+        }
+
+        $assetPaths = @($packagePath, $checksumPath, $sqlAssetPath, $sqlChecksumPath)
+        $assetNames = @($assetPaths | ForEach-Object { [IO.Path]::GetFileName($_) })
+        $existingNames = @($release.assets | ForEach-Object { $_.name })
+        $conflicts = @($assetNames | Where-Object { $existingNames -contains $_ })
+        if ($conflicts.Count -gt 0) {
+            throw "Release v$Version already contains immutable server asset(s): $($conflicts -join ', '). Choose a new version instead of overwriting a published asset."
+        }
+
+        Invoke-Checked 'gh' (@(
+            'release', 'upload', "v$Version"
+        ) + $assetPaths + @(
+            '--repo', $repositorySlug
+        ))
+        Write-Host "Published server and SQL assets to $RepositoryUrl/releases/tag/v$Version"
+    }
+
     Write-Host "Created service package: $packagePath"
     Write-Host "Created SHA-256 sidecar: $checksumPath"
+    Write-Host "Created standalone SQL asset: $sqlAssetPath"
+    Write-Host "Created SQL SHA-256 sidecar: $sqlChecksumPath"
 } finally {
     Pop-Location
 }
