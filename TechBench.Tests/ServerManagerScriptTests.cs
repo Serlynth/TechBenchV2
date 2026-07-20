@@ -119,8 +119,9 @@ public sealed class ServerManagerScriptTests
             StringComparison.Ordinal);
         Assert.Contains("TechBench Server Manager.lnk", uninstaller, StringComparison.Ordinal);
 
-        var addTypeHereStringEnd = installer.IndexOf("'@\n    }", StringComparison.Ordinal);
-        var shortcutFunction = installer.IndexOf(
+        var normalizedInstaller = installer.Replace("\r\n", "\n", StringComparison.Ordinal);
+        var addTypeHereStringEnd = normalizedInstaller.IndexOf("'@\n    }", StringComparison.Ordinal);
+        var shortcutFunction = normalizedInstaller.IndexOf(
             "function Install-ServerManagerShortcut",
             StringComparison.Ordinal);
         Assert.True(addTypeHereStringEnd >= 0);
