@@ -110,6 +110,9 @@ function Assert-SafeServicePayload {
         'Set-TechBenchSyncCredential.ps1',
         'Set-TechBenchSageSyncCredential.ps1',
         'TechBench-ServerManager.ps1',
+        'Start-TechBenchServerManager.ps1',
+        'Start-TechBenchServerManager.vbs',
+        'csri-techbench-icon.ico',
         'Uninstall-TechBenchSyncService.ps1',
         'sage-odbc-worker\TechBench.SageOdbcWorker.exe',
         'sage-odbc-worker\TechBench.SageOdbcWorker.runtimeconfig.json',
@@ -272,11 +275,16 @@ try {
         'Set-TechBenchSyncCredential.ps1',
         'Set-TechBenchSageSyncCredential.ps1',
         'TechBench-ServerManager.ps1',
+        'Start-TechBenchServerManager.ps1',
+        'Start-TechBenchServerManager.vbs',
         'Uninstall-TechBenchSyncService.ps1'
     )) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $scriptName) `
             -Destination (Join-Path $publishDirectory $scriptName) -Force
     }
+
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'Assets\csri-techbench-icon.ico') `
+        -Destination (Join-Path $publishDirectory 'csri-techbench-icon.ico') -Force
 
     Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\WHD-SYNC-SERVICE.md') `
         -Destination (Join-Path $publishDirectory 'README-WHD-SYNC-SERVICE.md') -Force

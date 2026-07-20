@@ -65,12 +65,12 @@ public sealed class ServerManagerScriptTests
         Assert.Contains("Wait-ForStableRunningService", source, StringComparison.Ordinal);
         Assert.Contains("Repair-InterruptedUpdate", source, StringComparison.Ordinal);
         Assert.Contains("$journal.Phase = 'ManagerSwapPrepared'", source, StringComparison.Ordinal);
-        Assert.Contains("required rollback copy is missing", source, StringComparison.Ordinal);
-        Assert.Contains("both its rollback copy and staged copy are missing", source, StringComparison.Ordinal);
-        Assert.Contains("[IO.File]::Replace($managerStage, $managerTarget, $managerBackup)", source, StringComparison.Ordinal);
+        Assert.Contains("complete Server Manager companion set", source, StringComparison.Ordinal);
+        Assert.Contains("both its rollback and staged copies are missing", source, StringComparison.Ordinal);
+        Assert.Contains("$managerFile.Stage, $managerFile.Target, $managerFile.Backup", source, StringComparison.Ordinal);
         Assert.True(
             source.IndexOf("$journal.Phase = 'ManagerSwapPrepared'", StringComparison.Ordinal) <
-            source.IndexOf("[IO.File]::Replace($managerStage, $managerTarget, $managerBackup)", StringComparison.Ordinal));
+            source.IndexOf("$managerFile.Stage, $managerFile.Target, $managerFile.Backup", StringComparison.Ordinal));
         Assert.Contains("$manifest.SageOdbcWorkerRuntime -cne 'win-x86'", source, StringComparison.Ordinal);
         Assert.Contains("$manifest.SelfContained -isnot [bool]", source, StringComparison.Ordinal);
         Assert.Contains("The Sage ODBC worker executable version does not match release", source, StringComparison.Ordinal);

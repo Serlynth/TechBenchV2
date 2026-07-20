@@ -20,8 +20,12 @@ $script:ServiceName = $ServiceName
 $script:InstallDirectory = [IO.Path]::GetFullPath($InstallDirectory).TrimEnd('\')
 $script:DataDirectory = [IO.Path]::GetFullPath($DataDirectory).TrimEnd('\')
 $script:ManagerDirectory = [IO.Path]::GetFullPath($ManagerDirectory).TrimEnd('\')
+$script:ProgramFilesRootPath = [IO.Path]::GetFullPath($env:ProgramFiles).TrimEnd('\')
+$script:ProgramDataRootPath = [IO.Path]::GetFullPath($env:ProgramData).TrimEnd('\')
+$script:ProgramDataAnchorPath = [IO.Path]::GetFullPath(
+    (Join-Path $script:ProgramDataRootPath 'CSRI')).TrimEnd('\')
 $script:ManagerDataDirectory = [IO.Path]::GetFullPath(
-    "$env:ProgramData\CSRI\TechBench Server Manager").TrimEnd('\')
+    (Join-Path $script:ProgramDataAnchorPath 'TechBench Server Manager')).TrimEnd('\')
 $script:ReleaseApiUrl = 'https://api.github.com/repos/Serlynth/TechBenchV2-Releases/releases?per_page=100'
 $script:ReleaseDownloadPrefix = 'https://github.com/Serlynth/TechBenchV2-Releases/releases/download/'
 $script:AvailableUpdate = $null
@@ -29,33 +33,505 @@ $script:AccountFieldIsDirty = $false
 $script:UpdatingAccountField = $false
 $script:OperationInProgress = $false
 $script:RecoveryBlocked = $false
+$script:TrayNoticeShown = $false
+$script:TrayContextMenu = $null
+$script:TrayExitMenuItem = $null
+$script:NotifyIcon = $null
+$script:ManagerIcon = $null
 $script:MaximumPackageBytes = 536870912
 $script:MaximumExpandedBytes = 1073741824
 $script:MaximumArchiveEntries = 5000
+$script:ManagerCompanionFileNames = @(
+    'TechBench-ServerManager.ps1',
+    'Start-TechBenchServerManager.ps1',
+    'Start-TechBenchServerManager.vbs',
+    'csri-techbench-icon.ico'
+)
 
 if (-not [Environment]::Is64BitProcess) {
     throw 'TechBench Server Manager requires 64-bit Windows PowerShell 5.1 or later.'
 }
 
+function Assert-PathTreesDoNotOverlap {
+    param(
+        [Parameter(Mandatory = $true)][string]$FirstPath,
+        [Parameter(Mandatory = $true)][string]$SecondPath,
+        [Parameter(Mandatory = $true)][string]$FirstName,
+        [Parameter(Mandatory = $true)][string]$SecondName
+    )
+
+    $separator = [IO.Path]::DirectorySeparatorChar
+    $alternateSeparator = [IO.Path]::AltDirectorySeparatorChar
+    $firstCanonical = [IO.Path]::GetFullPath($FirstPath).
+        Replace($alternateSeparator, $separator).TrimEnd($separator)
+    $secondCanonical = [IO.Path]::GetFullPath($SecondPath).
+        Replace($alternateSeparator, $separator).TrimEnd($separator)
+    $firstPrefix = $firstCanonical + $separator
+    $secondPrefix = $secondCanonical + $separator
+    if ($firstCanonical.Equals($secondCanonical, [StringComparison]::OrdinalIgnoreCase) -or
+        $firstCanonical.StartsWith($secondPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+        $secondCanonical.StartsWith($firstPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "$FirstName and $SecondName must not be equal or contain one another: '$firstCanonical' and '$secondCanonical'."
+    }
+}
+
 $allowedProgramFilesRoot = [IO.Path]::GetFullPath(
     (Join-Path $env:ProgramFiles 'CSRI')).TrimEnd('\') + '\'
-$allowedProgramDataRoot = [IO.Path]::GetFullPath(
-    (Join-Path $env:ProgramData 'CSRI')).TrimEnd('\') + '\'
+$allowedProgramDataRoot = $script:ProgramDataAnchorPath + '\'
 if (-not $script:InstallDirectory.StartsWith(
         $allowedProgramFilesRoot, [StringComparison]::OrdinalIgnoreCase) -or
     -not $script:ManagerDirectory.StartsWith(
         $allowedProgramFilesRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw "TechBench service and manager directories must remain under '$allowedProgramFilesRoot'."
 }
-if ($script:InstallDirectory.Equals(
-    $script:ManagerDirectory, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'The TechBench service and Server Manager must use separate directories.'
-}
 if (-not $script:DataDirectory.StartsWith(
         $allowedProgramDataRoot, [StringComparison]::OrdinalIgnoreCase) -or
     -not $script:ManagerDataDirectory.StartsWith(
         $allowedProgramDataRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw "TechBench data directories must remain under '$allowedProgramDataRoot'."
+}
+Assert-PathTreesDoNotOverlap `
+    -FirstPath $script:InstallDirectory -SecondPath $script:ManagerDirectory `
+    -FirstName 'InstallDirectory' -SecondName 'ManagerDirectory'
+Assert-PathTreesDoNotOverlap `
+    -FirstPath $script:DataDirectory -SecondPath $script:ManagerDataDirectory `
+    -FirstName 'DataDirectory' -SecondName 'ManagerDataDirectory'
+
+function Assert-NoReparsePointInPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$TrustedRoot,
+        [switch]$AllowLeaf
+    )
+
+    $rootPath = [IO.Path]::GetFullPath($TrustedRoot).TrimEnd('\')
+    $fullPath = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    $trustedRootItem = Get-Item -LiteralPath $rootPath -Force -ErrorAction Stop
+    if (-not $trustedRootItem.PSIsContainer -or
+        ($trustedRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "The trusted root is missing, not a directory, or a reparse point: $rootPath"
+    }
+    $rootPrefix = $rootPath + '\'
+    if (-not $fullPath.Equals($rootPath, [StringComparison]::OrdinalIgnoreCase) -and
+        -not $fullPath.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to inspect a path outside trusted root '$rootPath': $fullPath"
+    }
+
+    $relativePath = $fullPath.Substring($rootPath.Length).TrimStart('\')
+    if ([string]::IsNullOrWhiteSpace($relativePath)) { return $fullPath }
+    $segments = $relativePath.Split(
+        [char[]]@('\'), [StringSplitOptions]::RemoveEmptyEntries)
+    $currentPath = $rootPath
+    for ($index = 0; $index -lt $segments.Length; $index++) {
+        $currentPath = Join-Path $currentPath $segments[$index]
+        try {
+            $item = Get-Item -LiteralPath $currentPath -Force -ErrorAction Stop
+        } catch [Management.Automation.ItemNotFoundException] {
+            break
+        }
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Refusing to follow a reparse-point path component: $currentPath"
+        }
+        $isAllowedLeaf = $AllowLeaf -and $index -eq ($segments.Length - 1)
+        if (-not $item.PSIsContainer -and -not $isAllowedLeaf) {
+            throw "A directory path component is not a directory: $currentPath"
+        }
+    }
+    return $fullPath
+}
+
+function Assert-NoReparsePointsInDirectoryTree {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return }
+    $pending = [Collections.Generic.Stack[string]]::new()
+    $pending.Push([IO.Path]::GetFullPath($Path))
+    $itemCount = 0
+    while ($pending.Count -gt 0) {
+        $currentDirectory = $pending.Pop()
+        foreach ($item in @(Get-ChildItem -LiteralPath $currentDirectory -Force)) {
+            $itemCount++
+            if ($itemCount -gt 10000) {
+                throw "Refusing to adopt a ProgramData directory tree with more than 10000 entries: $Path"
+            }
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "Refusing to adopt a ProgramData directory tree containing a reparse point: $($item.FullName)"
+            }
+            if ($item.PSIsContainer) {
+                $pending.Push($item.FullName)
+            }
+        }
+    }
+}
+
+function New-ProtectedProgramDataAnchorAcl {
+    $security = [Security.AccessControl.DirectorySecurity]::new()
+    $security.SetAccessRuleProtection($true, $false)
+    $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+    $users = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+    $security.SetOwner($administrators)
+    foreach ($sid in @($administrators, $system)) {
+        [void]$security.AddAccessRule(
+            [Security.AccessControl.FileSystemAccessRule]::new(
+                $sid,
+                [Security.AccessControl.FileSystemRights]::FullControl,
+                [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit',
+                [Security.AccessControl.PropagationFlags]::None,
+                [Security.AccessControl.AccessControlType]::Allow))
+    }
+    [void]$security.AddAccessRule(
+        [Security.AccessControl.FileSystemAccessRule]::new(
+            $users,
+            [Security.AccessControl.FileSystemRights]'ReadAndExecute, Synchronize',
+            [Security.AccessControl.InheritanceFlags]::None,
+            [Security.AccessControl.PropagationFlags]::None,
+            [Security.AccessControl.AccessControlType]::Allow))
+    return $security
+}
+
+function Assert-TrustedDirectoryAcl {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string[]]$AllowedWriteSidValues,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
+
+    $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($owner -notin @('S-1-5-18', 'S-1-5-32-544') -or
+        -not $acl.AreAccessRulesProtected) {
+        throw "Refusing unsafe existing $Description '$Path'. It must be owned by SYSTEM or Administrators and have protected permissions. Inspect and remove any untrusted contents or junctions, then recreate it with an administrator-approved ACL; Server Manager will not take ownership of it."
+    }
+    $writeMask = [Security.AccessControl.FileSystemRights]::WriteData -bor
+        [Security.AccessControl.FileSystemRights]::AppendData -bor
+        [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+        [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+        [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
+    $unsafeRule = $acl.GetAccessRules(
+        $true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object {
+            $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+            $AllowedWriteSidValues -notcontains $_.IdentityReference.Value -and
+            ($_.FileSystemRights -band $writeMask) -ne 0
+        } | Select-Object -First 1
+    if ($null -ne $unsafeRule) {
+        throw "Refusing unsafe existing $Description '$Path': '$($unsafeRule.IdentityReference.Value)' has write access. Inspect and remove any untrusted contents or junctions, then recreate it with an administrator-approved ACL."
+    }
+    return $acl
+}
+
+function Resolve-InstalledServiceAccountSidValue {
+    $escapedServiceName = $script:ServiceName.Replace("'", "''")
+    $service = Get-CimInstance -ClassName Win32_Service `
+        -Filter "Name='$escapedServiceName'" -ErrorAction Stop
+    if ($null -eq $service -or
+        [string]::IsNullOrWhiteSpace([string]$service.StartName)) {
+        throw "Windows service '$($script:ServiceName)' is not installed or its account cannot be resolved. Run the verified package installer to repair the ProgramData ACL before opening Server Manager."
+    }
+    $accountName = [string]$service.StartName
+    switch ($accountName.ToUpperInvariant()) {
+        'LOCALSYSTEM' { return 'S-1-5-18' }
+        'NT AUTHORITY\SYSTEM' { return 'S-1-5-18' }
+        'NT AUTHORITY\LOCAL SERVICE' { return 'S-1-5-19' }
+        'NT AUTHORITY\LOCALSERVICE' { return 'S-1-5-19' }
+        'NT AUTHORITY\NETWORK SERVICE' { return 'S-1-5-20' }
+        'NT AUTHORITY\NETWORKSERVICE' { return 'S-1-5-20' }
+    }
+    try {
+        return ([Security.Principal.NTAccount]::new($accountName)).Translate(
+            [Security.Principal.SecurityIdentifier]).Value
+    } catch {
+        throw "The Windows service account '$accountName' cannot be translated to a SID. Run the verified package installer to repair the ProgramData ACL. $($_.Exception.Message)"
+    }
+}
+
+function Assert-TrustedManagerSecretFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ServiceSidValue,
+        [switch]$RequireServiceReadOnly
+    )
+
+    [void](Assert-NoReparsePointInPath `
+        -Path $Path -TrustedRoot $script:ProgramDataRootPath -AllowLeaf)
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($item.PSIsContainer -or
+        ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "The protected credential path is not a regular file: $Path"
+    }
+    $linkTypeProperty = $item.PSObject.Properties['LinkType']
+    if ($null -ne $linkTypeProperty -and
+        -not [string]::IsNullOrWhiteSpace([string]$linkTypeProperty.Value)) {
+        throw "Refusing an existing credential file that is a file-system link: $Path"
+    }
+
+    $allowedSidValues = @('S-1-5-18', 'S-1-5-32-544', $ServiceSidValue)
+    $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($allowedSidValues -notcontains $owner) {
+        throw "Refusing unsafe existing credential file '$Path': it must be owned by SYSTEM, Administrators, or the configured service identity. Run the verified package installer to repair and reprovision the credential."
+    }
+    $unsafeRule = $acl.GetAccessRules(
+        $true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object {
+            $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+            $allowedSidValues -notcontains $_.IdentityReference.Value
+        } | Select-Object -First 1
+    if ($null -ne $unsafeRule) {
+        throw "Refusing unsafe existing credential file '$Path': '$($unsafeRule.IdentityReference.Value)' has access. Run the verified package installer to repair and reprovision the credential."
+    }
+
+    if ($RequireServiceReadOnly) {
+        if (-not $acl.AreAccessRulesProtected) {
+            throw "The normalized credential file ACL still permits inheritance: $Path"
+        }
+        $writeMask = [Security.AccessControl.FileSystemRights]::WriteData -bor
+            [Security.AccessControl.FileSystemRights]::AppendData -bor
+            [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+            [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+            [Security.AccessControl.FileSystemRights]::Delete -bor
+            [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+            [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+            [Security.AccessControl.FileSystemRights]::TakeOwnership
+        $serviceWriteRule = $acl.GetAccessRules(
+            $true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object {
+                $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+                $_.IdentityReference.Value -eq $ServiceSidValue -and
+                ($_.FileSystemRights -band $writeMask) -ne 0
+            } | Select-Object -First 1
+        if ($null -ne $serviceWriteRule) {
+            throw "The normalized credential file still grants write access to the service identity: $Path"
+        }
+    }
+}
+
+function Assert-LegacyServiceDataContents {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ServiceSidValue
+    )
+
+    [void](Assert-NoReparsePointInPath `
+        -Path $Path -TrustedRoot $script:ProgramDataRootPath)
+    Assert-NoReparsePointsInDirectoryTree -Path $Path
+    $allowedSecretNames = @('whd.secret', 'sage.secret')
+    foreach ($entry in @(Get-ChildItem -LiteralPath $Path -Force)) {
+        if ($allowedSecretNames -notcontains $entry.Name) {
+            throw "The legacy service-data directory contains an unexpected entry: $($entry.FullName). Run the verified package installer after reviewing and removing it."
+        }
+        Assert-TrustedManagerSecretFile `
+            -Path $entry.FullName -ServiceSidValue $ServiceSidValue
+    }
+}
+
+function Protect-LegacyServiceDataDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ServiceSidValue
+    )
+
+    $legacyAllowedWriteSids = @(
+        'S-1-5-18',
+        'S-1-5-32-544',
+        $ServiceSidValue)
+    [void](Assert-NoReparsePointInPath `
+        -Path $Path -TrustedRoot $script:ProgramDataRootPath)
+    [void](Assert-TrustedDirectoryAcl -Path $Path `
+        -AllowedWriteSidValues $legacyAllowedWriteSids `
+        -Description 'existing TechBench service data directory')
+    Assert-LegacyServiceDataContents `
+        -Path $Path -ServiceSidValue $ServiceSidValue
+    $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+    $serviceSid = [Security.Principal.SecurityIdentifier]::new($ServiceSidValue)
+    $accessEntries = @(
+        [PSCustomObject]@{
+            Sid = $system
+            Rights = [Security.AccessControl.FileSystemRights]::FullControl
+        },
+        [PSCustomObject]@{
+            Sid = $administrators
+            Rights = [Security.AccessControl.FileSystemRights]::FullControl
+        },
+        [PSCustomObject]@{
+            Sid = $serviceSid
+            Rights = [Security.AccessControl.FileSystemRights]'ReadAndExecute, Synchronize'
+        }
+    )
+
+    $directorySecurity = [Security.AccessControl.DirectorySecurity]::new()
+    $directorySecurity.SetAccessRuleProtection($true, $false)
+    $directorySecurity.SetOwner($administrators)
+    foreach ($entry in $accessEntries) {
+        [void]$directorySecurity.AddAccessRule(
+            [Security.AccessControl.FileSystemAccessRule]::new(
+                $entry.Sid,
+                $entry.Rights,
+                [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit',
+                [Security.AccessControl.PropagationFlags]::None,
+                [Security.AccessControl.AccessControlType]::Allow))
+    }
+    Set-Acl -LiteralPath $Path -AclObject $directorySecurity
+    [void](Assert-NoReparsePointInPath `
+        -Path $Path -TrustedRoot $script:ProgramDataRootPath)
+    [void](Assert-TrustedDirectoryAcl -Path $Path `
+        -AllowedWriteSidValues @('S-1-5-18', 'S-1-5-32-544') `
+        -Description 'normalized TechBench service data directory')
+
+    foreach ($secretName in @('whd.secret', 'sage.secret')) {
+        $secretPath = Join-Path $Path $secretName
+        [void](Assert-NoReparsePointInPath `
+            -Path $secretPath -TrustedRoot $script:ProgramDataRootPath -AllowLeaf)
+        if (-not (Test-Path -LiteralPath $secretPath)) { continue }
+        Assert-TrustedManagerSecretFile `
+            -Path $secretPath -ServiceSidValue $ServiceSidValue
+        $fileSecurity = [Security.AccessControl.FileSecurity]::new()
+        $fileSecurity.SetAccessRuleProtection($true, $false)
+        $fileSecurity.SetOwner($administrators)
+        foreach ($entry in $accessEntries) {
+            [void]$fileSecurity.AddAccessRule(
+                [Security.AccessControl.FileSystemAccessRule]::new(
+                    $entry.Sid,
+                    $entry.Rights,
+                    [Security.AccessControl.AccessControlType]::Allow))
+        }
+        Set-Acl -LiteralPath $secretPath -AclObject $fileSecurity
+        Assert-TrustedManagerSecretFile `
+            -Path $secretPath -ServiceSidValue $ServiceSidValue `
+            -RequireServiceReadOnly
+    }
+}
+
+function Assert-LegacyTechBenchAnchorCanMigrate {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($owner -notin @('S-1-5-18', 'S-1-5-32-544')) {
+        throw 'The legacy CSRI anchor is not owned by SYSTEM or Administrators.'
+    }
+    $allowedChildren = @('TechBench Sync Service', 'TechBench Server Manager')
+    foreach ($item in @(Get-ChildItem -LiteralPath $Path -Force)) {
+        if (-not $item.PSIsContainer -or
+            ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            $allowedChildren -notcontains $item.Name) {
+            throw "The legacy CSRI anchor contains an unexpected or unsafe entry: $($item.FullName)"
+        }
+        $childAcl = Get-Acl -LiteralPath $item.FullName -ErrorAction Stop
+        $childOwner = $childAcl.GetOwner(
+            [Security.Principal.SecurityIdentifier]).Value
+        if ($childOwner -notin @('S-1-5-18', 'S-1-5-32-544') -or
+            -not $childAcl.AreAccessRulesProtected) {
+            throw "The legacy TechBench child is not protected and privileged-owned: $($item.FullName)"
+        }
+        $allowedWriteSids = @('S-1-5-18', 'S-1-5-32-544')
+        if ($item.Name -eq 'TechBench Sync Service') {
+            $serviceSidValue = Resolve-InstalledServiceAccountSidValue
+            $allowedWriteSids += $serviceSidValue
+            Assert-LegacyServiceDataContents `
+                -Path $item.FullName -ServiceSidValue $serviceSidValue
+        }
+        [void](Assert-TrustedDirectoryAcl -Path $item.FullName `
+            -AllowedWriteSidValues $allowedWriteSids `
+            -Description "legacy $($item.Name) directory")
+        Assert-NoReparsePointsInDirectoryTree -Path $item.FullName
+    }
+}
+
+function New-ProtectedDirectoryAtomically {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ParentPath,
+        [Parameter(Mandatory = $true)][Security.AccessControl.DirectorySecurity]$Security,
+        [Parameter(Mandatory = $true)][string[]]$AllowedWriteSidValues,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
+
+    [void](Assert-NoReparsePointInPath `
+        -Path $Path -TrustedRoot $script:ProgramDataRootPath)
+    if (Test-Path -LiteralPath $Path -PathType Container) {
+        [void](Assert-TrustedDirectoryAcl -Path $Path `
+            -AllowedWriteSidValues $AllowedWriteSidValues -Description $Description)
+        return $false
+    }
+
+    $temporaryPath = Join-Path $ParentPath `
+        ('.{0}.create-{1}' -f [IO.Path]::GetFileName($Path), [Guid]::NewGuid().ToString('N'))
+    $temporaryCreated = $false
+    try {
+        ([IO.DirectoryInfo]::new($temporaryPath)).Create($Security)
+        $temporaryCreated = $true
+        [void](Assert-NoReparsePointInPath `
+            -Path $temporaryPath -TrustedRoot $script:ProgramDataRootPath)
+        [void](Assert-TrustedDirectoryAcl -Path $temporaryPath `
+            -AllowedWriteSidValues $AllowedWriteSidValues -Description "temporary $Description")
+        try {
+            [IO.Directory]::Move($temporaryPath, $Path)
+            $temporaryCreated = $false
+        } catch {
+            if (-not (Test-Path -LiteralPath $Path -PathType Container)) { throw }
+            [void](Assert-NoReparsePointInPath `
+                -Path $Path -TrustedRoot $script:ProgramDataRootPath)
+            [void](Assert-TrustedDirectoryAcl -Path $Path `
+                -AllowedWriteSidValues $AllowedWriteSidValues -Description $Description)
+        }
+    } finally {
+        if ($temporaryCreated -and (Test-Path -LiteralPath $temporaryPath -PathType Container)) {
+            [void](Assert-NoReparsePointInPath `
+                -Path $temporaryPath -TrustedRoot $script:ProgramDataRootPath)
+            [void](Assert-TrustedDirectoryAcl -Path $temporaryPath `
+                -AllowedWriteSidValues $AllowedWriteSidValues -Description "temporary $Description")
+            [IO.Directory]::Delete($temporaryPath, $false)
+        }
+    }
+
+    [void](Assert-NoReparsePointInPath `
+        -Path $Path -TrustedRoot $script:ProgramDataRootPath)
+    [void](Assert-TrustedDirectoryAcl -Path $Path `
+        -AllowedWriteSidValues $AllowedWriteSidValues -Description $Description)
+    return $true
+}
+
+function Initialize-ProtectedProgramDataAnchor {
+    [void](Assert-NoReparsePointInPath `
+        -Path $script:ProgramDataAnchorPath -TrustedRoot $script:ProgramDataRootPath)
+    if (Test-Path -LiteralPath $script:ProgramDataAnchorPath -PathType Container) {
+        try {
+            [void](Assert-TrustedDirectoryAcl -Path $script:ProgramDataAnchorPath `
+                -AllowedWriteSidValues @('S-1-5-18', 'S-1-5-32-544') `
+                -Description 'ProgramData CSRI anchor')
+        } catch {
+            $unsafeReason = $_.Exception.Message
+            try {
+                Assert-LegacyTechBenchAnchorCanMigrate `
+                    -Path $script:ProgramDataAnchorPath
+            } catch {
+                throw "$unsafeReason Automatic legacy-alpha ACL migration was refused: $($_.Exception.Message) Inspect the CSRI directory and repair it manually before retrying."
+            }
+            Set-Acl -LiteralPath $script:ProgramDataAnchorPath `
+                -AclObject (New-ProtectedProgramDataAnchorAcl)
+            [void](Assert-NoReparsePointInPath `
+                -Path $script:ProgramDataAnchorPath `
+                -TrustedRoot $script:ProgramDataRootPath)
+            Assert-LegacyTechBenchAnchorCanMigrate `
+                -Path $script:ProgramDataAnchorPath
+            [void](Assert-TrustedDirectoryAcl -Path $script:ProgramDataAnchorPath `
+                -AllowedWriteSidValues @('S-1-5-18', 'S-1-5-32-544') `
+                -Description 'migrated ProgramData CSRI anchor')
+        }
+    } else {
+        [void](New-ProtectedDirectoryAtomically `
+            -Path $script:ProgramDataAnchorPath `
+            -ParentPath $script:ProgramDataRootPath `
+            -Security (New-ProtectedProgramDataAnchorAcl) `
+            -AllowedWriteSidValues @('S-1-5-18', 'S-1-5-32-544') `
+            -Description 'ProgramData CSRI anchor')
+    }
+    [void](Assert-NoReparsePointInPath `
+        -Path $script:ProgramDataAnchorPath -TrustedRoot $script:ProgramDataRootPath)
+    return $script:ProgramDataAnchorPath
 }
 
 function Test-IsAdministrator {
@@ -69,13 +545,13 @@ function Start-ElevatedCopy {
         throw 'TechBench Server Manager must be run from its .ps1 file so it can request administrator access.'
     }
 
-    $powershell = Join-Path $env:SystemRoot `
-        'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $powershell = Join-Path ([Environment]::SystemDirectory) `
+        'WindowsPowerShell\v1.0\powershell.exe'
     if (-not (Test-Path -LiteralPath $powershell -PathType Leaf)) {
         throw "64-bit Windows PowerShell was not found: $powershell"
     }
     $quotedScript = '"{0}"' -f $PSCommandPath
-    $argumentLine = '-NoProfile -ExecutionPolicy Bypass -File {0} -ServiceName "{1}" -InstallDirectory "{2}" -DataDirectory "{3}" -ManagerDirectory "{4}"' -f
+    $argumentLine = '-NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File {0} -ServiceName "{1}" -InstallDirectory "{2}" -DataDirectory "{3}" -ManagerDirectory "{4}"' -f
         $quotedScript,
         $script:ServiceName,
         $script:InstallDirectory,
@@ -95,9 +571,22 @@ if (-not (Test-IsAdministrator)) {
     return
 }
 
+[void](Initialize-ProtectedProgramDataAnchor)
+[void](Assert-NoReparsePointInPath `
+    -Path $script:DataDirectory -TrustedRoot $script:ProgramDataRootPath)
+# Credential-directory validation and normalization is deliberately deferred
+# until Open-ManagerLifetimeLock succeeds below, so no service-data mutation can
+# race another Manager instance.
+[void](Assert-NoReparsePointInPath `
+    -Path $script:ManagerDataDirectory -TrustedRoot $script:ProgramDataRootPath)
+[void](Assert-NoReparsePointInPath `
+    -Path $script:InstallDirectory -TrustedRoot $script:ProgramFilesRootPath)
+[void](Assert-NoReparsePointInPath `
+    -Path $script:ManagerDirectory -TrustedRoot $script:ProgramFilesRootPath)
+
 # The Start Menu shortcut opens in the install directory. Leave it immediately so
 # Windows can rename that directory during a staged update and rollback.
-Set-Location -LiteralPath $env:SystemRoot
+Set-Location -LiteralPath ([Environment]::SystemDirectory)
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -168,6 +657,9 @@ function Set-ManagerBusy {
         $script:InstallUpdateButton
     )) {
         $control.Enabled = -not $Busy
+    }
+    if ($null -ne $script:TrayExitMenuItem) {
+        $script:TrayExitMenuItem.Enabled = -not $Busy
     }
     if ($Busy -and -not [string]::IsNullOrWhiteSpace($Message)) {
         Add-StatusLine $Message
@@ -893,17 +1385,13 @@ function Expand-VerifiedServiceArchive {
 }
 
 function Initialize-AdminManagerDataRoot {
-    $allowedRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'CSRI')).TrimEnd('\') + '\'
+    [void](Initialize-ProtectedProgramDataAnchor)
+    $allowedRoot = $script:ProgramDataAnchorPath.TrimEnd('\') + '\'
     $rootPath = [IO.Path]::GetFullPath($script:ManagerDataDirectory)
     if (-not $rootPath.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
         throw "The Server Manager data directory must remain under '$allowedRoot'."
     }
-    if ((Test-Path -LiteralPath $rootPath) -and
-        ((Get-Item -LiteralPath $rootPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-        throw "Refusing to stage updates in a reparse-point directory: $rootPath"
-    }
 
-    New-Item -ItemType Directory -Path $rootPath -Force | Out-Null
     $security = [Security.AccessControl.DirectorySecurity]::new()
     $security.SetAccessRuleProtection($true, $false)
     $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
@@ -918,7 +1406,26 @@ function Initialize-AdminManagerDataRoot {
             [Security.AccessControl.AccessControlType]::Allow)
         [void]$security.AddAccessRule($rule)
     }
-    Set-Acl -LiteralPath $rootPath -AclObject $security
+
+    [void](Assert-NoReparsePointInPath `
+        -Path $rootPath -TrustedRoot $script:ProgramDataRootPath)
+    if (Test-Path -LiteralPath $rootPath -PathType Container) {
+        [void](Assert-TrustedDirectoryAcl -Path $rootPath `
+            -AllowedWriteSidValues @('S-1-5-18', 'S-1-5-32-544') `
+            -Description 'Server Manager data directory')
+    } else {
+        [void](New-ProtectedDirectoryAtomically `
+            -Path $rootPath `
+            -ParentPath $script:ProgramDataAnchorPath `
+            -Security $security `
+            -AllowedWriteSidValues @('S-1-5-18', 'S-1-5-32-544') `
+            -Description 'Server Manager data directory')
+    }
+    Assert-NoReparsePointsInDirectoryTree -Path $rootPath
+
+    [void](Assert-TrustedDirectoryAcl -Path $rootPath `
+        -AllowedWriteSidValues @('S-1-5-18', 'S-1-5-32-544') `
+        -Description 'Server Manager data directory')
 
     return $rootPath
 }
@@ -928,26 +1435,53 @@ function Initialize-AdminUpdateDirectory {
 
     $updatePath = Join-Path $rootPath `
         ("Update-{0}" -f [Guid]::NewGuid().ToString('N'))
+    [void](Assert-NoReparsePointInPath `
+        -Path $rootPath -TrustedRoot $script:ProgramDataRootPath)
     New-Item -ItemType Directory -Path $updatePath -Force | Out-Null
+    [void](Assert-NoReparsePointInPath `
+        -Path $updatePath -TrustedRoot $script:ProgramDataRootPath)
     return $updatePath
 }
 
 function Write-UpdateJournal {
-    param([Parameter(Mandatory = $true)][Collections.IDictionary]$State)
+    param([Parameter(Mandatory = $true)][object]$State)
 
     $rootPath = Initialize-AdminManagerDataRoot
     $journalPath = Join-Path $rootPath 'pending-update.json'
     $temporaryPath = Join-Path $rootPath `
         ("pending-update-{0}.tmp" -f [Guid]::NewGuid().ToString('N'))
+    [void](Assert-NoReparsePointInPath `
+        -Path $journalPath -TrustedRoot $script:ProgramDataRootPath -AllowLeaf)
+    [void](Assert-NoReparsePointInPath `
+        -Path $temporaryPath -TrustedRoot $script:ProgramDataRootPath -AllowLeaf)
+    $jsonBytes = $null
+    $journalStream = $null
     try {
-        $State | ConvertTo-Json -Depth 4 |
-            Set-Content -LiteralPath $temporaryPath -Encoding UTF8
+        $jsonText = $State | ConvertTo-Json -Depth 4
+        $jsonBytes = [Text.UTF8Encoding]::new($false).GetBytes($jsonText)
+        $journalStream = [IO.FileStream]::new(
+            $temporaryPath,
+            [IO.FileMode]::CreateNew,
+            [IO.FileAccess]::Write,
+            [IO.FileShare]::None,
+            4096,
+            [IO.FileOptions]::WriteThrough)
+        $journalStream.Write($jsonBytes, 0, $jsonBytes.Length)
+        $journalStream.Flush($true)
+        $journalStream.Dispose()
+        $journalStream = $null
         if (Test-Path -LiteralPath $journalPath -PathType Leaf) {
             [IO.File]::Replace($temporaryPath, $journalPath, $null)
         } else {
             Move-Item -LiteralPath $temporaryPath -Destination $journalPath
         }
     } finally {
+        if ($null -ne $journalStream) {
+            $journalStream.Dispose()
+        }
+        if ($null -ne $jsonBytes) {
+            [Array]::Clear($jsonBytes, 0, $jsonBytes.Length)
+        }
         if (Test-Path -LiteralPath $temporaryPath) {
             Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
         }
@@ -955,7 +1489,10 @@ function Write-UpdateJournal {
 }
 
 function Remove-UpdateJournal {
-    $journalPath = Join-Path $script:ManagerDataDirectory 'pending-update.json'
+    $rootPath = Initialize-AdminManagerDataRoot
+    $journalPath = Join-Path $rootPath 'pending-update.json'
+    [void](Assert-NoReparsePointInPath `
+        -Path $journalPath -TrustedRoot $script:ProgramDataRootPath -AllowLeaf)
     if (Test-Path -LiteralPath $journalPath) {
         Remove-Item -LiteralPath $journalPath -Force
     }
@@ -978,13 +1515,221 @@ function Assert-JournalFilePath {
     return $fullPath
 }
 
+function Get-ValidatedJournalManagerFiles {
+    param([Parameter(Mandatory = $true)]$Journal)
+
+    $formatVersion = [int]$Journal.JournalFormatVersion
+    if ($formatVersion -eq 1) {
+        $managerTarget = [IO.Path]::GetFullPath([string]$Journal.ManagerTarget)
+        $expectedManagerTarget = [IO.Path]::GetFullPath(
+            (Join-Path $script:ManagerDirectory 'TechBench-ServerManager.ps1'))
+        if (-not $managerTarget.Equals(
+                $expectedManagerTarget, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'The protected update journal contains an invalid Server Manager target.'
+        }
+        return ,([PSCustomObject]@{
+            Name = 'TechBench-ServerManager.ps1'
+            Target = $managerTarget
+            Backup = Assert-JournalFilePath -Path ([string]$Journal.ManagerBackup) `
+                -Root $script:ManagerDirectory -NamePrefix 'TechBench-ServerManager.backup-'
+            Stage = Assert-JournalFilePath -Path ([string]$Journal.ManagerStage) `
+                -Root $script:ManagerDirectory -NamePrefix 'TechBench-ServerManager.stage-'
+            HadExisting = [bool]$Journal.ManagerHadExisting
+            Installed = $false
+        })
+    }
+    if ($formatVersion -ne 2) {
+        throw 'The protected update journal uses an unsupported format.'
+    }
+
+    $journalFiles = @($Journal.ManagerFiles)
+    if ($journalFiles.Count -ne $script:ManagerCompanionFileNames.Count) {
+        throw 'The protected update journal does not list the complete Server Manager companion set.'
+    }
+
+    $validated = @()
+    foreach ($expectedName in $script:ManagerCompanionFileNames) {
+        $matches = @($journalFiles | Where-Object {
+            ([string]$_.Name).Equals($expectedName, [StringComparison]::Ordinal)
+        })
+        if ($matches.Count -ne 1) {
+            throw "The protected update journal has an invalid companion entry: $expectedName"
+        }
+        $entry = $matches[0]
+        $target = [IO.Path]::GetFullPath([string]$entry.Target)
+        $expectedTarget = [IO.Path]::GetFullPath(
+            (Join-Path $script:ManagerDirectory $expectedName))
+        if (-not $target.Equals($expectedTarget, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "The protected update journal has an invalid target for $expectedName."
+        }
+
+        $baseName = [IO.Path]::GetFileNameWithoutExtension($expectedName)
+        $extension = [IO.Path]::GetExtension($expectedName)
+        $backup = Assert-JournalFilePath -Path ([string]$entry.Backup) `
+            -Root $script:ManagerDirectory -NamePrefix "$baseName.backup-"
+        $stage = Assert-JournalFilePath -Path ([string]$entry.Stage) `
+            -Root $script:ManagerDirectory -NamePrefix "$baseName.stage-"
+        if (-not [IO.Path]::GetExtension($backup).Equals(
+                $extension, [StringComparison]::OrdinalIgnoreCase) -or
+            -not [IO.Path]::GetExtension($stage).Equals(
+                $extension, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "The protected update journal has an invalid staged extension for $expectedName."
+        }
+        $validated += [PSCustomObject]@{
+            Name = $expectedName
+            Target = $target
+            Backup = $backup
+            Stage = $stage
+            HadExisting = [bool]$entry.HadExisting
+            Installed = [bool]$entry.Installed
+        }
+    }
+    return $validated
+}
+
+function Test-ManagerFileMatchesInstalledPackageManifest {
+    param([Parameter(Mandatory = $true)]$ManagerFile)
+
+    try {
+        $manifestPath = Join-Path $script:InstallDirectory 'package-manifest.json'
+        if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $ManagerFile.Target -PathType Leaf)) {
+            return $false
+        }
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        if ($manifest.Product -cne 'TechBench Sync Service' -or
+            [int]$manifest.PackageFormatVersion -ne 1) {
+            return $false
+        }
+        $entries = @($manifest.Files | Where-Object {
+            ([string]$_.Path).Equals(
+                $ManagerFile.Name, [StringComparison]::OrdinalIgnoreCase)
+        })
+        if ($entries.Count -ne 1 -or
+            [string]$entries[0].Sha256 -notmatch '^[0-9A-Fa-f]{64}$') {
+            return $false
+        }
+
+        $packagedPath = Join-Path $script:InstallDirectory $ManagerFile.Name
+        if (-not (Test-Path -LiteralPath $packagedPath -PathType Leaf)) {
+            return $false
+        }
+        foreach ($path in @($packagedPath, $ManagerFile.Target)) {
+            $item = Get-Item -LiteralPath $path
+            if ($item.Length -ne [int64]$entries[0].Length -or
+                -not (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.Equals(
+                    [string]$entries[0].Sha256,
+                    [StringComparison]::OrdinalIgnoreCase)) {
+                return $false
+            }
+        }
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Restore-ManagerFileFromBackup {
+    param(
+        [Parameter(Mandatory = $true)][string]$BackupPath,
+        [Parameter(Mandatory = $true)][string]$TargetPath
+    )
+
+    $temporaryPath = Join-Path $script:ManagerDirectory `
+        ('.rollback-{0}.tmp' -f [Guid]::NewGuid().ToString('N'))
+    try {
+        Copy-Item -LiteralPath $BackupPath -Destination $temporaryPath -Force
+        $backupItem = Get-Item -LiteralPath $BackupPath
+        $temporaryItem = Get-Item -LiteralPath $temporaryPath
+        if ($backupItem.Length -ne $temporaryItem.Length -or
+            (Get-FileHash -LiteralPath $BackupPath -Algorithm SHA256).Hash -ne
+                (Get-FileHash -LiteralPath $temporaryPath -Algorithm SHA256).Hash) {
+            throw "The rollback copy failed verification: $BackupPath"
+        }
+        if (Test-Path -LiteralPath $TargetPath -PathType Leaf) {
+            [IO.File]::Replace($temporaryPath, $TargetPath, $null)
+        } else {
+            Move-Item -LiteralPath $temporaryPath -Destination $TargetPath
+        }
+        Set-ManagerCompanionFileAcl -Path $TargetPath
+    } finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Restore-ManagerCompanionState {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$ManagerFiles,
+        [Parameter(Mandatory = $true)][bool]$SwapStarted
+    )
+
+    if (-not $SwapStarted) { return }
+
+    for ($managerIndex = $ManagerFiles.Count - 1;
+        $managerIndex -ge 0;
+        $managerIndex--) {
+        $managerFile = $ManagerFiles[$managerIndex]
+        $backupExists = Test-Path -LiteralPath $managerFile.Backup -PathType Leaf
+        $stageExists = Test-Path -LiteralPath $managerFile.Stage -PathType Leaf
+        $targetExists = Test-Path -LiteralPath $managerFile.Target -PathType Leaf
+
+        if ($backupExists) {
+            Restore-ManagerFileFromBackup -BackupPath $managerFile.Backup `
+                -TargetPath $managerFile.Target
+            continue
+        }
+        if ($managerFile.HadExisting) {
+            if (-not $stageExists -or -not $targetExists) {
+                throw "The rollback state for '$($managerFile.Name)' is incomplete; its recovery artifacts were preserved."
+            }
+            continue
+        }
+        if ($stageExists -and $targetExists) {
+            throw "The rollback state for '$($managerFile.Name)' contains both staged and installed copies; its recovery artifacts were preserved."
+        }
+        if ($targetExists) {
+            # Moving the newly installed file back to Stage records the original
+            # absence without consuming the only recovery artifact.
+            Move-Item -LiteralPath $managerFile.Target `
+                -Destination $managerFile.Stage
+        }
+    }
+}
+
+function Remove-UpdateRecoveryArtifacts {
+    param(
+        [Parameter(Mandatory = $true)][string]$InstallParent,
+        [Parameter(Mandatory = $true)][string]$ServiceStagePath,
+        [Parameter(Mandatory = $true)][string]$ServiceBackupPath,
+        [Parameter(Mandatory = $true)][object[]]$ManagerFiles
+    )
+
+    foreach ($path in @($ServiceStagePath, $ServiceBackupPath)) {
+        if (Test-Path -LiteralPath $path) {
+            Remove-VerifiedDirectory -Path $path -AllowedRoot $InstallParent
+        }
+    }
+    foreach ($managerFile in $ManagerFiles) {
+        foreach ($path in @($managerFile.Stage, $managerFile.Backup)) {
+            if (Test-Path -LiteralPath $path) {
+                Remove-Item -LiteralPath $path -Force
+            }
+        }
+    }
+}
+
 function Repair-InterruptedUpdate {
-    $journalPath = Join-Path $script:ManagerDataDirectory 'pending-update.json'
+    $rootPath = Initialize-AdminManagerDataRoot
+    $journalPath = Join-Path $rootPath 'pending-update.json'
+    [void](Assert-NoReparsePointInPath `
+        -Path $journalPath -TrustedRoot $script:ProgramDataRootPath -AllowLeaf)
     if (-not (Test-Path -LiteralPath $journalPath -PathType Leaf)) { return $false }
 
     Add-StatusLine 'An interrupted service update was detected; recovering it now.'
     $journal = Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json
-    if ([int]$journal.JournalFormatVersion -ne 1 -or
+    if ([int]$journal.JournalFormatVersion -notin @(1, 2) -or
         ([string]$journal.ServiceName) -cne $script:ServiceName -or
         -not ([IO.Path]::GetFullPath([string]$journal.InstallPath)).Equals(
             $script:InstallDirectory, [StringComparison]::OrdinalIgnoreCase)) {
@@ -996,43 +1741,75 @@ function Repair-InterruptedUpdate {
         -Root $installParent -NamePrefix 'TechBench Sync Service.backup-'
     $stagePath = Assert-JournalFilePath -Path ([string]$journal.StagePath) `
         -Root $installParent -NamePrefix 'TechBench Sync Service.stage-'
-    $managerTarget = [IO.Path]::GetFullPath([string]$journal.ManagerTarget)
-    $expectedManagerTarget = [IO.Path]::GetFullPath(
-        (Join-Path $script:ManagerDirectory 'TechBench-ServerManager.ps1'))
-    if (-not $managerTarget.Equals(
-        $expectedManagerTarget, [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'The protected update journal contains an invalid Server Manager target.'
-    }
-    $managerBackup = Assert-JournalFilePath -Path ([string]$journal.ManagerBackup) `
-        -Root $script:ManagerDirectory -NamePrefix 'TechBench-ServerManager.backup-'
-    $managerStage = Assert-JournalFilePath -Path ([string]$journal.ManagerStage) `
-        -Root $script:ManagerDirectory -NamePrefix 'TechBench-ServerManager.stage-'
+    $managerFiles = @(Get-ValidatedJournalManagerFiles -Journal $journal)
 
     $phase = [string]$journal.Phase
-    if ([bool]$journal.ManagerHadExisting) {
-        $managerBackupExists = Test-Path -LiteralPath $managerBackup -PathType Leaf
-        $managerStageExists = Test-Path -LiteralPath $managerStage -PathType Leaf
-        if ($phase -ceq 'ManagerInstalled' -and -not $managerBackupExists) {
-            throw 'The interrupted update says Server Manager was replaced, but its required rollback copy is missing. The protected update journal was retained for manual administrator repair.'
+    if ($phase -notin @(
+        'Prepared',
+        'OldPayloadMoved',
+        'NewPayloadInstalled',
+        'ManagerSwapPrepared',
+        'ManagerInstalled',
+        'Committed',
+        'RolledBack'
+    )) {
+        throw "The protected update journal contains an unsupported phase: $phase"
+    }
+    $legacyManagerNeedsManifestProof = $false
+    $managerSwapArtifactEvidence = $false
+    foreach ($managerFile in $managerFiles) {
+        $backupExists = Test-Path -LiteralPath $managerFile.Backup -PathType Leaf
+        $stageExists = Test-Path -LiteralPath $managerFile.Stage -PathType Leaf
+        $targetExists = Test-Path -LiteralPath $managerFile.Target -PathType Leaf
+        if ($backupExists -or
+            (-not $managerFile.HadExisting -and -not $stageExists -and $targetExists)) {
+            $managerSwapArtifactEvidence = $true
+            break
         }
-        if ($phase -ceq 'ManagerSwapPrepared' -and
-            -not $managerBackupExists -and -not $managerStageExists) {
-            throw 'The interrupted Server Manager swap cannot be classified because both its rollback copy and staged copy are missing. The protected update journal was retained for manual administrator repair.'
+    }
+    $managerStateNeedsClassification =
+        $phase -notin @('Committed', 'RolledBack') -and (
+            $phase -in @('ManagerSwapPrepared', 'ManagerInstalled') -or
+            $managerSwapArtifactEvidence -or
+            [int]$journal.JournalFormatVersion -eq 1)
+    if ($managerStateNeedsClassification) {
+        foreach ($managerFile in $managerFiles) {
+            $backupExists = Test-Path -LiteralPath $managerFile.Backup -PathType Leaf
+            $stageExists = Test-Path -LiteralPath $managerFile.Stage -PathType Leaf
+            $targetExists = Test-Path -LiteralPath $managerFile.Target -PathType Leaf
+            if ($managerFile.HadExisting -and -not $backupExists -and -not $stageExists) {
+                if ([int]$journal.JournalFormatVersion -eq 1 -and $targetExists) {
+                    # Alpha.9 consumed its only Manager backup during rollback and
+                    # could then leave the v1 journal behind if journal deletion
+                    # failed. Defer classification until the service payload has
+                    # been restored, then prove this target matches that payload.
+                    $legacyManagerNeedsManifestProof = $true
+                } else {
+                    throw "The interrupted Server Manager swap for '$($managerFile.Name)' cannot be classified because both its rollback and staged copies are missing. The protected update journal was retained for manual administrator repair."
+                }
+            }
+            if (-not $managerFile.HadExisting -and -not $stageExists -and
+                -not $targetExists) {
+                throw "The interrupted Server Manager swap for '$($managerFile.Name)' has neither a staged nor installed copy. The protected update journal was retained for manual administrator repair."
+            }
+            if (-not $managerFile.HadExisting -and $stageExists -and
+                $targetExists) {
+                throw "The interrupted Server Manager swap for '$($managerFile.Name)' has both a staged and installed copy. The protected update journal was retained for manual administrator repair."
+            }
         }
     }
 
-    if ($phase -ceq 'Committed') {
-        if (Test-Path -LiteralPath $backupPath) {
-            Remove-VerifiedDirectory -Path $backupPath -AllowedRoot $installParent
-        }
-        if (Test-Path -LiteralPath $stagePath) {
-            Remove-VerifiedDirectory -Path $stagePath -AllowedRoot $installParent
-        }
-        foreach ($path in @($managerBackup, $managerStage)) {
-            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
-        }
+    if ($phase -in @('Committed', 'RolledBack')) {
+        Remove-UpdateRecoveryArtifacts -InstallParent $installParent `
+            -ServiceStagePath $stagePath -ServiceBackupPath $backupPath `
+            -ManagerFiles $managerFiles
         Remove-UpdateJournal
-        Add-StatusLine 'The committed service update cleanup was completed.'
+        $description = if ($phase -ceq 'Committed') {
+            'committed service update'
+        } else {
+            'completed service rollback'
+        }
+        Add-StatusLine "The $description cleanup was completed."
         return $true
     }
 
@@ -1051,26 +1828,30 @@ function Repair-InterruptedUpdate {
         throw 'The interrupted update has neither an installed payload nor a rollback payload. Manual repair is required.'
     }
 
-    if (Test-Path -LiteralPath $managerBackup -PathType Leaf) {
-        if (Test-Path -LiteralPath $managerTarget) {
-            Remove-Item -LiteralPath $managerTarget -Force
+    $managerSwapStarted =
+        $phase -in @('ManagerSwapPrepared', 'ManagerInstalled') -or
+        $managerSwapArtifactEvidence
+    if ($legacyManagerNeedsManifestProof) {
+        if ($managerFiles.Count -ne 1 -or
+            -not (Test-ManagerFileMatchesInstalledPackageManifest `
+                -ManagerFile $managerFiles[0])) {
+            throw 'The legacy v1 update journal has no Manager rollback artifact, and the installed Manager does not match the restored service package manifest. Manual administrator repair is required.'
         }
-        Move-Item -LiteralPath $managerBackup -Destination $managerTarget
-    } elseif (-not [bool]$journal.ManagerHadExisting -and
-        (Test-Path -LiteralPath $managerTarget -PathType Leaf)) {
-        Remove-Item -LiteralPath $managerTarget -Force
+        $managerSwapStarted = $false
+        Add-StatusLine 'The legacy v1 Manager rollback was verified against the restored service package manifest.'
     }
-    if (Test-Path -LiteralPath $managerStage) {
-        Remove-Item -LiteralPath $managerStage -Force
-    }
-    if (Test-Path -LiteralPath $stagePath) {
-        Remove-VerifiedDirectory -Path $stagePath -AllowedRoot $installParent
-    }
+    Restore-ManagerCompanionState -ManagerFiles $managerFiles `
+        -SwapStarted $managerSwapStarted
 
     if ([bool]$journal.WasRunning) {
         Start-Service -Name $script:ServiceName
         Wait-ForStableRunningService
     }
+    $journal.Phase = 'RolledBack'
+    Write-UpdateJournal -State $journal
+    Remove-UpdateRecoveryArtifacts -InstallParent $installParent `
+        -ServiceStagePath $stagePath -ServiceBackupPath $backupPath `
+        -ManagerFiles $managerFiles
     Remove-UpdateJournal
     Add-StatusLine 'The previous service payload and state were restored after the interrupted update.'
     return $true
@@ -1149,6 +1930,9 @@ function Assert-ServicePackageManifest {
         'Set-TechBenchSyncCredential.ps1',
         'Set-TechBenchSageSyncCredential.ps1',
         'TechBench-ServerManager.ps1',
+        'Start-TechBenchServerManager.ps1',
+        'Start-TechBenchServerManager.vbs',
+        'csri-techbench-icon.ico',
         'Uninstall-TechBenchSyncService.ps1',
         'sage-odbc-worker\TechBench.SageOdbcWorker.exe',
         'sage-odbc-worker\TechBench.SageOdbcWorker.runtimeconfig.json',
@@ -1238,18 +2022,31 @@ function Assert-ServiceDeploymentPath {
     if (-not $fullPath.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to modify a service directory outside '$allowedRoot': $fullPath"
     }
-    if ((Test-Path -LiteralPath $fullPath) -and
-        ((Get-Item -LiteralPath $fullPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-        throw "Refusing to modify a reparse-point service directory: $fullPath"
-    }
+    [void](Assert-NoReparsePointInPath `
+        -Path $fullPath -TrustedRoot $script:ProgramFilesRootPath)
     return $fullPath
 }
 
 function Set-ManagerInstallDirectoryAcl {
     param([Parameter(Mandatory = $true)][string]$Path)
 
+    $fullPath = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    [void](Assert-NoReparsePointInPath `
+        -Path $fullPath -TrustedRoot $script:ProgramFilesRootPath)
+    if (Test-Path -LiteralPath $fullPath -PathType Container) {
+        [void](Assert-TrustedDirectoryAcl -Path $fullPath `
+            -AllowedWriteSidValues @('S-1-5-18', 'S-1-5-32-544') `
+            -Description 'existing Server Manager install directory')
+        Assert-NoReparsePointsInDirectoryTree -Path $fullPath
+    } else {
+        New-Item -ItemType Directory -Path $fullPath | Out-Null
+    }
+    [void](Assert-NoReparsePointInPath `
+        -Path $fullPath -TrustedRoot $script:ProgramFilesRootPath)
     $security = [Security.AccessControl.DirectorySecurity]::new()
     $security.SetAccessRuleProtection($true, $false)
+    $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $security.SetOwner($administrators)
     $inheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
     $propagation = [Security.AccessControl.PropagationFlags]::None
     $allow = [Security.AccessControl.AccessControlType]::Allow
@@ -1259,7 +2056,7 @@ function Set-ManagerInstallDirectoryAcl {
             Rights = [Security.AccessControl.FileSystemRights]::FullControl
         },
         [PSCustomObject]@{
-            Sid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+            Sid = $administrators
             Rights = [Security.AccessControl.FileSystemRights]::FullControl
         },
         [PSCustomObject]@{
@@ -1271,7 +2068,65 @@ function Set-ManagerInstallDirectoryAcl {
             [Security.AccessControl.FileSystemAccessRule]::new(
                 $entry.Sid, $entry.Rights, $inheritance, $propagation, $allow))
     }
+    Set-Acl -LiteralPath $fullPath -AclObject $security
+    [void](Assert-NoReparsePointInPath `
+        -Path $fullPath -TrustedRoot $script:ProgramFilesRootPath)
+    [void](Assert-TrustedDirectoryAcl -Path $fullPath `
+        -AllowedWriteSidValues @('S-1-5-18', 'S-1-5-32-544') `
+        -Description 'Server Manager install directory')
+    return $fullPath
+}
+
+function Assert-RegularManagerCompanionFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    [void](Assert-NoReparsePointInPath `
+        -Path $Path -TrustedRoot $script:ProgramFilesRootPath -AllowLeaf)
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($item.PSIsContainer -or
+        ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "The Server Manager companion is not a regular file: $Path"
+    }
+    $linkTypeProperty = $item.PSObject.Properties['LinkType']
+    if ($null -ne $linkTypeProperty -and
+        -not [string]::IsNullOrWhiteSpace([string]$linkTypeProperty.Value)) {
+        throw "Refusing a linked Server Manager companion file: $Path"
+    }
+}
+
+function Set-ManagerCompanionFileAcl {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    Assert-RegularManagerCompanionFile -Path $Path
+    $security = [Security.AccessControl.FileSecurity]::new()
+    $security.SetAccessRuleProtection($true, $false)
+    $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $security.SetOwner($administrators)
+    foreach ($entry in @(
+        [PSCustomObject]@{
+            Sid = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+            Rights = [Security.AccessControl.FileSystemRights]::FullControl
+        },
+        [PSCustomObject]@{
+            Sid = $administrators
+            Rights = [Security.AccessControl.FileSystemRights]::FullControl
+        },
+        [PSCustomObject]@{
+            Sid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+            Rights = [Security.AccessControl.FileSystemRights]'ReadAndExecute, Synchronize'
+        }
+    )) {
+        [void]$security.AddAccessRule(
+            [Security.AccessControl.FileSystemAccessRule]::new(
+                $entry.Sid,
+                $entry.Rights,
+                [Security.AccessControl.AccessControlType]::Allow))
+    }
     Set-Acl -LiteralPath $Path -AclObject $security
+    Assert-RegularManagerCompanionFile -Path $Path
+    [void](Assert-TrustedDirectoryAcl -Path $Path `
+        -AllowedWriteSidValues @('S-1-5-18', 'S-1-5-32-544') `
+        -Description 'Server Manager companion file')
 }
 
 function Remove-VerifiedDirectory {
@@ -1343,32 +2198,38 @@ function Install-VerifiedServicePayload {
     $oldPayloadMoved = $false
     $newPayloadInstalled = $false
     $managerPath = Assert-ServiceDeploymentPath $script:ManagerDirectory
-    if ((Test-Path -LiteralPath $managerPath) -and
-        ((Get-Item -LiteralPath $managerPath -Force).Attributes -band
-            [IO.FileAttributes]::ReparsePoint)) {
-        throw "Refusing to update a reparse-point Server Manager directory: $managerPath"
-    }
-    New-Item -ItemType Directory -Path $managerPath -Force | Out-Null
-    Set-ManagerInstallDirectoryAcl -Path $managerPath
-    $managerTarget = Join-Path $managerPath 'TechBench-ServerManager.ps1'
-    $managerStage = Join-Path $managerPath "TechBench-ServerManager.stage-$operationId.ps1"
-    $managerBackup = Join-Path $managerPath "TechBench-ServerManager.backup-$operationId.ps1"
-    $managerHadExisting = Test-Path -LiteralPath $managerTarget -PathType Leaf
-    $managerMoved = $false
-    $managerInstalled = $false
+    $managerPath = Set-ManagerInstallDirectoryAcl -Path $managerPath
+    $managerFiles = @($script:ManagerCompanionFileNames | ForEach-Object {
+        $name = $_
+        $baseName = [IO.Path]::GetFileNameWithoutExtension($name)
+        $extension = [IO.Path]::GetExtension($name)
+        $target = Join-Path $managerPath $name
+        [void](Assert-NoReparsePointInPath `
+            -Path $target -TrustedRoot $script:ProgramFilesRootPath -AllowLeaf)
+        if (Test-Path -LiteralPath $target) {
+            Set-ManagerCompanionFileAcl -Path $target
+        }
+        [ordered]@{
+            Name = $name
+            Target = $target
+            Stage = Join-Path $managerPath "$baseName.stage-$operationId$extension"
+            Backup = Join-Path $managerPath "$baseName.backup-$operationId$extension"
+            HadExisting = Test-Path -LiteralPath $target -PathType Leaf
+            Installed = $false
+        }
+    })
     $updateSucceeded = $false
+    $rollbackSucceeded = $false
+    $managerSwapStarted = $false
     $journalWritten = $false
     $journal = [ordered]@{
-        JournalFormatVersion = 1
+        JournalFormatVersion = 2
         Phase = 'Prepared'
         ServiceName = $script:ServiceName
         InstallPath = $installPath
         StagePath = $stagePath
         BackupPath = $backupPath
-        ManagerTarget = $managerTarget
-        ManagerStage = $managerStage
-        ManagerBackup = $managerBackup
-        ManagerHadExisting = $managerHadExisting
+        ManagerFiles = $managerFiles
         WasRunning = $wasRunning
     }
     try {
@@ -1413,23 +2274,34 @@ function Install-VerifiedServicePayload {
             Add-StatusLine 'The service passed its running-state stability check and was returned to Stopped.'
         }
 
-        # Update the separately installed GUI only after the service payload has
-        # passed its running-state stability check. The running script is already loaded in memory.
-        $packagedManager = Join-Path $PackageDirectory 'TechBench-ServerManager.ps1'
-        Copy-Item -LiteralPath $packagedManager -Destination $managerStage -Force
-        if ((Get-FileHash -LiteralPath $packagedManager -Algorithm SHA256).Hash -ne
-            (Get-FileHash -LiteralPath $managerStage -Algorithm SHA256).Hash) {
-            throw 'The staged Server Manager script failed its final copy verification.'
+        # Update the separately installed GUI and its launch/icon companions only
+        # after the service payload has passed its running-state stability check.
+        # The running scripts and icon are fully loaded in memory.
+        foreach ($managerFile in $managerFiles) {
+            $packagedFile = Join-Path $PackageDirectory $managerFile.Name
+            Copy-Item -LiteralPath $packagedFile `
+                -Destination $managerFile.Stage -Force
+            Set-ManagerCompanionFileAcl -Path $managerFile.Stage
+            if ((Get-FileHash -LiteralPath $packagedFile -Algorithm SHA256).Hash -ne
+                (Get-FileHash -LiteralPath $managerFile.Stage -Algorithm SHA256).Hash) {
+                throw "The staged Server Manager companion failed its final copy verification: $($managerFile.Name)"
+            }
         }
         $journal.Phase = 'ManagerSwapPrepared'
         Write-UpdateJournal -State $journal
-        if ($managerHadExisting) {
-            [IO.File]::Replace($managerStage, $managerTarget, $managerBackup)
-            $managerMoved = $true
-        } else {
-            Move-Item -LiteralPath $managerStage -Destination $managerTarget
+        $managerSwapStarted = $true
+        foreach ($managerFile in $managerFiles) {
+            if ([bool]$managerFile.HadExisting) {
+                [IO.File]::Replace(
+                    $managerFile.Stage, $managerFile.Target, $managerFile.Backup)
+            } else {
+                Move-Item -LiteralPath $managerFile.Stage `
+                    -Destination $managerFile.Target
+            }
+            Set-ManagerCompanionFileAcl -Path $managerFile.Target
+            $managerFile.Installed = $true
+            Write-UpdateJournal -State $journal
         }
-        $managerInstalled = $true
         $journal.Phase = 'ManagerInstalled'
         Write-UpdateJournal -State $journal
         $journal.Phase = 'Committed'
@@ -1438,16 +2310,9 @@ function Install-VerifiedServicePayload {
     } catch {
         $updateError = $_.Exception
         $rollbackMessage = 'The previous service files were not changed.'
-        $rollbackSucceeded = $false
         try {
-            if ($managerInstalled -and (Test-Path -LiteralPath $managerTarget)) {
-                Remove-Item -LiteralPath $managerTarget -Force
-                $managerInstalled = $false
-            }
-            if ($managerMoved -and (Test-Path -LiteralPath $managerBackup)) {
-                Move-Item -LiteralPath $managerBackup -Destination $managerTarget
-                $managerMoved = $false
-            }
+            Restore-ManagerCompanionState -ManagerFiles $managerFiles `
+                -SwapStarted $managerSwapStarted
             if ($oldPayloadMoved) {
                 $currentService = Get-Service -Name $script:ServiceName -ErrorAction SilentlyContinue
                 if ($null -ne $currentService -and
@@ -1471,39 +2336,34 @@ function Install-VerifiedServicePayload {
                 Start-Service -Name $script:ServiceName
                 Wait-ForServiceStatus -Status Running
             }
+            if ($journalWritten) {
+                $journal.Phase = 'RolledBack'
+                Write-UpdateJournal -State $journal
+            }
             $rollbackSucceeded = $true
         } catch {
             $rollbackMessage = "Automatic rollback also failed: $($_.Exception.Message)"
         }
-        if ($rollbackSucceeded -and $journalWritten) {
-            Remove-UpdateJournal
-            $journalWritten = $false
-        }
         throw "The service update failed: $($updateError.Message) $rollbackMessage"
     } finally {
-        if (Test-Path -LiteralPath $stagePath) {
-            Remove-VerifiedDirectory -Path $stagePath -AllowedRoot $parentPath
-        }
-        if (Test-Path -LiteralPath $managerStage) {
-            Remove-Item -LiteralPath $managerStage -Force
-        }
-        if ($updateSucceeded -and (Test-Path -LiteralPath $backupPath)) {
+        $cleanupIsSafe = -not $journalWritten -or
+            $updateSucceeded -or $rollbackSucceeded
+        if ($cleanupIsSafe) {
             try {
-                Remove-VerifiedDirectory -Path $backupPath -AllowedRoot $parentPath
+                Remove-UpdateRecoveryArtifacts -InstallParent $parentPath `
+                    -ServiceStagePath $stagePath -ServiceBackupPath $backupPath `
+                    -ManagerFiles $managerFiles
+                if ($journalWritten) {
+                    Remove-UpdateJournal
+                    $journalWritten = $false
+                }
             } catch {
-                Add-StatusLine "Update succeeded, but its backup could not be removed: $($_.Exception.Message)"
+                if ($journalWritten) {
+                    Add-StatusLine "Recovery cleanup is incomplete; the protected update journal and remaining artifacts were retained. $($_.Exception.Message)"
+                } else {
+                    Add-StatusLine "Temporary update artifacts could not be completely removed. $($_.Exception.Message)"
+                }
             }
-        }
-        if ($updateSucceeded -and (Test-Path -LiteralPath $managerBackup)) {
-            try {
-                Remove-Item -LiteralPath $managerBackup -Force
-            } catch {
-                Add-StatusLine "Update succeeded, but the prior Server Manager script could not be removed: $($_.Exception.Message)"
-            }
-        }
-        if ($updateSucceeded -and $journalWritten) {
-            Remove-UpdateJournal
-            $journalWritten = $false
         }
     }
 }
@@ -1590,7 +2450,11 @@ function Download-AndInstallServiceUpdate {
     if ($null -eq $script:AvailableUpdate) {
         throw 'Check for an update before downloading and installing it.'
     }
-    if (Test-Path -LiteralPath (Join-Path $script:ManagerDataDirectory 'pending-update.json')) {
+    $managerDataRoot = Initialize-AdminManagerDataRoot
+    $pendingJournalPath = Join-Path $managerDataRoot 'pending-update.json'
+    [void](Assert-NoReparsePointInPath `
+        -Path $pendingJournalPath -TrustedRoot $script:ProgramDataRootPath -AllowLeaf)
+    if (Test-Path -LiteralPath $pendingJournalPath) {
         throw 'An earlier update journal still exists. Close and reopen Server Manager so recovery can complete before installing another update.'
     }
     $update = $script:AvailableUpdate
@@ -1680,6 +2544,125 @@ If the service is currently stopped, it will run under its configured service id
     }
 }
 
+function Repair-ManagerLaunchIntegration {
+    $managerDataRoot = Initialize-AdminManagerDataRoot
+    # Never mutate companion files while an interrupted update journal still
+    # owns their rollback state. Recovery runs when the form is first shown.
+    $pendingJournalPath = Join-Path $managerDataRoot 'pending-update.json'
+    [void](Assert-NoReparsePointInPath `
+        -Path $pendingJournalPath -TrustedRoot $script:ProgramDataRootPath -AllowLeaf)
+    if (Test-Path -LiteralPath $pendingJournalPath -PathType Leaf) {
+        return
+    }
+
+    $manifestPath = Join-Path $script:InstallDirectory 'package-manifest.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw 'The installed service package manifest is missing, so Server Manager launch files cannot be repaired safely.'
+    }
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    if ($manifest.Product -cne 'TechBench Sync Service' -or
+        [int]$manifest.PackageFormatVersion -ne 1) {
+        throw 'The installed service package manifest is not a recognized TechBench manifest.'
+    }
+
+    [void](Set-ManagerInstallDirectoryAcl -Path $script:ManagerDirectory)
+    foreach ($fileName in @(
+        'Start-TechBenchServerManager.ps1',
+        'Start-TechBenchServerManager.vbs',
+        'csri-techbench-icon.ico'
+    )) {
+        $entries = @($manifest.Files | Where-Object {
+            ([string]$_.Path).Equals($fileName, [StringComparison]::OrdinalIgnoreCase)
+        })
+        if ($entries.Count -ne 1 -or
+            [string]$entries[0].Sha256 -notmatch '^[0-9A-Fa-f]{64}$') {
+            throw "The installed package manifest does not contain one valid entry for $fileName."
+        }
+        $sourcePath = Join-Path $script:InstallDirectory $fileName
+        if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+            throw "The installed service package is missing Server Manager companion: $fileName"
+        }
+        $sourceItem = Get-Item -LiteralPath $sourcePath
+        $sourceHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash
+        if ($sourceItem.Length -ne [int64]$entries[0].Length -or
+            -not $sourceHash.Equals(
+                [string]$entries[0].Sha256, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "The installed Server Manager companion failed manifest verification: $fileName"
+        }
+
+        $targetPath = Join-Path $script:ManagerDirectory $fileName
+        [void](Assert-NoReparsePointInPath `
+            -Path $targetPath -TrustedRoot $script:ProgramFilesRootPath -AllowLeaf)
+        if (Test-Path -LiteralPath $targetPath) {
+            Set-ManagerCompanionFileAcl -Path $targetPath
+        }
+        if ((Test-Path -LiteralPath $targetPath -PathType Leaf) -and
+            (Get-FileHash -LiteralPath $targetPath -Algorithm SHA256).Hash.Equals(
+                $sourceHash, [StringComparison]::OrdinalIgnoreCase)) {
+            continue
+        }
+
+        $temporaryPath = Join-Path $script:ManagerDirectory `
+            (".{0}.repair-{1}.tmp" -f $fileName, [Guid]::NewGuid().ToString('N'))
+        $backupPath = "$temporaryPath.backup"
+        try {
+            Copy-Item -LiteralPath $sourcePath -Destination $temporaryPath -Force
+            if (-not (Get-FileHash -LiteralPath $temporaryPath -Algorithm SHA256).Hash.Equals(
+                    $sourceHash, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "The repaired copy of $fileName failed verification."
+            }
+            if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
+                [IO.File]::Replace($temporaryPath, $targetPath, $backupPath)
+                Remove-Item -LiteralPath $backupPath -Force
+            } else {
+                Move-Item -LiteralPath $temporaryPath -Destination $targetPath
+            }
+            Set-ManagerCompanionFileAcl -Path $targetPath
+        } finally {
+            foreach ($temporaryFile in @($temporaryPath, $backupPath)) {
+                if (Test-Path -LiteralPath $temporaryFile) {
+                    Remove-Item -LiteralPath $temporaryFile -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+    }
+
+    $shortcutDirectory = Join-Path $env:ProgramData `
+        'Microsoft\Windows\Start Menu\Programs\CSRI'
+    [void](Assert-NoReparsePointInPath `
+        -Path $shortcutDirectory -TrustedRoot $script:ProgramDataRootPath)
+    New-Item -ItemType Directory -Path $shortcutDirectory -Force | Out-Null
+    [void](Assert-NoReparsePointInPath `
+        -Path $shortcutDirectory -TrustedRoot $script:ProgramDataRootPath)
+    $shortcutPath = Join-Path $shortcutDirectory 'TechBench Server Manager.lnk'
+    [void](Assert-NoReparsePointInPath `
+        -Path $shortcutPath -TrustedRoot $script:ProgramDataRootPath -AllowLeaf)
+    $shell = New-Object -ComObject WScript.Shell
+    try {
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = Join-Path `
+            ([Environment]::SystemDirectory) 'wscript.exe'
+        $shortcut.Arguments = '"{0}" "{1}" "{2}" "{3}" "{4}"' -f `
+            (Join-Path $script:ManagerDirectory 'Start-TechBenchServerManager.vbs'),
+            $script:ServiceName,
+            $script:InstallDirectory,
+            $script:DataDirectory,
+            $script:ManagerDirectory
+        $shortcut.WorkingDirectory = $script:ManagerDirectory
+        $shortcut.IconLocation = '{0},0' -f `
+            (Join-Path $script:ManagerDirectory 'csri-techbench-icon.ico')
+        $shortcut.Description = 'Manage and update the TechBench Sync Service'
+        $shortcut.Save()
+        [void](Assert-NoReparsePointInPath `
+            -Path $shortcutPath -TrustedRoot $script:ProgramDataRootPath -AllowLeaf)
+    } finally {
+        if ($null -ne $shortcut) {
+            [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcut) | Out-Null
+        }
+        [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) | Out-Null
+    }
+}
+
 function New-Label {
     param(
         [Parameter(Mandatory = $true)][string]$Text,
@@ -1734,13 +2717,206 @@ function New-SecretTextBox {
     return $box
 }
 
+function Open-ManagerLifetimeLock {
+    $managerDataRoot = Initialize-AdminManagerDataRoot
+    $lockPath = Join-Path $managerDataRoot 'server-manager.lock'
+    [void](Assert-NoReparsePointInPath `
+        -Path $lockPath -TrustedRoot $script:ProgramDataRootPath -AllowLeaf)
+
+    try {
+        $stream = [IO.File]::Open(
+            $lockPath,
+            [IO.FileMode]::OpenOrCreate,
+            [IO.FileAccess]::ReadWrite,
+            [IO.FileShare]::None)
+    } catch [IO.IOException] {
+        $win32Error = $_.Exception.HResult -band 0xFFFF
+        if ($win32Error -in @(32, 33)) {
+            [void][Windows.Forms.MessageBox]::Show(
+                'TechBench Server Manager is already running. Use its notification area icon to open it.',
+                'TechBench Server Manager',
+                [Windows.Forms.MessageBoxButtons]::OK,
+                [Windows.Forms.MessageBoxIcon]::Information)
+            return $null
+        }
+        throw
+    }
+
+    try {
+        # Recheck after opening to close the path-validation/use race. The file is
+        # intentionally persistent and remains empty between Manager sessions.
+        [void](Assert-NoReparsePointInPath `
+            -Path $lockPath -TrustedRoot $script:ProgramDataRootPath -AllowLeaf)
+        return $stream
+    } catch {
+        $stream.Dispose()
+        throw
+    }
+}
+
+$script:ManagerLifetimeLock = Open-ManagerLifetimeLock
+if ($null -eq $script:ManagerLifetimeLock) {
+    return
+}
+
+try {
+[void](Assert-NoReparsePointInPath `
+    -Path $script:DataDirectory -TrustedRoot $script:ProgramDataRootPath)
+if (Test-Path -LiteralPath $script:DataDirectory -PathType Container) {
+    # This is the one startup normalization site. Serialize the idempotent
+    # alpha.9 ACL migration with every other Manager mutation by holding the
+    # lifetime lock for the entire operation.
+    Protect-LegacyServiceDataDirectory `
+        -Path $script:DataDirectory `
+        -ServiceSidValue (Resolve-InstalledServiceAccountSidValue)
+}
+[void](Assert-NoReparsePointInPath `
+    -Path $script:DataDirectory -TrustedRoot $script:ProgramDataRootPath)
+[void](Assert-NoReparsePointsInDirectoryTree -Path $script:DataDirectory)
+$script:LaunchIntegrationWarning = $null
+try {
+    Repair-ManagerLaunchIntegration
+} catch {
+    $script:LaunchIntegrationWarning = $_.Exception.Message
+    $logPath = Join-Path $script:ManagerDataDirectory 'startup-errors.log'
+    try {
+        Initialize-AdminManagerDataRoot | Out-Null
+        [void](Assert-NoReparsePointInPath `
+            -Path $logPath -TrustedRoot $script:ProgramDataRootPath -AllowLeaf)
+        $logEntry = '[{0}] Server Manager launch integration repair failed: {1}{2}' -f `
+            [DateTime]::UtcNow.ToString('o'),
+            $script:LaunchIntegrationWarning,
+            [Environment]::NewLine
+        [IO.File]::AppendAllText($logPath, $logEntry, [Text.Encoding]::UTF8)
+    } catch {
+        $logPath = $null
+    }
+    $message = "Server Manager opened, but its Start Menu launcher could not be repaired.`r`n`r`n$($script:LaunchIntegrationWarning)"
+    if (-not [string]::IsNullOrWhiteSpace($logPath)) {
+        $message += "`r`n`r`nDetails were logged to:`r`n$logPath"
+    }
+    [void][Windows.Forms.MessageBox]::Show(
+        $message,
+        'TechBench Server Manager',
+        [Windows.Forms.MessageBoxButtons]::OK,
+        [Windows.Forms.MessageBoxIcon]::Warning)
+}
+
 $script:MainForm = [Windows.Forms.Form]::new()
 $script:MainForm.Text = 'TechBench Server Manager'
 $script:MainForm.ClientSize = [Drawing.Size]::new(790, 715)
 $script:MainForm.MinimumSize = [Drawing.Size]::new(806, 754)
 $script:MainForm.StartPosition = [Windows.Forms.FormStartPosition]::CenterScreen
-$script:MainForm.Icon = [Drawing.SystemIcons]::Application
 $script:MainForm.AutoScaleMode = [Windows.Forms.AutoScaleMode]::Dpi
+
+# Copy the packaged icon completely into memory before assigning it. Server
+# Manager updates can then replace the icon file while this process is open.
+$managerIconPath = Join-Path $script:ManagerDirectory 'csri-techbench-icon.ico'
+if (Test-Path -LiteralPath $managerIconPath -PathType Leaf) {
+    try {
+        $iconBytes = [IO.File]::ReadAllBytes($managerIconPath)
+        $iconStream = [IO.MemoryStream]::new($iconBytes, $false)
+        try {
+            $sourceIcon = [Drawing.Icon]::new($iconStream)
+            try {
+                $script:ManagerIcon = [Drawing.Icon]$sourceIcon.Clone()
+            } finally {
+                $sourceIcon.Dispose()
+            }
+        } finally {
+            $iconStream.Dispose()
+        }
+    } catch {
+        $script:ManagerIcon = $null
+    }
+}
+$script:MainForm.Icon = if ($null -ne $script:ManagerIcon) {
+    $script:ManagerIcon
+} else {
+    [Drawing.SystemIcons]::Application
+}
+
+function Show-ManagerWindow {
+    if (-not $script:MainForm.Visible) {
+        $script:MainForm.Show()
+    }
+    if ($script:MainForm.WindowState -eq [Windows.Forms.FormWindowState]::Minimized) {
+        $script:MainForm.WindowState = [Windows.Forms.FormWindowState]::Normal
+    }
+    $script:MainForm.BringToFront()
+    [void]$script:MainForm.Activate()
+}
+
+function Clear-ManagerSecretFields {
+    foreach ($box in @(
+        $script:ServicePasswordBox,
+        $script:WhdSecretBox,
+        $script:SageSecretBox
+    )) {
+        if ($null -ne $box) {
+            $box.Clear()
+            $box.UseSystemPasswordChar = $true
+        }
+    }
+    foreach ($checkBox in @(
+        $script:ShowServicePasswordCheckBox,
+        $script:ShowWhdSecretCheckBox,
+        $script:ShowSageSecretCheckBox
+    )) {
+        if ($null -ne $checkBox) {
+            $checkBox.Checked = $false
+        }
+    }
+}
+
+function Hide-ManagerToTray {
+    Clear-ManagerSecretFields
+    $script:MainForm.Hide()
+    if (-not $script:TrayNoticeShown) {
+        $script:TrayNoticeShown = $true
+        $script:NotifyIcon.ShowBalloonTip(3000)
+    }
+}
+
+function Request-ManagerExit {
+    if ($script:OperationInProgress) {
+        Show-ManagerWindow
+        Show-ManagerMessage `
+            -Text 'Wait for the current server operation to finish before exiting Server Manager.'
+        return
+    }
+
+    $script:MainForm.Close()
+}
+
+$script:TrayContextMenu = [Windows.Forms.ContextMenuStrip]::new()
+$trayOpenMenuItem = [Windows.Forms.ToolStripMenuItem]::new()
+$trayOpenMenuItem.Text = 'Open TechBench Server Manager'
+$script:TrayExitMenuItem = [Windows.Forms.ToolStripMenuItem]::new()
+$script:TrayExitMenuItem.Text = 'Exit'
+[void]$script:TrayContextMenu.Items.Add($trayOpenMenuItem)
+[void]$script:TrayContextMenu.Items.Add(
+    [Windows.Forms.ToolStripSeparator]::new())
+[void]$script:TrayContextMenu.Items.Add($script:TrayExitMenuItem)
+
+$script:NotifyIcon = [Windows.Forms.NotifyIcon]::new()
+$script:NotifyIcon.Text = 'TechBench Server Manager'
+$script:NotifyIcon.Icon = $script:MainForm.Icon
+$script:NotifyIcon.ContextMenuStrip = $script:TrayContextMenu
+$script:NotifyIcon.BalloonTipTitle = 'TechBench Server Manager'
+$script:NotifyIcon.BalloonTipText =
+    'Server Manager is still running. Double-click the tray icon to reopen it.'
+$script:NotifyIcon.BalloonTipIcon = [Windows.Forms.ToolTipIcon]::Info
+$script:NotifyIcon.Visible = $true
+
+$trayOpenMenuItem.Add_Click({ Show-ManagerWindow })
+$script:TrayExitMenuItem.Add_Click({ Request-ManagerExit })
+$script:NotifyIcon.Add_DoubleClick({ Show-ManagerWindow })
+$script:MainForm.Add_Resize({
+    if ($script:MainForm.WindowState -eq [Windows.Forms.FormWindowState]::Minimized) {
+        Hide-ManagerToTray
+    }
+})
 
 $title = New-Label -Text 'TechBench Server Manager' -X 22 -Y 17 -Width 500 -Height 31 -Bold $true
 $title.Font = [Drawing.Font]::new('Segoe UI', 16, [Drawing.FontStyle]::Bold)
@@ -1934,12 +3110,16 @@ $script:InstallUpdateButton.Add_Click({
     }
 })
 $script:MainForm.Add_FormClosed({
-    foreach ($box in @(
-        $script:ServicePasswordBox,
-        $script:WhdSecretBox,
-        $script:SageSecretBox
-    )) {
-        $box.Clear()
+    Clear-ManagerSecretFields
+    if ($null -ne $script:NotifyIcon) {
+        $script:NotifyIcon.Visible = $false
+        $script:NotifyIcon.ContextMenuStrip = $null
+        $script:NotifyIcon.Dispose()
+        $script:NotifyIcon = $null
+    }
+    if ($null -ne $script:TrayContextMenu) {
+        $script:TrayContextMenu.Dispose()
+        $script:TrayContextMenu = $null
     }
 })
 $script:MainForm.Add_FormClosing({
@@ -1968,7 +3148,20 @@ $script:MainForm.Add_Shown({
     } else {
         Add-StatusLine 'Server Manager is ready. Shared configuration remains managed by TechBench Admins in the client.'
     }
+    if (-not [string]::IsNullOrWhiteSpace($script:LaunchIntegrationWarning)) {
+        Add-StatusLine "WARNING: The Start Menu launcher could not be repaired. $($script:LaunchIntegrationWarning)"
+    }
 })
 
-[void]$script:MainForm.ShowDialog()
+[Windows.Forms.Application]::Run($script:MainForm)
 $script:MainForm.Dispose()
+if ($null -ne $script:ManagerIcon) {
+    $script:ManagerIcon.Dispose()
+    $script:ManagerIcon = $null
+}
+} finally {
+    if ($null -ne $script:ManagerLifetimeLock) {
+        $script:ManagerLifetimeLock.Dispose()
+        $script:ManagerLifetimeLock = $null
+    }
+}

@@ -76,9 +76,12 @@ public sealed class SyncServiceCoreTests
         var store = CreateSecretStore(path);
         const string firstSecret = "first-test-secret-1!";
         const string secondSecret = "second-test-secret-2!";
+        const string legacyTemporarySentinel = "do-not-overwrite";
 
         try
         {
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(path + ".new", legacyTemporarySentinel);
             Assert.False(store.Exists);
             store.Write(firstSecret);
 
@@ -91,7 +94,8 @@ public sealed class SyncServiceCoreTests
             store.Write(secondSecret);
 
             Assert.Equal(secondSecret, store.Read());
-            Assert.False(File.Exists(path + ".new"));
+            Assert.Equal(legacyTemporarySentinel, File.ReadAllText(path + ".new"));
+            Assert.Empty(Directory.GetFiles(directory, ".whd.secret.*.tmp"));
 
             store.Delete();
             Assert.False(store.Exists);
@@ -148,6 +152,7 @@ public sealed class SyncServiceCoreTests
             Assert.False(ContainsSequence(
                 File.ReadAllBytes(path),
                 Encoding.UTF8.GetBytes(secret)));
+            Assert.Empty(Directory.GetFiles(directory, ".sage.secret.*.tmp"));
 
             var whdStore = new WhdSecretStore(options);
             var error = Assert.Throws<InvalidOperationException>(() => whdStore.Read());

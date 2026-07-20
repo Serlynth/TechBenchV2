@@ -44,11 +44,40 @@ $sourcePath = [IO.Path]::GetFullPath($SourceDirectory)
 $installPath = [IO.Path]::GetFullPath($InstallDirectory)
 $dataPath = [IO.Path]::GetFullPath($DataDirectory)
 $managerPath = [IO.Path]::GetFullPath($ManagerDirectory)
+$programFilesRootPath = [IO.Path]::GetFullPath($env:ProgramFiles).TrimEnd('\')
 $allowedInstallRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramFiles 'CSRI')).TrimEnd('\') + '\'
-$allowedDataRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'CSRI')).TrimEnd('\') + '\'
+$programDataRootPath = [IO.Path]::GetFullPath($env:ProgramData).TrimEnd('\')
+$programDataAnchorPath = [IO.Path]::GetFullPath(
+    (Join-Path $programDataRootPath 'CSRI')).TrimEnd('\')
+$managerDataRootPath = [IO.Path]::GetFullPath(
+    (Join-Path $programDataAnchorPath 'TechBench Server Manager')).TrimEnd('\')
+$allowedDataRoot = $programDataAnchorPath + '\'
 $sourceExecutable = Join-Path $sourcePath 'TechBench.SyncService.exe'
 $installedExecutable = Join-Path $installPath 'TechBench.SyncService.exe'
 $isManagedServiceAccount = $ServiceAccount.EndsWith('$', [StringComparison]::Ordinal)
+
+function Assert-PathTreesDoNotOverlap {
+    param(
+        [Parameter(Mandatory = $true)][string]$FirstPath,
+        [Parameter(Mandatory = $true)][string]$SecondPath,
+        [Parameter(Mandatory = $true)][string]$FirstName,
+        [Parameter(Mandatory = $true)][string]$SecondName
+    )
+
+    $separator = [IO.Path]::DirectorySeparatorChar
+    $alternateSeparator = [IO.Path]::AltDirectorySeparatorChar
+    $firstCanonical = [IO.Path]::GetFullPath($FirstPath).
+        Replace($alternateSeparator, $separator).TrimEnd($separator)
+    $secondCanonical = [IO.Path]::GetFullPath($SecondPath).
+        Replace($alternateSeparator, $separator).TrimEnd($separator)
+    $firstPrefix = $firstCanonical + $separator
+    $secondPrefix = $secondCanonical + $separator
+    if ($firstCanonical.Equals($secondCanonical, [StringComparison]::OrdinalIgnoreCase) -or
+        $firstCanonical.StartsWith($secondPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+        $secondCanonical.StartsWith($firstPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "$FirstName and $SecondName must not be equal or contain one another: '$firstCanonical' and '$secondCanonical'."
+    }
+}
 
 if (-not $installPath.StartsWith($allowedInstallRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw "InstallDirectory must be a service-owned child directory under '$allowedInstallRoot': $installPath"
@@ -62,21 +91,284 @@ if (-not $managerPath.StartsWith($allowedInstallRoot, [StringComparison]::Ordina
     throw "ManagerDirectory must be a child directory under '$allowedInstallRoot': $managerPath"
 }
 
-if ($managerPath.Equals($installPath, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'ManagerDirectory must be separate from InstallDirectory so Server Manager can update service files safely.'
+Assert-PathTreesDoNotOverlap `
+    -FirstPath $installPath -SecondPath $managerPath `
+    -FirstName 'InstallDirectory' -SecondName 'ManagerDirectory'
+Assert-PathTreesDoNotOverlap `
+    -FirstPath $dataPath -SecondPath $managerDataRootPath `
+    -FirstName 'DataDirectory' -SecondName 'ManagerDataDirectory'
+
+function Assert-NoReparsePointInPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$TrustedRoot,
+        [switch]$AllowLeaf
+    )
+
+    $rootPath = [IO.Path]::GetFullPath($TrustedRoot).TrimEnd('\')
+    $fullPath = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    $trustedRootItem = Get-Item -LiteralPath $rootPath -Force -ErrorAction Stop
+    if (-not $trustedRootItem.PSIsContainer -or
+        ($trustedRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "The trusted root is missing, not a directory, or a reparse point: $rootPath"
+    }
+    $rootPrefix = $rootPath + '\'
+    if (-not $fullPath.Equals($rootPath, [StringComparison]::OrdinalIgnoreCase) -and
+        -not $fullPath.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to inspect a path outside trusted root '$rootPath': $fullPath"
+    }
+
+    $relativePath = $fullPath.Substring($rootPath.Length).TrimStart('\')
+    if ([string]::IsNullOrWhiteSpace($relativePath)) { return $fullPath }
+    $segments = $relativePath.Split(
+        [char[]]@('\'), [StringSplitOptions]::RemoveEmptyEntries)
+    $currentPath = $rootPath
+    for ($index = 0; $index -lt $segments.Length; $index++) {
+        $currentPath = Join-Path $currentPath $segments[$index]
+        try {
+            $item = Get-Item -LiteralPath $currentPath -Force -ErrorAction Stop
+        } catch [Management.Automation.ItemNotFoundException] {
+            break
+        }
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Refusing to follow a reparse-point path component: $currentPath"
+        }
+        $isAllowedLeaf = $AllowLeaf -and $index -eq ($segments.Length - 1)
+        if (-not $item.PSIsContainer -and -not $isAllowedLeaf) {
+            throw "A directory path component is not a directory: $currentPath"
+        }
+    }
+    return $fullPath
 }
 
-foreach ($protectedPath in @($installPath, $dataPath, $managerPath)) {
-    if ((Test-Path -LiteralPath $protectedPath) -and
-        ((Get-Item -LiteralPath $protectedPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-        throw "Refusing to install into a reparse-point directory: $protectedPath"
+function Assert-NoReparsePointsInDirectoryTree {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return }
+    $pending = [Collections.Generic.Stack[string]]::new()
+    $pending.Push([IO.Path]::GetFullPath($Path))
+    $itemCount = 0
+    while ($pending.Count -gt 0) {
+        $currentDirectory = $pending.Pop()
+        foreach ($item in @(Get-ChildItem -LiteralPath $currentDirectory -Force)) {
+            $itemCount++
+            if ($itemCount -gt 10000) {
+                throw "Refusing to adopt a ProgramData directory tree with more than 10000 entries: $Path"
+            }
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "Refusing to adopt a ProgramData directory tree containing a reparse point: $($item.FullName)"
+            }
+            if ($item.PSIsContainer) {
+                $pending.Push($item.FullName)
+            }
+        }
     }
 }
+
+function New-ProtectedProgramDataAnchorAcl {
+    $security = [Security.AccessControl.DirectorySecurity]::new()
+    $security.SetAccessRuleProtection($true, $false)
+    $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+    $users = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+    $security.SetOwner($administrators)
+    foreach ($sid in @($administrators, $system)) {
+        [void]$security.AddAccessRule(
+            [Security.AccessControl.FileSystemAccessRule]::new(
+                $sid,
+                [Security.AccessControl.FileSystemRights]::FullControl,
+                [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit',
+                [Security.AccessControl.PropagationFlags]::None,
+                [Security.AccessControl.AccessControlType]::Allow))
+    }
+    [void]$security.AddAccessRule(
+        [Security.AccessControl.FileSystemAccessRule]::new(
+            $users,
+            [Security.AccessControl.FileSystemRights]'ReadAndExecute, Synchronize',
+            [Security.AccessControl.InheritanceFlags]::None,
+            [Security.AccessControl.PropagationFlags]::None,
+            [Security.AccessControl.AccessControlType]::Allow))
+    return $security
+}
+
+function Assert-TrustedDirectoryAcl {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string[]]$AllowedWriteSidValues,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
+
+    $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($owner -notin @('S-1-5-18', 'S-1-5-32-544') -or
+        -not $acl.AreAccessRulesProtected) {
+        throw "Refusing unsafe existing $Description '$Path'. It must be owned by SYSTEM or Administrators and have protected permissions. Inspect and remove any untrusted contents or junctions, then recreate it with an administrator-approved ACL; this installer will not take ownership of it."
+    }
+    $writeMask = [Security.AccessControl.FileSystemRights]::WriteData -bor
+        [Security.AccessControl.FileSystemRights]::AppendData -bor
+        [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+        [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+        [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
+    $unsafeRule = $acl.GetAccessRules(
+        $true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object {
+            $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+            $AllowedWriteSidValues -notcontains $_.IdentityReference.Value -and
+            ($_.FileSystemRights -band $writeMask) -ne 0
+        } | Select-Object -First 1
+    if ($null -ne $unsafeRule) {
+        throw "Refusing unsafe existing $Description '$Path': '$($unsafeRule.IdentityReference.Value)' has write access. Inspect and remove any untrusted contents or junctions, then recreate it with an administrator-approved ACL."
+    }
+    return $acl
+}
+
+function Assert-LegacyTechBenchAnchorCanMigrate {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [string]$ServiceSidValue
+    )
+
+    $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($owner -notin @('S-1-5-18', 'S-1-5-32-544')) {
+        throw "The legacy CSRI anchor is not owned by SYSTEM or Administrators."
+    }
+    $allowedChildren = @('TechBench Sync Service', 'TechBench Server Manager')
+    foreach ($item in @(Get-ChildItem -LiteralPath $Path -Force)) {
+        if (-not $item.PSIsContainer -or
+            ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            $allowedChildren -notcontains $item.Name) {
+            throw "The legacy CSRI anchor contains an unexpected or unsafe entry: $($item.FullName)"
+        }
+        $childAcl = Get-Acl -LiteralPath $item.FullName -ErrorAction Stop
+        $childOwner = $childAcl.GetOwner(
+            [Security.Principal.SecurityIdentifier]).Value
+        if ($childOwner -notin @('S-1-5-18', 'S-1-5-32-544') -or
+            -not $childAcl.AreAccessRulesProtected) {
+            throw "The legacy TechBench child is not protected and privileged-owned: $($item.FullName)"
+        }
+        $allowedWriteSids = @('S-1-5-18', 'S-1-5-32-544')
+        if ($item.Name -eq 'TechBench Sync Service') {
+            if ([string]::IsNullOrWhiteSpace($ServiceSidValue)) {
+                throw 'The configured service SID is required to validate the legacy service-data ACL.'
+            }
+            $allowedWriteSids += $ServiceSidValue
+        }
+        [void](Assert-TrustedDirectoryAcl -Path $item.FullName `
+            -AllowedWriteSidValues $allowedWriteSids `
+            -Description "legacy $($item.Name) directory")
+        Assert-NoReparsePointsInDirectoryTree -Path $item.FullName
+    }
+}
+
+function New-ProtectedDirectoryAtomically {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ParentPath,
+        [Parameter(Mandatory = $true)][Security.AccessControl.DirectorySecurity]$Security,
+        [Parameter(Mandatory = $true)][string[]]$AllowedWriteSidValues,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
+
+    [void](Assert-NoReparsePointInPath -Path $Path -TrustedRoot $programDataRootPath)
+    if (Test-Path -LiteralPath $Path -PathType Container) {
+        [void](Assert-TrustedDirectoryAcl -Path $Path `
+            -AllowedWriteSidValues $AllowedWriteSidValues -Description $Description)
+        return $false
+    }
+
+    $temporaryPath = Join-Path $ParentPath `
+        ('.{0}.create-{1}' -f [IO.Path]::GetFileName($Path), [Guid]::NewGuid().ToString('N'))
+    $temporaryCreated = $false
+    try {
+        ([IO.DirectoryInfo]::new($temporaryPath)).Create($Security)
+        $temporaryCreated = $true
+        [void](Assert-NoReparsePointInPath `
+            -Path $temporaryPath -TrustedRoot $programDataRootPath)
+        [void](Assert-TrustedDirectoryAcl -Path $temporaryPath `
+            -AllowedWriteSidValues $AllowedWriteSidValues -Description "temporary $Description")
+        try {
+            [IO.Directory]::Move($temporaryPath, $Path)
+            $temporaryCreated = $false
+        } catch {
+            if (-not (Test-Path -LiteralPath $Path -PathType Container)) { throw }
+            [void](Assert-NoReparsePointInPath `
+                -Path $Path -TrustedRoot $programDataRootPath)
+            [void](Assert-TrustedDirectoryAcl -Path $Path `
+                -AllowedWriteSidValues $AllowedWriteSidValues -Description $Description)
+        }
+    } finally {
+        if ($temporaryCreated -and (Test-Path -LiteralPath $temporaryPath -PathType Container)) {
+            [void](Assert-NoReparsePointInPath `
+                -Path $temporaryPath -TrustedRoot $programDataRootPath)
+            [void](Assert-TrustedDirectoryAcl -Path $temporaryPath `
+                -AllowedWriteSidValues $AllowedWriteSidValues -Description "temporary $Description")
+            [IO.Directory]::Delete($temporaryPath, $false)
+        }
+    }
+
+    [void](Assert-NoReparsePointInPath -Path $Path -TrustedRoot $programDataRootPath)
+    [void](Assert-TrustedDirectoryAcl -Path $Path `
+        -AllowedWriteSidValues $AllowedWriteSidValues -Description $Description)
+    return $true
+}
+
+function Initialize-ProtectedProgramDataAnchor {
+    param([string]$ServiceSidValue)
+
+    [void](Assert-NoReparsePointInPath `
+        -Path $programDataAnchorPath -TrustedRoot $programDataRootPath)
+    if (Test-Path -LiteralPath $programDataAnchorPath -PathType Container) {
+        try {
+            [void](Assert-TrustedDirectoryAcl -Path $programDataAnchorPath `
+                -AllowedWriteSidValues @('S-1-5-18', 'S-1-5-32-544') `
+                -Description 'ProgramData CSRI anchor')
+        } catch {
+            $unsafeReason = $_.Exception.Message
+            try {
+                Assert-LegacyTechBenchAnchorCanMigrate `
+                    -Path $programDataAnchorPath -ServiceSidValue $ServiceSidValue
+            } catch {
+                throw "$unsafeReason Automatic legacy-alpha ACL migration was refused: $($_.Exception.Message) Inspect the CSRI directory and repair it manually before retrying."
+            }
+            Set-Acl -LiteralPath $programDataAnchorPath `
+                -AclObject (New-ProtectedProgramDataAnchorAcl)
+            [void](Assert-NoReparsePointInPath `
+                -Path $programDataAnchorPath -TrustedRoot $programDataRootPath)
+            Assert-LegacyTechBenchAnchorCanMigrate `
+                -Path $programDataAnchorPath -ServiceSidValue $ServiceSidValue
+            [void](Assert-TrustedDirectoryAcl -Path $programDataAnchorPath `
+                -AllowedWriteSidValues @('S-1-5-18', 'S-1-5-32-544') `
+                -Description 'migrated ProgramData CSRI anchor')
+        }
+    } else {
+        [void](New-ProtectedDirectoryAtomically `
+            -Path $programDataAnchorPath `
+            -ParentPath $programDataRootPath `
+            -Security (New-ProtectedProgramDataAnchorAcl) `
+            -AllowedWriteSidValues @('S-1-5-18', 'S-1-5-32-544') `
+            -Description 'ProgramData CSRI anchor')
+    }
+    [void](Assert-NoReparsePointInPath `
+        -Path $programDataAnchorPath -TrustedRoot $programDataRootPath)
+    return $programDataAnchorPath
+}
+
+[void](Assert-NoReparsePointInPath `
+    -Path $installPath -TrustedRoot $programFilesRootPath)
+[void](Assert-NoReparsePointInPath `
+    -Path $managerPath -TrustedRoot $programFilesRootPath)
+[void](Assert-NoReparsePointInPath -Path $dataPath -TrustedRoot $programDataRootPath)
+[void](Assert-NoReparsePointInPath `
+    -Path $managerDataRootPath -TrustedRoot $programDataRootPath)
 
 function Invoke-ScChecked {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
-    $output = & "$env:SystemRoot\System32\sc.exe" @Arguments 2>&1
+    $scExecutable = Join-Path ([Environment]::SystemDirectory) 'sc.exe'
+    $output = & $scExecutable @Arguments 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Service Control Manager command failed: sc.exe $($Arguments -join ' ')`n$($output -join [Environment]::NewLine)"
     }
@@ -233,15 +525,74 @@ function Read-ServiceAccountCredential {
     return $fallbackCredential
 }
 
+function Assert-TrustedSecretFileAcl {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][Security.Principal.SecurityIdentifier]$ServiceSid,
+        [switch]$RequireServiceReadOnly
+    )
+
+    [void](Assert-NoReparsePointInPath `
+        -Path $Path -TrustedRoot $programDataRootPath -AllowLeaf)
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($item.PSIsContainer -or
+        ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "The protected credential path is not a regular file: $Path"
+    }
+    $linkTypeProperty = $item.PSObject.Properties['LinkType']
+    if ($null -ne $linkTypeProperty -and
+        -not [string]::IsNullOrWhiteSpace([string]$linkTypeProperty.Value)) {
+        throw "Refusing an existing credential file that is a file-system link: $Path"
+    }
+
+    $allowedSidValues = @('S-1-5-18', 'S-1-5-32-544', $ServiceSid.Value)
+    $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($allowedSidValues -notcontains $owner) {
+        throw "Refusing unsafe existing credential file '$Path': it must be owned by SYSTEM, Administrators, or the configured service identity. Remove it and reprovision the credential."
+    }
+    $unsafeRule = $acl.GetAccessRules(
+        $true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object {
+            $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+            $allowedSidValues -notcontains $_.IdentityReference.Value
+        } | Select-Object -First 1
+    if ($null -ne $unsafeRule) {
+        throw "Refusing unsafe existing credential file '$Path': '$($unsafeRule.IdentityReference.Value)' has access. Remove it and reprovision the credential."
+    }
+    if ($RequireServiceReadOnly) {
+        if (-not $acl.AreAccessRulesProtected) {
+            throw "The normalized credential file ACL still permits inheritance: $Path"
+        }
+        $writeMask = [Security.AccessControl.FileSystemRights]::WriteData -bor
+            [Security.AccessControl.FileSystemRights]::AppendData -bor
+            [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+            [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+            [Security.AccessControl.FileSystemRights]::Delete -bor
+            [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+            [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+            [Security.AccessControl.FileSystemRights]::TakeOwnership
+        $serviceWriteRule = $acl.GetAccessRules(
+            $true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object {
+                $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+                $_.IdentityReference.Value -eq $ServiceSid.Value -and
+                ($_.FileSystemRights -band $writeMask) -ne 0
+            } | Select-Object -First 1
+        if ($null -ne $serviceWriteRule) {
+            throw "The normalized credential file still grants write access to the service identity: $Path"
+        }
+    }
+}
+
 function Set-SecretDirectoryAcl {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
         [Parameter(Mandatory = $true)][Security.Principal.SecurityIdentifier]$ServiceSid
     )
 
-    New-Item -ItemType Directory -Path $Path -Force | Out-Null
     $security = [Security.AccessControl.DirectorySecurity]::new()
     $security.SetAccessRuleProtection($true, $false)
+    $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $security.SetOwner($administrators)
     $inheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
     $propagation = [Security.AccessControl.PropagationFlags]::None
     $allow = [Security.AccessControl.AccessControlType]::Allow
@@ -257,7 +608,7 @@ function Set-SecretDirectoryAcl {
         },
         [PSCustomObject]@{
             Sid = $ServiceSid
-            Rights = [Security.AccessControl.FileSystemRights]::Modify
+            Rights = [Security.AccessControl.FileSystemRights]'ReadAndExecute, Synchronize'
         }
     )
     foreach ($entry in $accessEntries) {
@@ -266,7 +617,61 @@ function Set-SecretDirectoryAcl {
         [void]$security.AddAccessRule($rule)
     }
 
+    $privilegedWriteSids = @('S-1-5-18', 'S-1-5-32-544')
+    $legacyAllowedWriteSids = @($privilegedWriteSids + $ServiceSid.Value)
+    [void](Assert-NoReparsePointInPath -Path $Path -TrustedRoot $programDataRootPath)
+    if (Test-Path -LiteralPath $Path -PathType Container) {
+        [void](Assert-TrustedDirectoryAcl -Path $Path `
+            -AllowedWriteSidValues $legacyAllowedWriteSids `
+            -Description 'TechBench service data directory')
+        Assert-NoReparsePointsInDirectoryTree -Path $Path
+    } else {
+        [void](New-ProtectedDirectoryAtomically `
+            -Path $Path `
+            -ParentPath $programDataAnchorPath `
+            -Security $security `
+            -AllowedWriteSidValues $privilegedWriteSids `
+            -Description 'TechBench service data directory')
+    }
+    $allowedSecretNames = @('whd.secret', 'sage.secret')
+    foreach ($entry in @(Get-ChildItem -LiteralPath $Path -Force)) {
+        if ($allowedSecretNames -notcontains $entry.Name) {
+            throw "The TechBench service data directory contains an unexpected entry: $($entry.FullName). Remove it after verifying its origin, then retry."
+        }
+        Assert-TrustedSecretFileAcl -Path $entry.FullName -ServiceSid $ServiceSid
+    }
+
+    # The directory and its exact, allowlisted contents were proved trusted
+    # before this normalization, so Set-Acl never privileges attacker data.
     Set-Acl -LiteralPath $Path -AclObject $security
+    [void](Assert-NoReparsePointInPath -Path $Path -TrustedRoot $programDataRootPath)
+    Assert-NoReparsePointsInDirectoryTree -Path $Path
+    [void](Assert-TrustedDirectoryAcl -Path $Path `
+        -AllowedWriteSidValues $privilegedWriteSids `
+        -Description 'TechBench service data directory')
+
+    foreach ($secretName in @('whd.secret', 'sage.secret')) {
+        $secretPath = Join-Path $Path $secretName
+        [void](Assert-NoReparsePointInPath `
+            -Path $secretPath -TrustedRoot $programDataRootPath -AllowLeaf)
+        if (-not (Test-Path -LiteralPath $secretPath)) { continue }
+        Assert-TrustedSecretFileAcl -Path $secretPath -ServiceSid $ServiceSid
+        $fileSecurity = [Security.AccessControl.FileSecurity]::new()
+        $fileSecurity.SetAccessRuleProtection($true, $false)
+        $fileSecurity.SetOwner($administrators)
+        foreach ($entry in $accessEntries) {
+            [void]$fileSecurity.AddAccessRule(
+                [Security.AccessControl.FileSystemAccessRule]::new(
+                    $entry.Sid,
+                    $entry.Rights,
+                    [Security.AccessControl.AccessControlType]::Allow))
+        }
+        Set-Acl -LiteralPath $secretPath -AclObject $fileSecurity
+        [void](Assert-NoReparsePointInPath `
+            -Path $secretPath -TrustedRoot $programDataRootPath -AllowLeaf)
+        Assert-TrustedSecretFileAcl -Path $secretPath -ServiceSid $ServiceSid `
+            -RequireServiceReadOnly
+    }
 }
 
 function Add-ServiceReadAcl {
@@ -398,6 +803,58 @@ namespace TechBench.Deployment
     [Array]::Clear($sidBytes, 0, $sidBytes.Length)
 }
 
+function Assert-RegularManagerCompanionFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    [void](Assert-NoReparsePointInPath `
+        -Path $Path -TrustedRoot $programFilesRootPath -AllowLeaf)
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($item.PSIsContainer -or
+        ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "The Server Manager companion is not a regular file: $Path"
+    }
+    $linkTypeProperty = $item.PSObject.Properties['LinkType']
+    if ($null -ne $linkTypeProperty -and
+        -not [string]::IsNullOrWhiteSpace([string]$linkTypeProperty.Value)) {
+        throw "Refusing a linked Server Manager companion file: $Path"
+    }
+}
+
+function Set-ManagerCompanionFileAcl {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    Assert-RegularManagerCompanionFile -Path $Path
+    $security = [Security.AccessControl.FileSecurity]::new()
+    $security.SetAccessRuleProtection($true, $false)
+    $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $security.SetOwner($administrators)
+    foreach ($entry in @(
+        [PSCustomObject]@{
+            Sid = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+            Rights = [Security.AccessControl.FileSystemRights]::FullControl
+        },
+        [PSCustomObject]@{
+            Sid = $administrators
+            Rights = [Security.AccessControl.FileSystemRights]::FullControl
+        },
+        [PSCustomObject]@{
+            Sid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+            Rights = [Security.AccessControl.FileSystemRights]'ReadAndExecute, Synchronize'
+        }
+    )) {
+        [void]$security.AddAccessRule(
+            [Security.AccessControl.FileSystemAccessRule]::new(
+                $entry.Sid,
+                $entry.Rights,
+                [Security.AccessControl.AccessControlType]::Allow))
+    }
+    Set-Acl -LiteralPath $Path -AclObject $security
+    Assert-RegularManagerCompanionFile -Path $Path
+    [void](Assert-TrustedDirectoryAcl -Path $Path `
+        -AllowedWriteSidValues @('S-1-5-18', 'S-1-5-32-544') `
+        -Description 'Server Manager companion file')
+}
+
 function Install-ServerManagerShortcut {
     param(
         [Parameter(Mandatory = $true)][string]$InstalledDirectory,
@@ -406,15 +863,39 @@ function Install-ServerManagerShortcut {
         [Parameter(Mandatory = $true)][string]$DataDirectory
     )
 
-    $sourceManagerPath = Join-Path $InstalledDirectory 'TechBench-ServerManager.ps1'
-    if (-not (Test-Path -LiteralPath $sourceManagerPath -PathType Leaf)) {
-        Write-Warning 'TechBench Server Manager was not present, so its Start Menu shortcut was not created.'
-        return
+    [void](Assert-NoReparsePointInPath `
+        -Path $InstalledDirectory -TrustedRoot $programFilesRootPath)
+    [void](Assert-NoReparsePointInPath `
+        -Path $ManagerDirectory -TrustedRoot $programFilesRootPath)
+    $managerFileNames = @(
+        'TechBench-ServerManager.ps1',
+        'Start-TechBenchServerManager.ps1',
+        'Start-TechBenchServerManager.vbs',
+        'csri-techbench-icon.ico'
+    )
+    foreach ($fileName in $managerFileNames) {
+        $sourcePath = Join-Path $InstalledDirectory $fileName
+        if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+            throw "The Server Manager package is missing required companion file: $fileName"
+        }
+        Assert-RegularManagerCompanionFile -Path $sourcePath
     }
 
-    New-Item -ItemType Directory -Path $ManagerDirectory -Force | Out-Null
+    $managerDirectoryExisted = Test-Path -LiteralPath $ManagerDirectory -PathType Container
+    if ($managerDirectoryExisted) {
+        [void](Assert-TrustedDirectoryAcl -Path $ManagerDirectory `
+            -AllowedWriteSidValues @('S-1-5-18', 'S-1-5-32-544') `
+            -Description 'existing Server Manager install directory')
+        Assert-NoReparsePointsInDirectoryTree -Path $ManagerDirectory
+    } else {
+        New-Item -ItemType Directory -Path $ManagerDirectory | Out-Null
+    }
+    [void](Assert-NoReparsePointInPath `
+        -Path $ManagerDirectory -TrustedRoot $programFilesRootPath)
     $managerSecurity = [Security.AccessControl.DirectorySecurity]::new()
     $managerSecurity.SetAccessRuleProtection($true, $false)
+    $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $managerSecurity.SetOwner($administrators)
     $inheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
     $propagation = [Security.AccessControl.PropagationFlags]::None
     $allow = [Security.AccessControl.AccessControlType]::Allow
@@ -424,7 +905,7 @@ function Install-ServerManagerShortcut {
             Rights = [Security.AccessControl.FileSystemRights]::FullControl
         },
         [PSCustomObject]@{
-            Sid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+            Sid = $administrators
             Rights = [Security.AccessControl.FileSystemRights]::FullControl
         },
         [PSCustomObject]@{
@@ -437,23 +918,50 @@ function Install-ServerManagerShortcut {
                 $entry.Sid, $entry.Rights, $inheritance, $propagation, $allow))
     }
     Set-Acl -LiteralPath $ManagerDirectory -AclObject $managerSecurity
-    $managerPath = Join-Path $ManagerDirectory 'TechBench-ServerManager.ps1'
-    Copy-Item -LiteralPath $sourceManagerPath -Destination $managerPath -Force
+    [void](Assert-NoReparsePointInPath `
+        -Path $ManagerDirectory -TrustedRoot $programFilesRootPath)
+    [void](Assert-TrustedDirectoryAcl -Path $ManagerDirectory `
+        -AllowedWriteSidValues @('S-1-5-18', 'S-1-5-32-544') `
+        -Description 'Server Manager install directory')
+    foreach ($fileName in $managerFileNames) {
+        $sourceFile = Join-Path $InstalledDirectory $fileName
+        $destinationFile = Join-Path $ManagerDirectory $fileName
+        [void](Assert-NoReparsePointInPath `
+            -Path $destinationFile -TrustedRoot $programFilesRootPath -AllowLeaf)
+        if (Test-Path -LiteralPath $destinationFile) {
+            Assert-RegularManagerCompanionFile -Path $destinationFile
+        }
+        Copy-Item -LiteralPath $sourceFile -Destination $destinationFile -Force
+        Set-ManagerCompanionFileAcl -Path $destinationFile
+    }
 
     $shortcutDirectory = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\CSRI'
+    [void](Assert-NoReparsePointInPath `
+        -Path $shortcutDirectory -TrustedRoot $programDataRootPath)
     New-Item -ItemType Directory -Path $shortcutDirectory -Force | Out-Null
+    [void](Assert-NoReparsePointInPath `
+        -Path $shortcutDirectory -TrustedRoot $programDataRootPath)
     $shortcutPath = Join-Path $shortcutDirectory 'TechBench Server Manager.lnk'
+    [void](Assert-NoReparsePointInPath `
+        -Path $shortcutPath -TrustedRoot $programDataRootPath -AllowLeaf)
     $shell = New-Object -ComObject WScript.Shell
     try {
         $shortcut = $shell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = Join-Path $env:SystemRoot `
-            'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -ServiceName "{1}" -InstallDirectory "{2}" -DataDirectory "{3}" -ManagerDirectory "{4}"' -f `
-            $managerPath, $ServiceName, $InstalledDirectory, $DataDirectory, $ManagerDirectory
+        $shortcut.TargetPath = Join-Path `
+            ([Environment]::SystemDirectory) 'wscript.exe'
+        $shortcut.Arguments = '"{0}" "{1}" "{2}" "{3}" "{4}"' -f `
+            (Join-Path $ManagerDirectory 'Start-TechBenchServerManager.vbs'),
+            $ServiceName,
+            $InstalledDirectory,
+            $DataDirectory,
+            $ManagerDirectory
         $shortcut.WorkingDirectory = $ManagerDirectory
-        $shortcut.IconLocation = '{0},0' -f (Join-Path $InstalledDirectory 'TechBench.SyncService.exe')
+        $shortcut.IconLocation = '{0},0' -f `
+            (Join-Path $ManagerDirectory 'csri-techbench-icon.ico')
         $shortcut.Description = 'Manage and update the TechBench Sync Service'
         $shortcut.Save()
+        [void](Assert-NoReparsePointInPath `
+            -Path $shortcutPath -TrustedRoot $programDataRootPath -AllowLeaf)
     } finally {
         if ($null -ne $shortcut) {
             [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcut) | Out-Null
@@ -624,6 +1132,9 @@ function Assert-ServicePackageManifest {
         'Set-TechBenchSyncCredential.ps1',
         'Set-TechBenchSageSyncCredential.ps1',
         'TechBench-ServerManager.ps1',
+        'Start-TechBenchServerManager.ps1',
+        'Start-TechBenchServerManager.vbs',
+        'csri-techbench-icon.ico',
         'Uninstall-TechBenchSyncService.ps1',
         'sage-odbc-worker\TechBench.SageOdbcWorker.exe',
         'sage-odbc-worker\TechBench.SageOdbcWorker.runtimeconfig.json',
@@ -690,6 +1201,8 @@ function Set-AdministratorOnlyDirectoryAcl {
 
     $security = [Security.AccessControl.DirectorySecurity]::new()
     $security.SetAccessRuleProtection($true, $false)
+    $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $security.SetOwner($administrators)
     $inheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
     $propagation = [Security.AccessControl.PropagationFlags]::None
     $allow = [Security.AccessControl.AccessControlType]::Allow
@@ -703,7 +1216,21 @@ function Set-AdministratorOnlyDirectoryAcl {
                 $propagation,
                 $allow))
     }
-    Set-Acl -LiteralPath $Path -AclObject $security
+    $allowedWriteSids = @('S-1-5-18', 'S-1-5-32-544')
+    [void](Assert-NoReparsePointInPath -Path $Path -TrustedRoot $programDataRootPath)
+    if (Test-Path -LiteralPath $Path -PathType Container) {
+        [void](Assert-TrustedDirectoryAcl -Path $Path `
+            -AllowedWriteSidValues $allowedWriteSids `
+            -Description 'Server Manager data directory')
+    } else {
+        [void](New-ProtectedDirectoryAtomically `
+            -Path $Path `
+            -ParentPath $programDataAnchorPath `
+            -Security $security `
+            -AllowedWriteSidValues $allowedWriteSids `
+            -Description 'Server Manager data directory')
+    }
+    Assert-NoReparsePointsInDirectoryTree -Path $Path
 }
 
 function New-VerifiedAdministratorInstallStage {
@@ -712,22 +1239,22 @@ function New-VerifiedAdministratorInstallStage {
     $sourceManifest = Assert-ServicePackageManifest -PackageDirectory $PackageDirectory
     $sourceManifestPath = Join-Path $PackageDirectory 'package-manifest.json'
     $sourceManifestHash = (Get-FileHash -LiteralPath $sourceManifestPath -Algorithm SHA256).Hash
-    $managerDataRoot = [IO.Path]::GetFullPath(
-        (Join-Path $env:ProgramData 'CSRI\TechBench Server Manager')).TrimEnd('\')
+    [void](Initialize-ProtectedProgramDataAnchor)
+    $managerDataRoot = $managerDataRootPath
     if (-not $managerDataRoot.StartsWith($allowedDataRoot, [StringComparison]::OrdinalIgnoreCase)) {
         throw "The protected installer staging directory must remain under '$allowedDataRoot'."
     }
-    if ((Test-Path -LiteralPath $managerDataRoot) -and
-        ((Get-Item -LiteralPath $managerDataRoot -Force).Attributes -band
-            [IO.FileAttributes]::ReparsePoint)) {
-        throw "Refusing to stage the service package in a reparse-point directory: $managerDataRoot"
-    }
-
-    New-Item -ItemType Directory -Path $managerDataRoot -Force | Out-Null
+    [void](Assert-NoReparsePointInPath `
+        -Path $managerDataRoot -TrustedRoot $programDataRootPath)
     Set-AdministratorOnlyDirectoryAcl -Path $managerDataRoot
+    [void](Assert-NoReparsePointInPath `
+        -Path $managerDataRoot -TrustedRoot $programDataRootPath)
+    Assert-NoReparsePointsInDirectoryTree -Path $managerDataRoot
     $stagePath = Join-Path $managerDataRoot `
         ("Install-{0}" -f [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $stagePath | Out-Null
+    [void](Assert-NoReparsePointInPath `
+        -Path $stagePath -TrustedRoot $programDataRootPath)
     try {
         foreach ($file in @($sourceManifest.Files)) {
             $relativePath = [string]$file.Path
@@ -766,6 +1293,9 @@ function Remove-AdministratorInstallStage {
             'Install-', [StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to remove an unverified installer staging directory: $fullPath"
     }
+    [void](Assert-NoReparsePointInPath `
+        -Path $fullPath -TrustedRoot $programDataRootPath)
+    Assert-NoReparsePointsInDirectoryTree -Path $fullPath
     if ((Get-Item -LiteralPath $fullPath -Force).Attributes -band
         [IO.FileAttributes]::ReparsePoint) {
         throw "Refusing to remove a reparse-point installer staging directory: $fullPath"
@@ -807,6 +1337,9 @@ if ($isManagedServiceAccount) {
 if ($PSCmdlet.ShouldProcess($DisplayName, "Install Windows service as $ServiceAccount")) {
     $administratorInstallStage = $null
     try {
+        [void](Initialize-ProtectedProgramDataAnchor `
+            -ServiceSidValue $serviceSid.Value)
+        Set-SecretDirectoryAcl -Path $dataPath -ServiceSid $serviceSid
         $administratorInstallStage = New-VerifiedAdministratorInstallStage `
             -PackageDirectory $sourcePath
         $sourcePath = $administratorInstallStage
@@ -821,7 +1354,11 @@ if ($PSCmdlet.ShouldProcess($DisplayName, "Install Windows service as $ServiceAc
 
         Stop-AndDeleteExistingService $ServiceName
 
+    [void](Assert-NoReparsePointInPath `
+        -Path $installPath -TrustedRoot $programFilesRootPath)
     New-Item -ItemType Directory -Path $installPath -Force | Out-Null
+    [void](Assert-NoReparsePointInPath `
+        -Path $installPath -TrustedRoot $programFilesRootPath)
     $preservedConfiguration = $null
     $installedConfiguration = Join-Path $installPath 'appsettings.json'
     if (-not $ReplaceConfiguration -and (Test-Path -LiteralPath $installedConfiguration)) {
@@ -829,6 +1366,8 @@ if ($PSCmdlet.ShouldProcess($DisplayName, "Install Windows service as $ServiceAc
     }
 
     if (-not $sourcePath.Equals($installPath, [StringComparison]::OrdinalIgnoreCase)) {
+        [void](Assert-NoReparsePointInPath `
+            -Path $installPath -TrustedRoot $programFilesRootPath)
         Get-ChildItem -LiteralPath $sourcePath | Where-Object {
             $_.Name -notmatch '(?i)\.sha256$'
         } | ForEach-Object {
@@ -861,14 +1400,19 @@ if ($PSCmdlet.ShouldProcess($DisplayName, "Install Windows service as $ServiceAc
     Update-InstalledPackageManifestConfigurationEntry -PackageDirectory $installPath
 
     try {
+        [void](Assert-NoReparsePointInPath `
+            -Path $installPath -TrustedRoot $programFilesRootPath)
+        [void](Assert-NoReparsePointInPath `
+            -Path $managerPath -TrustedRoot $programFilesRootPath)
         Install-ServerManagerShortcut -InstalledDirectory $installPath `
             -ManagerDirectory $managerPath -ServiceName $ServiceName -DataDirectory $dataPath
     } catch {
         Write-Warning "The service was installed, but its Server Manager Start Menu shortcut could not be created. Run TechBench-ServerManager.ps1 from '$installPath'. $($_.Exception.Message)"
     }
 
+    [void](Assert-NoReparsePointInPath `
+        -Path $installPath -TrustedRoot $programFilesRootPath)
     Add-ServiceReadAcl -Path $installPath -ServiceSid $serviceSid
-    Set-SecretDirectoryAcl -Path $dataPath -ServiceSid $serviceSid
     Add-ServiceLogonRight -Sid $serviceSid
 
     if ($isManagedServiceAccount) {

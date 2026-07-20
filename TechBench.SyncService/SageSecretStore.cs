@@ -74,14 +74,26 @@ public sealed class SageSecretStore
 
         var plainBytes = Encoding.UTF8.GetBytes(secret);
         byte[]? protectedBytes = null;
-        var temporaryPath = _path + ".new";
+        var temporaryPath = System.IO.Path.Combine(
+            directory,
+            $".{System.IO.Path.GetFileName(_path)}.{Guid.NewGuid():N}.tmp");
         try
         {
             protectedBytes = ProtectedData.Protect(
                 plainBytes,
                 Entropy,
                 DataProtectionScope.LocalMachine);
-            File.WriteAllBytes(temporaryPath, protectedBytes);
+            using (var stream = new FileStream(
+                temporaryPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 4096,
+                FileOptions.WriteThrough))
+            {
+                stream.Write(protectedBytes);
+                stream.Flush(flushToDisk: true);
+            }
             File.Move(temporaryPath, _path, overwrite: true);
         }
         finally
