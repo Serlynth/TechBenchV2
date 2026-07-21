@@ -81,6 +81,23 @@ public sealed class SharedAdminPolicyTests
     }
 
     [Fact]
+    public void NewEntryShowsWorkDateBeforeClientAndTicketSelection()
+    {
+        var xaml = File.ReadAllText(FindRepositoryFile("MainWindow.xaml"));
+        var editorStart = xaml.IndexOf(
+            "Text=\"{Binding EditorTitle}\"",
+            StringComparison.Ordinal);
+        var date = xaml.IndexOf("Text=\"Work date\"", editorStart, StringComparison.Ordinal);
+        var client = xaml.IndexOf("Text=\"Client\"", editorStart, StringComparison.Ordinal);
+        var ticket = xaml.IndexOf("Text=\"Ticket\"", editorStart, StringComparison.Ordinal);
+
+        Assert.True(editorStart >= 0);
+        Assert.True(date > editorStart);
+        Assert.True(client > date);
+        Assert.True(ticket > date);
+    }
+
+    [Fact]
     public void WorkstationDoesNotExposeOrganizationWhdSyncCommandsOrTimer()
     {
         Assert.Null(typeof(MainWindowViewModel).GetProperty("SyncWhdTicketsCommand"));

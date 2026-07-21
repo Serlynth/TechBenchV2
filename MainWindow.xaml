@@ -848,6 +848,15 @@
                                                        VerticalAlignment="Center" />
                                         </Border>
 
+                                        <StackPanel Width="220"
+                                                    HorizontalAlignment="Left"
+                                                    Margin="0,0,0,12"
+                                                    IsEnabled="{Binding IsEditorEditable}">
+                                            <TextBlock Text="Work date" Style="{StaticResource FieldLabelStyle}" />
+                                            <DatePicker SelectedDate="{Binding Editor.WorkDate}"
+                                                        SelectedDateFormat="Short" />
+                                        </StackPanel>
+
                                         <Grid Margin="0,0,0,12" IsEnabled="{Binding IsEditorEditable}">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
@@ -970,11 +979,7 @@
                                                 <RowDefinition Height="Auto" />
                                             </Grid.RowDefinitions>
 
-                                            <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,12,0,0">
-                                                <TextBlock Text="Work date" Style="{StaticResource FieldLabelStyle}" />
-                                                <DatePicker SelectedDate="{Binding Editor.WorkDate}" SelectedDateFormat="Short" />
-                                            </StackPanel>
-                                            <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,32,0,0">
+                                            <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,12,0,0">
                                                 <CheckBox Content="Billable" IsChecked="{Binding Editor.Billable}" />
                                             </StackPanel>
 
