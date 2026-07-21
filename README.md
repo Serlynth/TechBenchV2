@@ -4,7 +4,7 @@ TechBench V2 is the multi-user successor to TechBench 1.x. It keeps the existing
 
 The original TechBench workspace is not modified. V1 and V2 have separate product identities, executables, mutex names, settings, credential namespaces, packages, and update feeds.
 
-Current milestone: `2.0.0-alpha.13` - the server-backed client, owner-scoped V1 migration, server-owned WHD and Sage synchronization, Admin-only read-only user preview, and the server-local TechBench Server Manager GUI are implemented. Alpha.13 includes alpha.11's complete organization-wide WHD/Sage configuration move, alpha.12's corrected GitHub release discovery, and a Windows PowerShell 5.1 SQL connection-builder correction. The client retains only each user's personal WHD posting credential and workstation-specific Sage posting settings. It still requires deployment to the real SQL Server 2016 instance plus domain-user, live-WHD, live-Sage, and server-update smoke testing before it should be treated as production-ready.
+Current milestone: `2.0.0-alpha.14` - the server-backed client, owner-scoped V1 migration, server-owned WHD and Sage synchronization, Admin-only read-only user preview, and a compiled server-local TechBench Server Manager are implemented. Alpha.14 replaces the PowerShell/VBScript Manager runtime with a self-contained Windows EXE, direct Start Menu shortcut, notification-area icon, compiled service/credential/configuration controls, and a compiled verified updater with rollback. The client retains only each user's personal WHD posting credential and workstation-specific Sage posting settings. It still requires deployment to the real SQL Server 2016 instance plus domain-user, live-WHD, live-Sage, and server-update smoke testing before it should be treated as production-ready.
 
 ## What V2 stores where
 
@@ -36,7 +36,7 @@ The production client packages the SQLite runtime only for the read-only **Impor
 
 There is no TechBench web server, public API, or container. V2 includes one small internal Windows service for organization-wide WHD reads and Sage customer synchronization.
 
-The service host also receives an administrator-only TechBench Server Manager GUI. A consoleless Start Menu launcher requests elevation and reports startup errors instead of flashing a command window and disappearing. The Manager controls the fixed TechBench service, owns organization-wide WHD/Sage synchronization configuration and manual requests, rotates the machine-protected WHD/Sage secrets, and installs verified service updates while preserving SQL-owned configuration and the existing Windows service identity. It can be minimized to the notification area and restored from its tray icon. It is an operations tool, not an application server or a general workstation-settings editor.
+The service host also receives an administrator-only, self-contained `TechBench.ServerManager.exe`. The Start Menu shortcut targets that executable directly and Windows requests elevation from its application manifest; no PowerShell or VBScript runs when the Manager opens. The Manager controls the fixed TechBench service, SQL connection configuration, organization-wide WHD/Sage configuration and manual requests, machine-protected WHD/Sage secrets, and verified service updates while preserving SQL-owned configuration and the existing Windows service identity. It minimizes to the notification area and is an operations tool, not an application server or a general workstation-settings editor.
 
 ~~~text
 WHD
@@ -54,9 +54,9 @@ TechBench V2 WPF clients (x86)
     -> the same TechBench database
 ~~~
 
-The service performs the initial full organization ticket import, five-minute overlapping ticket deltas, and daily reference refreshes for WHD clients, statuses, technicians, and group memberships. SQL Server stores the durable queue, cursor, and health state. Admin clients configure the non-secret WHD endpoint/service username, request an immediate run, and map AD users to WHD technicians; the WHD credential exists only as machine-protected data on the service host. Explicit closed or deleted records update the shared snapshot, but omission never closes a ticket.
+The service performs the initial full organization ticket import, five-minute overlapping ticket deltas, and daily reference refreshes for WHD clients, statuses, technicians, and group memberships. SQL Server stores the durable queue, cursor, and health state. TechBench Admins use the server-local Manager to configure the non-secret WHD endpoint/service username, request an immediate run, and map AD users to WHD technicians; the WHD credential exists only as machine-protected data on the service host. Explicit closed or deleted records update the shared snapshot, but omission never closes a ticket.
 
-Sage customer synchronization is manual-only. A TechBench Admin queues it from Settings, the Windows service runs the isolated 32-bit ODBC reader, and SQL Server validates every returned row before atomically applying the customer snapshot. Empty, malformed, over-length, or duplicate-ID snapshots change no customer data. If an established snapshot would remove at least 10 and at least 25 percent of existing Sage mappings, SQL Server rejects it and Settings exposes a separate Admin confirmation action showing the proposed counts. The approval references that rejected request and is accepted only when the rerun has exactly the same read, existing, and stale counts; a changed rerun is blocked for fresh review. The server Sage password is machine-protected on the service host. Personal Sage desktop time-ticket posting remains workstation-side and continues to use each technician's own protected credential and local Sage preferences.
+Sage customer synchronization is manual-only. A TechBench Admin queues it from Server Manager, the Windows service runs the isolated 32-bit ODBC reader, and SQL Server validates every returned row before atomically applying the customer snapshot. Empty, malformed, over-length, or duplicate-ID snapshots change no customer data. If an established snapshot would remove at least 10 and at least 25 percent of existing Sage mappings, SQL Server rejects it and Server Manager exposes a separate Admin confirmation action showing the proposed counts. The approval references that rejected request and is accepted only when the rerun has exactly the same read, existing, and stale counts; a changed rerun is blocked for fresh review. The server Sage password is machine-protected on the service host. Personal Sage desktop time-ticket posting remains workstation-side and continues to use each technician's own protected credential and local Sage preferences.
 
 The V2 client uses short-lived pooled connections and stored procedures. It does not hold a database transaction open while calling WHD or Sage.
 
@@ -127,25 +127,25 @@ Application Name=TechBench V2;
 
 No SQL username, `sa` password, or other credential belongs in the client connection configuration.
 
-The desktop application and Server Manager check schema compatibility and refuse an incompatible deployment. Version `2.0.0-alpha.13` requires database schema version `7`, including the service-only WHD and Sage ingestion contracts and restricted Admin preview boundary. Alpha.13 introduces no database migration.
+The desktop application and Server Manager check schema compatibility and refuse an incompatible deployment. Version `2.0.0-alpha.14` requires database schema version `7`, including the service-only WHD and Sage ingestion contracts and restricted Admin preview boundary. Alpha.14 introduces no database migration.
 
-### Coordinated alpha.13 upgrade
+### Coordinated alpha.14 upgrade
 
 The database and client must be upgraded as one planned cutover:
 
 1. Back up the `TechBench` database.
 2. Stop the existing V2 clients and sync service, run the complete schema-version-7 standalone deployment, and confirm all verification output passes.
-3. Install the alpha.13 x64 TechBench Sync Service package under `CSRI\TechBench_Sync`, preserving its machine-protected WHD/Sage credentials. The installer adds or repairs TechBench Server Manager, its consoleless launcher, icon, and Start Menu shortcut.
+3. Install the alpha.14 x64 TechBench Sync Service package under `CSRI\TechBench_Sync`, preserving its machine-protected WHD/Sage credentials. The installer adds or repairs the compiled TechBench Server Manager and its direct EXE Start Menu shortcut.
 4. On the service host, create the 32-bit Sage **System DSN**, grant the service identity the required Sage read access, and provision the separate machine-protected Sage password.
-5. Open Server Manager as a TechBench Admin and configure the WHD endpoint, authentication mode, service username, five-minute schedule, server Sage DSN/username, shared activity item ID, and AD-to-WHD technician mappings. Install the alpha.13 client on workstations; each technician configures only their personal posting credentials and local workstation options.
+5. Open Server Manager as a TechBench Admin and configure the SQL connection, WHD endpoint, authentication mode, service username, five-minute schedule, server Sage DSN/username, shared activity item ID, and AD-to-WHD technician mappings. Install the alpha.14 client on workstations; each technician configures only their personal posting credentials and local workstation options.
 6. Test with at least one ordinary domain user and one TechBench administrator. Confirm the initial WHD full sync, a later automatic delta, a manually requested Sage customer sync, malformed/empty snapshot rejection, the explicit large-removal confirmation path, service health, and direct/group ticket visibility.
 7. Verify ordinary users cannot queue either server job or change shared configuration. Verify an Admin can open a read-only preview, cannot write through it, and cannot see another user's Personal Note or editor draft.
 8. Verify shared clients, tickets, canonical customer matching, aliases, tags, templates, Common Links, work entries, Personal Note privacy, drafts, posting coordination, automatic refresh, and optimistic-concurrency conflicts.
 9. Have the DBA configure and test ongoing SQL Server backups before production data entry.
 
-The alpha.9 Manager has a Windows PowerShell 5.1 release-list parsing defect and cannot discover alpha.10 or later when several GitHub releases exist. Bootstrap alpha.13 once by downloading and extracting its service ZIP, closing the old Manager, and running `TechBench-ServerManager.ps1` from the extracted package as Administrator. In that Manager, select **Check for updates** and **Download & Install**. Alpha.13 can discover the release and construct its schema-verification connection correctly on Windows PowerShell 5.1; the update installs the repaired Manager companions and Start Menu shortcut.
+To replace an alpha.9 through alpha.13 script-based Manager, download and extract the alpha.14 service ZIP, close the old Manager, and run `.\Install-TechBenchServerManager.ps1` once from an elevated PowerShell window. That verified deployment script installs the compiled Manager and changes the Start Menu shortcut to target `TechBench.ServerManager.exe` directly without changing the service account or protected secrets. Then use **Check for updates** and **Download & Install** in the compiled Manager to update the service. Future Manager use and routine updates do not invoke PowerShell.
 
-Do not deploy only one side. The alpha.13 client and service require schema version 7; earlier alpha clients keep obsolete organization-sync controls in their Settings page.
+Do not deploy only one side. The alpha.14 client and service require schema version 7; earlier alpha clients keep obsolete organization-sync controls in their Settings page.
 
 Users newly added to an AD group should sign out of Windows and sign back in before testing so their Windows security token includes the new membership.
 
@@ -155,8 +155,8 @@ Users newly added to an AD group should sign out of Windows and sign back in bef
 dotnet restore TechBenchV2.sln
 dotnet build TechBenchV2.sln -c Release
 dotnet test TechBench.Tests\TechBench.Tests.csproj -c Release
-.\scripts\Publish-TechBenchRelease.ps1 -Version 2.0.0-alpha.13
-.\scripts\Publish-TechBenchServer.ps1 -Version 2.0.0-alpha.13
+.\scripts\Publish-TechBenchRelease.ps1 -Version 2.0.0-alpha.14
+.\scripts\Publish-TechBenchServer.ps1 -Version 2.0.0-alpha.14
 ~~~
 
 Inspect and smoke-test both local packages before publishing. For an approved
@@ -181,6 +181,6 @@ Unit and contract tests do not replace the required integration run against the 
 - Verify counts, relationships, ownership, posting state, and sample note content before cutover.
 - Do not run V1 and V2 as dual writable production systems.
 
-V1 remains untouched and available for rollback or historical reference. Its data is not automatically migrated merely by installing alpha.13; each user uses **Settings > Import V1 Database...**, reviews the preview, and explicitly starts their own import. Work history, Personal Notes, entry tags, follow-up state, posting state/history, and note links move to that user's SQL-owned records. Equivalent legacy link rows may share one canonical SQL relationship. A resumed batch counts mappings first accepted by that same batch as imported, while a later batch skips unchanged mappings. Dependent links and posting logs attach only through work-entry mappings accepted by the current batch, and a successful completion must account for every read item with zero errors. A user may abandon their own stale active V1 batch before restarting. Shared configuration, credentials, editor drafts, active posting attempts, and local caches are intentionally excluded.
+V1 remains untouched and available for rollback or historical reference. Its data is not automatically migrated merely by installing alpha.14; each user uses **Settings > Import V1 Database...**, reviews the preview, and explicitly starts their own import. Work history, Personal Notes, entry tags, follow-up state, posting state/history, and note links move to that user's SQL-owned records. Equivalent legacy link rows may share one canonical SQL relationship. A resumed batch counts mappings first accepted by that same batch as imported, while a later batch skips unchanged mappings. Dependent links and posting logs attach only through work-entry mappings accepted by the current batch, and a successful completion must account for every read item with zero errors. A user may abandon their own stale active V1 batch before restarting. Shared configuration, credentials, editor drafts, active posting attempts, and local caches are intentionally excluded.
 
 For implementation details, see [docs/V2-ARCHITECTURE.md](docs/V2-ARCHITECTURE.md). For deployment, see the [database runbook](database/sqlserver2016/README-Deploy.md) and [sync-service runbook](docs/WHD-SYNC-SERVICE.md).

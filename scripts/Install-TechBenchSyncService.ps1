@@ -867,19 +867,19 @@ function Install-ServerManagerShortcut {
         -Path $InstalledDirectory -TrustedRoot $programFilesRootPath)
     [void](Assert-NoReparsePointInPath `
         -Path $ManagerDirectory -TrustedRoot $programFilesRootPath)
-    $managerFileNames = @(
-        'TechBench-ServerManager.ps1',
-        'Start-TechBenchServerManager.ps1',
-        'Start-TechBenchServerManager.vbs',
-        'csri-techbench-icon.ico'
-    )
-    foreach ($fileName in $managerFileNames) {
-        $sourcePath = Join-Path $InstalledDirectory $fileName
+    $managerPayloadDirectory = Join-Path $InstalledDirectory 'server-manager'
+    foreach ($fileName in @(
+        'TechBench.ServerManager.exe',
+        'TechBench.ServerManager.runtimeconfig.json',
+        'TechBench.ServerManager.deps.json'
+    )) {
+        $sourcePath = Join-Path $managerPayloadDirectory $fileName
         if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
-            throw "The Server Manager package is missing required companion file: $fileName"
+            throw "The package is missing compiled Server Manager file: $fileName"
         }
         Assert-RegularManagerCompanionFile -Path $sourcePath
     }
+    $managerPayloadFiles = @(Get-ChildItem -LiteralPath $managerPayloadDirectory -Recurse -File)
 
     $managerDirectoryExisted = Test-Path -LiteralPath $ManagerDirectory -PathType Container
     if ($managerDirectoryExisted) {
@@ -923,16 +923,29 @@ function Install-ServerManagerShortcut {
     [void](Assert-TrustedDirectoryAcl -Path $ManagerDirectory `
         -AllowedWriteSidValues @('S-1-5-18', 'S-1-5-32-544') `
         -Description 'Server Manager install directory')
-    foreach ($fileName in $managerFileNames) {
-        $sourceFile = Join-Path $InstalledDirectory $fileName
-        $destinationFile = Join-Path $ManagerDirectory $fileName
+    foreach ($sourceFile in $managerPayloadFiles) {
+        $relativePath = $sourceFile.FullName.Substring($managerPayloadDirectory.Length).TrimStart('\')
+        $destinationFile = Join-Path $ManagerDirectory $relativePath
+        $destinationParent = Split-Path -Parent $destinationFile
+        New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
         [void](Assert-NoReparsePointInPath `
             -Path $destinationFile -TrustedRoot $programFilesRootPath -AllowLeaf)
         if (Test-Path -LiteralPath $destinationFile) {
             Assert-RegularManagerCompanionFile -Path $destinationFile
         }
-        Copy-Item -LiteralPath $sourceFile -Destination $destinationFile -Force
+        Copy-Item -LiteralPath $sourceFile.FullName -Destination $destinationFile -Force
         Set-ManagerCompanionFileAcl -Path $destinationFile
+    }
+    foreach ($legacyFile in @(
+        'TechBench-ServerManager.ps1',
+        'Start-TechBenchServerManager.ps1',
+        'Start-TechBenchServerManager.vbs',
+        'csri-techbench-icon.ico'
+    )) {
+        $legacyPath = Join-Path $ManagerDirectory $legacyFile
+        if (Test-Path -LiteralPath $legacyPath -PathType Leaf) {
+            Remove-Item -LiteralPath $legacyPath -Force
+        }
     }
 
     $shortcutDirectory = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\CSRI'
@@ -947,17 +960,11 @@ function Install-ServerManagerShortcut {
     $shell = New-Object -ComObject WScript.Shell
     try {
         $shortcut = $shell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = Join-Path `
-            ([Environment]::SystemDirectory) 'wscript.exe'
-        $shortcut.Arguments = '"{0}" "{1}" "{2}" "{3}" "{4}"' -f `
-            (Join-Path $ManagerDirectory 'Start-TechBenchServerManager.vbs'),
-            $ServiceName,
-            $InstalledDirectory,
-            $DataDirectory,
-            $ManagerDirectory
+        $shortcut.TargetPath = Join-Path $ManagerDirectory 'TechBench.ServerManager.exe'
+        $shortcut.Arguments = ''
         $shortcut.WorkingDirectory = $ManagerDirectory
         $shortcut.IconLocation = '{0},0' -f `
-            (Join-Path $ManagerDirectory 'csri-techbench-icon.ico')
+            (Join-Path $ManagerDirectory 'TechBench.ServerManager.exe')
         $shortcut.Description = 'Manage and update the TechBench Sync Service'
         $shortcut.Save()
         [void](Assert-NoReparsePointInPath `
@@ -1129,11 +1136,15 @@ function Assert-ServicePackageManifest {
         'TechBench.SyncService.deps.json',
         'appsettings.json',
         'Install-TechBenchSyncService.ps1',
+        'Install-TechBenchServerManager.ps1',
         'Set-TechBenchSyncCredential.ps1',
         'Set-TechBenchSageSyncCredential.ps1',
         'TechBench-ServerManager.ps1',
         'Start-TechBenchServerManager.ps1',
         'Start-TechBenchServerManager.vbs',
+        'server-manager\TechBench.ServerManager.exe',
+        'server-manager\TechBench.ServerManager.runtimeconfig.json',
+        'server-manager\TechBench.ServerManager.deps.json',
         'csri-techbench-icon.ico',
         'Uninstall-TechBenchSyncService.ps1',
         'sage-odbc-worker\TechBench.SageOdbcWorker.exe',
@@ -1152,7 +1163,8 @@ function Assert-ServicePackageManifest {
     $expectedVersion = [string]$manifest.Version
     $serviceExecutable = Join-Path $packagePath 'TechBench.SyncService.exe'
     $workerExecutable = Join-Path $packagePath 'sage-odbc-worker\TechBench.SageOdbcWorker.exe'
-    foreach ($executable in @($serviceExecutable, $workerExecutable)) {
+    $managerExecutable = Join-Path $packagePath 'server-manager\TechBench.ServerManager.exe'
+    foreach ($executable in @($serviceExecutable, $workerExecutable, $managerExecutable)) {
         $productVersion = (Get-Item -LiteralPath $executable).VersionInfo.ProductVersion
         if ([string]::IsNullOrWhiteSpace($productVersion) -or
             $productVersion.Split('+', 2)[0] -cne $expectedVersion) {
@@ -1407,7 +1419,7 @@ if ($PSCmdlet.ShouldProcess($DisplayName, "Install Windows service as $ServiceAc
         Install-ServerManagerShortcut -InstalledDirectory $installPath `
             -ManagerDirectory $managerPath -ServiceName $ServiceName -DataDirectory $dataPath
     } catch {
-        Write-Warning "The service was installed, but its Server Manager Start Menu shortcut could not be created. Run TechBench-ServerManager.ps1 from '$installPath'. $($_.Exception.Message)"
+        Write-Warning "The service was installed, but the compiled Server Manager or its direct Start Menu shortcut could not be installed. Run Install-TechBenchServerManager.ps1 from the verified extracted package. $($_.Exception.Message)"
     }
 
     [void](Assert-NoReparsePointInPath `

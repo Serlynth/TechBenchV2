@@ -3,23 +3,20 @@ namespace TechBench.Tests;
 public sealed class ServerManagerLauncherScriptTests
 {
     [Fact]
-    public void StartMenuUsesConsolelessBootstrapWithFixedArguments()
+    public void StartMenuTargetsCompiledManagerDirectly()
     {
         var installer = ReadScript("Install-TechBenchSyncService.ps1");
 
-        Assert.Contains("[Environment]::SystemDirectory", installer, StringComparison.Ordinal);
-        Assert.Contains("'wscript.exe'", installer, StringComparison.Ordinal);
-        Assert.Contains("Start-TechBenchServerManager.vbs", installer, StringComparison.Ordinal);
-        Assert.Contains("Start-TechBenchServerManager.ps1", installer, StringComparison.Ordinal);
-        Assert.Contains("csri-techbench-icon.ico", installer, StringComparison.Ordinal);
-        Assert.Contains("$ServiceName", installer, StringComparison.Ordinal);
-        Assert.Contains("$InstalledDirectory", installer, StringComparison.Ordinal);
-        Assert.Contains("$DataDirectory", installer, StringComparison.Ordinal);
-        Assert.Contains("$ManagerDirectory", installer, StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "System32\\WindowsPowerShell\\v1.0\\powershell.exe'\r\n        $shortcut.Arguments",
-            installer,
-            StringComparison.Ordinal);
+        Assert.Contains("$shortcut.TargetPath = Join-Path $ManagerDirectory 'TechBench.ServerManager.exe'", installer, StringComparison.Ordinal);
+        Assert.Contains("$shortcut.Arguments = ''", installer, StringComparison.Ordinal);
+        Assert.Contains("server-manager\\TechBench.ServerManager.exe", installer, StringComparison.Ordinal);
+        var shortcutStart = installer.IndexOf("$shortcut.TargetPath", StringComparison.Ordinal);
+        var shortcutEnd = installer.IndexOf("$shortcut.Save()", shortcutStart, StringComparison.Ordinal);
+        var shortcut = installer[shortcutStart..shortcutEnd];
+        Assert.DoesNotContain("wscript.exe", shortcut, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("powershell.exe", shortcut, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(".vbs", shortcut, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(".ps1", shortcut, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -73,6 +70,8 @@ public sealed class ServerManagerLauncherScriptTests
         }
 
         Assert.Contains("Assets\\csri-techbench-icon.ico", publisher, StringComparison.Ordinal);
+        Assert.Contains("server-manager\\TechBench.ServerManager.exe", publisher, StringComparison.Ordinal);
+        Assert.Contains("Install-TechBenchServerManager.ps1", publisher, StringComparison.Ordinal);
     }
 
     [Fact]

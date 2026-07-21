@@ -1,0 +1,238 @@
+using System.Data;
+using Microsoft.Data.SqlClient;
+
+namespace TechBench.ServerManager;
+
+internal sealed class SqlAdminRepository(AppPaths paths)
+{
+    public SynchronizationConfiguration Load()
+    {
+        using var connection = OpenAdminConnection();
+        var configuration = new SynchronizationConfiguration();
+        LoadSettings(connection, configuration);
+        configuration.WhdStatus = LoadStatus(connection, "tb_app.GetWhdSyncStatus", false);
+        configuration.SageStatus = LoadStatus(connection, "tb_app.GetSageSyncStatus", true);
+        LoadMappings(connection, configuration);
+        LoadTechnicians(connection, configuration);
+        return configuration;
+    }
+
+    public void SaveSettings(IDictionary<string, string> settings, IDictionary<string, byte[]> expectedVersions)
+    {
+        using var connection = OpenAdminConnection();
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            foreach (var pair in settings.OrderBy(static value => value.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                using var command = StoredProcedure(connection, "tb_app.AdminSaveOrganizationSetting", transaction);
+                command.Parameters.Add("@SettingKey", SqlDbType.NVarChar, 200).Value = pair.Key;
+                command.Parameters.Add("@SettingValue", SqlDbType.NVarChar, -1).Value = pair.Value;
+                command.Parameters.Add("@ExpectedRowVersion", SqlDbType.Binary, 8).Value =
+                    expectedVersions.TryGetValue(pair.Key, out var rowVersion) ? rowVersion : DBNull.Value;
+                command.Parameters.Add("@RequestId", SqlDbType.UniqueIdentifier).Value = Guid.NewGuid();
+                using var reader = command.ExecuteReader();
+                if (!reader.Read()) throw new InvalidOperationException($"SQL Server did not save '{pair.Key}'.");
+            }
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    public string RequestWhdSync()
+    {
+        using var connection = OpenAdminConnection();
+        using var command = StoredProcedure(connection, "tb_app.AdminRequestWhdSync");
+        command.Parameters.Add("@RequestType", SqlDbType.NVarChar, 40).Value = "Incremental";
+        command.Parameters.Add("@RequestId", SqlDbType.UniqueIdentifier).Value = Guid.NewGuid();
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? ReadString(reader, "Status", "Queued") : "Queued";
+    }
+
+    public string RequestSageSync(bool allowLargeRemoval, Guid? confirmedRequestId)
+    {
+        using var connection = OpenAdminConnection();
+        using var command = StoredProcedure(connection, "tb_app.AdminRequestSageSync");
+        command.Parameters.Add("@RequestId", SqlDbType.UniqueIdentifier).Value = Guid.NewGuid();
+        command.Parameters.Add("@AllowLargeRemoval", SqlDbType.Bit).Value = allowLargeRemoval;
+        command.Parameters.Add("@ConfirmedRequestId", SqlDbType.UniqueIdentifier).Value = confirmedRequestId ?? (object)DBNull.Value;
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? ReadString(reader, "Status", "Queued") : "Queued";
+    }
+
+    public void SaveMapping(string windowsLoginName, string? technicianExternalId)
+    {
+        using var connection = OpenAdminConnection();
+        using var command = StoredProcedure(connection, "tb_app.AdminSaveWhdUserMapping");
+        command.Parameters.Add("@WindowsLoginName", SqlDbType.NVarChar, 256).Value = windowsLoginName;
+        command.Parameters.Add("@TechnicianExternalId", SqlDbType.NVarChar, 120).Value =
+            string.IsNullOrWhiteSpace(technicianExternalId) ? DBNull.Value : technicianExternalId;
+        command.ExecuteNonQuery();
+    }
+
+    public int VerifyRequiredSchema(int requiredVersion)
+    {
+        using var connection = OpenAdminConnection(requireExactVersion: false);
+        using var command = StoredProcedure(connection, "tb_app.GetCurrentUserContext");
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) throw new InvalidOperationException("TechBench SQL Server returned no user context.");
+        var installed = ReadInt(reader, "SchemaVersion");
+        if (installed != requiredVersion)
+        {
+            throw new InvalidOperationException($"This package requires database schema {requiredVersion}, but SQL Server reports {installed}. Apply the matching SQL installer first.");
+        }
+        return installed;
+    }
+
+    private SqlConnection OpenAdminConnection(bool requireExactVersion = true)
+    {
+        var configuration = paths.ReadConfiguration();
+        var builder = new SqlConnectionStringBuilder
+        {
+            DataSource = configuration.SqlServer,
+            InitialCatalog = configuration.Database,
+            IntegratedSecurity = true,
+            ApplicationName = "TechBench Server Manager",
+            ConnectTimeout = 15,
+            Encrypt = SqlConnectionEncryptOption.Mandatory,
+            TrustServerCertificate = configuration.TrustServerCertificate
+        };
+        var connection = new SqlConnection(builder.ConnectionString);
+        try
+        {
+            connection.Open();
+            using var command = StoredProcedure(connection, "tb_app.GetCurrentUserContext");
+            using var reader = command.ExecuteReader();
+            if (!reader.Read()) throw new InvalidOperationException("TechBench SQL Server returned no user context.");
+            var schema = ReadInt(reader, "SchemaVersion");
+            var isAdmin = ReadBool(reader, "IsAdmin");
+            var login = ReadString(reader, "AuthenticatedLoginName");
+            if (requireExactVersion && schema != 7)
+                throw new InvalidOperationException($"Server Manager requires database schema 7; SQL Server reports {schema}.");
+            if (!isAdmin)
+                throw new UnauthorizedAccessException($"'{login}' is not a TechBench Admin. Add this Windows account to CSRI\\TechBench_Admins.");
+            return connection;
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
+    }
+
+    private static void LoadSettings(SqlConnection connection, SynchronizationConfiguration configuration)
+    {
+        var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Whd.BaseUrl", "Whd.AuthenticationMode", "Whd.ServiceUsername", "Whd.AutoSyncEnabled",
+            "Whd.AutoSyncMinutes", "Sage.SyncDsn", "Sage.SyncUsername", "Sage.ActivityItemId"
+        };
+        using var command = StoredProcedure(connection, "tb_app.GetSettings");
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var key = ReadString(reader, "SettingKey");
+            if (!wanted.Contains(key) || !ReadString(reader, "ScopeType").Equals("Organization", StringComparison.OrdinalIgnoreCase)) continue;
+            configuration.Settings[key] = ReadString(reader, "SettingValue");
+            var ordinal = TryOrdinal(reader, "RowVersion");
+            if (ordinal >= 0 && !reader.IsDBNull(ordinal)) configuration.RowVersions[key] = (byte[])reader.GetValue(ordinal);
+        }
+    }
+
+    private static SyncStatus LoadStatus(SqlConnection connection, string procedure, bool sage)
+    {
+        var status = new SyncStatus();
+        using var command = StoredProcedure(connection, procedure);
+        using var reader = command.ExecuteReader();
+        if (reader.Read())
+        {
+            status.RequestId = ReadNullableGuid(reader, "RequestId");
+            status.Status = ReadString(reader, "Status", "NeverRun");
+            status.Message = ReadString(reader, "Message");
+            status.QueueDepth = ReadInt(reader, "QueueDepth");
+            status.LastAttemptAtUtc = ReadNullableDateTime(reader, "RequestedAtUtc");
+            status.LastSuccessfulAtUtc = ReadNullableDateTime(reader, "CompletedAtUtc");
+            if (sage)
+            {
+                status.RequiresLargeRemovalConfirmation = ReadBool(reader, "RequiresLargeRemovalConfirmation");
+                status.ExistingCount = ReadInt(reader, "ExistingCount");
+                status.ReadCount = ReadInt(reader, "ReadCount");
+                status.SavedCount = ReadInt(reader, "SavedCount");
+                status.StaleCount = ReadInt(reader, "StaleCount");
+            }
+        }
+        if (reader.NextResult() && reader.Read())
+        {
+            status.LastAttemptAtUtc = ReadNullableDateTime(reader, "LastAttemptAtUtc") ?? status.LastAttemptAtUtc;
+            status.LastSuccessfulAtUtc = ReadNullableDateTime(reader, "LastSuccessfulAtUtc") ?? status.LastSuccessfulAtUtc;
+            status.LastError = ReadString(reader, "LastError");
+        }
+        return status;
+    }
+
+    private static void LoadMappings(SqlConnection connection, SynchronizationConfiguration configuration)
+    {
+        using var command = StoredProcedure(connection, "tb_app.AdminGetWhdUserMappings");
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var login = ReadString(reader, "LoginName");
+            var display = ReadString(reader, "DisplayName");
+            configuration.UserMappings.Add(new(login, string.IsNullOrWhiteSpace(display) ? login : $"{display} ({login})", ReadString(reader, "TechnicianExternalId")));
+        }
+    }
+
+    private static void LoadTechnicians(SqlConnection connection, SynchronizationConfiguration configuration)
+    {
+        configuration.Technicians.Add(new(string.Empty, "No WHD technician (remove mapping)"));
+        using var command = StoredProcedure(connection, "tb_app.AdminGetWhdTechnicians");
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var id = ReadString(reader, "ExternalId");
+            var display = ReadString(reader, "DisplayName", id);
+            configuration.Technicians.Add(new(id, ReadBool(reader, "IsActive", true) ? display : $"{display} (inactive)"));
+        }
+    }
+
+    private static SqlCommand StoredProcedure(SqlConnection connection, string name, SqlTransaction? transaction = null) => new(name, connection, transaction)
+    {
+        CommandType = CommandType.StoredProcedure,
+        CommandTimeout = 30
+    };
+
+    private static int TryOrdinal(SqlDataReader reader, string name)
+    {
+        try { return reader.GetOrdinal(name); } catch (IndexOutOfRangeException) { return -1; }
+    }
+
+    private static string ReadString(SqlDataReader reader, string name, string fallback = "")
+    {
+        var ordinal = TryOrdinal(reader, name);
+        return ordinal < 0 || reader.IsDBNull(ordinal) ? fallback : Convert.ToString(reader.GetValue(ordinal)) ?? fallback;
+    }
+    private static int ReadInt(SqlDataReader reader, string name, int fallback = 0)
+    {
+        var ordinal = TryOrdinal(reader, name);
+        return ordinal < 0 || reader.IsDBNull(ordinal) ? fallback : Convert.ToInt32(reader.GetValue(ordinal));
+    }
+    private static bool ReadBool(SqlDataReader reader, string name, bool fallback = false)
+    {
+        var ordinal = TryOrdinal(reader, name);
+        return ordinal < 0 || reader.IsDBNull(ordinal) ? fallback : Convert.ToBoolean(reader.GetValue(ordinal));
+    }
+    private static DateTime? ReadNullableDateTime(SqlDataReader reader, string name)
+    {
+        var ordinal = TryOrdinal(reader, name);
+        return ordinal < 0 || reader.IsDBNull(ordinal) ? null : Convert.ToDateTime(reader.GetValue(ordinal));
+    }
+    private static Guid? ReadNullableGuid(SqlDataReader reader, string name)
+    {
+        var ordinal = TryOrdinal(reader, name);
+        return ordinal < 0 || reader.IsDBNull(ordinal) ? null : (Guid)reader.GetValue(ordinal);
+    }
+}

@@ -25,6 +25,7 @@
   <ItemGroup>
     <ProjectReference Include="..\TechBench.csproj" AdditionalProperties="TechBenchTestBuild=true" />
     <ProjectReference Include="..\TechBench.SyncService\TechBench.SyncService.csproj" />
+    <ProjectReference Include="..\TechBench.ServerManager\TechBench.ServerManager.csproj" />
     <ProjectReference Include="..\TechBench.WHD\TechBench.WHD.csproj" />
   </ItemGroup>
 

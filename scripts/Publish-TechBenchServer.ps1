@@ -27,9 +27,11 @@ $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $repoPrefix = $repoRoot.TrimEnd('\') + '\'
 $projectPath = Join-Path $repoRoot 'TechBench.SyncService\TechBench.SyncService.csproj'
 $sageWorkerProjectPath = Join-Path $repoRoot 'TechBench.SageOdbcWorker\TechBench.SageOdbcWorker.csproj'
+$managerProjectPath = Join-Path $repoRoot 'TechBench.ServerManager\TechBench.ServerManager.csproj'
 $solutionPath = Join-Path $repoRoot 'TechBenchV2.sln'
 $publishDirectory = Join-Path $repoRoot 'artifacts\server\win-x64'
 $sageWorkerPublishDirectory = Join-Path $publishDirectory 'sage-odbc-worker'
+$managerPublishDirectory = Join-Path $publishDirectory 'server-manager'
 $distDirectory = Join-Path $repoRoot 'dist'
 $packageName = "TechBenchSyncService-$Version-win-x64"
 $packagePath = Join-Path $distDirectory "$packageName.zip"
@@ -107,11 +109,15 @@ function Assert-SafeServicePayload {
         'TechBench.SyncService.deps.json',
         'appsettings.json',
         'Install-TechBenchSyncService.ps1',
+        'Install-TechBenchServerManager.ps1',
         'Set-TechBenchSyncCredential.ps1',
         'Set-TechBenchSageSyncCredential.ps1',
         'TechBench-ServerManager.ps1',
         'Start-TechBenchServerManager.ps1',
         'Start-TechBenchServerManager.vbs',
+        'server-manager\TechBench.ServerManager.exe',
+        'server-manager\TechBench.ServerManager.runtimeconfig.json',
+        'server-manager\TechBench.ServerManager.deps.json',
         'csri-techbench-icon.ico',
         'Uninstall-TechBenchSyncService.ps1',
         'sage-odbc-worker\TechBench.SageOdbcWorker.exe',
@@ -217,6 +223,9 @@ try {
     if (-not (Test-Path -LiteralPath $sageWorkerProjectPath)) {
         throw "The Sage ODBC worker project was not found: $sageWorkerProjectPath"
     }
+    if (-not (Test-Path -LiteralPath $managerProjectPath)) {
+        throw "The compiled Server Manager project was not found: $managerProjectPath"
+    }
 
     Assert-StandaloneSqlIsCurrent
 
@@ -270,8 +279,25 @@ try {
         "-p:FileVersion=$numericVersion.0"
     )
 
+    New-Item -ItemType Directory -Path $managerPublishDirectory -Force | Out-Null
+    Invoke-Checked $dotnet @(
+        'publish', $managerProjectPath,
+        '-c', $Configuration,
+        '-r', 'win-x64',
+        '--self-contained', 'true',
+        '-o', $managerPublishDirectory,
+        '-p:PublishSingleFile=false',
+        '-p:PublishTrimmed=false',
+        '-p:DebugType=None',
+        '-p:DebugSymbols=false',
+        "-p:Version=$Version",
+        "-p:AssemblyVersion=$numericVersion.0",
+        "-p:FileVersion=$numericVersion.0"
+    )
+
     foreach ($scriptName in @(
         'Install-TechBenchSyncService.ps1',
+        'Install-TechBenchServerManager.ps1',
         'Set-TechBenchSyncCredential.ps1',
         'Set-TechBenchSageSyncCredential.ps1',
         'TechBench-ServerManager.ps1',
