@@ -42,7 +42,7 @@ internal sealed class ReleaseUpdater(AppPaths paths)
             var candidate = new ReleasePackage(
                 version, zipName, ApprovedAssetUri(zip.Value), zip.Value.GetProperty("size").GetInt64(),
                 checksumName, ApprovedAssetUri(checksum.Value), checksum.Value.GetProperty("size").GetInt64());
-            if (best is null || SemanticVersion.Compare(candidate.Version, best.Version) > 0) best = candidate;
+            if (best is null || SemanticVersion.CompareForUpdate(candidate.Version, best.Version) > 0) best = candidate;
         }
         return best;
     }
@@ -268,6 +268,19 @@ internal readonly record struct SemanticVersion(int Major, int Minor, int Patch,
         if (!l.IsPrerelease) return 1;
         if (!r.IsPrerelease) return -1;
         return ComparePrerelease(l.PreRelease, r.PreRelease);
+    }
+
+    public static int CompareForUpdate(string left, string right)
+    {
+        if (!TryParse(left, out var l) || !TryParse(right, out var r))
+            return Compare(left, right);
+
+        static bool CorrectedLine(SemanticVersion version) => version.Major is 0 or 1;
+        static bool MistakenLegacyLine(SemanticVersion version) => version.Major is 2 or 5;
+
+        if (CorrectedLine(l) && MistakenLegacyLine(r)) return 1;
+        if (MistakenLegacyLine(l) && CorrectedLine(r)) return -1;
+        return Compare(left, right);
     }
     private static int ComparePrerelease(string left, string right)
     {

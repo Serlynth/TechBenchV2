@@ -650,7 +650,7 @@ internal sealed class ServerManagerForm : Form
         await RunAsync("Checking the public TechBench release repository...", async () =>
         {
             _availableUpdate = await _updater.FindUpdateAsync(CancellationToken.None);
-            if (_availableUpdate is null || SemanticVersion.Compare(_availableUpdate.Version, _paths.CurrentVersion) <= 0)
+            if (_availableUpdate is null || SemanticVersion.CompareForUpdate(_availableUpdate.Version, _paths.CurrentVersion) <= 0)
             {
                 _availableUpdate = null; _updateStatus.Text = $"Current ({_paths.CurrentVersion})"; _installUpdateButton.Enabled = false;
                 MessageBox.Show($"TechBench {_paths.CurrentVersion} is already current.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);

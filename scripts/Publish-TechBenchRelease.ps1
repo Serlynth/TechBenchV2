@@ -27,6 +27,7 @@ $iconPath = Join-Path $repoRoot 'Assets\csri-techbench-icon.ico'
 $splashPath = Join-Path $repoRoot 'Assets\csri-techbench-logo.png'
 $numericVersion = ($Version -split '-', 2)[0]
 $isPrerelease = $Version.Contains('-')
+$releaseChannel = if ($Version -match '^0\.') { 'v2' } else { 'win' }
 
 if ([string]::IsNullOrWhiteSpace($ReleaseNotesPath)) {
     $ReleaseNotesPath = Join-Path $repoRoot "release-notes\$Version.md"
@@ -177,17 +178,23 @@ try {
         }
     }
 
-    $hasExistingRelease = $existingReleases.Count -gt 0
+    $hasExistingChannelRelease = @($existingReleases | Where-Object {
+        if ($releaseChannel -eq 'v2') {
+            $_.tagName -match '^v0\.'
+        } else {
+            $_.tagName -match '^v(?:2\.|5\.)'
+        }
+    }).Count -gt 0
     if ($Publish -and $existingReleases.tagName -contains "v$Version") {
         throw "GitHub release v$Version already exists. Versions are immutable; choose a new version."
     }
 
-    if ($Publish -and $hasExistingRelease) {
+    if ($Publish -and $hasExistingChannelRelease) {
         Invoke-Checked $dotnet @(
             'tool', 'run', 'vpk', '--',
             'download', 'github',
             '--outputDir', $releaseDirectory,
-            '--channel', 'win',
+            '--channel', $releaseChannel,
             '--repoUrl', $RepositoryUrl
         )
     }
@@ -212,7 +219,7 @@ try {
         'tool', 'run', 'vpk', '--',
         'pack',
         '--outputDir', $releaseDirectory,
-        '--channel', 'win',
+        '--channel', $releaseChannel,
         '--runtime', 'win-x86',
         '--packId', 'CSRI.TechBenchV2',
         '--packVersion', $Version,
@@ -258,7 +265,7 @@ try {
             'tool', 'run', 'vpk', '--',
             'upload', 'github',
             '--outputDir', $releaseDirectory,
-            '--channel', 'win',
+            '--channel', $releaseChannel,
             '--repoUrl', $RepositoryUrl,
             '--token', $token,
             '--publish',

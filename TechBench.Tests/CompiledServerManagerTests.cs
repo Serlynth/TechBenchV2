@@ -110,6 +110,16 @@ public sealed class CompiledServerManagerTests
         Assert.Equal(expectedSign, Math.Sign(SemanticVersion.Compare(left, right)));
     }
 
+    [Theory]
+    [InlineData("0.5.1", "5.0.3", 1)]
+    [InlineData("0.5.1", "2.0.0-alpha.25", 1)]
+    [InlineData("0.5.2", "0.5.1", 1)]
+    [InlineData("5.0.3", "0.5.1", -1)]
+    public void CorrectedReleaseLineSupersedesMistakenVersionNumbers(string left, string right, int expectedSign)
+    {
+        Assert.Equal(expectedSign, Math.Sign(SemanticVersion.CompareForUpdate(left, right)));
+    }
+
     [Fact]
     public void SelfUpdateHelperDoesNotInheritTheInstalledManagerWorkingDirectory()
     {

@@ -8,6 +8,7 @@ public sealed class V2AppUpdateService : IAppUpdateService
 {
     public const string ReleaseRepositoryUrl =
         "https://github.com/Serlynth/TechBenchV2-Releases";
+    public const string ReleaseChannel = "v2";
 
     private readonly UpdateManager _updateManager;
     private UpdateInfo? _pendingUpdate;
@@ -18,7 +19,14 @@ public sealed class V2AppUpdateService : IAppUpdateService
             new GithubSource(
                 ReleaseRepositoryUrl,
                 accessToken: null,
-                prerelease: true));
+                prerelease: true),
+            new UpdateOptions
+            {
+                ExplicitChannel = ReleaseChannel,
+                // 5.0.1/5.0.2 were published before the intended 0.5.x numbering
+                // was clarified. Permit the one-time move to the corrected line.
+                AllowVersionDowngrade = true
+            });
     }
 
     public bool IsInstalled => _updateManager.IsInstalled;

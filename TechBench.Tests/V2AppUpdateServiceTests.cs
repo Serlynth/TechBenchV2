@@ -14,5 +14,6 @@ public sealed class V2AppUpdateServiceTests
             "/TechBench-Releases",
             V2AppUpdateService.ReleaseRepositoryUrl,
             StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("v2", V2AppUpdateService.ReleaseChannel);
     }
 }
