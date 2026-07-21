@@ -94,6 +94,28 @@ public sealed class CompiledServerManagerTests
     }
 
     [Fact]
+    public void SelfUpdateHelperDoesNotInheritTheInstalledManagerWorkingDirectory()
+    {
+        var packageDirectory = Path.Combine(Path.GetTempPath(), "TechBenchUpdate", Guid.NewGuid().ToString("N"));
+        var startInfo = ReleaseUpdater.CreateInstallerStartInfo(packageDirectory, 1234);
+
+        Assert.Equal(Path.GetFullPath(packageDirectory), startInfo.WorkingDirectory);
+        Assert.Equal(
+            Path.Combine(Path.GetFullPath(packageDirectory), "server-manager", "TechBench.ServerManager.exe"),
+            startInfo.FileName);
+        Assert.Contains("--manager-pid 1234", startInfo.Arguments, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelfUpdateStopsBeforeChangingFilesWhenManagerDoesNotExit()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            PackageInstaller.WaitForManagerExit(Environment.ProcessId, TimeSpan.Zero));
+
+        Assert.Contains("no installed files were changed", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void FirstInstallScriptVerifiesPayloadAndCreatesDirectShortcut()
     {
         var script = ReadRepositoryFile("scripts", "Install-TechBenchServerManager.ps1");

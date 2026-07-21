@@ -76,14 +76,24 @@ internal sealed class ReleaseUpdater(AppPaths paths)
 
     public static void LaunchInstaller(string packageDirectory, int managerProcessId)
     {
+        _ = Process.Start(CreateInstallerStartInfo(packageDirectory, managerProcessId))
+            ?? throw new InvalidOperationException("The compiled update helper could not be started.");
+    }
+
+    internal static ProcessStartInfo CreateInstallerStartInfo(string packageDirectory, int managerProcessId)
+    {
+        packageDirectory = Path.GetFullPath(packageDirectory);
         var helper = Path.Combine(packageDirectory, "server-manager", "TechBench.ServerManager.exe");
-        var info = new ProcessStartInfo
+        return new ProcessStartInfo
         {
             FileName = helper,
+            // The installed Manager normally starts with its installation directory as the
+            // current directory. Do not inherit it: a child process whose current directory
+            // is there prevents Windows from moving that directory during self-update.
+            WorkingDirectory = packageDirectory,
             UseShellExecute = true,
             Arguments = $"--apply-update --package-directory {Quote(packageDirectory)} --manager-pid {managerProcessId}"
         };
-        _ = Process.Start(info) ?? throw new InvalidOperationException("The compiled update helper could not be started.");
     }
 
     private async Task DownloadBoundedAsync(Uri uri, string destination, long maximumBytes, CancellationToken cancellationToken)

@@ -16,10 +16,7 @@ internal static class PackageInstaller
 
         try
         {
-            if (managerProcessId > 0)
-            {
-                try { Process.GetProcessById(managerProcessId).WaitForExit(30000); } catch (ArgumentException) { }
-            }
+            WaitForManagerExit(managerProcessId, TimeSpan.FromSeconds(30));
             var manifest = PackageManifest.LoadAndVerify(packageDirectory);
             if (!InstalledPackageDeclaresRequiredSchema(paths, manifest.RequiredDatabaseSchemaVersion))
             {
@@ -51,10 +48,10 @@ internal static class PackageInstaller
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(paths.ServiceDirectory)!);
-                if (Directory.Exists(paths.ServiceDirectory)) { Directory.Move(paths.ServiceDirectory, serviceBackup); serviceMoved = true; }
-                if (Directory.Exists(paths.ManagerDirectory)) { Directory.Move(paths.ManagerDirectory, managerBackup); managerMoved = true; }
-                Directory.Move(serviceStage, paths.ServiceDirectory);
-                Directory.Move(managerStage, paths.ManagerDirectory);
+                if (Directory.Exists(paths.ServiceDirectory)) { MoveDirectoryWithRetries(paths.ServiceDirectory, serviceBackup); serviceMoved = true; }
+                if (Directory.Exists(paths.ManagerDirectory)) { MoveDirectoryWithRetries(paths.ManagerDirectory, managerBackup); managerMoved = true; }
+                MoveDirectoryWithRetries(serviceStage, paths.ServiceDirectory);
+                MoveDirectoryWithRetries(managerStage, paths.ManagerDirectory);
                 SecureDirectory.GrantReadAndExecute(paths.ServiceDirectory, installedService.Account);
                 SecureDirectory.GrantBuiltInUsersReadAndExecute(paths.ManagerDirectory);
                 ShortcutManager.Create(paths);
@@ -110,6 +107,23 @@ internal static class PackageInstaller
         }
     }
 
+    internal static void WaitForManagerExit(int managerProcessId, TimeSpan timeout)
+    {
+        if (managerProcessId <= 0) return;
+        try
+        {
+            using var manager = Process.GetProcessById(managerProcessId);
+            if (!manager.WaitForExit((int)timeout.TotalMilliseconds))
+                throw new InvalidOperationException(
+                    "The running TechBench Server Manager did not close, so no installed files were changed. " +
+                    "Exit it from the notification area and try the update again.");
+        }
+        catch (ArgumentException)
+        {
+            // The process already exited before the helper obtained its handle.
+        }
+    }
+
     private static void CopyDirectory(string source, string destination, Func<string, bool> include)
     {
         if (!Directory.Exists(source)) throw new DirectoryNotFoundException(source);
@@ -150,6 +164,21 @@ internal static class PackageInstaller
     private static void TryDelete(string path)
     {
         try { if (Directory.Exists(path)) Directory.Delete(path, true); } catch { }
+    }
+
+    private static void MoveDirectoryWithRetries(string source, string destination)
+    {
+        Exception? last = null;
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            try { Directory.Move(source, destination); return; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                last = ex;
+                Thread.Sleep(250 * (attempt + 1));
+            }
+        }
+        throw last ?? new IOException($"Unable to move '{source}' to '{destination}'.");
     }
 
     private static void TryRollbackDirectory(string installedPath, string backupPath, bool hadBackup, ICollection<Exception> errors)
