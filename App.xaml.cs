@@ -79,6 +79,10 @@ public partial class App : System.Windows.Application
         // This lightweight connection screen is intentionally shown on every
         // interactive launch. Windows remains the authenticated identity; the
         // optional username only requests an Admin-only, read-only preview.
+        // Keep the process alive while this is the only window. Otherwise,
+        // closing a successful modal connection window can trigger WPF's
+        // default last-window shutdown before the workspace is shown.
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
         var connectionWindow = new DatabaseConnectionWindow(
             connectionOptions,
             connectionStatus);
@@ -109,6 +113,7 @@ public partial class App : System.Windows.Application
         MainWindow.ShowActivated = false;
 #endif
         MainWindow.Show();
+        ShutdownMode = ShutdownMode.OnMainWindowClose;
     }
 
     protected override void OnExit(ExitEventArgs e)

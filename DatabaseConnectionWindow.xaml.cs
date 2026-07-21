@@ -26,13 +26,19 @@ public partial class DatabaseConnectionWindow : Window
         StatusTextBlock.Text = initialStatus ?? string.Empty;
         Loaded += (_, _) =>
         {
+            FitToWorkingArea();
+
             if (string.IsNullOrWhiteSpace(ServerTextBox.Text))
             {
                 ServerTextBox.Focus();
             }
-            else
+            else if (string.IsNullOrWhiteSpace(DatabaseTextBox.Text))
             {
                 DatabaseTextBox.Focus();
+            }
+            else
+            {
+                ConnectButton.Focus();
             }
         };
     }
@@ -135,6 +141,24 @@ public partial class DatabaseConnectionWindow : Window
     private void CancelButton_Click(object sender, RoutedEventArgs e)
     {
         DialogResult = false;
+    }
+
+    private void FitToWorkingArea()
+    {
+        const double edgeMargin = 16;
+        var workArea = SystemParameters.WorkArea;
+        var availableWidth = Math.Max(420, workArea.Width - edgeMargin);
+        var availableHeight = Math.Max(360, workArea.Height - edgeMargin);
+
+        MinWidth = Math.Min(MinWidth, availableWidth);
+        MinHeight = Math.Min(MinHeight, availableHeight);
+        MaxWidth = availableWidth;
+        MaxHeight = availableHeight;
+        Width = Math.Min(Width, availableWidth);
+        Height = Math.Min(Height, availableHeight);
+
+        Left = workArea.Left + Math.Max(0, (workArea.Width - Width) / 2);
+        Top = workArea.Top + Math.Max(0, (workArea.Height - Height) / 2);
     }
 
     private static string ResolveSqlError(SqlException exception)
