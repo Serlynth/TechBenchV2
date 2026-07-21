@@ -153,12 +153,14 @@ schedule, verify, or restore a SQL Server backup.
   links, drafts, templates, Common Links, organization/user settings, aliases,
   posting coordination, synchronization runs, imports, and legacy mappings.
 - V0003 promotes Common Links and import/customer aliases to organization
-  scope, adds the canonical shared tag catalog, and separates shared WHD/Sage
-  defaults from per-user identity settings.
+  scope, retains the original organization-tag catalog for migration
+  compatibility, and separates shared WHD/Sage defaults from per-user identity
+  settings. Current tag suggestions are derived from each effective user's
+  saved work entries.
 - V0004 makes shared mutation and WHD/Sage synchronization strictly Admin-only,
-  makes built-in Common Links Admin-editable but non-removable, turns common
-  tags into an Admin-curated catalog, and moves the WHD auto-sync schedule into
-  organization settings. The first V0004 Admin initialization records
+  makes built-in Common Links Admin-editable but non-removable, retains the
+  legacy Admin tag procedures for upgrade compatibility, and moves the WHD
+  auto-sync schedule into organization settings. The first V0004 Admin initialization records
   `WorkspaceDefaults.Initialized=4` with that Admin's identity.
 - V0005 lets every `tb_role_user` import their own TechBench V1 history. SQL
   derives the owner SID from `ORIGINAL_LOGIN()`, keys legacy mappings by that

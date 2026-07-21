@@ -149,10 +149,12 @@ DECLARE @SaveWorkEntryDefinition nvarchar(max) =
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveWorkEntry'));
 
 IF @GetDistinctTagsDefinition IS NULL
-   OR CHARINDEX(N'[tb_data].[OrganizationTags]', @GetDistinctTagsDefinition) = 0
-   OR CHARINDEX(N'[tb_data].[WorkEntries]', @GetDistinctTagsDefinition) > 0
+   OR CHARINDEX(N'[tb_data].[WorkEntries]', @GetDistinctTagsDefinition) = 0
+   OR CHARINDEX(N'work_entry.[OwnerWindowsSid] = @UserSid', @GetDistinctTagsDefinition) = 0
+   OR CHARINDEX(N'STRING_SPLIT', @GetDistinctTagsDefinition) = 0
+   OR CHARINDEX(N'[tb_data].[OrganizationTags]', @GetDistinctTagsDefinition) > 0
 BEGIN
-    PRINT N'FAIL: GetDistinctTags is not isolated to the canonical organization catalog.';
+    PRINT N'FAIL: GetDistinctTags is not isolated to tags used by the effective user.';
     SET @FailureCount += 1;
 END;
 

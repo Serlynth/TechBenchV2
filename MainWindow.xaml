@@ -1061,22 +1061,17 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="12" />
                                                 <ColumnDefinition Width="180" />
-                                                <ColumnDefinition Width="12" />
-                                                <ColumnDefinition Width="180" />
                                             </Grid.ColumnDefinitions>
                                             <StackPanel Grid.Column="0">
                                                 <TextBlock Text="Tags" Style="{StaticResource FieldLabelStyle}" />
-                                                <TextBox Text="{Binding Editor.Tags, UpdateSourceTrigger=PropertyChanged}"
-                                                         ToolTip="Comma-separated tags" />
+                                                <ComboBox ItemsSource="{Binding TagSuggestions}"
+                                                          Text="{Binding Editor.Tags, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                          IsEditable="True"
+                                                          IsTextSearchEnabled="True"
+                                                          StaysOpenOnEdit="True"
+                                                          ToolTip="Type a tag or choose one you have used before. Separate multiple tags with commas." />
                                             </StackPanel>
                                             <StackPanel Grid.Column="2">
-                                                <TextBlock Text="Add saved tag" Style="{StaticResource FieldLabelStyle}" />
-                                                <ComboBox ItemsSource="{Binding TagSuggestions}"
-                                                          SelectedItem="{Binding SelectedEditorTagSuggestion, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                          IsTextSearchEnabled="True"
-                                                          ToolTip="Choose a tag used on a saved entry" />
-                                            </StackPanel>
-                                            <StackPanel Grid.Column="4">
                                                 <TextBlock Text="Follow-up" Style="{StaticResource FieldLabelStyle}" />
                                                 <ComboBox ItemsSource="{Binding FollowUpOptions}"
                                                           DisplayMemberPath="DisplayName"
@@ -3121,53 +3116,6 @@
                                                 Style="{StaticResource PrimaryButtonStyle}" />
                                     </StackPanel>
                                 </Grid>
-                            </Grid>
-                        </Border>
-
-                        <Border Style="{StaticResource CardStyle}"
-                                Margin="0,14,0,0"
-                                Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="250" />
-                                    <ColumnDefinition Width="16" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0">
-                                    <TextBlock Text="Common Tags" Style="{StaticResource SectionHeadingStyle}" />
-                                    <TextBlock Text="Shared suggestions for every user. Only TechBench Admins can add or remove them."
-                                               Style="{StaticResource MutedTextStyle}"
-                                               TextWrapping="Wrap"
-                                               Margin="0,0,0,8" />
-                                    <ListBox ItemsSource="{Binding ManagedOrganizationTags}"
-                                             SelectedItem="{Binding SelectedOrganizationTag}"
-                                             DisplayMemberPath="Tag"
-                                             Background="{DynamicResource ComboBoxBackgroundBrush}"
-                                             Foreground="{DynamicResource ComboBoxTextBrush}"
-                                             BorderBrush="{DynamicResource ComboBoxBorderBrush}"
-                                             ItemContainerStyle="{StaticResource TicketSelectorItemStyle}"
-                                             MinHeight="130"
-                                             MaxHeight="220" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="2" VerticalAlignment="Top">
-                                    <TextBlock Text="New shared tag" Style="{StaticResource FieldLabelStyle}" />
-                                    <TextBox Text="{Binding NewOrganizationTag, UpdateSourceTrigger=PropertyChanged}"
-                                             MaxLength="1000"
-                                             Margin="0,0,0,10" />
-                                    <WrapPanel>
-                                        <Button Content="Add Tag"
-                                                Command="{Binding AddOrganizationTagCommand}"
-                                                Style="{StaticResource PrimaryButtonStyle}"
-                                                Margin="0,0,8,0" />
-                                        <Button Content="Remove Selected"
-                                                Command="{Binding DeleteOrganizationTagCommand}"
-                                                Style="{StaticResource DangerButtonStyle}" />
-                                    </WrapPanel>
-                                    <TextBlock Text="Removing a common tag only removes the suggestion; existing work notes keep their tag text."
-                                               Style="{StaticResource MutedTextStyle}"
-                                               TextWrapping="Wrap"
-                                               Margin="0,10,0,0" />
-                                </StackPanel>
                             </Grid>
                         </Border>
 

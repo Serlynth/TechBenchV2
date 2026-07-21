@@ -273,6 +273,23 @@ public sealed partial class SqlServer2016SyntaxTests
     }
 
     [Fact]
+    public void TagSuggestionsComeOnlyFromTheEffectiveUsersSavedWork()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindSqlDirectory(),
+            "41-V0002-WorkProcedures.sql"));
+        var body = Regex.Replace(
+            ProcedureBody(source, "GetDistinctTags", "tb_app"),
+            @"\s+",
+            string.Empty);
+
+        Assert.Contains("[tb_data].[WorkEntries]", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("work_entry.[OwnerWindowsSid]=@UserSid", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("STRING_SPLIT", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("[tb_data].[OrganizationTags]", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void V0007PublishesServerOwnedSageAndReadOnlyPreviewContracts()
     {
         var sqlDirectory = FindSqlDirectory();

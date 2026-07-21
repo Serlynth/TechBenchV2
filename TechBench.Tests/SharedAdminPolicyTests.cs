@@ -64,14 +64,20 @@ public sealed class SharedAdminPolicyTests
     }
 
     [Fact]
-    public void RepositoryExposesAdminManagedCommonTagCatalog()
+    public void ClientUsesOneEditablePersonalTagPickerWithoutCommonTagAdministration()
     {
-        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
-            nameof(ITechBenchRepository.GetOrganizationTags)));
-        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
-            nameof(ITechBenchRepository.SaveOrganizationTag)));
-        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
-            nameof(ITechBenchRepository.DeleteOrganizationTag)));
+        var xaml = File.ReadAllText(FindRepositoryFile("MainWindow.xaml"));
+        var notesViewModel = File.ReadAllText(FindRepositoryFile(
+            "ViewModels",
+            "MainWindowViewModel.Notes.cs"));
+
+        Assert.Contains("Text=\"{Binding Editor.Tags, Mode=TwoWay", xaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding TagSuggestions}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("choose one you have used before", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Add saved tag", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Common Tags", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("ManagedOrganizationTags", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("SelectedEditorTagSuggestion", notesViewModel, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -2,7 +2,7 @@
 
 ## Status
 
-TechBench V2 `2.0.0-alpha.20` implements the conversion from TechBench 1.x's local SQLite design to a shared SQL Server design, including an owner-scoped V1 migration contract, a dedicated Windows service for organization-wide WHD and Sage customer synchronization, an Admin-only read-only user-preview boundary, a compiled server-local administrator GUI, and a self-contained one-click server installer. Alpha.20 keeps normal Ticket List reads scoped to the mapped WHD technician or synchronized groups even for Admins, while preserving the explicit read-only preview path for inspecting another technician.
+TechBench V2 `2.0.0-alpha.21` implements the conversion from TechBench 1.x's local SQLite design to a shared SQL Server design, including an owner-scoped V1 migration contract, a dedicated Windows service for organization-wide WHD and Sage customer synchronization, an Admin-only read-only user-preview boundary, a compiled server-local administrator GUI, and a self-contained one-click server installer. Alpha.21 keeps normal Ticket List reads scoped to the mapped WHD technician or synchronized groups even for Admins, and simplifies work-entry tags into one editable, owner-scoped suggestion control.
 
 The production WPF runtime uses the SQL Server repository for every business and operational workflow. It packages `Microsoft.Data.Sqlite` only for the explicit, read-only V1 migration reader; production builds still exclude the legacy local repository, database-location service, and local client/ticket providers. V2 has no client-side business-database backup path; SQL Server protection is owned by DBA/operations.
 
@@ -134,7 +134,7 @@ The `TechBench` database owns:
 - clients, organization-wide aliases, external identities, matching state, and merge audit
 - tickets and ticket status options
 - work entries, related-entry links, follow-ups, and search/history fields
-- an Admin-curated organization-wide tag catalog used as the shared suggestion list; saving a work entry does not publish new catalog values
+- owner-scoped work-entry tags, with suggestions derived automatically from tags previously used by the effective user
 - owner-private Personal Notes and their WHD inclusion choice
 - editor recovery drafts keyed by owner SID and device ID
 - organization templates, with read compatibility for legacy personal templates
@@ -152,7 +152,7 @@ Tables are separated into deployment, data, private, user, operations, audit, se
 
 Ordinary work is owned by the caller's Windows SID. Managers may read approved ordinary team work through manager-enabled procedure paths. Personal Notes are joined and returned only when the current SID owns them; team reads redact the private content.
 
-Drafts and user settings are scoped by the current SID. Common Links, canonical tags, customer aliases, external identities, and client matching are organization-wide. Every template, Common Link, matching, alias, organization-setting, and shared synchronization mutation requires the Admin role and is enforced at the stored-procedure boundary.
+Drafts, user settings, and tag suggestions are scoped by the current SID. Common Links, customer aliases, external identities, and client matching are organization-wide. Every template, Common Link, matching, alias, organization-setting, and shared synchronization mutation requires the Admin role and is enforced at the stored-procedure boundary.
 
 Settings intentionally contains no separate manual Sage customer-mapping editor. Administrators perform matching in the dedicated Client Matching workspace, which uses the same shared, audited server contract as the rest of client administration.
 
@@ -182,7 +182,7 @@ Local JSON files under `%LOCALAPPDATA%\TechBenchV2` contain no work entries, not
 - personal Sage time-ticket DSN/company-path/native-automation choices
 - the Microsoft admin-link browser preference
 
-The local refresh interval drives a client timer that reloads shared clients, tickets, statuses, matching, links, tags, and templates. It does not create a cache or overwrite an active editor.
+The local refresh interval drives a client timer that reloads shared clients, tickets, statuses, matching, links, templates, and the current user's tag suggestions. It does not create a cache or overwrite an active editor.
 
 The WHD automatic-sync enabled state and interval are organization settings stored in SQL Server, so every Admin sees one schedule. The Windows service claims durable SQL work under an expiring lease. It performs one initial full import, overlapping ticket deltas every five minutes, and reference snapshots for clients, statuses, technicians, and group membership at least daily. An Admin may also queue an immediate WHD run. No Admin workstation needs to remain open.
 
@@ -259,11 +259,11 @@ The SQL Server 2016 package contains idempotent stages for:
 
 `database/sqlserver2016/Deploy-CSRI-Standalone.sql` combines every numbered stage for SSMS SQLCMD Mode and has no external include paths.
 
-Schema version `2` is recorded as migration `SqlServer2016.OperationalStorage.0002`; schema version `3` adds shared reference data; schema version `4` records the strict Admin-owned boundary; schema version `5` adds owner-scoped, idempotent V1 entity mappings; schema version `6` adds the leased service-only WHD ingestion boundary through `SqlServer2016.WhdServerSync.0006`; and schema version `7` adds server-owned Sage synchronization and Admin read-only preview through `SqlServer2016.ServerOwnedSageAndAdminPreview.0007`. The alpha.20 client and service require exactly schema version 7. Alpha.20 does not change schema or data, but its matching SQL deployment refreshes normal ticket-read procedures.
+Schema version `2` is recorded as migration `SqlServer2016.OperationalStorage.0002`; schema version `3` adds shared reference data; schema version `4` records the strict Admin-owned boundary; schema version `5` adds owner-scoped, idempotent V1 entity mappings; schema version `6` adds the leased service-only WHD ingestion boundary through `SqlServer2016.WhdServerSync.0006`; and schema version `7` adds server-owned Sage synchronization and Admin read-only preview through `SqlServer2016.ServerOwnedSageAndAdminPreview.0007`. The alpha.21 client and service require exactly schema version 7. Alpha.21 does not change schema or data, but its matching SQL deployment refreshes normal ticket-read and personal tag-suggestion procedures.
 
 The first schema-version-4 Admin startup performs one insert-missing catalog seed and writes the organization setting `WorkspaceDefaults.Initialized=4` with that Admin's real SID. Subsequent startups do not recreate renamed or deleted note templates. The WHD auto-sync enabled/interval rows remain independently insert-missing so required runtime defaults can be repaired without changing an Admin's saved values.
 
-The schema-version-7 database, alpha.20 client, and compatible sync service are a coordinated cutover. Have the DBA back up and verify the database, run the matching alpha.20 SQL deployment, configure shared WHD/Sage values in Server Manager, install the matching client, and run smoke tests as one planned operation. Do not leave mixed alpha clients in normal use.
+The schema-version-7 database, alpha.21 client, and compatible sync service are a coordinated cutover. Have the DBA back up and verify the database, run the matching alpha.21 SQL deployment, configure shared WHD/Sage values in Server Manager, install the matching client, and run smoke tests as one planned operation. Do not leave mixed alpha clients in normal use.
 
 The desktop client has no database-backup command and no authority to create a SQL Server backup. Full/log backup scheduling, `DBCC CHECKDB`, retention, monitoring, and restore testing belong to DBA/operations outside TechBench.
 
@@ -295,11 +295,11 @@ Production approval still requires a live SQL Server 2016 exercise. At minimum:
 12. Verify service lease recovery, direct/group ticket visibility, explicit close/delete handling, and that omission does not close a ticket.
 13. Have the DBA verify SQL Server backup, `DBCC CHECKDB`, and restore procedures independently of the client.
 
-Until those checks pass, alpha.20 is an implementation candidate, not a production release.
+Until those checks pass, alpha.21 is an implementation candidate, not a production release.
 
 ## V1 data migration
 
-Installing alpha.20 does not automatically import V1 data; each authenticated user explicitly uses **Settings > Import V1 Database...** and confirms an import preview for their own account. This is separate from the Admin-only login preview.
+Installing alpha.21 does not automatically import V1 data; each authenticated user explicitly uses **Settings > Import V1 Database...** and confirms an import preview for their own account. This is separate from the Admin-only login preview.
 
 The user must close V1 and select its closed local database or a verified copy. The reader opens SQLite in read-only/query-only mode, rejects active journal/WAL sidecars, runs `quick_check`, validates known schema variants and SQL field limits, and rejects a source whose SHA-256 changes during the read. It extracts work entries, Personal Notes, entry tags, follow-up state, posting state/history, and note links. It does not import shared catalogs/configuration, credentials, editor drafts, active posting attempts, or local caches.
 

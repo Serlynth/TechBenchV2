@@ -773,13 +773,21 @@ BEGIN
         @IsSyncOperator = @IsSyncOperator OUTPUT;
 
     /*
-        @IncludeAllUsers is retained for desktop contract compatibility. Tags are
-        now a canonical organization catalog, so every authorized user receives
-        the same list without this procedure reading or exposing work entries.
+        @IncludeAllUsers is retained for desktop contract compatibility, but tag
+        suggestions are always private to the effective user's saved work. This
+        also gives an Admin read-only preview the same suggestions as its target.
     */
-    SELECT [Tag]
-    FROM [tb_data].[OrganizationTags]
-    ORDER BY [Tag];
+    SELECT parsed_tag.[Tag]
+    FROM
+    (
+        SELECT MIN(LTRIM(RTRIM(tag.[value]))) AS [Tag]
+        FROM [tb_data].[WorkEntries] AS work_entry
+        CROSS APPLY STRING_SPLIT(COALESCE(work_entry.[Tags], N''), N',') AS tag
+        WHERE work_entry.[OwnerWindowsSid] = @UserSid
+          AND NULLIF(LTRIM(RTRIM(tag.[value])), N'') IS NOT NULL
+        GROUP BY UPPER(LTRIM(RTRIM(tag.[value])))
+    ) AS parsed_tag
+    ORDER BY parsed_tag.[Tag];
 END;
 GO
 

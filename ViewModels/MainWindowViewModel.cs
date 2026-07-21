@@ -186,7 +186,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         InitializeNoteFeatures();
         InitializeV1DatabaseImport();
         InitializeCommonLinks();
-        InitializeAdminFeatures();
 
         StatusFilterOptions.Add("Any");
         StatusFilterOptions.Add("Draft");
@@ -1080,7 +1079,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             RefreshEditorTickets();
             RefreshCommonLinks();
             RefreshTagSuggestions();
-            RefreshOrganizationTags();
             ReloadNoteTemplates(ManagedNoteTemplate?.Id);
             ReloadOrganizationSettings();
         }

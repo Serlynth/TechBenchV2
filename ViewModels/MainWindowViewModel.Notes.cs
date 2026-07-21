@@ -22,7 +22,6 @@ public sealed partial class MainWindowViewModel
     private DateTime? _lastEditorSaveAt;
     private string _editorSaveStatus = "Saved";
     private string _searchTags = string.Empty;
-    private string? _selectedEditorTagSuggestion;
     private FollowUpOption? _searchFollowUpOption;
     private bool _searchOpenFollowUpsOnly;
     private NoteTemplate? _managedNoteTemplate;
@@ -59,22 +58,6 @@ public sealed partial class MainWindowViewModel
     {
         get => _searchTags;
         set => SetProperty(ref _searchTags, value);
-    }
-
-    public string? SelectedEditorTagSuggestion
-    {
-        get => _selectedEditorTagSuggestion;
-        set
-        {
-            if (!SetProperty(ref _selectedEditorTagSuggestion, value) || string.IsNullOrWhiteSpace(value))
-            {
-                return;
-            }
-
-            Editor.Tags = WorkEntryTags.Add(Editor.Tags, value);
-            _selectedEditorTagSuggestion = null;
-            OnPropertyChanged();
-        }
     }
 
     public FollowUpOption? SearchFollowUpOption
