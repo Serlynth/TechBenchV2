@@ -2,7 +2,7 @@
 
 ## Status
 
-TechBench V2 `2.0.0-alpha.15` implements the conversion from TechBench 1.x's local SQLite design to a shared SQL Server design, including an owner-scoped V1 migration contract, a dedicated Windows service for organization-wide WHD and Sage customer synchronization, an Admin-only read-only user-preview boundary, and a compiled server-local administrator GUI with shared synchronization configuration, notification-area behavior, and controlled service updates. Alpha.15 accepts Windows PowerShell 5.1 UTF-8 BOM configuration and manifest files.
+TechBench V2 `2.0.0-alpha.16` implements the conversion from TechBench 1.x's local SQLite design to a shared SQL Server design, including an owner-scoped V1 migration contract, a dedicated Windows service for organization-wide WHD and Sage customer synchronization, an Admin-only read-only user-preview boundary, a compiled server-local administrator GUI, and a self-contained one-click server installer. Alpha.16 preserves the installed service identity, SQL configuration, and protected WHD/Sage secrets during same-schema update or repair.
 
 The production WPF runtime uses the SQL Server repository for every business and operational workflow. It packages `Microsoft.Data.Sqlite` only for the explicit, read-only V1 migration reader; production builds still exclude the legacy local repository, database-location service, and local client/ticket providers. V2 has no client-side business-database backup path; SQL Server protection is owned by DBA/operations.
 
@@ -68,11 +68,11 @@ The server and database names are non-secret deployment configuration. Productio
 
 ## Server Manager lifecycle
 
-TechBench Server Manager is a compiled, self-contained server-local administrator process, not a network service. It is the sole product UI for the service identity, protected server credentials, SQL connection settings, organization-wide WHD/Sage synchronization configuration, and manual sync requests. It connects to SQL Server with the elevated operator's Windows identity, requires the TechBench Admin role, and uses only the existing stored-procedure boundary; external-system secrets remain machine-protected outside SQL. Its Start Menu shortcut targets `TechBench.ServerManager.exe` directly, and its application manifest requests elevation. Normal launch and runtime do not invoke PowerShell or VBScript.
+TechBench Server Manager is a compiled, self-contained server-local administrator process, not a network service. It is the sole product UI for the service identity, protected server credentials, SQL connection settings, organization-wide WHD/Sage synchronization configuration, and manual sync requests. It connects to SQL Server with the elevated operator's Windows identity, requires the TechBench Admin role, and uses only the existing stored-procedure boundary; external-system secrets remain machine-protected outside SQL. Its Start Menu shortcut targets `TechBench.ServerManager.exe` directly, and its application manifest requests elevation. `TechBenchServerSetup.exe` provides the first-install and repair boundary without requiring package extraction or operator-entered commands.
 
 The Manager owns one notification-area icon and one exclusive lifetime lock while running. Minimizing clears/remasks entered credentials and hides the form; double-clicking the icon or selecting **Open TechBench Server Manager** restores it. A second launch directs the operator to the existing tray instance. **Exit** and the window X end the process, except that closing is rejected while a service/update operation is active. The icon, context menu, in-memory icon copy, and lifetime lock are explicitly disposed at shutdown. The packaged icon is cloned from memory so the update transaction never retains a file handle on it.
 
-Routine updates are performed by a verified compiled helper mode of the new Manager. It validates the outer SHA-256 sidecar, every package-manifest entry, and the required SQL schema before stopping the service. It stages and backs up the service and Manager directories, preserves the installed SQL configuration and ProgramData secrets, creates a direct EXE shortcut, restarts the service, and restores the previous directories if installation fails. Alpha.9 through alpha.13 require one execution of the verified `Install-TechBenchServerManager.ps1` deployment script to replace the legacy launcher; future routine operations use compiled code.
+Routine updates are performed by a verified compiled helper mode of the Manager. It validates the outer SHA-256 sidecar and every package-manifest entry before stopping the service. It stages and backs up the service and Manager directories, preserves the installed SQL configuration and ProgramData secrets, creates a direct EXE shortcut, restarts the service, and restores the previous directories if installation fails. The one-click setup can perform the same replacement for any earlier V2 installation; when installed and target packages require the same schema it does not depend on the interactive operator's SQL login. A schema change still requires the matching DBA deployment and verification.
 
 ## Startup, identity, and authorization
 
@@ -259,11 +259,11 @@ The SQL Server 2016 package contains idempotent stages for:
 
 `database/sqlserver2016/Deploy-CSRI-Standalone.sql` combines every numbered stage for SSMS SQLCMD Mode and has no external include paths.
 
-Schema version `2` is recorded as migration `SqlServer2016.OperationalStorage.0002`; schema version `3` adds shared reference data; schema version `4` records the strict Admin-owned boundary; schema version `5` adds owner-scoped, idempotent V1 entity mappings; schema version `6` adds the leased service-only WHD ingestion boundary through `SqlServer2016.WhdServerSync.0006`; and schema version `7` adds server-owned Sage synchronization and Admin read-only preview through `SqlServer2016.ServerOwnedSageAndAdminPreview.0007`. The alpha.15 client and service require exactly schema version 7; alpha.15 introduces no database migration.
+Schema version `2` is recorded as migration `SqlServer2016.OperationalStorage.0002`; schema version `3` adds shared reference data; schema version `4` records the strict Admin-owned boundary; schema version `5` adds owner-scoped, idempotent V1 entity mappings; schema version `6` adds the leased service-only WHD ingestion boundary through `SqlServer2016.WhdServerSync.0006`; and schema version `7` adds server-owned Sage synchronization and Admin read-only preview through `SqlServer2016.ServerOwnedSageAndAdminPreview.0007`. The alpha.16 client and service require exactly schema version 7; alpha.16 introduces no database migration.
 
 The first schema-version-4 Admin startup performs one insert-missing catalog seed and writes the organization setting `WorkspaceDefaults.Initialized=4` with that Admin's real SID. Subsequent startups do not recreate renamed or deleted note templates. The WHD auto-sync enabled/interval rows remain independently insert-missing so required runtime defaults can be repaired without changing an Admin's saved values.
 
-The schema-version-7 database, alpha.15 client, and alpha.15 sync service are a coordinated cutover. Have the DBA back up and verify the database, install the service and both protected credentials, configure shared WHD/Sage values in Server Manager, install the matching client, and run smoke tests as one planned operation. Do not leave mixed alpha clients in normal use.
+The schema-version-7 database, alpha.16 client, and alpha.16 sync service are a coordinated cutover. Have the DBA back up and verify the database, run the one-click server setup, install both protected credentials, configure shared WHD/Sage values in Server Manager, install the matching client, and run smoke tests as one planned operation. Do not leave mixed alpha clients in normal use.
 
 The desktop client has no database-backup command and no authority to create a SQL Server backup. Full/log backup scheduling, `DBCC CHECKDB`, retention, monitoring, and restore testing belong to DBA/operations outside TechBench.
 
@@ -295,11 +295,11 @@ Production approval still requires a live SQL Server 2016 exercise. At minimum:
 12. Verify service lease recovery, direct/group ticket visibility, explicit close/delete handling, and that omission does not close a ticket.
 13. Have the DBA verify SQL Server backup, `DBCC CHECKDB`, and restore procedures independently of the client.
 
-Until those checks pass, alpha.15 is an implementation candidate, not a production release.
+Until those checks pass, alpha.16 is an implementation candidate, not a production release.
 
 ## V1 data migration
 
-Installing alpha.15 does not automatically import V1 data; each authenticated user explicitly uses **Settings > Import V1 Database...** and confirms an import preview for their own account. This is separate from the Admin-only login preview.
+Installing alpha.16 does not automatically import V1 data; each authenticated user explicitly uses **Settings > Import V1 Database...** and confirms an import preview for their own account. This is separate from the Admin-only login preview.
 
 The user must close V1 and select its closed local database or a verified copy. The reader opens SQLite in read-only/query-only mode, rejects active journal/WAL sidecars, runs `quick_check`, validates known schema variants and SQL field limits, and rejects a source whose SHA-256 changes during the read. It extracts work entries, Personal Notes, entry tags, follow-up state, posting state/history, and note links. It does not import shared catalogs/configuration, credentials, editor drafts, active posting attempts, or local caches.
 

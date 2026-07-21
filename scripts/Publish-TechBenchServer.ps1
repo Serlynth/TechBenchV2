@@ -28,10 +28,12 @@ $repoPrefix = $repoRoot.TrimEnd('\') + '\'
 $projectPath = Join-Path $repoRoot 'TechBench.SyncService\TechBench.SyncService.csproj'
 $sageWorkerProjectPath = Join-Path $repoRoot 'TechBench.SageOdbcWorker\TechBench.SageOdbcWorker.csproj'
 $managerProjectPath = Join-Path $repoRoot 'TechBench.ServerManager\TechBench.ServerManager.csproj'
+$setupProjectPath = Join-Path $repoRoot 'TechBench.ServerSetup\TechBench.ServerSetup.csproj'
 $solutionPath = Join-Path $repoRoot 'TechBenchV2.sln'
 $publishDirectory = Join-Path $repoRoot 'artifacts\server\win-x64'
 $sageWorkerPublishDirectory = Join-Path $publishDirectory 'sage-odbc-worker'
 $managerPublishDirectory = Join-Path $publishDirectory 'server-manager'
+$setupPublishDirectory = Join-Path $repoRoot 'artifacts\server-setup\win-x64'
 $distDirectory = Join-Path $repoRoot 'dist'
 $packageName = "TechBenchSyncService-$Version-win-x64"
 $packagePath = Join-Path $distDirectory "$packageName.zip"
@@ -39,6 +41,8 @@ $checksumPath = "$packagePath.sha256"
 $sqlAssetName = "TechBenchV2-SQLServer2016-$Version.sql"
 $sqlAssetPath = Join-Path $distDirectory $sqlAssetName
 $sqlChecksumPath = "$sqlAssetPath.sha256"
+$setupPath = Join-Path $distDirectory 'TechBenchServerSetup.exe'
+$setupChecksumPath = "$setupPath.sha256"
 $numericVersion = ($Version -split '-', 2)[0]
 
 $userDotNet = Join-Path $env:USERPROFILE '.dotnet\dotnet.exe'
@@ -226,6 +230,9 @@ try {
     if (-not (Test-Path -LiteralPath $managerProjectPath)) {
         throw "The compiled Server Manager project was not found: $managerProjectPath"
     }
+    if (-not (Test-Path -LiteralPath $setupProjectPath)) {
+        throw "The native Server Setup project was not found: $setupProjectPath"
+    }
 
     Assert-StandaloneSqlIsCurrent
 
@@ -241,7 +248,9 @@ try {
         $packagePath,
         $checksumPath,
         $sqlAssetPath,
-        $sqlChecksumPath
+        $sqlChecksumPath,
+        $setupPath,
+        $setupChecksumPath
     )) {
         if (Test-Path -LiteralPath $existingOutput) {
             Remove-Item -LiteralPath $existingOutput -Force
@@ -360,6 +369,42 @@ try {
     "$sqlAssetHash  $([IO.Path]::GetFileName($sqlAssetPath))" |
         Set-Content -LiteralPath $sqlChecksumPath -Encoding ASCII
 
+    Reset-RepositoryDirectory $setupPublishDirectory
+    Invoke-Checked $dotnet @(
+        'publish', $setupProjectPath,
+        '-c', $Configuration,
+        '-r', 'win-x64',
+        '--self-contained', 'true',
+        '-o', $setupPublishDirectory,
+        '-p:PublishSingleFile=true',
+        '-p:EnableCompressionInSingleFile=true',
+        '-p:PublishTrimmed=false',
+        '-p:DebugType=None',
+        '-p:DebugSymbols=false',
+        "-p:TechBenchEmbeddedPayload=$packagePath",
+        "-p:Version=$Version",
+        "-p:AssemblyVersion=$numericVersion.0",
+        "-p:FileVersion=$numericVersion.0"
+    )
+    $publishedSetup = Join-Path $setupPublishDirectory 'TechBench.ServerSetup.exe'
+    if (-not (Test-Path -LiteralPath $publishedSetup)) {
+        throw "The native server installer was not published: $publishedSetup"
+    }
+    $publishedSetupInfo = Get-Item -LiteralPath $publishedSetup
+    $packageInfo = Get-Item -LiteralPath $packagePath
+    if ($publishedSetupInfo.Length -le $packageInfo.Length) {
+        throw 'The native server installer is not large enough to contain the verified embedded service package.'
+    }
+    $publishedSetupVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($publishedSetup).ProductVersion
+    if ([string]::IsNullOrWhiteSpace($publishedSetupVersion) -or
+        -not $publishedSetupVersion.Split('+', 2)[0].Equals($Version, [StringComparison]::Ordinal)) {
+        throw "The native server installer version does not match package ${Version}: $publishedSetupVersion"
+    }
+    Copy-Item -LiteralPath $publishedSetup -Destination $setupPath -Force
+    $setupHash = (Get-FileHash -LiteralPath $setupPath -Algorithm SHA256).Hash
+    "$setupHash  $([IO.Path]::GetFileName($setupPath))" |
+        Set-Content -LiteralPath $setupChecksumPath -Encoding ASCII
+
     if ($Publish) {
         $releaseJson = & gh release view "v$Version" `
             --repo $repositorySlug `
@@ -378,7 +423,14 @@ try {
             throw "GitHub release v$Version must be the already-published, non-draft client release before server assets can be attached."
         }
 
-        $assetPaths = @($packagePath, $checksumPath, $sqlAssetPath, $sqlChecksumPath)
+        $assetPaths = @(
+            $packagePath,
+            $checksumPath,
+            $sqlAssetPath,
+            $sqlChecksumPath,
+            $setupPath,
+            $setupChecksumPath
+        )
         $assetNames = @($assetPaths | ForEach-Object { [IO.Path]::GetFileName($_) })
         $existingNames = @($release.assets | ForEach-Object { $_.name })
         $conflicts = @($assetNames | Where-Object { $existingNames -contains $_ })
@@ -398,6 +450,8 @@ try {
     Write-Host "Created SHA-256 sidecar: $checksumPath"
     Write-Host "Created standalone SQL asset: $sqlAssetPath"
     Write-Host "Created SQL SHA-256 sidecar: $sqlChecksumPath"
+    Write-Host "Created one-click server installer: $setupPath"
+    Write-Host "Created installer SHA-256 sidecar: $setupChecksumPath"
 } finally {
     Pop-Location
 }

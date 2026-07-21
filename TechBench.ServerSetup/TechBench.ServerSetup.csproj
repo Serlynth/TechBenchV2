@@ -7,8 +7,8 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>TechBench.ServerManager</AssemblyName>
-    <RootNamespace>TechBench.ServerManager</RootNamespace>
+    <AssemblyName>TechBench.ServerSetup</AssemblyName>
+    <RootNamespace>TechBench.ServerSetup</RootNamespace>
     <Version>2.0.0-alpha.16</Version>
     <AssemblyVersion>2.0.0.0</AssemblyVersion>
     <FileVersion>2.0.0.0</FileVersion>
@@ -16,13 +16,9 @@
     <ApplicationIcon>..\Assets\csri-techbench-icon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
-    <PackageReference Include="System.IO.FileSystem.AccessControl" Version="5.0.0" />
-    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.1" />
+    <ProjectReference Include="..\TechBench.ServerManager\TechBench.ServerManager.csproj" />
   </ItemGroup>
-  <ItemGroup>
-    <InternalsVisibleTo Include="TechBench.Tests" />
-    <InternalsVisibleTo Include="TechBench.ServerSetup" />
+  <ItemGroup Condition="'$(TechBenchEmbeddedPayload)' != ''">
+    <EmbeddedResource Include="$(TechBenchEmbeddedPayload)" LogicalName="TechBench.ServerSetup.Payload.zip" />
   </ItemGroup>
 </Project>

@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -74,7 +73,9 @@ internal sealed record AppPaths(
     {
         get
         {
-            var path = File.Exists(ServiceExecutable) ? ServiceExecutable : Assembly.GetExecutingAssembly().Location;
+            var fallbackExecutable = Environment.ProcessPath
+                ?? throw new InvalidOperationException("The current executable path is unavailable.");
+            var path = File.Exists(ServiceExecutable) ? ServiceExecutable : fallbackExecutable;
             var value = System.Diagnostics.FileVersionInfo.GetVersionInfo(path).ProductVersion;
             return string.IsNullOrWhiteSpace(value) ? "Unknown" : value.Split('+', 2)[0];
         }

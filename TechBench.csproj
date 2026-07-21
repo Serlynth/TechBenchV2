@@ -4,7 +4,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <StartupObject>TechBench.App</StartupObject>
-    <Version>2.0.0-alpha.15</Version>
+    <Version>2.0.0-alpha.16</Version>
     <AssemblyVersion>2.0.0.0</AssemblyVersion>
     <FileVersion>2.0.0.0</FileVersion>
     <AssemblyName>TechBenchV2</AssemblyName>
@@ -41,6 +41,7 @@
     <Compile Remove="TechBench.Tests\**\*.cs" />
     <Compile Remove="TechBench.SyncService\**\*.cs" />
     <Compile Remove="TechBench.ServerManager\**\*.cs" />
+    <Compile Remove="TechBench.ServerSetup\**\*.cs" />
     <Compile Remove="TechBench.SageOdbcWorker\**\*.cs" />
     <Compile Remove="TechBench.SyncService.Tests\**\*.cs" />
     <Compile Remove="TechBench.WHD\**\*.cs" />

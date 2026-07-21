@@ -1,4 +1,5 @@
 using System.Data;
+using System.Security.Principal;
 using Microsoft.Data.SqlClient;
 
 namespace TechBench.ServerManager;
@@ -117,12 +118,30 @@ internal sealed class SqlAdminRepository(AppPaths paths)
                 throw new UnauthorizedAccessException($"'{login}' is not a TechBench Admin. Add this Windows account to CSRI\\TechBench_Admins.");
             return connection;
         }
+        catch (SqlException ex) when (IsDatabaseLoginFailure(ex))
+        {
+            connection.Dispose();
+            throw new UnauthorizedAccessException(DescribeDatabaseLoginFailure(
+                WindowsIdentity.GetCurrent().Name,
+                configuration.Database), ex);
+        }
         catch
         {
             connection.Dispose();
             throw;
         }
     }
+
+    internal static string DescribeDatabaseLoginFailure(string windowsLogin, string database) =>
+        $"SQL Server rejected Windows account '{windowsLogin}' for database '{database}'. " +
+        "This is an AD/SQL authorization issue, not a server-package problem. Confirm the exact account is a member " +
+        "of CSRI\\TechBench_Admins, then fully sign out of Windows and sign back in so the new group appears in " +
+        "'whoami /groups'. If it already appears, have the DBA verify the CSRI\\TechBench_Admins SQL login and TechBench database user.";
+
+    private static bool IsDatabaseLoginFailure(SqlException exception) =>
+        exception.Number is 4060 or 18456 ||
+        exception.Message.Contains("Cannot open database", StringComparison.OrdinalIgnoreCase) ||
+        exception.Message.Contains("Login failed", StringComparison.OrdinalIgnoreCase);
 
     private static void LoadSettings(SqlConnection connection, SynchronizationConfiguration configuration)
     {

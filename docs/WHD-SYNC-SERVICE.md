@@ -7,19 +7,19 @@
 From the repository root, create a self-contained `win-x64` service package with its isolated self-contained `win-x86` Sage ODBC worker:
 
 ```powershell
-.\scripts\Publish-TechBenchServer.ps1 -Version 2.0.0-alpha.15
+.\scripts\Publish-TechBenchServer.ps1 -Version 2.0.0-alpha.16
 ```
 
-The package is created at `dist\TechBenchSyncService-2.0.0-alpha.15-win-x64.zip`, with a SHA-256 sidecar. It includes the x64 service, x86 Sage worker, the self-contained compiled Server Manager, `appsettings.json`, runbook, release notes, deployment/credential scripts, and matching standalone SQLCMD deployment under `database`. Do not place either external-system secret in the package or in `appsettings.json`.
+The publisher creates the directly runnable `dist\TechBenchServerSetup.exe` and its SHA-256 sidecar. The setup executable embeds the complete verified `TechBenchSyncService-2.0.0-alpha.16-win-x64.zip` payload, including the x64 service, x86 Sage worker, compiled Server Manager, configuration template, runbook, credential helpers, and matching SQLCMD deployment. Do not place either external-system secret in the package or in `appsettings.json`.
 
 The same command also creates the directly downloadable
-`dist\TechBenchV2-SQLServer2016-2.0.0-alpha.15.sql` and its checksum. After the
-matching client publisher has created GitHub release `v2.0.0-alpha.15`, attach
-all four server-side assets with:
+`dist\TechBenchV2-SQLServer2016-2.0.0-alpha.16.sql` and its checksum. After the
+matching client publisher has created GitHub release `v2.0.0-alpha.16`, attach
+the installer, service ZIP, SQL file, and their checksums with:
 
 ```powershell
 .\scripts\Publish-TechBenchServer.ps1 `
-  -Version 2.0.0-alpha.15 `
+  -Version 2.0.0-alpha.16 `
   -Publish
 ```
 
@@ -29,13 +29,13 @@ server/SQL assets.
 
 ## Deploy the database first
 
-Before installing the service or alpha.15 clients, stop the old V2 service/clients, have the DBA back up `TechBench`, review `database\README-Deploy.md`, and execute `database\Deploy-CSRI-Standalone.sql` in SSMS while connected to `CSRI-SQL` as a SQL Server sysadmin with **Query > SQLCMD Mode** enabled. The script creates or verifies schema version 7 and checks the service-only WHD/Sage permissions, ticket row-security policy, and restricted Admin preview boundary. Alpha.15 introduces no database migration; an already verified schema-version-7 database remains current. Stop if any verification reports a failure.
+Before installing the service or alpha.16 clients, stop the old V2 clients, have the DBA back up `TechBench`, and verify schema version 7. Alpha.16 introduces no database migration; an already verified schema-version-7 database remains current. For a new database or a schema change, review `database\README-Deploy.md` and execute `database\Deploy-CSRI-Standalone.sql` in SSMS while connected to `CSRI-SQL` as a SQL Server sysadmin with **Query > SQLCMD Mode** enabled. Stop if any verification reports a failure.
 
 If you download the versioned standalone SQL asset instead of taking it from
 the service ZIP, verify its sidecar before opening it in SSMS:
 
 ```powershell
-$sql = '.\TechBenchV2-SQLServer2016-2.0.0-alpha.15.sql'
+$sql = '.\TechBenchV2-SQLServer2016-2.0.0-alpha.16.sql'
 $expectedHash = ((Get-Content "$sql.sha256" -Raw) -split '\s+')[0]
 $actualHash = (Get-FileHash $sql -Algorithm SHA256).Hash
 if ($actualHash -ne $expectedHash) { throw 'TechBench SQL SHA-256 does not match.' }
@@ -43,7 +43,7 @@ if ($actualHash -ne $expectedHash) { throw 'TechBench SQL SHA-256 does not match
 
 ## Prerequisites
 
-- Run the installer from an elevated PowerShell session on the target server.
+- Run `TechBenchServerSetup.exe` on the target server and approve its Windows administrator prompt.
 - Use the dedicated, least-privilege `CSRI\TechBench_Sync` AD domain account. The default SQL deployment maps that account directly to the service-only database role; no same-named AD group is required. Do not add it directly or through a nested group to `TechBench_Users`, `TechBench_Admins`, or any unrelated SQL role.
 - For a gMSA, install the account on the host and grant that host permission to retrieve its password before installing the service. The installer calls `Test-ADServiceAccount` when the ActiveDirectory module is available.
 - For an ordinary domain account, ensure the supplied account is allowed to log on as a service. The installer adds that right when local policy permits it; a domain GPO can override the local assignment.
@@ -52,56 +52,17 @@ if ($actualHash -ne $expectedHash) { throw 'TechBench SQL SHA-256 does not match
 - Install the supported 32-bit Sage ODBC driver on the service host. Use `%windir%\SysWOW64\odbcad32.exe` to create a **System DSN**; a User DSN or mapped drive will not be visible reliably to the Windows service.
 - Give `CSRI\TechBench_Sync` read access to the Sage data location and any other file/share rights required by the Sage ODBC driver. Use UNC paths rather than mapped drive letters.
 
-## Install
+## Install or update
 
-For a normal domain account, the installer opens a credential dialog for the
-Windows service account password. The password is hidden initially. Select
-**Show password while I verify it** to reveal what you typed, then clear the
-check box to hide it again before continuing. Revealing it affects only the
-on-screen password field; the installer does not write it to the command line,
-a file, PowerShell output, or a log. Clipboard shortcuts are disabled in that
-field to reduce accidental disclosure. Avoid revealing it while anyone else
-can see or record the server screen. `-WhatIf` reports the proposed installation
-without prompting for any credential.
+Download and run the one-click installer:
 
-If Windows cannot open the dialog (for example, on Server Core or through a
-non-GUI remote session), the installer falls back to PowerShell's standard
-protected, masked credential prompt. For unattended installation, obtain a
-`PSCredential` from the organization's approved secret-management process and
-pass that object with `-Credential`; never put the password itself in a command
-line, script, environment variable, or response file.
+`https://github.com/Serlynth/TechBenchV2-Releases/releases/download/v2.0.0-alpha.16/TechBenchServerSetup.exe`
 
-Install interactively with:
+Windows requests administrator approval. For a new installation, leave the service account as `CSRI\TechBench_Sync`, select **Install**, and enter that account's password in the secure dialog. The password can be revealed temporarily for verification and is never written to the command line, configuration, package, output, or logs. After installation, Server Manager opens so the WHD and Sage secrets and shared configuration can be entered.
 
-```powershell
-$package = '.\TechBenchSyncService-2.0.0-alpha.15-win-x64.zip'
-$expectedHash = ((Get-Content "$package.sha256" -Raw) -split '\s+')[0]
-$actualHash = (Get-FileHash $package -Algorithm SHA256).Hash
-if ($actualHash -ne $expectedHash) { throw 'TechBench service package SHA-256 does not match.' }
+For an existing installation, select **Update / Repair**. Setup closes Server Manager, verifies its embedded package and every manifest hash, stops the service, preserves the Windows service identity, SQL configuration, and machine-protected WHD/Sage secrets, replaces the service and Manager binaries, repairs the Start Menu shortcut, restarts the service, and opens the Manager. A same-schema update does not require the interactive setup operator to have SQL access. A release that requires a different schema remains blocked until the DBA applies the matching SQL deployment.
 
-Unblock-File $package
-Expand-Archive $package .\TechBenchSyncService
-Get-ChildItem .\TechBenchSyncService -Recurse -File | Unblock-File
-
-# Applies only to this elevated PowerShell process. It does not change the
-# computer-wide execution policy.
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-Set-Location .\TechBenchSyncService
-.\Install-TechBenchSyncService.ps1 `
-  -ServiceAccount 'CSRI\TechBench_Sync' `
-  -ConfigureWhdCredential `
-  -ConfigureSageCredential
-```
-
-Download the ZIP and its matching `.sha256` sidecar from the same release. Do not run the scripts if the hash comparison fails. `Unblock-File` removes the Internet mark inherited from the downloaded ZIP; the process-scoped execution-policy setting handles the unsigned internal deployment scripts for only that PowerShell window. If domain policy prevents the process-scoped setting, have your administrator sign or explicitly approve the scripts instead of weakening machine-wide policy.
-
-Before it changes the Windows service, the elevated installer verifies every extracted file against `package-manifest.json`, copies only those verified files into an Administrators/SYSTEM-only staging directory, and verifies them again there. It rejects an incomplete, altered, wrong-version, or wrong-architecture package.
-
-The predictable alpha.15 server download is
-`https://github.com/Serlynth/TechBenchV2-Releases/releases/download/v2.0.0-alpha.15/TechBenchSyncService-2.0.0-alpha.15-win-x64.zip`.
-Download its `.sha256` sidecar by appending `.sha256` to that URL. The standalone
-SQL asset follows the same pattern with filename
-`TechBenchV2-SQLServer2016-2.0.0-alpha.15.sql`.
+The setup EXE and its `.sha256` sidecar are published together. The versioned ZIP remains available for controlled advanced or unattended deployment, but normal installation and repair do not require extracting it, changing execution policy, or typing PowerShell commands. The standalone SQL asset is `TechBenchV2-SQLServer2016-2.0.0-alpha.16.sql`.
 
 The prepared CSRI deployment does not use a gMSA. If a future deployment
 switches to one, first redeploy SQL with that exact gMSA (or a dedicated group
@@ -132,24 +93,17 @@ Installation places the self-contained GUI under `%ProgramFiles%\CSRI\TechBench 
 
 Minimizing or closing Server Manager hides it in the Windows notification area and clears every typed password or secret field. Double-click the tray icon or select **Open** to restore and activate it. Select **Exit** from the tray menu to terminate it. Only one Manager instance may run; a second launch directs the operator to the existing tray icon.
 
-### Replace an alpha.9 through alpha.14 Manager
+### Replace an earlier V2 Manager
 
-Download and extract the alpha.15 service ZIP once, close the old script-based Manager, open **Windows PowerShell as Administrator** in the extracted folder, and run:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-.\Install-TechBenchServerManager.ps1
-```
-
-The deployment script verifies every compiled Manager file against `package-manifest.json`, installs it separately under Program Files, creates a direct EXE Start Menu shortcut, and opens it. It does not change the Windows service identity or either protected secret. In the compiled Manager, verify **SQL Server connection**, then select **Check for updates** and **Download & Install** to update the service. Future Manager launches and routine updates use compiled code.
+Run the current `TechBenchServerSetup.exe` and select **Update / Repair**. This is the supported transition from every earlier script-based or compiled V2 Manager. It does not change the Windows service identity, SQL settings, or either protected secret.
 
 The service-account password and WHD/Sage secrets are never placed in command-line arguments, configuration, output, or logs. They exist briefly in the visible form field when entered, are converted to `SecureString`, and are cleared immediately after use. Server Manager uses the elevated operator's Windows identity and Admin-only stored procedures to manage the non-secret WHD/Sage synchronization configuration in SQL Server. It never stores external-system secrets in SQL.
 
-Routine service updates do not request the service-account password and do not recreate the Windows service. Server Manager downloads the exact versioned ZIP and SHA-256 sidecar from the public release repository, rejects unexpected URLs and unsafe archive paths, verifies the outer hash and every file in `package-manifest.json`, and verifies the required database schema through `tb_app.GetCurrentUserContext` using the current Windows identity. It blocks the update if SQL cannot be verified or the schema does not match; a DBA must apply the matching SQL installer first.
+Routine service updates do not request the service-account password and do not recreate the Windows service. Server Manager downloads the exact versioned ZIP and SHA-256 sidecar from the public release repository, rejects unexpected URLs and unsafe archive paths, and verifies the outer hash and every file in `package-manifest.json`. The one-click setup can update an existing installation without interactive SQL access when the installed and target packages declare the same required schema. A schema change still requires successful database verification after the matching DBA deployment.
 
 After verification, the compiled update helper stops the service, stages the new payload, preserves the exact installed `appsettings.json` and `%ProgramData%` secrets, and swaps the service and Manager directories. It recreates the direct EXE shortcut and restarts the service under its existing Windows identity. If installation or restart fails, it restores both previous directories and attempts to return the service to its prior working payload.
 
-The Windows service credential is deliberately separate from routine updates. Use the PowerShell service installer shown above for a first installation; it creates the Windows service and installs the compiled Manager. For an existing service, the compiled Manager can apply the password for the displayed domain account without placing it on a command line. A gMSA ending in `$` may use a blank password. Use a controlled service reinstall for a deliberate identity migration.
+The Windows service credential is deliberately separate from routine updates. The one-click setup prompts for it only during first installation. For an existing service, the compiled Manager can apply a rotated password for the displayed domain account without placing it on a command line. A gMSA ending in `$` may use a blank password. Use the advanced controlled deployment workflow for a deliberate identity migration.
 
 ## Store or rotate the WHD credential
 

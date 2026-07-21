@@ -21,7 +21,10 @@ internal static class PackageInstaller
                 try { Process.GetProcessById(managerProcessId).WaitForExit(30000); } catch (ArgumentException) { }
             }
             var manifest = PackageManifest.LoadAndVerify(packageDirectory);
-            new SqlAdminRepository(paths).VerifyRequiredSchema(manifest.RequiredDatabaseSchemaVersion);
+            if (!InstalledPackageDeclaresRequiredSchema(paths, manifest.RequiredDatabaseSchemaVersion))
+            {
+                new SqlAdminRepository(paths).VerifyRequiredSchema(manifest.RequiredDatabaseSchemaVersion);
+            }
 
             var operation = Path.Combine(paths.ManagerDataDirectory, "install-" + Guid.NewGuid().ToString("N"));
             var serviceStage = Path.Combine(operation, "service-stage");
@@ -79,6 +82,26 @@ internal static class PackageInstaller
             MessageBox.Show($"TechBench could not install the update. The previous installation was restored when possible.\n\n{ex.Message}\n\nDetails: {logPath}",
                 "TechBench Server Manager", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
+        }
+    }
+
+    internal static bool InstalledPackageDeclaresRequiredSchema(AppPaths paths, int requiredVersion)
+    {
+        try
+        {
+            var manifestPath = Path.Combine(paths.ServiceDirectory, "package-manifest.json");
+            using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
+            var root = document.RootElement;
+            return root.TryGetProperty("Product", out var product) &&
+                   product.GetString() == "TechBench Sync Service" &&
+                   root.TryGetProperty("PackageFormatVersion", out var format) &&
+                   format.GetInt32() == 1 &&
+                   root.TryGetProperty("RequiredDatabaseSchemaVersion", out var schema) &&
+                   schema.GetInt32() == requiredVersion;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
+        {
+            return false;
         }
     }
 

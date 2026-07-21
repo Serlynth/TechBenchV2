@@ -66,7 +66,8 @@ internal sealed class ReleaseUpdater(AppPaths paths)
         progress.Report("Verifying package contents...");
         ExtractSafe(zipPath, packageDirectory);
         var manifest = PackageManifest.LoadAndVerify(packageDirectory, package.Version);
-        new SqlAdminRepository(paths).VerifyRequiredSchema(manifest.RequiredDatabaseSchemaVersion);
+        if (!PackageInstaller.InstalledPackageDeclaresRequiredSchema(paths, manifest.RequiredDatabaseSchemaVersion))
+            new SqlAdminRepository(paths).VerifyRequiredSchema(manifest.RequiredDatabaseSchemaVersion);
 
         var helper = Path.Combine(packageDirectory, "server-manager", "TechBench.ServerManager.exe");
         if (!File.Exists(helper)) throw new InvalidDataException("The package does not contain the compiled Server Manager.");
