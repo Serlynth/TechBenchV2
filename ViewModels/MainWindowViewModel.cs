@@ -944,7 +944,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Posting Queue" => "Showing entries still pending WHD or Sage posting",
             "Posting History" => "Showing WHD and Sage posting history",
             "Client List" => "Showing synced/imported clients",
-            "Ticket List" => "Showing organization non-closed tickets",
+            "Ticket List" => "Showing my assigned and group non-closed tickets",
             "Common Links" => "Showing commonly used websites",
             _ => $"Showing {section}"
         };
@@ -3399,20 +3399,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void TestSageConnection()
     {
-        var missing = new List<string>();
         if (string.IsNullOrWhiteSpace(SageEmployeeId))
         {
-            missing.Add("employee ID");
+            const string message = "Enter your Sage employee ID in Settings before creating time tickets.";
+            StatusMessage = message;
+            _dialogService.Error("Sage 50", message);
+            return;
         }
 
         if (string.IsNullOrWhiteSpace(SageActivityItemId))
         {
-            missing.Add("activity item ID");
-        }
-
-        if (missing.Count > 0)
-        {
-            _dialogService.Error("Sage 50", $"Enter Sage {string.Join(", ", missing)} before creating time tickets.");
+            const string message = "A TechBench Admin must configure the shared Sage activity item in TechBench Server Manager before users can create time tickets.";
+            StatusMessage = message;
+            _dialogService.Error("Sage 50", message);
             return;
         }
 

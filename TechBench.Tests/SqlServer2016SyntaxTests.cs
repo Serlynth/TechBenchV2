@@ -254,6 +254,25 @@ public sealed partial class SqlServer2016SyntaxTests
     }
 
     [Fact]
+    public void NormalTicketReadsNeverUseTheAdminOrganizationWideBypass()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindSqlDirectory(),
+            "48-V0006-WhdServerSyncProcedures.sql"));
+
+        foreach (var procedureName in new[] { "SearchTickets", "GetTicket" })
+        {
+            var body = Regex.Replace(
+                ProcedureBody(source, procedureName, "tb_app"),
+                @"\s+",
+                string.Empty);
+            Assert.Contains("UserTechnicianMappings", body, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("TechnicianGroupMemberships", body, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("OR@Admin=1", body, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
     public void V0007PublishesServerOwnedSageAndReadOnlyPreviewContracts()
     {
         var sqlDirectory = FindSqlDirectory();

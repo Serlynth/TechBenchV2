@@ -45,6 +45,25 @@ public sealed class SharedAdminPolicyTests
     }
 
     [Fact]
+    public void ClientSettingsShowPersonalPostingInputsButNotSharedIntegrationConfiguration()
+    {
+        var source = File.ReadAllText(FindRepositoryFile("MainWindow.xaml"));
+
+        Assert.Contains("My Web Help Desk Posting", source, StringComparison.Ordinal);
+        Assert.Contains("{Binding WhdUsername", source, StringComparison.Ordinal);
+        Assert.Contains("WhdApiTokenPasswordBox", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("{Binding WhdBaseUrl", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("{Binding WhdAuthenticationModeOptions", source, StringComparison.Ordinal);
+
+        Assert.Contains("My Sage 50 Posting", source, StringComparison.Ordinal);
+        Assert.Contains("{Binding SageEmployeeId", source, StringComparison.Ordinal);
+        Assert.Contains("{Binding SageDsn", source, StringComparison.Ordinal);
+        Assert.Contains("SagePasswordBox", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("{Binding SageActivityItemId", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"Billing type\"", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RepositoryExposesAdminManagedCommonTagCatalog()
     {
         Assert.NotNull(typeof(ITechBenchRepository).GetMethod(

@@ -2976,47 +2976,35 @@
 
                             <Border Grid.Column="0" Style="{StaticResource CardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="Web Help Desk" Style="{StaticResource SectionHeadingStyle}" />
-                                     <TextBlock Text="Base URL" Style="{StaticResource FieldLabelStyle}" />
-                                     <TextBox Text="{Binding WhdBaseUrl, UpdateSourceTrigger=PropertyChanged}"
-                                             IsReadOnly="True"
-                                             IsTabStop="False"
-                                             Margin="0,0,0,10" />
-                                     <TextBlock Text="Authentication" Style="{StaticResource FieldLabelStyle}" />
-                                     <ComboBox ItemsSource="{Binding WhdAuthenticationModeOptions}"
-                                               SelectedItem="{Binding SelectedWhdAuthenticationMode}"
-                                               IsEnabled="False"
-                                               Margin="0,0,0,10" />
-                                     <TextBlock Text="The shared WHD connection is configured in TechBench Server Manager. It is shown here because your personal credential uses it when posting work notes."
-                                                Style="{StaticResource MutedTextStyle}"
-                                                TextWrapping="Wrap"
-                                               Margin="0,-4,0,10" />
+                                    <TextBlock Text="My Web Help Desk Posting" Style="{StaticResource SectionHeadingStyle}" />
+                                    <TextBlock Text="These credentials are private to your Windows profile and are used only when you test access or post your own work notes. The shared WHD connection and ticket synchronization are configured in TechBench Server Manager."
+                                               Style="{StaticResource MutedTextStyle}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,0,0,12" />
                                     <TextBlock Text="My WHD username" Style="{StaticResource FieldLabelStyle}" />
                                     <TextBox Text="{Binding WhdUsername, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" />
                                     <TextBlock Text="My API key, password, or token" Style="{StaticResource FieldLabelStyle}" />
                                     <PasswordBox x:Name="WhdApiTokenPasswordBox"
                                                  PasswordChanged="WhdApiTokenPasswordBox_PasswordChanged"
                                                  Margin="0,0,0,8" />
-                                    <TextBlock Text="Your WHD credentials are used only to test your access and post your work notes. Organization synchronization runs on the server."
-                                               Style="{StaticResource MutedTextStyle}"
-                                               TextWrapping="Wrap"
-                                               Margin="0,0,0,14" />
-                                     <WrapPanel>
-                                         <Button Content="Test Connection"
-                                                 Command="{Binding TestWhdConnectionCommand}"
-                                                 MinWidth="126"
-                                                 Margin="0,0,8,0" />
-                                     </WrapPanel>
-                                 </StackPanel>
-                             </Border>
+                                    <Button Content="Test My WHD Posting Access"
+                                            Command="{Binding TestWhdConnectionCommand}"
+                                            HorizontalAlignment="Left"
+                                            MinWidth="190"
+                                            Margin="0,6,0,0" />
+                                </StackPanel>
+                            </Border>
 
                             <Border Grid.Column="2" Style="{StaticResource CardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="My Sage 50 Time Tickets" Style="{StaticResource SectionHeadingStyle}" />
-                                    <TextBlock Text="These workstation settings are used only to create and verify your own Sage time tickets. Shared customer synchronization runs on the server."
+                                    <TextBlock Text="My Sage 50 Posting" Style="{StaticResource SectionHeadingStyle}" />
+                                    <TextBlock Text="These settings apply only to creating and verifying your own Sage time tickets from this workstation. Shared Sage configuration and customer synchronization are managed in TechBench Server Manager."
                                                Style="{StaticResource MutedTextStyle}"
                                                TextWrapping="Wrap"
                                                Margin="0,0,0,12" />
+                                    <TextBlock Text="My employee ID" Style="{StaticResource FieldLabelStyle}" />
+                                    <TextBox Text="{Binding SageEmployeeId, UpdateSourceTrigger=PropertyChanged}"
+                                             Margin="0,0,0,12" />
                                     <CheckBox Content="Save and verify tickets automatically"
                                               IsChecked="{Binding SageNativeAutoSave}"
                                               Margin="0,0,0,12" />
@@ -3048,47 +3036,17 @@
                                     </Grid>
 
                                     <WrapPanel Margin="0,12,0,14">
-                                        <Button Content="Test Sage ODBC"
+                                        <Button Content="Test My Sage ODBC"
                                                 Command="{Binding TestSageOdbcCommand}"
                                                 MinWidth="130"
                                                 Margin="0,0,8,8" />
+                                        <Button Content="Check Sage Desktop"
+                                                Command="{Binding TestSageConnectionCommand}"
+                                                MinWidth="140"
+                                                Margin="0,0,0,8" />
                                     </WrapPanel>
-
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="12" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                        </Grid.RowDefinitions>
-
-                                        <StackPanel Grid.Row="0" Grid.Column="0">
-                                            <TextBlock Text="Employee ID" Style="{StaticResource FieldLabelStyle}" />
-                                            <TextBox Text="{Binding SageEmployeeId, UpdateSourceTrigger=PropertyChanged}" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Row="0" Grid.Column="2">
-                                             <TextBlock Text="Activity Item ID" Style="{StaticResource FieldLabelStyle}" />
-                                             <TextBox Text="{Binding SageActivityItemId, UpdateSourceTrigger=PropertyChanged}"
-                                                     IsReadOnly="True"
-                                                     IsTabStop="False" />
-                                             <TextBlock Text="Shared; configured in TechBench Server Manager."
-                                                        Style="{StaticResource MutedTextStyle}"
-                                                       TextWrapping="Wrap"
-                                                       Margin="0,4,0,0" />
-                                        </StackPanel>
-
-                                        <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,10,0,0">
-                                            <TextBlock Text="Billing type" Style="{StaticResource FieldLabelStyle}" />
-                                            <TextBox Text="Activity Rate" IsReadOnly="True" IsTabStop="False" />
-                                        </StackPanel>
-                                    </Grid>
-
-                                     <Button Content="Check Sage Desktop" Command="{Binding TestSageConnectionCommand}" />
-                                 </StackPanel>
-                             </Border>
+                                </StackPanel>
+                            </Border>
                         </Grid>
 
                         <Border Style="{StaticResource CardStyle}"

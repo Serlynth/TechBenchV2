@@ -16543,7 +16543,7 @@ GO
 CREATE PROCEDURE [tb_app].[SearchTickets] @ClientId int=NULL,@Search nvarchar(240)=NULL,@IncludeClosed bit=0,@Limit int=500
 AS
 BEGIN
- SET NOCOUNT ON; DECLARE @Sid varbinary(85),@Login nvarchar(256),@Name nvarchar(160),@Tech bit,@Manager bit,@Admin bit,@Sync bit; EXEC [tb_security].[EnsureCurrentUser] @UserSid=@Sid OUTPUT,@LoginName=@Login OUTPUT,@DisplayName=@Name OUTPUT,@IsTechnician=@Tech OUTPUT,@IsManager=@Manager OUTPUT,@IsAdmin=@Admin OUTPUT,@IsSyncOperator=@Sync OUTPUT; SET @Limit=CASE WHEN @Limit IS NULL OR @Limit<1 THEN 1 WHEN @Limit>2000 THEN 2000 ELSE @Limit END; SET @Search=NULLIF(LTRIM(RTRIM(@Search)),N''); DECLARE @Pattern nvarchar(500)=CASE WHEN @Search IS NULL THEN NULL ELSE N'%'+REPLACE(REPLACE(REPLACE(REPLACE(@Search,N'~',N'~~'),N'%',N'~%'),N'_',N'~_'),N'[',N'~[')+N'%' END; SELECT TOP(@Limit) t.[Id],t.[TicketNumber],t.[ClientId],t.[Subject],t.[Status],t.[Source],t.[ExternalId],t.[WhdStatusTypeId],t.[IsClosed],t.[LastSyncedAtUtc] [LastSyncedAt],t.[WhdLastUpdatedUtc],t.[IsWhdDeleted],t.[AssignedTechExternalId],t.[AssignedTechName],t.[AssignedGroupExternalId],t.[AssignedGroupName],t.[RowVersion] FROM [tb_data].[Tickets] t WHERE (@ClientId IS NULL OR t.[ClientId]=@ClientId) AND (@IncludeClosed=1 OR t.[IsClosed]=0) AND (@Pattern IS NULL OR t.[TicketNumber] LIKE @Pattern ESCAPE N'~' OR t.[Subject] LIKE @Pattern ESCAPE N'~' OR t.[Status] LIKE @Pattern ESCAPE N'~' OR t.[ExternalId] LIKE @Pattern ESCAPE N'~') AND (t.[Source]<>N'WHD' OR @Admin=1 OR EXISTS(SELECT 1 FROM [tb_whd].[UserTechnicianMappings] m WHERE m.[WindowsSid]=@Sid AND (m.[TechnicianExternalId]=t.[AssignedTechExternalId] OR EXISTS(SELECT 1 FROM [tb_whd].[TechnicianGroupMemberships] gm WHERE gm.[TechnicianExternalId]=m.[TechnicianExternalId] AND gm.[GroupExternalId]=t.[AssignedGroupExternalId])))) ORDER BY t.[IsClosed],t.[TicketNumber],t.[Id]; END;
+ SET NOCOUNT ON; DECLARE @Sid varbinary(85),@Login nvarchar(256),@Name nvarchar(160),@Tech bit,@Manager bit,@Admin bit,@Sync bit; EXEC [tb_security].[EnsureCurrentUser] @UserSid=@Sid OUTPUT,@LoginName=@Login OUTPUT,@DisplayName=@Name OUTPUT,@IsTechnician=@Tech OUTPUT,@IsManager=@Manager OUTPUT,@IsAdmin=@Admin OUTPUT,@IsSyncOperator=@Sync OUTPUT; SET @Limit=CASE WHEN @Limit IS NULL OR @Limit<1 THEN 1 WHEN @Limit>2000 THEN 2000 ELSE @Limit END; SET @Search=NULLIF(LTRIM(RTRIM(@Search)),N''); DECLARE @Pattern nvarchar(500)=CASE WHEN @Search IS NULL THEN NULL ELSE N'%'+REPLACE(REPLACE(REPLACE(REPLACE(@Search,N'~',N'~~'),N'%',N'~%'),N'_',N'~_'),N'[',N'~[')+N'%' END; SELECT TOP(@Limit) t.[Id],t.[TicketNumber],t.[ClientId],t.[Subject],t.[Status],t.[Source],t.[ExternalId],t.[WhdStatusTypeId],t.[IsClosed],t.[LastSyncedAtUtc] [LastSyncedAt],t.[WhdLastUpdatedUtc],t.[IsWhdDeleted],t.[AssignedTechExternalId],t.[AssignedTechName],t.[AssignedGroupExternalId],t.[AssignedGroupName],t.[RowVersion] FROM [tb_data].[Tickets] t WHERE (@ClientId IS NULL OR t.[ClientId]=@ClientId) AND (@IncludeClosed=1 OR t.[IsClosed]=0) AND (@Pattern IS NULL OR t.[TicketNumber] LIKE @Pattern ESCAPE N'~' OR t.[Subject] LIKE @Pattern ESCAPE N'~' OR t.[Status] LIKE @Pattern ESCAPE N'~' OR t.[ExternalId] LIKE @Pattern ESCAPE N'~') AND (t.[Source]<>N'WHD' OR EXISTS(SELECT 1 FROM [tb_whd].[UserTechnicianMappings] m WHERE m.[WindowsSid]=@Sid AND (m.[TechnicianExternalId]=t.[AssignedTechExternalId] OR EXISTS(SELECT 1 FROM [tb_whd].[TechnicianGroupMemberships] gm WHERE gm.[TechnicianExternalId]=m.[TechnicianExternalId] AND gm.[GroupExternalId]=t.[AssignedGroupExternalId])))) ORDER BY t.[IsClosed],t.[TicketNumber],t.[Id]; END;
 GO
 
 IF OBJECT_ID(N'tb_app.GetTicket', N'P') IS NOT NULL DROP PROCEDURE [tb_app].[GetTicket];
@@ -16551,7 +16551,7 @@ GO
 CREATE PROCEDURE [tb_app].[GetTicket] @Id int
 AS
 BEGIN
- SET NOCOUNT ON; DECLARE @Sid varbinary(85),@Login nvarchar(256),@Name nvarchar(160),@Tech bit,@Manager bit,@Admin bit,@Sync bit; EXEC [tb_security].[EnsureCurrentUser] @UserSid=@Sid OUTPUT,@LoginName=@Login OUTPUT,@DisplayName=@Name OUTPUT,@IsTechnician=@Tech OUTPUT,@IsManager=@Manager OUTPUT,@IsAdmin=@Admin OUTPUT,@IsSyncOperator=@Sync OUTPUT; SELECT t.[Id],t.[TicketNumber],t.[ClientId],t.[Subject],t.[Status],t.[Source],t.[ExternalId],t.[WhdStatusTypeId],t.[IsClosed],t.[LastSyncedAtUtc] [LastSyncedAt],t.[WhdLastUpdatedUtc],t.[IsWhdDeleted],t.[AssignedTechExternalId],t.[AssignedTechName],t.[AssignedGroupExternalId],t.[AssignedGroupName],t.[RowVersion] FROM [tb_data].[Tickets] t WHERE t.[Id]=@Id AND (t.[Source]<>N'WHD' OR @Admin=1 OR EXISTS(SELECT 1 FROM [tb_whd].[UserTechnicianMappings] m WHERE m.[WindowsSid]=@Sid AND (m.[TechnicianExternalId]=t.[AssignedTechExternalId] OR EXISTS(SELECT 1 FROM [tb_whd].[TechnicianGroupMemberships] gm WHERE gm.[TechnicianExternalId]=m.[TechnicianExternalId] AND gm.[GroupExternalId]=t.[AssignedGroupExternalId])))); END;
+ SET NOCOUNT ON; DECLARE @Sid varbinary(85),@Login nvarchar(256),@Name nvarchar(160),@Tech bit,@Manager bit,@Admin bit,@Sync bit; EXEC [tb_security].[EnsureCurrentUser] @UserSid=@Sid OUTPUT,@LoginName=@Login OUTPUT,@DisplayName=@Name OUTPUT,@IsTechnician=@Tech OUTPUT,@IsManager=@Manager OUTPUT,@IsAdmin=@Admin OUTPUT,@IsSyncOperator=@Sync OUTPUT; SELECT t.[Id],t.[TicketNumber],t.[ClientId],t.[Subject],t.[Status],t.[Source],t.[ExternalId],t.[WhdStatusTypeId],t.[IsClosed],t.[LastSyncedAtUtc] [LastSyncedAt],t.[WhdLastUpdatedUtc],t.[IsWhdDeleted],t.[AssignedTechExternalId],t.[AssignedTechName],t.[AssignedGroupExternalId],t.[AssignedGroupName],t.[RowVersion] FROM [tb_data].[Tickets] t WHERE t.[Id]=@Id AND (t.[Source]<>N'WHD' OR EXISTS(SELECT 1 FROM [tb_whd].[UserTechnicianMappings] m WHERE m.[WindowsSid]=@Sid AND (m.[TechnicianExternalId]=t.[AssignedTechExternalId] OR EXISTS(SELECT 1 FROM [tb_whd].[TechnicianGroupMemberships] gm WHERE gm.[TechnicianExternalId]=m.[TechnicianExternalId] AND gm.[GroupExternalId]=t.[AssignedGroupExternalId])))); END;
 GO
 
 /* Enforce the same WHD assignment boundary at the table, not only in ticket
@@ -22999,10 +22999,14 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF CHARINDEX(N'[Source]<>N''WHD''OR@Admin=1', @SearchDefinition) = 0
-   OR CHARINDEX(N'[Source]<>N''WHD''OR@Admin=1', @GetTicketDefinition) = 0
+IF CHARINDEX(N'UserTechnicianMappings', @SearchDefinition) = 0
+   OR CHARINDEX(N'TechnicianGroupMemberships', @SearchDefinition) = 0
+   OR CHARINDEX(N'UserTechnicianMappings', @GetTicketDefinition) = 0
+   OR CHARINDEX(N'TechnicianGroupMemberships', @GetTicketDefinition) = 0
+   OR CHARINDEX(N'OR@Admin=1', @SearchDefinition) > 0
+   OR CHARINDEX(N'OR@Admin=1', @GetTicketDefinition) > 0
 BEGIN
-    PRINT N'FAIL: WHD ticket access filtering is missing.';
+    PRINT N'FAIL: normal WHD ticket reads are not strictly scoped to the mapped technician or groups.';
     SET @FailureCount += 1;
 END;
 

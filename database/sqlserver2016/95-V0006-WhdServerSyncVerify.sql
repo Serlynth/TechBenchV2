@@ -409,10 +409,14 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF CHARINDEX(N'[Source]<>N''WHD''OR@Admin=1', @SearchDefinition) = 0
-   OR CHARINDEX(N'[Source]<>N''WHD''OR@Admin=1', @GetTicketDefinition) = 0
+IF CHARINDEX(N'UserTechnicianMappings', @SearchDefinition) = 0
+   OR CHARINDEX(N'TechnicianGroupMemberships', @SearchDefinition) = 0
+   OR CHARINDEX(N'UserTechnicianMappings', @GetTicketDefinition) = 0
+   OR CHARINDEX(N'TechnicianGroupMemberships', @GetTicketDefinition) = 0
+   OR CHARINDEX(N'OR@Admin=1', @SearchDefinition) > 0
+   OR CHARINDEX(N'OR@Admin=1', @GetTicketDefinition) > 0
 BEGIN
-    PRINT N'FAIL: WHD ticket access filtering is missing.';
+    PRINT N'FAIL: normal WHD ticket reads are not strictly scoped to the mapped technician or groups.';
     SET @FailureCount += 1;
 END;
 
