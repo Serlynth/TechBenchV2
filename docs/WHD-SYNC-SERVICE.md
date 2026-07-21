@@ -7,19 +7,19 @@
 From the repository root, create a self-contained `win-x64` service package with its isolated self-contained `win-x86` Sage ODBC worker:
 
 ```powershell
-.\scripts\Publish-TechBenchServer.ps1 -Version 2.0.0-alpha.14
+.\scripts\Publish-TechBenchServer.ps1 -Version 2.0.0-alpha.15
 ```
 
-The package is created at `dist\TechBenchSyncService-2.0.0-alpha.14-win-x64.zip`, with a SHA-256 sidecar. It includes the x64 service, x86 Sage worker, the self-contained compiled Server Manager, `appsettings.json`, runbook, release notes, deployment/credential scripts, and matching standalone SQLCMD deployment under `database`. Do not place either external-system secret in the package or in `appsettings.json`.
+The package is created at `dist\TechBenchSyncService-2.0.0-alpha.15-win-x64.zip`, with a SHA-256 sidecar. It includes the x64 service, x86 Sage worker, the self-contained compiled Server Manager, `appsettings.json`, runbook, release notes, deployment/credential scripts, and matching standalone SQLCMD deployment under `database`. Do not place either external-system secret in the package or in `appsettings.json`.
 
 The same command also creates the directly downloadable
-`dist\TechBenchV2-SQLServer2016-2.0.0-alpha.14.sql` and its checksum. After the
-matching client publisher has created GitHub release `v2.0.0-alpha.14`, attach
+`dist\TechBenchV2-SQLServer2016-2.0.0-alpha.15.sql` and its checksum. After the
+matching client publisher has created GitHub release `v2.0.0-alpha.15`, attach
 all four server-side assets with:
 
 ```powershell
 .\scripts\Publish-TechBenchServer.ps1 `
-  -Version 2.0.0-alpha.14 `
+  -Version 2.0.0-alpha.15 `
   -Publish
 ```
 
@@ -29,13 +29,13 @@ server/SQL assets.
 
 ## Deploy the database first
 
-Before installing the service or alpha.14 clients, stop the old V2 service/clients, have the DBA back up `TechBench`, review `database\README-Deploy.md`, and execute `database\Deploy-CSRI-Standalone.sql` in SSMS while connected to `CSRI-SQL` as a SQL Server sysadmin with **Query > SQLCMD Mode** enabled. The script creates or verifies schema version 7 and checks the service-only WHD/Sage permissions, ticket row-security policy, and restricted Admin preview boundary. Alpha.14 introduces no database migration; an already verified schema-version-7 database remains current. Stop if any verification reports a failure.
+Before installing the service or alpha.15 clients, stop the old V2 service/clients, have the DBA back up `TechBench`, review `database\README-Deploy.md`, and execute `database\Deploy-CSRI-Standalone.sql` in SSMS while connected to `CSRI-SQL` as a SQL Server sysadmin with **Query > SQLCMD Mode** enabled. The script creates or verifies schema version 7 and checks the service-only WHD/Sage permissions, ticket row-security policy, and restricted Admin preview boundary. Alpha.15 introduces no database migration; an already verified schema-version-7 database remains current. Stop if any verification reports a failure.
 
 If you download the versioned standalone SQL asset instead of taking it from
 the service ZIP, verify its sidecar before opening it in SSMS:
 
 ```powershell
-$sql = '.\TechBenchV2-SQLServer2016-2.0.0-alpha.14.sql'
+$sql = '.\TechBenchV2-SQLServer2016-2.0.0-alpha.15.sql'
 $expectedHash = ((Get-Content "$sql.sha256" -Raw) -split '\s+')[0]
 $actualHash = (Get-FileHash $sql -Algorithm SHA256).Hash
 if ($actualHash -ne $expectedHash) { throw 'TechBench SQL SHA-256 does not match.' }
@@ -74,7 +74,7 @@ line, script, environment variable, or response file.
 Install interactively with:
 
 ```powershell
-$package = '.\TechBenchSyncService-2.0.0-alpha.14-win-x64.zip'
+$package = '.\TechBenchSyncService-2.0.0-alpha.15-win-x64.zip'
 $expectedHash = ((Get-Content "$package.sha256" -Raw) -split '\s+')[0]
 $actualHash = (Get-FileHash $package -Algorithm SHA256).Hash
 if ($actualHash -ne $expectedHash) { throw 'TechBench service package SHA-256 does not match.' }
@@ -97,11 +97,11 @@ Download the ZIP and its matching `.sha256` sidecar from the same release. Do no
 
 Before it changes the Windows service, the elevated installer verifies every extracted file against `package-manifest.json`, copies only those verified files into an Administrators/SYSTEM-only staging directory, and verifies them again there. It rejects an incomplete, altered, wrong-version, or wrong-architecture package.
 
-The predictable alpha.14 server download is
-`https://github.com/Serlynth/TechBenchV2-Releases/releases/download/v2.0.0-alpha.14/TechBenchSyncService-2.0.0-alpha.14-win-x64.zip`.
+The predictable alpha.15 server download is
+`https://github.com/Serlynth/TechBenchV2-Releases/releases/download/v2.0.0-alpha.15/TechBenchSyncService-2.0.0-alpha.15-win-x64.zip`.
 Download its `.sha256` sidecar by appending `.sha256` to that URL. The standalone
 SQL asset follows the same pattern with filename
-`TechBenchV2-SQLServer2016-2.0.0-alpha.14.sql`.
+`TechBenchV2-SQLServer2016-2.0.0-alpha.15.sql`.
 
 The prepared CSRI deployment does not use a gMSA. If a future deployment
 switches to one, first redeploy SQL with that exact gMSA (or a dedicated group
@@ -132,9 +132,9 @@ Installation places the self-contained GUI under `%ProgramFiles%\CSRI\TechBench 
 
 Minimizing or closing Server Manager hides it in the Windows notification area and clears every typed password or secret field. Double-click the tray icon or select **Open** to restore and activate it. Select **Exit** from the tray menu to terminate it. Only one Manager instance may run; a second launch directs the operator to the existing tray icon.
 
-### Replace an alpha.9 through alpha.13 Manager
+### Replace an alpha.9 through alpha.14 Manager
 
-Download and extract the alpha.14 service ZIP once, close the old script-based Manager, open **Windows PowerShell as Administrator** in the extracted folder, and run:
+Download and extract the alpha.15 service ZIP once, close the old script-based Manager, open **Windows PowerShell as Administrator** in the extracted folder, and run:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force

@@ -1,6 +1,7 @@
 using TechBench.ServerManager;
 using TechBench.SyncService;
 using Microsoft.Extensions.Options;
+using System.Text;
 
 namespace TechBench.Tests;
 
@@ -90,7 +91,7 @@ public sealed class CompiledServerManagerTests
             Directory.CreateDirectory(paths.ServiceDirectory);
             File.WriteAllText(paths.ConfigurationPath, """
                 { "TechBenchSync": { "SqlServer": "old", "Database": "oldDb", "TrustServerCertificate": false, "PollSeconds": 20 }, "Logging": { "LogLevel": { "Default": "Information" } } }
-                """);
+                """, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
             paths.SaveConfiguration(new("CSRI-SQL.CSRI.local", "TechBench", true));
             var saved = paths.ReadConfiguration();
             Assert.Equal("CSRI-SQL.CSRI.local", saved.SqlServer);
@@ -101,6 +102,19 @@ public sealed class CompiledServerManagerTests
             Assert.Contains("\"Logging\"", text, StringComparison.Ordinal);
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public void AllManagerJsonReadersAcceptWindowsPowerShellUtf8BomFiles()
+    {
+        var paths = ReadRepositoryFile("TechBench.ServerManager", "AppPaths.cs");
+        var installer = ReadRepositoryFile("TechBench.ServerManager", "PackageInstaller.cs");
+        var updater = ReadRepositoryFile("TechBench.ServerManager", "ReleaseUpdater.cs");
+        Assert.Contains("JsonDocument.Parse(File.ReadAllText(ConfigurationPath))", paths, StringComparison.Ordinal);
+        Assert.Contains("JsonNode.Parse(File.ReadAllText(ConfigurationPath))", paths, StringComparison.Ordinal);
+        Assert.Contains("JsonNode.Parse(File.ReadAllText(manifestPath))", installer, StringComparison.Ordinal);
+        Assert.Contains("Deserialize<PackageManifest>(File.ReadAllText(manifestPath)", updater, StringComparison.Ordinal);
+        Assert.DoesNotContain("Parse(File.ReadAllBytes", paths + installer + updater, StringComparison.Ordinal);
     }
 
     private static AppPaths TestPaths(string root) => new(

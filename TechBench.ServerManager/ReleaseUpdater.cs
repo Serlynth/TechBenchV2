@@ -180,7 +180,7 @@ internal sealed class PackageManifest
     public static PackageManifest LoadAndVerify(string packageDirectory, string? expectedVersion = null)
     {
         var manifestPath = Path.Combine(packageDirectory, "package-manifest.json");
-        var manifest = JsonSerializer.Deserialize<PackageManifest>(File.ReadAllBytes(manifestPath), JsonOptions())
+        var manifest = JsonSerializer.Deserialize<PackageManifest>(File.ReadAllText(manifestPath), JsonOptions())
             ?? throw new InvalidDataException("The package manifest is empty.");
         if (manifest.Product != "TechBench Sync Service" || manifest.PackageFormatVersion != 1 ||
             manifest.Runtime != "win-x64" || manifest.SageOdbcWorkerRuntime != "win-x86" || !manifest.SelfContained ||

@@ -35,7 +35,9 @@ internal sealed record AppPaths(
             throw new FileNotFoundException("The installed service configuration was not found.", ConfigurationPath);
         }
 
-        using var document = JsonDocument.Parse(File.ReadAllBytes(ConfigurationPath));
+        // Windows PowerShell 5.1 writes UTF-8 files with a BOM. Read as text so
+        // .NET removes that encoding marker before the JSON parser sees it.
+        using var document = JsonDocument.Parse(File.ReadAllText(ConfigurationPath));
         if (!document.RootElement.TryGetProperty("TechBenchSync", out var section))
         {
             throw new InvalidDataException("appsettings.json does not contain TechBenchSync.");
@@ -52,7 +54,7 @@ internal sealed record AppPaths(
     {
         if (string.IsNullOrWhiteSpace(configuration.SqlServer) || string.IsNullOrWhiteSpace(configuration.Database))
             throw new ArgumentException("SQL Server and database are required.");
-        var root = JsonNode.Parse(File.ReadAllBytes(ConfigurationPath))?.AsObject()
+        var root = JsonNode.Parse(File.ReadAllText(ConfigurationPath))?.AsObject()
             ?? throw new InvalidDataException("appsettings.json is invalid.");
         var section = root["TechBenchSync"]?.AsObject()
             ?? throw new InvalidDataException("appsettings.json does not contain TechBenchSync.");

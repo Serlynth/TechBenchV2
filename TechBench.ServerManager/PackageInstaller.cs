@@ -105,7 +105,7 @@ internal static class PackageInstaller
     {
         var manifestPath = Path.Combine(serviceStage, "package-manifest.json");
         var configurationPath = Path.Combine(serviceStage, "appsettings.json");
-        var root = JsonNode.Parse(File.ReadAllBytes(manifestPath))?.AsObject()
+        var root = JsonNode.Parse(File.ReadAllText(manifestPath))?.AsObject()
             ?? throw new InvalidDataException("The installed package manifest is invalid.");
         var files = root["Files"]?.AsArray() ?? root["files"]?.AsArray()
             ?? throw new InvalidDataException("The package manifest has no files collection.");

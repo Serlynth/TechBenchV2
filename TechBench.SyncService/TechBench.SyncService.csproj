@@ -9,7 +9,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>TechBench.SyncService</AssemblyName>
     <RootNamespace>TechBench.SyncService</RootNamespace>
-    <Version>2.0.0-alpha.14</Version>
+    <Version>2.0.0-alpha.15</Version>
     <AssemblyVersion>2.0.0.0</AssemblyVersion>
     <FileVersion>2.0.0.0</FileVersion>
   </PropertyGroup>
