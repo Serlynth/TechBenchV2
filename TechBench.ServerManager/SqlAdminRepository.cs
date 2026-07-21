@@ -148,7 +148,7 @@ internal sealed class SqlAdminRepository(AppPaths paths)
         var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "Whd.BaseUrl", "Whd.AuthenticationMode", "Whd.ServiceUsername", "Whd.AutoSyncEnabled",
-            "Whd.AutoSyncMinutes", "Sage.SyncDsn", "Sage.SyncUsername", "Sage.ActivityItemId"
+            "Whd.AutoSyncMinutes", "Sage.SyncDsn", "Sage.SyncUsername"
         };
         using var command = StoredProcedure(connection, "tb_app.GetSettings");
         using var reader = command.ExecuteReader();

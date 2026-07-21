@@ -737,7 +737,8 @@ BEGIN
        (
            N'Whd.Username',
            N'Sage.Username',
-           N'Sage.EmployeeId'
+           N'Sage.EmployeeId',
+           N'Sage.ActivityItemId'
        )
         THROW 51510, N'Only approved per-user identity settings may be saved.', 1;
 
@@ -837,6 +838,7 @@ BEGIN
            N'Whd.Username',
            N'Sage.Username',
            N'Sage.EmployeeId',
+           N'Sage.ActivityItemId',
            N'Whd.ApiToken',
            N'Sage.Password',
            N'Sage.DefaultCustomerId'

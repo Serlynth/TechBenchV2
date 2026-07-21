@@ -238,7 +238,7 @@ public sealed class SageNativeUiPoster : IWorkEntryPoster
 
         if (string.IsNullOrWhiteSpace(request.ActivityItemId))
         {
-            return "A TechBench Admin must configure the shared Sage activity item in TechBench Server Manager.";
+            return "Enter your Sage activity item ID in TechBench Settings.";
         }
 
         return null;

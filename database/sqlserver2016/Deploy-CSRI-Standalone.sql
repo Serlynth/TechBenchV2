@@ -1598,8 +1598,7 @@ BEGIN TRY
     INSERT INTO @SharedSettingKeys([SettingKey])
     VALUES
         (N'Whd.BaseUrl'),
-        (N'Whd.AuthenticationMode'),
-        (N'Sage.ActivityItemId');
+        (N'Whd.AuthenticationMode');
 
     INSERT INTO [tb_data].[OrganizationSettings]
     (
@@ -1728,6 +1727,7 @@ BEGIN TRY
         N'Whd.Username',
         N'Sage.Username',
         N'Sage.EmployeeId',
+        N'Sage.ActivityItemId',
         N'Whd.ApiToken',
         N'Sage.Password',
         N'Sage.DefaultCustomerId'
@@ -12371,7 +12371,8 @@ BEGIN
        (
            N'Whd.Username',
            N'Sage.Username',
-           N'Sage.EmployeeId'
+           N'Sage.EmployeeId',
+           N'Sage.ActivityItemId'
        )
         THROW 51510, N'Only approved per-user identity settings may be saved.', 1;
 
@@ -12471,6 +12472,7 @@ BEGIN
            N'Whd.Username',
            N'Sage.Username',
            N'Sage.EmployeeId',
+           N'Sage.ActivityItemId',
            N'Whd.ApiToken',
            N'Sage.Password',
            N'Sage.DefaultCustomerId'
@@ -16653,6 +16655,11 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 GO
 
+/* Activity Item ID is personal posting identity, not shared sync configuration. */
+DELETE FROM [tb_data].[OrganizationSettings]
+WHERE [SettingKey] = N'Sage.ActivityItemId';
+GO
+
 /*
     V0007 moves Sage customer synchronization behind the Windows service and
     adds short-lived, server-issued, read-only Admin preview sessions.
@@ -20497,8 +20504,7 @@ IF EXISTS
     WHERE [SettingKey] IN
     (
         N'Whd.BaseUrl',
-        N'Whd.AuthenticationMode',
-        N'Sage.ActivityItemId'
+        N'Whd.AuthenticationMode'
     )
 )
 BEGIN
@@ -20514,9 +20520,6 @@ IF @InstalledSchemaVersion = 3
            OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
        OR CHARINDEX(
            N'Whd.AuthenticationMode',
-           OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
-       OR CHARINDEX(
-           N'Sage.ActivityItemId',
            OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
    )
 BEGIN
@@ -20716,6 +20719,7 @@ IF EXISTS
         N'Whd.Username',
         N'Sage.Username',
         N'Sage.EmployeeId',
+        N'Sage.ActivityItemId',
         N'Whd.ApiToken',
         N'Sage.Password',
         N'Sage.DefaultCustomerId'
@@ -23157,6 +23161,17 @@ END;
 IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) <> 7
 BEGIN
     PRINT N'FAIL: installed schema version is not 7.';
+    SET @FailureCount += 1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM [tb_data].[OrganizationSettings]
+    WHERE [SettingKey] = N'Sage.ActivityItemId'
+)
+BEGIN
+    PRINT N'FAIL: Sage Activity Item ID remains organization-scoped.';
     SET @FailureCount += 1;
 END;
 

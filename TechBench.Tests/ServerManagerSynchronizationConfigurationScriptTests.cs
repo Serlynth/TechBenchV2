@@ -15,8 +15,7 @@ public sealed class ServerManagerSynchronizationConfigurationScriptTests
                      "Whd.AutoSyncEnabled",
                      "Whd.AutoSyncMinutes",
                      "Sage.SyncDsn",
-                     "Sage.SyncUsername",
-                     "Sage.ActivityItemId"
+                     "Sage.SyncUsername"
                  })
         {
             Assert.Contains($"'{settingKey}'", source, StringComparison.Ordinal);
@@ -28,6 +27,7 @@ public sealed class ServerManagerSynchronizationConfigurationScriptTests
         Assert.Contains("AD user to WHD technician", source, StringComparison.Ordinal);
         Assert.Contains("Save-WhdSynchronizationConfiguration", source, StringComparison.Ordinal);
         Assert.Contains("Save-SageSynchronizationConfiguration", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Sage.ActivityItemId", source, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -54,6 +54,7 @@ BEGIN TRY
         N'Whd.Username',
         N'Sage.Username',
         N'Sage.EmployeeId',
+        N'Sage.ActivityItemId',
         N'Whd.ApiToken',
         N'Sage.Password',
         N'Sage.DefaultCustomerId'

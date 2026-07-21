@@ -57,10 +57,16 @@ public sealed class SharedAdminPolicyTests
 
         Assert.Contains("My Sage 50 Posting", source, StringComparison.Ordinal);
         Assert.Contains("{Binding SageEmployeeId", source, StringComparison.Ordinal);
+        Assert.Contains("{Binding SageActivityItemId", source, StringComparison.Ordinal);
         Assert.Contains("{Binding SageDsn", source, StringComparison.Ordinal);
         Assert.Contains("SagePasswordBox", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("{Binding SageActivityItemId", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Text=\"Billing type\"", source, StringComparison.Ordinal);
+
+        var viewModel = File.ReadAllText(FindRepositoryFile("ViewModels", "MainWindowViewModel.cs"));
+        Assert.Contains(
+            "_repository.SaveSetting(\"Sage.ActivityItemId\", SageActivityItemId.Trim())",
+            viewModel,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -170,7 +176,7 @@ public sealed class SharedAdminPolicyTests
 
         var reloadBody = source[start..end];
         Assert.Contains("WhdBaseUrl = settings.GetValueOrDefault(", reloadBody);
-        Assert.Contains("SageActivityItemId = settings.GetValueOrDefault(", reloadBody);
+        Assert.DoesNotContain("SageActivityItemId", reloadBody);
         Assert.DoesNotContain("Sage.SyncDsn", reloadBody);
         Assert.DoesNotContain("Sage.SyncUsername", reloadBody);
         Assert.DoesNotContain("RefreshWhdSyncServiceStatus", reloadBody);

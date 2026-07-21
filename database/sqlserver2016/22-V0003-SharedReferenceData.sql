@@ -297,8 +297,7 @@ BEGIN TRY
     INSERT INTO @SharedSettingKeys([SettingKey])
     VALUES
         (N'Whd.BaseUrl'),
-        (N'Whd.AuthenticationMode'),
-        (N'Sage.ActivityItemId');
+        (N'Whd.AuthenticationMode');
 
     INSERT INTO [tb_data].[OrganizationSettings]
     (

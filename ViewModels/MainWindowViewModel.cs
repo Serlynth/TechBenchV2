@@ -1104,9 +1104,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 settings.GetValueOrDefault(
                     "Whd.AuthenticationMode",
                     WhdAuthenticationMode.Auto.ToString()));
-            SageActivityItemId = settings.GetValueOrDefault(
-                "Sage.ActivityItemId",
-                string.Empty);
         }
         finally
         {
@@ -3329,6 +3326,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         SaveWhdConnectionSettings();
         _repository.SaveSetting("Sage.EmployeeId", SageEmployeeId.Trim());
+        _repository.SaveSetting("Sage.ActivityItemId", SageActivityItemId.Trim());
         _repository.DeleteSetting("Sage.DefaultCustomerId");
 
         SaveSageConnectionSettings();
@@ -3421,7 +3419,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         if (string.IsNullOrWhiteSpace(SageActivityItemId))
         {
-            const string message = "A TechBench Admin must configure the shared Sage activity item in TechBench Server Manager before users can create time tickets.";
+            const string message = "Enter your Sage activity item ID in Settings before creating time tickets.";
             StatusMessage = message;
             _dialogService.Error("Sage 50", message);
             return;

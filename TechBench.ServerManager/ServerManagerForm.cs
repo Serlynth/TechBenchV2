@@ -46,7 +46,6 @@ internal sealed class ServerManagerForm : Form
 
     private readonly TextBox _sageDsn = Field();
     private readonly TextBox _sageUsername = Field();
-    private readonly TextBox _sageActivityItem = Field();
     private readonly Label _sageSyncStatus = StatusLabel();
     private readonly Button _confirmSageButton = Button("Confirm large-removal sync");
 
@@ -237,23 +236,22 @@ internal sealed class ServerManagerForm : Form
     private TabPage BuildSageTab()
     {
         var page = new TabPage("Sage 50") { Padding = new Padding(16), AutoScroll = true };
-        var layout = Grid(2, 7);
+        var layout = Grid(2, 6);
         layout.Controls.Add(Label("Server 32-bit System DSN"), 0, 0); layout.Controls.Add(_sageDsn, 1, 0);
-        layout.Controls.Add(Label("Sage username"), 0, 1); layout.Controls.Add(_sageUsername, 1, 1);
-        layout.Controls.Add(Label("Activity Item ID"), 0, 2); layout.Controls.Add(_sageActivityItem, 1, 2);
+        layout.Controls.Add(Label("Sage ODBC username"), 0, 1); layout.Controls.Add(_sageUsername, 1, 1);
         var save = Button("Save settings"); save.Click += async (_, _) => await SaveSageAsync(false, false);
         var sync = Button("Sync customers now"); sync.Click += async (_, _) => await SaveSageAsync(true, false);
         var refresh = Button("Refresh"); refresh.Click += async (_, _) => await RefreshConfigurationAsync(true);
         _confirmSageButton.Visible = false;
         _confirmSageButton.Click += async (_, _) => await SaveSageAsync(true, true);
-        layout.Controls.Add(ButtonRow(save, sync, refresh, _confirmSageButton), 1, 3);
-        layout.Controls.Add(_sageSyncStatus, 0, 4); layout.SetColumnSpan(_sageSyncStatus, 2);
+        layout.Controls.Add(ButtonRow(save, sync, refresh, _confirmSageButton), 1, 2);
+        layout.Controls.Add(_sageSyncStatus, 0, 3); layout.SetColumnSpan(_sageSyncStatus, 2);
         var note = new Label
         {
             Text = "Sage synchronization is server-owned and manual only. The 32-bit ODBC worker runs under the TechBench service account.",
             AutoSize = true, MaximumSize = new Size(720, 0), ForeColor = Color.DimGray, Margin = new Padding(3, 18, 3, 3)
         };
-        layout.Controls.Add(note, 0, 5); layout.SetColumnSpan(note, 2);
+        layout.Controls.Add(note, 0, 4); layout.SetColumnSpan(note, 2);
         page.Controls.Add(layout); return page;
     }
 
@@ -378,7 +376,7 @@ internal sealed class ServerManagerForm : Form
         _whdUsername.Text = Setting("Whd.ServiceUsername");
         _whdAuto.Checked = bool.TryParse(Setting("Whd.AutoSyncEnabled"), out var enabled) && enabled;
         if (decimal.TryParse(Setting("Whd.AutoSyncMinutes"), out var minutes)) _whdMinutes.Value = Math.Clamp(minutes, 1, 120);
-        _sageDsn.Text = Setting("Sage.SyncDsn"); _sageUsername.Text = Setting("Sage.SyncUsername"); _sageActivityItem.Text = Setting("Sage.ActivityItemId");
+        _sageDsn.Text = Setting("Sage.SyncDsn"); _sageUsername.Text = Setting("Sage.SyncUsername");
         _whdSyncStatus.Text = FormatStatus(configuration.WhdStatus, false);
         _sageSyncStatus.Text = FormatStatus(configuration.SageStatus, true);
         _confirmSageButton.Visible = configuration.SageStatus.RequiresLargeRemovalConfirmation;
@@ -414,7 +412,7 @@ internal sealed class ServerManagerForm : Form
             if (string.IsNullOrWhiteSpace(_sageUsername.Text)) throw new InvalidOperationException("Enter the organization-wide Sage ODBC username.");
             var settings = new Dictionary<string, string>
             {
-                ["Sage.SyncDsn"] = _sageDsn.Text.Trim(), ["Sage.SyncUsername"] = _sageUsername.Text.Trim(), ["Sage.ActivityItemId"] = _sageActivityItem.Text.Trim()
+                ["Sage.SyncDsn"] = _sageDsn.Text.Trim(), ["Sage.SyncUsername"] = _sageUsername.Text.Trim()
             };
             await Task.Run(() => _repository.SaveSettings(settings, _configuration?.RowVersions ?? new Dictionary<string, byte[]>()));
             AddLog("Shared Sage configuration saved.");

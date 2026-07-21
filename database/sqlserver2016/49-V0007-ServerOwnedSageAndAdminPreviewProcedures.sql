@@ -7,6 +7,11 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 GO
 
+/* Activity Item ID is personal posting identity, not shared sync configuration. */
+DELETE FROM [tb_data].[OrganizationSettings]
+WHERE [SettingKey] = N'Sage.ActivityItemId';
+GO
+
 /*
     V0007 moves Sage customer synchronization behind the Windows service and
     adds short-lived, server-issued, read-only Admin preview sessions.

@@ -3004,6 +3004,9 @@
                                                Margin="0,0,0,12" />
                                     <TextBlock Text="My employee ID" Style="{StaticResource FieldLabelStyle}" />
                                     <TextBox Text="{Binding SageEmployeeId, UpdateSourceTrigger=PropertyChanged}"
+                                             Margin="0,0,0,10" />
+                                    <TextBlock Text="My activity item ID" Style="{StaticResource FieldLabelStyle}" />
+                                    <TextBox Text="{Binding SageActivityItemId, UpdateSourceTrigger=PropertyChanged}"
                                              Margin="0,0,0,12" />
                                     <CheckBox Content="Save and verify tickets automatically"
                                               IsChecked="{Binding SageNativeAutoSave}"

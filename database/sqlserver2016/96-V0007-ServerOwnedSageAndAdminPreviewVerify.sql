@@ -26,6 +26,17 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
+IF EXISTS
+(
+    SELECT 1
+    FROM [tb_data].[OrganizationSettings]
+    WHERE [SettingKey] = N'Sage.ActivityItemId'
+)
+BEGIN
+    PRINT N'FAIL: Sage Activity Item ID remains organization-scoped.';
+    SET @FailureCount += 1;
+END;
+
 DECLARE @RequiredObjects TABLE
 (
     [ObjectName] nvarchar(300) NOT NULL PRIMARY KEY,

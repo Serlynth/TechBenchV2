@@ -30,6 +30,8 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("WindowState == FormWindowState.Minimized", form, StringComparison.Ordinal);
         Assert.Contains("ServicePassword", form, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ProtectedSecretStore.Whd", form, StringComparison.Ordinal);
+        Assert.DoesNotContain("Sage.ActivityItemId", form + sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("Activity Item ID", form, StringComparison.Ordinal);
         Assert.Contains("tb_app.AdminSaveOrganizationSetting", sql, StringComparison.Ordinal);
         Assert.Contains("IntegratedSecurity = true", sql, StringComparison.Ordinal);
         Assert.Contains("PackageManifest.LoadAndVerify", updater, StringComparison.Ordinal);

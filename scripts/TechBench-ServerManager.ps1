@@ -2528,8 +2528,7 @@ function Get-TechBenchSynchronizationConfiguration {
             'Whd.AutoSyncEnabled',
             'Whd.AutoSyncMinutes',
             'Sage.SyncDsn',
-            'Sage.SyncUsername',
-            'Sage.ActivityItemId'
+            'Sage.SyncUsername'
         )
         $settings = @{}
         $rowVersions = @{}
@@ -2834,7 +2833,6 @@ function Save-SageSynchronizationConfiguration {
     Save-TechBenchOrganizationSettings -Settings @{
         'Sage.SyncDsn' = $dsn
         'Sage.SyncUsername' = $username
-        'Sage.ActivityItemId' = $script:SageActivityItemIdBox.Text.Trim()
     }
     Add-StatusLine 'Shared Sage server configuration saved to SQL Server.'
 }
@@ -2991,7 +2989,6 @@ function Set-SynchronizationConfigurationEnabled {
         $script:SaveWhdMappingButton,
         $script:SageSyncDsnBox,
         $script:SageSyncUsernameBox,
-        $script:SageActivityItemIdBox,
         $script:SaveSageConfigurationButton,
         $script:RequestSageSyncButton,
         $script:RefreshSageConfigurationButton
@@ -3074,7 +3071,6 @@ function Refresh-SynchronizationConfiguration {
 
         $script:SageSyncDsnBox.Text = [string]$configuration.Settings['Sage.SyncDsn']
         $script:SageSyncUsernameBox.Text = [string]$configuration.Settings['Sage.SyncUsername']
-        $script:SageActivityItemIdBox.Text = [string]$configuration.Settings['Sage.ActivityItemId']
         $sageStatus = $configuration.SageStatus
         $sageHealth = if ([string]::IsNullOrWhiteSpace($sageStatus.LastError)) {
             $sageStatus.Status
@@ -3842,34 +3838,29 @@ $script:SageSyncUsernameBox = [Windows.Forms.TextBox]::new()
 $script:SageSyncUsernameBox.Location = [Drawing.Point]::new(12, 89)
 $script:SageSyncUsernameBox.Size = [Drawing.Size]::new(326, 24)
 $sageTab.Controls.Add($script:SageSyncUsernameBox)
-$sageTab.Controls.Add((New-Label -Text 'Shared activity item ID' -X 12 -Y 122 -Width 200))
-$script:SageActivityItemIdBox = [Windows.Forms.TextBox]::new()
-$script:SageActivityItemIdBox.Location = [Drawing.Point]::new(12, 144)
-$script:SageActivityItemIdBox.Size = [Drawing.Size]::new(326, 24)
-$sageTab.Controls.Add($script:SageActivityItemIdBox)
 $sagePasswordNote = New-Label `
     -Text 'The Sage password is entered in Protected server credentials on the left.' `
-    -X 12 -Y 176 -Width 326 -Height 38
+    -X 12 -Y 122 -Width 326 -Height 38
 $sagePasswordNote.ForeColor = [Drawing.SystemColors]::GrayText
 $sageTab.Controls.Add($sagePasswordNote)
-$script:SaveSageConfigurationButton = New-Button -Text 'Save settings' -X 12 -Y 218 -Width 102
-$script:RequestSageSyncButton = New-Button -Text 'Sync now' -X 122 -Y 218 -Width 92
-$script:RefreshSageConfigurationButton = New-Button -Text 'Refresh' -X 222 -Y 218 -Width 92
+$script:SaveSageConfigurationButton = New-Button -Text 'Save settings' -X 12 -Y 164 -Width 102
+$script:RequestSageSyncButton = New-Button -Text 'Sync now' -X 122 -Y 164 -Width 92
+$script:RefreshSageConfigurationButton = New-Button -Text 'Refresh' -X 222 -Y 164 -Width 92
 $sageTab.Controls.AddRange(@(
     $script:SaveSageConfigurationButton,
     $script:RequestSageSyncButton,
     $script:RefreshSageConfigurationButton
 ))
 $script:ConfirmSageRemovalButton = New-Button `
-    -Text 'Confirm large removal' -X 12 -Y 256 -Width 170
+    -Text 'Confirm large removal' -X 12 -Y 202 -Width 170
 $script:ConfirmSageRemovalButton.Enabled = $false
 $sageTab.Controls.Add($script:ConfirmSageRemovalButton)
 $script:SageSynchronizationStatusValue = New-Label `
-    -Text 'Configuration not loaded.' -X 12 -Y 296 -Width 326 -Height 92
+    -Text 'Configuration not loaded.' -X 12 -Y 242 -Width 326 -Height 92
 $sageTab.Controls.Add($script:SageSynchronizationStatusValue)
 $sageBoundaryNote = New-Label `
     -Text 'The service performs every organization-wide customer read. Client workstations keep only their own posting settings.' `
-    -X 12 -Y 398 -Width 326 -Height 55
+    -X 12 -Y 344 -Width 326 -Height 55
 $sageBoundaryNote.ForeColor = [Drawing.SystemColors]::GrayText
 $sageTab.Controls.Add($sageBoundaryNote)
 

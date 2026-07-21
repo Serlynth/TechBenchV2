@@ -310,8 +310,7 @@ IF EXISTS
     WHERE [SettingKey] IN
     (
         N'Whd.BaseUrl',
-        N'Whd.AuthenticationMode',
-        N'Sage.ActivityItemId'
+        N'Whd.AuthenticationMode'
     )
 )
 BEGIN
@@ -327,9 +326,6 @@ IF @InstalledSchemaVersion = 3
            OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
        OR CHARINDEX(
            N'Whd.AuthenticationMode',
-           OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
-       OR CHARINDEX(
-           N'Sage.ActivityItemId',
            OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveUserSetting'))) = 0
    )
 BEGIN
