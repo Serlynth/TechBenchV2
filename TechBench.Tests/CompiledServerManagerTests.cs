@@ -91,6 +91,8 @@ public sealed class CompiledServerManagerTests
     [InlineData("2.0.0-alpha.14", "2.0.0-alpha.9", 1)]
     [InlineData("2.0.0-alpha.14", "2.0.0", -1)]
     [InlineData("2.0.1", "2.0.0", 1)]
+    [InlineData("5.0.1", "2.0.0-alpha.25", 1)]
+    [InlineData("5.0.2", "5.0.1", 1)]
     public void SemanticVersionsAreOrderedCorrectly(string left, string right, int expectedSign)
     {
         Assert.Equal(expectedSign, Math.Sign(SemanticVersion.Compare(left, right)));
