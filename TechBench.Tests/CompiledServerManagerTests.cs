@@ -33,6 +33,9 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("ProtectedSecretStore.Whd", form, StringComparison.Ordinal);
         Assert.Contains("DataGridView", form, StringComparison.Ordinal);
         Assert.Contains("Save all mappings", form, StringComparison.Ordinal);
+        Assert.Contains("Save settings + mappings", form, StringComparison.Ordinal);
+        Assert.Contains("CommitEdit(DataGridViewDataErrorContexts.Commit)", form, StringComparison.Ordinal);
+        Assert.Equal(4, CountOccurrences(form, "SavePendingMappingsAsync("));
         Assert.Contains("TechBench_Users", directory, StringComparison.Ordinal);
         Assert.Contains("TechBench_Admins", directory, StringComparison.Ordinal);
         Assert.Contains("GetMembers(recursive: true)", directory, StringComparison.Ordinal);
@@ -200,5 +203,13 @@ public sealed class CompiledServerManagerTests
             directory = directory.Parent;
         }
         throw new DirectoryNotFoundException("Could not locate the TechBenchV2 repository root.");
+    }
+
+    private static int CountOccurrences(string text, string value)
+    {
+        var count = 0;
+        for (var index = 0; (index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0; index += value.Length)
+            count++;
+        return count;
     }
 }

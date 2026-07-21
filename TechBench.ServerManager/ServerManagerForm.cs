@@ -235,7 +235,7 @@ internal sealed class ServerManagerForm : Form
         var interval = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
         interval.Controls.Add(_whdMinutes); interval.Controls.Add(new Label { Text = "minutes (1-120)", AutoSize = true, Padding = new Padding(0, 7, 0, 0) });
         layout.Controls.Add(Label("Every"), 0, 4); layout.Controls.Add(interval, 1, 4);
-        var save = Button("Save settings"); save.Click += async (_, _) => await SaveWhdAsync(false);
+        var save = Button("Save settings + mappings"); save.Click += async (_, _) => await SaveWhdAsync(false);
         var sync = Button("Sync now"); sync.Click += async (_, _) => await SaveWhdAsync(true);
         var refresh = Button("Refresh"); refresh.Click += async (_, _) => await RefreshConfigurationAsync(true);
         layout.Controls.Add(ButtonRow(save, sync, refresh), 1, 5);
@@ -438,6 +438,7 @@ internal sealed class ServerManagerForm : Form
             };
             await Task.Run(() => _repository.SaveSettings(settings, _configuration?.RowVersions ?? new Dictionary<string, byte[]>()));
             AddLog("Shared WHD configuration saved.");
+            await SavePendingMappingsAsync(requireAuthorizedUsers: false);
             if (requestSync) AddLog("WHD sync request: " + await Task.Run(_repository.RequestWhdSync));
             await RefreshConfigurationAsync(false);
         });
@@ -455,6 +456,7 @@ internal sealed class ServerManagerForm : Form
             };
             await Task.Run(() => _repository.SaveSettings(settings, _configuration?.RowVersions ?? new Dictionary<string, byte[]>()));
             AddLog("Shared Sage configuration saved.");
+            await SavePendingMappingsAsync(requireAuthorizedUsers: false);
             if (requestSync)
             {
                 var confirmedId = confirmLargeRemoval ? _configuration?.SageStatus.RequestId : null;
@@ -469,27 +471,42 @@ internal sealed class ServerManagerForm : Form
     {
         await RunAsync("Saving all WHD user mappings...", async () =>
         {
-            _mappingGrid.EndEdit();
-            var assignments = _mappingGrid.Rows
-                .Cast<DataGridViewRow>()
-                .Where(static row => row.Tag is UserMapping)
-                .Select(row =>
-                {
-                    var mapping = (UserMapping)row.Tag!;
-                    return new UserMappingAssignment(
-                        mapping.LoginName,
-                        mapping.DisplayName,
-                        mapping.IsAdmin,
-                        Convert.ToString(row.Cells["WHD technician"].Value) ?? string.Empty);
-                })
-                .ToList();
-            if (assignments.Count == 0)
-                throw new InvalidOperationException("No authorized TechBench AD users were found to map.");
-
-            await Task.Run(() => _repository.SaveMappings(assignments));
-            AddLog($"Saved WHD technician mappings for {assignments.Count} authorized TechBench users.");
+            await SavePendingMappingsAsync(requireAuthorizedUsers: true);
             await RefreshConfigurationAsync(false);
         });
+    }
+
+    private async Task SavePendingMappingsAsync(bool requireAuthorizedUsers)
+    {
+        // A DataGridViewComboBoxCell can still contain an uncommitted selection when
+        // focus moves directly from its dropdown to a Save button.
+        _mappingGrid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+        if (!_mappingGrid.EndEdit())
+            throw new InvalidOperationException("The current WHD technician selection could not be committed.");
+
+        var assignments = _mappingGrid.Rows
+            .Cast<DataGridViewRow>()
+            .Where(static row => row.Tag is UserMapping)
+            .Select(row =>
+            {
+                var mapping = (UserMapping)row.Tag!;
+                return new UserMappingAssignment(
+                    mapping.LoginName,
+                    mapping.DisplayName,
+                    mapping.IsAdmin,
+                    Convert.ToString(row.Cells["WHD technician"].Value) ?? string.Empty);
+            })
+            .ToList();
+
+        if (assignments.Count == 0)
+        {
+            if (requireAuthorizedUsers)
+                throw new InvalidOperationException("No authorized TechBench AD users were found to map.");
+            return;
+        }
+
+        await Task.Run(() => _repository.SaveMappings(assignments));
+        AddLog($"Saved WHD technician mappings for {assignments.Count} authorized TechBench users.");
     }
 
     private void ConfigureMappingGrid()
