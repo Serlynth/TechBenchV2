@@ -24,4 +24,31 @@ internal static class SecureDirectory
         }
         new DirectoryInfo(path).SetAccessControl(security);
     }
+
+    public static void GrantReadAndExecute(string path, string accountName)
+    {
+        if (!Directory.Exists(path)) throw new DirectoryNotFoundException(path);
+        if (string.IsNullOrWhiteSpace(accountName) || accountName.Equals("Unknown", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("The installed Windows service account could not be resolved.", nameof(accountName));
+
+        SecurityIdentifier serviceSid;
+        try
+        {
+            serviceSid = (SecurityIdentifier)new NTAccount(accountName.Trim()).Translate(typeof(SecurityIdentifier));
+        }
+        catch (IdentityNotMappedException ex)
+        {
+            throw new InvalidOperationException($"Windows could not resolve service account '{accountName}'.", ex);
+        }
+
+        var directory = new DirectoryInfo(path);
+        var security = directory.GetAccessControl(AccessControlSections.Access);
+        security.AddAccessRule(new FileSystemAccessRule(
+            serviceSid,
+            FileSystemRights.ReadAndExecute | FileSystemRights.Synchronize,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None,
+            AccessControlType.Allow));
+        directory.SetAccessControl(security);
+    }
 }

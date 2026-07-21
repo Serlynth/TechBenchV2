@@ -7,19 +7,19 @@
 From the repository root, create a self-contained `win-x64` service package with its isolated self-contained `win-x86` Sage ODBC worker:
 
 ```powershell
-.\scripts\Publish-TechBenchServer.ps1 -Version 2.0.0-alpha.16
+.\scripts\Publish-TechBenchServer.ps1 -Version 2.0.0-alpha.17
 ```
 
-The publisher creates the directly runnable `dist\TechBenchServerSetup.exe` and its SHA-256 sidecar. The setup executable embeds the complete verified `TechBenchSyncService-2.0.0-alpha.16-win-x64.zip` payload, including the x64 service, x86 Sage worker, compiled Server Manager, configuration template, runbook, credential helpers, and matching SQLCMD deployment. Do not place either external-system secret in the package or in `appsettings.json`.
+The publisher creates the directly runnable `dist\TechBenchServerSetup.exe` and its SHA-256 sidecar. The setup executable embeds the complete verified `TechBenchSyncService-2.0.0-alpha.17-win-x64.zip` payload, including the x64 service, x86 Sage worker, compiled Server Manager, configuration template, runbook, credential helpers, and matching SQLCMD deployment. Do not place either external-system secret in the package or in `appsettings.json`.
 
 The same command also creates the directly downloadable
-`dist\TechBenchV2-SQLServer2016-2.0.0-alpha.16.sql` and its checksum. After the
-matching client publisher has created GitHub release `v2.0.0-alpha.16`, attach
+`dist\TechBenchV2-SQLServer2016-2.0.0-alpha.17.sql` and its checksum. After the
+matching client publisher has created GitHub release `v2.0.0-alpha.17`, attach
 the installer, service ZIP, SQL file, and their checksums with:
 
 ```powershell
 .\scripts\Publish-TechBenchServer.ps1 `
-  -Version 2.0.0-alpha.16 `
+  -Version 2.0.0-alpha.17 `
   -Publish
 ```
 
@@ -29,13 +29,13 @@ server/SQL assets.
 
 ## Deploy the database first
 
-Before installing the service or alpha.16 clients, stop the old V2 clients, have the DBA back up `TechBench`, and verify schema version 7. Alpha.16 introduces no database migration; an already verified schema-version-7 database remains current. For a new database or a schema change, review `database\README-Deploy.md` and execute `database\Deploy-CSRI-Standalone.sql` in SSMS while connected to `CSRI-SQL` as a SQL Server sysadmin with **Query > SQLCMD Mode** enabled. Stop if any verification reports a failure.
+Before installing the service or alpha.17 clients, stop the old V2 clients, have the DBA back up `TechBench`, and verify schema version 7. Alpha.17 introduces no database migration; an already verified schema-version-7 database remains current. For a new database or a schema change, review `database\README-Deploy.md` and execute `database\Deploy-CSRI-Standalone.sql` in SSMS while connected to `CSRI-SQL` as a SQL Server sysadmin with **Query > SQLCMD Mode** enabled. Stop if any verification reports a failure.
 
 If you download the versioned standalone SQL asset instead of taking it from
 the service ZIP, verify its sidecar before opening it in SSMS:
 
 ```powershell
-$sql = '.\TechBenchV2-SQLServer2016-2.0.0-alpha.16.sql'
+$sql = '.\TechBenchV2-SQLServer2016-2.0.0-alpha.17.sql'
 $expectedHash = ((Get-Content "$sql.sha256" -Raw) -split '\s+')[0]
 $actualHash = (Get-FileHash $sql -Algorithm SHA256).Hash
 if ($actualHash -ne $expectedHash) { throw 'TechBench SQL SHA-256 does not match.' }
@@ -56,13 +56,13 @@ if ($actualHash -ne $expectedHash) { throw 'TechBench SQL SHA-256 does not match
 
 Download and run the one-click installer:
 
-`https://github.com/Serlynth/TechBenchV2-Releases/releases/download/v2.0.0-alpha.16/TechBenchServerSetup.exe`
+`https://github.com/Serlynth/TechBenchV2-Releases/releases/download/v2.0.0-alpha.17/TechBenchServerSetup.exe`
 
 Windows requests administrator approval. For a new installation, leave the service account as `CSRI\TechBench_Sync`, select **Install**, and enter that account's password in the secure dialog. The password can be revealed temporarily for verification and is never written to the command line, configuration, package, output, or logs. After installation, Server Manager opens so the WHD and Sage secrets and shared configuration can be entered.
 
-For an existing installation, select **Update / Repair**. Setup closes Server Manager, verifies its embedded package and every manifest hash, stops the service, preserves the Windows service identity, SQL configuration, and machine-protected WHD/Sage secrets, replaces the service and Manager binaries, repairs the Start Menu shortcut, restarts the service, and opens the Manager. A same-schema update does not require the interactive setup operator to have SQL access. A release that requires a different schema remains blocked until the DBA applies the matching SQL deployment.
+For an existing installation, select **Update / Repair**. Setup closes Server Manager, verifies its embedded package and every manifest hash, stops the service, preserves the Windows service identity, SQL configuration, and machine-protected WHD/Sage secrets, replaces the service and Manager binaries, restores inherited read-and-execute access for the installed service identity, repairs the Start Menu shortcut, restarts the service, and opens the Manager. A same-schema update does not require the interactive setup operator to have SQL access. A release that requires a different schema remains blocked until the DBA applies the matching SQL deployment.
 
-The setup EXE and its `.sha256` sidecar are published together. The versioned ZIP remains available for controlled advanced or unattended deployment, but normal installation and repair do not require extracting it, changing execution policy, or typing PowerShell commands. The standalone SQL asset is `TechBenchV2-SQLServer2016-2.0.0-alpha.16.sql`.
+The setup EXE and its `.sha256` sidecar are published together. The versioned ZIP remains available for controlled advanced or unattended deployment, but normal installation and repair do not require extracting it, changing execution policy, or typing PowerShell commands. The standalone SQL asset is `TechBenchV2-SQLServer2016-2.0.0-alpha.17.sql`.
 
 The prepared CSRI deployment does not use a gMSA. If a future deployment
 switches to one, first redeploy SQL with that exact gMSA (or a dedicated group

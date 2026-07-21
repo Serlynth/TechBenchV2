@@ -41,6 +41,9 @@ internal static class PackageInstaller
             }
 
             var service = new WindowsServiceManager(paths);
+            var installedService = service.GetDetails();
+            if (!installedService.Installed)
+                throw new InvalidOperationException("The TechBench Sync Service is not installed. Use TechBench Server Setup for a first installation.");
             Log($"Installing TechBench {manifest.Version}.");
             try { service.Stop(); } catch (InvalidOperationException) { }
             var serviceMoved = false;
@@ -52,6 +55,7 @@ internal static class PackageInstaller
                 if (Directory.Exists(paths.ManagerDirectory)) { Directory.Move(paths.ManagerDirectory, managerBackup); managerMoved = true; }
                 Directory.Move(serviceStage, paths.ServiceDirectory);
                 Directory.Move(managerStage, paths.ManagerDirectory);
+                SecureDirectory.GrantReadAndExecute(paths.ServiceDirectory, installedService.Account);
                 ShortcutManager.Create(paths);
                 service.Start();
                 Log("Update completed and the service started.");

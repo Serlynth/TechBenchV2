@@ -1,4 +1,6 @@
 using System.Text;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using TechBench.ServerManager;
 
 namespace TechBench.Tests;
@@ -33,6 +35,29 @@ public sealed class NativeServerSetupTests
     }
 
     [Fact]
+    public void UpdatedServiceDirectoryGrantsInheritedReadAndExecuteToServiceIdentity()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "TechBench-Service-Acl-Test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            var identity = WindowsIdentity.GetCurrent();
+            SecureDirectory.GrantReadAndExecute(root, identity.Name);
+            var sid = identity.User!;
+            var rules = new DirectoryInfo(root).GetAccessControl(AccessControlSections.Access)
+                .GetAccessRules(includeExplicit: true, includeInherited: false, typeof(SecurityIdentifier))
+                .Cast<FileSystemAccessRule>();
+            Assert.Contains(rules, rule =>
+                rule.IdentityReference == sid &&
+                rule.AccessControlType == AccessControlType.Allow &&
+                (rule.FileSystemRights & FileSystemRights.ReadAndExecute) == FileSystemRights.ReadAndExecute &&
+                rule.InheritanceFlags.HasFlag(InheritanceFlags.ContainerInherit) &&
+                rule.InheritanceFlags.HasFlag(InheritanceFlags.ObjectInherit));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public void SetupIsAnElevatedNativeExeWithEmbeddedVerifiedPayload()
     {
         var project = ReadRepositoryFile("TechBench.ServerSetup", "TechBench.ServerSetup.csproj");
@@ -47,6 +72,7 @@ public sealed class NativeServerSetupTests
         Assert.Contains("PackageManifest.LoadAndVerify", package, StringComparison.Ordinal);
         Assert.Contains("PackageInstaller.Apply(package.Directory", engine, StringComparison.Ordinal);
         Assert.Contains("InstalledPackageDeclaresRequiredSchema", ReadRepositoryFile("TechBench.ServerManager", "ReleaseUpdater.cs"), StringComparison.Ordinal);
+        Assert.Contains("GrantReadAndExecute(paths.ServiceDirectory, installedService.Account)", ReadRepositoryFile("TechBench.ServerManager", "PackageInstaller.cs"), StringComparison.Ordinal);
         Assert.Contains("CreateNoWindow = true", engine, StringComparison.Ordinal);
         Assert.Contains("TechBenchServerSetup.exe", publisher, StringComparison.Ordinal);
     }

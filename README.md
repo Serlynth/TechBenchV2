@@ -4,7 +4,7 @@ TechBench V2 is the multi-user successor to TechBench 1.x. It keeps the existing
 
 The original TechBench workspace is not modified. V1 and V2 have separate product identities, executables, mutex names, settings, credential namespaces, packages, and update feeds.
 
-Current milestone: `2.0.0-alpha.16` - the server-backed client, owner-scoped V1 migration, server-owned WHD and Sage synchronization, Admin-only read-only user preview, compiled server-local TechBench Server Manager, and one-click native server setup are implemented. Alpha.16 packages the verified server payload in a directly downloadable `TechBenchServerSetup.exe`; existing installations preserve their service identity, SQL configuration, and protected WHD/Sage secrets during update or repair. The client retains only each user's personal WHD posting credential and workstation-specific Sage posting settings. It still requires deployment to the real SQL Server 2016 instance plus domain-user, live-WHD, live-Sage, and server-update smoke testing before it should be treated as production-ready.
+Current milestone: `2.0.0-alpha.17` - the server-backed client, owner-scoped V1 migration, server-owned WHD and Sage synchronization, Admin-only read-only user preview, compiled server-local TechBench Server Manager, and one-click native server setup are implemented. Alpha.17 fixes the real-server update ACL discovered in alpha.16 by restoring the service identity's inherited read-and-execute access before restart. Existing installations preserve their service identity, SQL configuration, and protected WHD/Sage secrets during update or repair. The client retains only each user's personal WHD posting credential and workstation-specific Sage posting settings. It still requires domain-user, live-WHD, live-Sage, and server-update smoke testing before it should be treated as production-ready.
 
 ## What V2 stores where
 
@@ -127,17 +127,17 @@ Application Name=TechBench V2;
 
 No SQL username, `sa` password, or other credential belongs in the client connection configuration.
 
-The desktop application and Server Manager check schema compatibility and refuse an incompatible deployment. Version `2.0.0-alpha.16` requires database schema version `7`, including the service-only WHD and Sage ingestion contracts and restricted Admin preview boundary. Alpha.16 introduces no database migration.
+The desktop application and Server Manager check schema compatibility and refuse an incompatible deployment. Version `2.0.0-alpha.17` requires database schema version `7`, including the service-only WHD and Sage ingestion contracts and restricted Admin preview boundary. Alpha.17 introduces no database migration.
 
-### Coordinated alpha.16 upgrade
+### Coordinated alpha.17 upgrade
 
 The database and client must be upgraded as one planned cutover:
 
 1. Back up the `TechBench` database.
 2. Stop the existing V2 clients and sync service, run the complete schema-version-7 standalone deployment, and confirm all verification output passes.
-3. Run the alpha.16 `TechBenchServerSetup.exe` as Administrator. It installs or repairs the x64 TechBench Sync Service under `CSRI\TechBench_Sync`, preserves existing machine-protected WHD/Sage credentials, and installs the compiled Manager and direct EXE Start Menu shortcut.
+3. Run the alpha.17 `TechBenchServerSetup.exe` as Administrator. It installs or repairs the x64 TechBench Sync Service under `CSRI\TechBench_Sync`, preserves existing machine-protected WHD/Sage credentials, restores service-folder read-and-execute access for that identity, and installs the compiled Manager and direct EXE Start Menu shortcut.
 4. On the service host, create the 32-bit Sage **System DSN**, grant the service identity the required Sage read access, and provision the separate machine-protected Sage password.
-5. Open Server Manager as a TechBench Admin and configure the SQL connection, WHD endpoint, authentication mode, service username, five-minute schedule, server Sage DSN/username, shared activity item ID, and AD-to-WHD technician mappings. Install the alpha.16 client on workstations; each technician configures only their personal posting credentials and local workstation options.
+5. Open Server Manager as a TechBench Admin and configure the SQL connection, WHD endpoint, authentication mode, service username, five-minute schedule, server Sage DSN/username, shared activity item ID, and AD-to-WHD technician mappings. Install the alpha.17 client on workstations; each technician configures only their personal posting credentials and local workstation options.
 6. Test with at least one ordinary domain user and one TechBench administrator. Confirm the initial WHD full sync, a later automatic delta, a manually requested Sage customer sync, malformed/empty snapshot rejection, the explicit large-removal confirmation path, service health, and direct/group ticket visibility.
 7. Verify ordinary users cannot queue either server job or change shared configuration. Verify an Admin can open a read-only preview, cannot write through it, and cannot see another user's Personal Note or editor draft.
 8. Verify shared clients, tickets, canonical customer matching, aliases, tags, templates, Common Links, work entries, Personal Note privacy, drafts, posting coordination, automatic refresh, and optimistic-concurrency conflicts.
@@ -145,7 +145,7 @@ The database and client must be upgraded as one planned cutover:
 
 To replace or repair any earlier V2 server installation, download and run `TechBenchServerSetup.exe` as Administrator. The setup EXE contains and verifies the matching server payload, closes the old Manager, preserves the installed service identity, configuration, and protected secrets, replaces both programs, restarts the service, repairs the Start Menu shortcut, and opens the Manager. No ZIP extraction or command-line bootstrap is required.
 
-Do not deploy only one side. The alpha.16 client and service require schema version 7; earlier alpha clients keep obsolete organization-sync controls in their Settings page.
+Do not deploy only one side. The alpha.17 client and service require schema version 7; earlier alpha clients keep obsolete organization-sync controls in their Settings page.
 
 Users newly added to an AD group should sign out of Windows and sign back in before testing so their Windows security token includes the new membership.
 
@@ -155,8 +155,8 @@ Users newly added to an AD group should sign out of Windows and sign back in bef
 dotnet restore TechBenchV2.sln
 dotnet build TechBenchV2.sln -c Release
 dotnet test TechBench.Tests\TechBench.Tests.csproj -c Release
-.\scripts\Publish-TechBenchRelease.ps1 -Version 2.0.0-alpha.16
-.\scripts\Publish-TechBenchServer.ps1 -Version 2.0.0-alpha.16
+.\scripts\Publish-TechBenchRelease.ps1 -Version 2.0.0-alpha.17
+.\scripts\Publish-TechBenchServer.ps1 -Version 2.0.0-alpha.17
 ~~~
 
 Inspect and smoke-test both local packages before publishing. For an approved
@@ -181,6 +181,6 @@ Unit and contract tests do not replace the required integration run against the 
 - Verify counts, relationships, ownership, posting state, and sample note content before cutover.
 - Do not run V1 and V2 as dual writable production systems.
 
-V1 remains untouched and available for rollback or historical reference. Its data is not automatically migrated merely by installing alpha.16; each user uses **Settings > Import V1 Database...**, reviews the preview, and explicitly starts their own import. Work history, Personal Notes, entry tags, follow-up state, posting state/history, and note links move to that user's SQL-owned records. Equivalent legacy link rows may share one canonical SQL relationship. A resumed batch counts mappings first accepted by that same batch as imported, while a later batch skips unchanged mappings. Dependent links and posting logs attach only through work-entry mappings accepted by the current batch, and a successful completion must account for every read item with zero errors. A user may abandon their own stale active V1 batch before restarting. Shared configuration, credentials, editor drafts, active posting attempts, and local caches are intentionally excluded.
+V1 remains untouched and available for rollback or historical reference. Its data is not automatically migrated merely by installing alpha.17; each user uses **Settings > Import V1 Database...**, reviews the preview, and explicitly starts their own import. Work history, Personal Notes, entry tags, follow-up state, posting state/history, and note links move to that user's SQL-owned records. Equivalent legacy link rows may share one canonical SQL relationship. A resumed batch counts mappings first accepted by that same batch as imported, while a later batch skips unchanged mappings. Dependent links and posting logs attach only through work-entry mappings accepted by the current batch, and a successful completion must account for every read item with zero errors. A user may abandon their own stale active V1 batch before restarting. Shared configuration, credentials, editor drafts, active posting attempts, and local caches are intentionally excluded.
 
 For implementation details, see [docs/V2-ARCHITECTURE.md](docs/V2-ARCHITECTURE.md). For deployment, see the [database runbook](database/sqlserver2016/README-Deploy.md) and [sync-service runbook](docs/WHD-SYNC-SERVICE.md).
