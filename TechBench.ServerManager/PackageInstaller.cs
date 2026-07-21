@@ -56,6 +56,7 @@ internal static class PackageInstaller
                 Directory.Move(serviceStage, paths.ServiceDirectory);
                 Directory.Move(managerStage, paths.ManagerDirectory);
                 SecureDirectory.GrantReadAndExecute(paths.ServiceDirectory, installedService.Account);
+                SecureDirectory.GrantBuiltInUsersReadAndExecute(paths.ManagerDirectory);
                 ShortcutManager.Create(paths);
                 service.Start();
                 Log("Update completed and the service started.");

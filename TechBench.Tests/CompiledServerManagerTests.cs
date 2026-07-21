@@ -59,6 +59,7 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("server-manager", script, StringComparison.Ordinal);
         Assert.Contains("TechBench.ServerManager.exe", script, StringComparison.Ordinal);
         Assert.Contains("$shortcut.TargetPath", script, StringComparison.Ordinal);
+        Assert.Contains("S-1-5-32-545", script, StringComparison.Ordinal);
         Assert.DoesNotContain("wscript.exe", script, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("powershell.exe", script, StringComparison.OrdinalIgnoreCase);
     }

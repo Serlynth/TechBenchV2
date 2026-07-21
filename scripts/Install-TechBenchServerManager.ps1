@@ -68,6 +68,36 @@ try {
     if (Test-Path -LiteralPath $managerPath) { Move-Item -LiteralPath $managerPath -Destination $backupPath }
     Move-Item -LiteralPath $stagePath -Destination $managerPath
 
+    # Explorer must be able to read the target before Windows can show the
+    # executable's administrator-elevation prompt. Keep writes restricted to
+    # SYSTEM/Administrators and grant built-in Users read/execute only.
+    $managerSecurity = [Security.AccessControl.DirectorySecurity]::new()
+    $managerSecurity.SetAccessRuleProtection($true, $false)
+    $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $managerSecurity.SetOwner($administrators)
+    $inheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    $propagation = [Security.AccessControl.PropagationFlags]::None
+    $allow = [Security.AccessControl.AccessControlType]::Allow
+    foreach ($entry in @(
+        [PSCustomObject]@{
+            Sid = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+            Rights = [Security.AccessControl.FileSystemRights]::FullControl
+        },
+        [PSCustomObject]@{
+            Sid = $administrators
+            Rights = [Security.AccessControl.FileSystemRights]::FullControl
+        },
+        [PSCustomObject]@{
+            Sid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+            Rights = [Security.AccessControl.FileSystemRights]'ReadAndExecute, Synchronize'
+        }
+    )) {
+        [void]$managerSecurity.AddAccessRule(
+            [Security.AccessControl.FileSystemAccessRule]::new(
+                $entry.Sid, $entry.Rights, $inheritance, $propagation, $allow))
+    }
+    Set-Acl -LiteralPath $managerPath -AclObject $managerSecurity
+
     $shortcutDirectory = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\CSRI'
     New-Item -ItemType Directory -Path $shortcutDirectory -Force | Out-Null
     $shell = New-Object -ComObject WScript.Shell

@@ -41,10 +41,22 @@ internal static class SecureDirectory
             throw new InvalidOperationException($"Windows could not resolve service account '{accountName}'.", ex);
         }
 
+        GrantReadAndExecute(path, serviceSid);
+    }
+
+    public static void GrantBuiltInUsersReadAndExecute(string path)
+    {
+        GrantReadAndExecute(path, new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null));
+    }
+
+    private static void GrantReadAndExecute(string path, SecurityIdentifier identity)
+    {
+        if (!Directory.Exists(path)) throw new DirectoryNotFoundException(path);
+
         var directory = new DirectoryInfo(path);
         var security = directory.GetAccessControl(AccessControlSections.Access);
         security.AddAccessRule(new FileSystemAccessRule(
-            serviceSid,
+            identity,
             FileSystemRights.ReadAndExecute | FileSystemRights.Synchronize,
             InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
             PropagationFlags.None,
