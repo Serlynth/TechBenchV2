@@ -1925,22 +1925,36 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private async Task SaveEntryAsync(object? parameter)
     {
         var savedEntry = SaveEditor();
-        if (savedEntry is not { WhdPosted: true, SagePosted: false })
+        if (savedEntry is null)
         {
             return;
         }
 
-        IsEntryOperationRunning = true;
-        EntryOperationText = "Synchronizing the Sage/WHD Note with WHD...";
-        try
+        if (savedEntry is { WhdPosted: true, SagePosted: false })
         {
-            await SynchronizeWhdEntryAsync(savedEntry, WhdSyncIntent.PushLocal, allowConflictPrompt: true);
+            IsEntryOperationRunning = true;
+            EntryOperationText = "Synchronizing the Sage/WHD Note with WHD...";
+            try
+            {
+                var synchronized = await SynchronizeWhdEntryAsync(
+                    savedEntry,
+                    WhdSyncIntent.PushLocal,
+                    allowConflictPrompt: true);
+                if (!synchronized)
+                {
+                    return;
+                }
+            }
+            finally
+            {
+                EntryOperationText = string.Empty;
+                IsEntryOperationRunning = false;
+            }
         }
-        finally
-        {
-            EntryOperationText = string.Empty;
-            IsEntryOperationRunning = false;
-        }
+
+        var savedStatus = StatusMessage;
+        NewEntry();
+        StatusMessage = $"{savedStatus} New entry ready.";
     }
 
     private WorkEntry? SaveEditor()
