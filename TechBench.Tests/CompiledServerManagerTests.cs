@@ -23,6 +23,7 @@ public sealed class CompiledServerManagerTests
     {
         var form = ReadRepositoryFile("TechBench.ServerManager", "ServerManagerForm.cs");
         var sql = ReadRepositoryFile("TechBench.ServerManager", "SqlAdminRepository.cs");
+        var directory = ReadRepositoryFile("TechBench.ServerManager", "ActiveDirectoryUserProvider.cs");
         var updater = ReadRepositoryFile("TechBench.ServerManager", "ReleaseUpdater.cs");
         var installer = ReadRepositoryFile("TechBench.ServerManager", "PackageInstaller.cs");
 
@@ -30,6 +31,12 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("WindowState == FormWindowState.Minimized", form, StringComparison.Ordinal);
         Assert.Contains("ServicePassword", form, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ProtectedSecretStore.Whd", form, StringComparison.Ordinal);
+        Assert.Contains("DataGridView", form, StringComparison.Ordinal);
+        Assert.Contains("Save all mappings", form, StringComparison.Ordinal);
+        Assert.Contains("TechBench_Users", directory, StringComparison.Ordinal);
+        Assert.Contains("TechBench_Admins", directory, StringComparison.Ordinal);
+        Assert.Contains("GetMembers(recursive: true)", directory, StringComparison.Ordinal);
+        Assert.Contains("SaveMappings", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("Sage.ActivityItemId", form + sql, StringComparison.Ordinal);
         Assert.DoesNotContain("Activity Item ID", form, StringComparison.Ordinal);
         Assert.Contains("tb_app.AdminSaveOrganizationSetting", sql, StringComparison.Ordinal);
@@ -41,6 +48,39 @@ public sealed class CompiledServerManagerTests
         Assert.DoesNotContain("powershell", form, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("powershell", updater, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("powershell", installer, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DirectoryUsersMergeWithSavedMappingsWithoutDuplicateRows()
+    {
+        var directoryUsers = new[]
+        {
+            new DirectoryUser("CSRI\\alice", "Alice Admin", true),
+            new DirectoryUser("CSRI\\bob", "Bob User", false)
+        };
+        var savedMappings = new[]
+        {
+            new UserMapping("csri\\ALICE", "Old Alice", false, "WHD-TECH-1"),
+            new UserMapping("CSRI\\retired", "Retired User", false, "WHD-TECH-2")
+        };
+
+        var merged = ActiveDirectoryUserProvider.MergeMappings(directoryUsers, savedMappings);
+
+        Assert.Collection(
+            merged,
+            alice =>
+            {
+                Assert.Equal("CSRI\\alice", alice.LoginName);
+                Assert.Equal("Alice Admin", alice.DisplayName);
+                Assert.True(alice.IsAdmin);
+                Assert.Equal("WHD-TECH-1", alice.TechnicianExternalId);
+            },
+            bob =>
+            {
+                Assert.Equal("CSRI\\bob", bob.LoginName);
+                Assert.False(bob.IsAdmin);
+                Assert.Empty(bob.TechnicianExternalId);
+            });
     }
 
     [Theory]

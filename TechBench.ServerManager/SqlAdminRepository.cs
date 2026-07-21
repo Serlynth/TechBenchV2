@@ -39,7 +39,15 @@ internal sealed class SqlAdminRepository(AppPaths paths)
         }
         catch
         {
-            transaction.Rollback();
+            try
+            {
+                if (transaction.Connection is not null)
+                    transaction.Rollback();
+            }
+            catch
+            {
+                // SQL Server may already have rolled back the outer transaction.
+            }
             throw;
         }
     }
@@ -65,14 +73,40 @@ internal sealed class SqlAdminRepository(AppPaths paths)
         return reader.Read() ? ReadString(reader, "Status", "Queued") : "Queued";
     }
 
-    public void SaveMapping(string windowsLoginName, string? technicianExternalId)
+    public void SaveMappings(IReadOnlyCollection<UserMappingAssignment> mappings)
     {
         using var connection = OpenAdminConnection();
-        using var command = StoredProcedure(connection, "tb_app.AdminSaveWhdUserMapping");
-        command.Parameters.Add("@WindowsLoginName", SqlDbType.NVarChar, 256).Value = windowsLoginName;
-        command.Parameters.Add("@TechnicianExternalId", SqlDbType.NVarChar, 120).Value =
-            string.IsNullOrWhiteSpace(technicianExternalId) ? DBNull.Value : technicianExternalId;
-        command.ExecuteNonQuery();
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            foreach (var mapping in mappings.OrderBy(static item => item.LoginName, StringComparer.OrdinalIgnoreCase))
+            {
+                using var command = StoredProcedure(connection, "tb_app.AdminSaveWhdUserMapping", transaction);
+                command.Parameters.Add("@WindowsLoginName", SqlDbType.NVarChar, 256).Value = mapping.LoginName;
+                command.Parameters.Add("@DisplayName", SqlDbType.NVarChar, 160).Value = mapping.DisplayName;
+                command.Parameters.Add("@IsAdmin", SqlDbType.Bit).Value = mapping.IsAdmin;
+                command.Parameters.Add("@TechnicianExternalId", SqlDbType.NVarChar, 120).Value =
+                    string.IsNullOrWhiteSpace(mapping.TechnicianExternalId)
+                        ? DBNull.Value
+                        : mapping.TechnicianExternalId;
+                command.ExecuteNonQuery();
+            }
+
+            transaction.Commit();
+        }
+        catch
+        {
+            try
+            {
+                if (transaction.Connection is not null)
+                    transaction.Rollback();
+            }
+            catch
+            {
+                // SQL Server may already have rolled back the outer transaction.
+            }
+            throw;
+        }
     }
 
     public int VerifyRequiredSchema(int requiredVersion)
@@ -201,7 +235,11 @@ internal sealed class SqlAdminRepository(AppPaths paths)
         {
             var login = ReadString(reader, "LoginName");
             var display = ReadString(reader, "DisplayName");
-            configuration.UserMappings.Add(new(login, string.IsNullOrWhiteSpace(display) ? login : $"{display} ({login})", ReadString(reader, "TechnicianExternalId")));
+            configuration.UserMappings.Add(new(
+                login,
+                string.IsNullOrWhiteSpace(display) ? login : display,
+                ReadBool(reader, "IsAdmin"),
+                ReadString(reader, "TechnicianExternalId")));
         }
     }
 
@@ -212,9 +250,10 @@ internal sealed class SqlAdminRepository(AppPaths paths)
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
+            if (!ReadBool(reader, "IsActive", true)) continue;
             var id = ReadString(reader, "ExternalId");
             var display = ReadString(reader, "DisplayName", id);
-            configuration.Technicians.Add(new(id, ReadBool(reader, "IsActive", true) ? display : $"{display} (inactive)"));
+            configuration.Technicians.Add(new(id, display));
         }
     }
 

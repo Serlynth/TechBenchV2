@@ -28,10 +28,26 @@ internal sealed class SyncStatus
     public int StaleCount { get; set; }
 }
 
-internal sealed record UserMapping(string LoginName, string Label, string TechnicianExternalId)
+internal sealed record DirectoryUser(string LoginName, string DisplayName, bool IsAdmin);
+
+internal sealed record UserMapping(
+    string LoginName,
+    string DisplayName,
+    bool IsAdmin,
+    string TechnicianExternalId)
 {
+    public string Label => string.IsNullOrWhiteSpace(DisplayName)
+        ? LoginName
+        : $"{DisplayName} ({LoginName})";
+
     public override string ToString() => Label;
 }
+
+internal sealed record UserMappingAssignment(
+    string LoginName,
+    string DisplayName,
+    bool IsAdmin,
+    string TechnicianExternalId);
 
 internal sealed record Technician(string ExternalId, string Label)
 {

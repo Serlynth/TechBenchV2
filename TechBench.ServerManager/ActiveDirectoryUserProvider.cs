@@ -1,0 +1,96 @@
+using System.DirectoryServices.AccountManagement;
+
+namespace TechBench.ServerManager;
+
+internal sealed class ActiveDirectoryUserProvider
+{
+    internal const string DomainDnsName = "CSRI.local";
+    internal const string DomainNetBiosName = "CSRI";
+    internal const string UserGroupName = "TechBench_Users";
+    internal const string AdminGroupName = "TechBench_Admins";
+
+    public IReadOnlyList<DirectoryUser> LoadAuthorizedUsers()
+    {
+        using var context = new PrincipalContext(ContextType.Domain, DomainDnsName);
+        var users = new Dictionary<string, DirectoryUser>(StringComparer.OrdinalIgnoreCase);
+
+        AddGroupMembers(context, UserGroupName, isAdmin: false, users);
+        AddGroupMembers(context, AdminGroupName, isAdmin: true, users);
+
+        return users.Values
+            .OrderBy(static user => user.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(static user => user.LoginName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    internal static IReadOnlyList<UserMapping> MergeMappings(
+        IEnumerable<DirectoryUser> directoryUsers,
+        IEnumerable<UserMapping> savedMappings)
+    {
+        var saved = savedMappings.ToDictionary(
+            static mapping => mapping.LoginName,
+            StringComparer.OrdinalIgnoreCase);
+
+        return directoryUsers
+            .Select(user => new UserMapping(
+                user.LoginName,
+                user.DisplayName,
+                user.IsAdmin,
+                saved.TryGetValue(user.LoginName, out var mapping)
+                    ? mapping.TechnicianExternalId
+                    : string.Empty))
+            .OrderBy(static mapping => mapping.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(static mapping => mapping.LoginName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static void AddGroupMembers(
+        PrincipalContext context,
+        string groupName,
+        bool isAdmin,
+        IDictionary<string, DirectoryUser> users)
+    {
+        using var group = GroupPrincipal.FindByIdentity(
+            context,
+            IdentityType.SamAccountName,
+            groupName)
+            ?? throw new InvalidOperationException(
+                $"Active Directory group '{DomainNetBiosName}\\{groupName}' was not found.");
+
+        using var members = group.GetMembers(recursive: true);
+        foreach (var principal in members)
+        {
+            using (principal)
+            {
+                if (principal is not UserPrincipal user
+                    || string.IsNullOrWhiteSpace(user.SamAccountName))
+                {
+                    continue;
+                }
+
+                var loginName = $"{DomainNetBiosName}\\{user.SamAccountName.Trim()}";
+                var displayName = FirstNonBlank(
+                    user.DisplayName,
+                    user.Name,
+                    user.SamAccountName);
+
+                if (users.TryGetValue(loginName, out var existing))
+                {
+                    users[loginName] = existing with
+                    {
+                        DisplayName = displayName,
+                        IsAdmin = existing.IsAdmin || isAdmin
+                    };
+                }
+                else
+                {
+                    users.Add(loginName, new DirectoryUser(loginName, displayName, isAdmin));
+                }
+            }
+        }
+    }
+
+    private static string FirstNonBlank(params string?[] values) =>
+        values.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value))?.Trim()
+        ?? "Unknown user";
+}

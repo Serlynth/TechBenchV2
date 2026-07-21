@@ -165,6 +165,8 @@ INSERT INTO @RequiredParameters([ProcedureName], [ParameterName]) VALUES
     (N'tb_app.AdminRequestWhdSync', N'@RequestType'),
     (N'tb_app.AdminRequestWhdSync', N'@RequestId'),
     (N'tb_app.AdminSaveWhdUserMapping', N'@WindowsLoginName'),
+    (N'tb_app.AdminSaveWhdUserMapping', N'@DisplayName'),
+    (N'tb_app.AdminSaveWhdUserMapping', N'@IsAdmin'),
     (N'tb_app.AdminSaveWhdUserMapping', N'@TechnicianExternalId');
 
 IF EXISTS
@@ -376,12 +378,14 @@ END;
 DECLARE @ClaimDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ClaimWhdSyncWork'));
 DECLARE @CompleteDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_service.CompleteWhdSyncWork'));
 DECLARE @MappingDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminSaveWhdUserMapping'));
+DECLARE @TechnicianListDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminGetWhdTechnicians'));
 DECLARE @SearchDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SearchTickets'));
 DECLARE @GetTicketDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetTicket'));
 
 SELECT @ClaimDefinition = REPLACE(REPLACE(REPLACE(@ClaimDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @CompleteDefinition = REPLACE(REPLACE(REPLACE(@CompleteDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @MappingDefinition = REPLACE(REPLACE(REPLACE(@MappingDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @TechnicianListDefinition = REPLACE(REPLACE(REPLACE(@TechnicianListDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @SearchDefinition = REPLACE(REPLACE(REPLACE(@SearchDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @GetTicketDefinition = REPLACE(REPLACE(REPLACE(@GetTicketDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 
@@ -402,10 +406,18 @@ BEGIN
 END;
 
 IF CHARINDEX(N'@TechnicianExternalIdnvarchar(120)=NULL', @MappingDefinition) = 0
+   OR CHARINDEX(N'SUSER_SID(@WindowsLoginName,0)', @MappingDefinition) = 0
+   OR CHARINDEX(N'INSERTINTO[tb_security].[Users]', @MappingDefinition) = 0
    OR CHARINDEX(N'WriteAuditEvent', @MappingDefinition) = 0
    OR CHARINDEX(N'DELETEFROM[tb_whd].[UserTechnicianMappings]', @MappingDefinition) = 0
 BEGIN
     PRINT N'FAIL: WHD user mapping does not support audited removal.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'WHERE[IsActive]=1', @TechnicianListDefinition) = 0
+BEGIN
+    PRINT N'FAIL: WHD technician mapping choices include inactive technicians.';
     SET @FailureCount += 1;
 END;
 

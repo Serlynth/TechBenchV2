@@ -1305,13 +1305,15 @@ GO
 CREATE PROCEDURE [tb_app].[AdminGetWhdUserMappings]
 AS
 BEGIN
- SET NOCOUNT ON; IF IS_ROLEMEMBER(N'tb_role_admin')<>1 THROW 51823,N'Only a TechBench Admin may manage WHD user mappings.',1; SELECT COALESCE(m.[Id],0) [Id],CONVERT(varchar(170),u.[WindowsSid],1) [UserSid],u.[LoginName],u.[DisplayName],m.[TechnicianExternalId],t.[DisplayName] [TechnicianDisplayName],m.[UpdatedAtUtc] FROM [tb_security].[Users] u LEFT JOIN [tb_whd].[UserTechnicianMappings] m ON m.[WindowsSid]=u.[WindowsSid] LEFT JOIN [tb_whd].[Technicians] t ON t.[ExternalId]=m.[TechnicianExternalId] WHERE u.[IsTechnician]=1 ORDER BY u.[LoginName]; END;
+ SET NOCOUNT ON; IF IS_ROLEMEMBER(N'tb_role_admin')<>1 THROW 51823,N'Only a TechBench Admin may manage WHD user mappings.',1; SELECT COALESCE(m.[Id],0) [Id],CONVERT(varchar(170),u.[WindowsSid],1) [UserSid],u.[LoginName],u.[DisplayName],u.[IsAdmin],m.[TechnicianExternalId],t.[DisplayName] [TechnicianDisplayName],m.[UpdatedAtUtc] FROM [tb_security].[Users] u LEFT JOIN [tb_whd].[UserTechnicianMappings] m ON m.[WindowsSid]=u.[WindowsSid] LEFT JOIN [tb_whd].[Technicians] t ON t.[ExternalId]=m.[TechnicianExternalId] WHERE u.[IsTechnician]=1 ORDER BY u.[DisplayName],u.[LoginName]; END;
 GO
 
 IF OBJECT_ID(N'tb_app.AdminSaveWhdUserMapping', N'P') IS NOT NULL DROP PROCEDURE [tb_app].[AdminSaveWhdUserMapping];
 GO
 CREATE PROCEDURE [tb_app].[AdminSaveWhdUserMapping]
     @WindowsLoginName nvarchar(256),
+    @DisplayName nvarchar(160) = NULL,
+    @IsAdmin bit = 0,
     @TechnicianExternalId nvarchar(120) = NULL
 AS
 BEGIN
@@ -1333,12 +1335,27 @@ BEGIN
         THROW 51824, N'Only a TechBench Admin may manage WHD user mappings.', 1;
 
     SET @WindowsLoginName = NULLIF(LTRIM(RTRIM(@WindowsLoginName)), N'');
+    SET @DisplayName = NULLIF(LTRIM(RTRIM(@DisplayName)), N'');
+    SET @IsAdmin = COALESCE(@IsAdmin, 0);
     SET @TechnicianExternalId = NULLIF(LTRIM(RTRIM(@TechnicianExternalId)), N'');
-    SET @Sid = SUSER_SID(@WindowsLoginName);
+    SET @Sid = SUSER_SID(@WindowsLoginName, 0);
 
-    IF @Sid IS NULL
-       OR NOT EXISTS (SELECT 1 FROM [tb_security].[Users] WHERE [WindowsSid] = @Sid)
-        THROW 51825, N'The mapped Windows user must have signed in to TechBench.', 1;
+    IF @Sid IS NULL OR DATALENGTH(@Sid) NOT BETWEEN 8 AND 85
+        THROW 51825, N'The mapped Windows user could not be resolved in Active Directory.', 1;
+
+    SET @DisplayName = LEFT
+    (
+        COALESCE
+        (
+            @DisplayName,
+            CASE
+                WHEN CHARINDEX(N'\', @WindowsLoginName) > 0
+                    THEN RIGHT(@WindowsLoginName, LEN(@WindowsLoginName) - CHARINDEX(N'\', @WindowsLoginName))
+                ELSE @WindowsLoginName
+            END
+        ),
+        160
+    );
 
     IF @TechnicianExternalId IS NOT NULL
        AND NOT EXISTS
@@ -1350,15 +1367,49 @@ BEGIN
        )
         THROW 51826, N'Unknown or inactive WHD technician.', 1;
 
-    DECLARE @PreviousTechnicianExternalId nvarchar(120) =
-    (
-        SELECT [TechnicianExternalId]
-        FROM [tb_whd].[UserTechnicianMappings]
-        WHERE [WindowsSid] = @Sid
-    );
-
     BEGIN TRY
         BEGIN TRANSACTION;
+
+        /* Populate authorized directory users before their first TechBench sign-in. */
+        UPDATE [tb_security].[Users]
+        SET [LoginName] = LEFT
+            (
+                N'Retired:' + CONVERT(nvarchar(170), [WindowsSid], 1) + N':' + [LoginName],
+                256
+            )
+        WHERE [LoginName] = @WindowsLoginName
+          AND [WindowsSid] <> @Sid;
+
+        UPDATE [tb_security].[Users] WITH (UPDLOCK, HOLDLOCK)
+        SET
+            [LoginName] = @WindowsLoginName,
+            [DisplayName] = @DisplayName,
+            [IsTechnician] = 1,
+            [IsManager] = @IsAdmin,
+            [IsAdmin] = @IsAdmin,
+            [IsSyncOperator] = @IsAdmin
+        WHERE [WindowsSid] = @Sid;
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+            INSERT INTO [tb_security].[Users]
+            (
+                [WindowsSid], [LoginName], [DisplayName], [IsTechnician],
+                [IsManager], [IsAdmin], [IsSyncOperator]
+            )
+            VALUES
+            (
+                @Sid, @WindowsLoginName, @DisplayName, 1,
+                @IsAdmin, @IsAdmin, @IsAdmin
+            );
+        END;
+
+        DECLARE @PreviousTechnicianExternalId nvarchar(120) =
+        (
+            SELECT [TechnicianExternalId]
+            FROM [tb_whd].[UserTechnicianMappings]
+            WHERE [WindowsSid] = @Sid
+        );
 
         IF @TechnicianExternalId IS NULL
         BEGIN
@@ -1432,7 +1483,7 @@ GO
 CREATE PROCEDURE [tb_app].[AdminGetWhdTechnicians]
 AS
 BEGIN
- SET NOCOUNT ON; IF IS_ROLEMEMBER(N'tb_role_admin')<>1 THROW 51827,N'Only a TechBench Admin may view WHD technicians.',1; SELECT [ExternalId],[DisplayName],[Username],[Email],[IsActive],[WhdLastUpdatedUtc],[LastSyncedAtUtc] FROM [tb_whd].[Technicians] ORDER BY [DisplayName],[ExternalId]; END;
+ SET NOCOUNT ON; IF IS_ROLEMEMBER(N'tb_role_admin')<>1 THROW 51827,N'Only a TechBench Admin may view WHD technicians.',1; SELECT [ExternalId],[DisplayName],[Username],[Email],[IsActive],[WhdLastUpdatedUtc],[LastSyncedAtUtc] FROM [tb_whd].[Technicians] WHERE [IsActive]=1 ORDER BY [DisplayName],[ExternalId]; END;
 GO
 
 /* WHD is access-scoped for ordinary users; non-WHD tickets retain V0002 behavior. */

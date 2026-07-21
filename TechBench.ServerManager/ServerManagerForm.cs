@@ -8,6 +8,7 @@ internal sealed class ServerManagerForm : Form
     private readonly AppPaths _paths;
     private readonly WindowsServiceManager _service;
     private readonly SqlAdminRepository _repository;
+    private readonly ActiveDirectoryUserProvider _directoryUsers = new();
     private readonly ReleaseUpdater _updater;
     private readonly ProtectedSecretStore _whdSecret;
     private readonly ProtectedSecretStore _sageSecret;
@@ -41,8 +42,23 @@ internal sealed class ServerManagerForm : Form
     private readonly CheckBox _whdAuto = new() { Text = "Automatically synchronize organization tickets", AutoSize = true };
     private readonly NumericUpDown _whdMinutes = new() { Minimum = 1, Maximum = 120, Value = 5, Width = 80 };
     private readonly Label _whdSyncStatus = StatusLabel();
-    private readonly ComboBox _mappingUser = DropDown();
-    private readonly ComboBox _mappingTechnician = DropDown();
+    private readonly DataGridView _mappingGrid = new()
+    {
+        AllowUserToAddRows = false,
+        AllowUserToDeleteRows = false,
+        AllowUserToResizeRows = false,
+        AutoGenerateColumns = false,
+        AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+        BackgroundColor = Color.White,
+        BorderStyle = BorderStyle.Fixed3D,
+        Dock = DockStyle.Fill,
+        EditMode = DataGridViewEditMode.EditOnEnter,
+        MinimumSize = new Size(0, 300),
+        MultiSelect = false,
+        RowHeadersVisible = false,
+        SelectionMode = DataGridViewSelectionMode.FullRowSelect
+    };
+    private readonly Label _mappingSummary = ValueLabel();
 
     private readonly TextBox _sageDsn = Field();
     private readonly TextBox _sageUsername = Field();
@@ -211,7 +227,7 @@ internal sealed class ServerManagerForm : Form
     {
         _whdMode.Items.AddRange(["Auto", "UsernamePassword", "ApplicationApiKey", "TechnicianApiKey"]);
         var page = new TabPage("Web Help Desk") { Padding = new Padding(16), AutoScroll = true };
-        var layout = Grid(2, 11);
+        var layout = Grid(2, 10);
         layout.Controls.Add(Label("Base URL"), 0, 0); layout.Controls.Add(_whdBaseUrl, 1, 0);
         layout.Controls.Add(Label("Authentication mode"), 0, 1); layout.Controls.Add(_whdMode, 1, 1);
         layout.Controls.Add(Label("Organization-wide WHD username"), 0, 2); layout.Controls.Add(_whdUsername, 1, 2);
@@ -224,12 +240,28 @@ internal sealed class ServerManagerForm : Form
         var refresh = Button("Refresh"); refresh.Click += async (_, _) => await RefreshConfigurationAsync(true);
         layout.Controls.Add(ButtonRow(save, sync, refresh), 1, 5);
         layout.Controls.Add(_whdSyncStatus, 0, 6); layout.SetColumnSpan(_whdSyncStatus, 2);
-        var mappingTitle = new Label { Text = "AD user to WHD technician", Font = new Font(Font, FontStyle.Bold), AutoSize = true, Margin = new Padding(3, 18, 3, 6) };
-        layout.Controls.Add(mappingTitle, 0, 7); layout.SetColumnSpan(mappingTitle, 2);
-        layout.Controls.Add(Label("TechBench user"), 0, 8); layout.Controls.Add(_mappingUser, 1, 8);
-        layout.Controls.Add(Label("WHD technician"), 0, 9); layout.Controls.Add(_mappingTechnician, 1, 9);
-        var map = Button("Save user mapping"); map.Click += async (_, _) => await SaveMappingAsync();
-        layout.Controls.Add(map, 1, 10);
+        var mappingHeader = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.TopDown,
+            Margin = new Padding(3, 18, 3, 6),
+            WrapContents = false
+        };
+        mappingHeader.Controls.Add(new Label { Text = "AD users to WHD technicians", Font = new Font(Font, FontStyle.Bold), AutoSize = true });
+        mappingHeader.Controls.Add(new Label
+        {
+            Text = "Members of CSRI\\TechBench_Users and CSRI\\TechBench_Admins are listed once. Only active WHD technicians are available.",
+            AutoSize = true,
+            ForeColor = Color.DimGray,
+            MaximumSize = new Size(760, 0)
+        });
+        layout.Controls.Add(mappingHeader, 0, 7); layout.SetColumnSpan(mappingHeader, 2);
+        ConfigureMappingGrid();
+        layout.Controls.Add(_mappingGrid, 0, 8); layout.SetColumnSpan(_mappingGrid, 2);
+        var map = Button("Save all mappings"); map.Click += async (_, _) => await SaveMappingsAsync();
+        var mappingActions = ButtonRow(map, _mappingSummary);
+        layout.Controls.Add(mappingActions, 0, 9); layout.SetColumnSpan(mappingActions, 2);
         page.Controls.Add(layout); return page;
     }
 
@@ -287,12 +319,7 @@ internal sealed class ServerManagerForm : Form
 
     private void WireEvents()
     {
-        _mappingUser.SelectedIndexChanged += (_, _) =>
-        {
-            if (_mappingUser.SelectedItem is not UserMapping mapping) return;
-            var index = _mappingTechnician.Items.Cast<Technician>().ToList().FindIndex(item => item.ExternalId == mapping.TechnicianExternalId);
-            _mappingTechnician.SelectedIndex = Math.Max(0, index);
-        };
+        _mappingGrid.DataError += (_, args) => args.ThrowException = false;
     }
 
     private async Task RefreshEverythingAsync(bool showErrors)
@@ -355,6 +382,19 @@ internal sealed class ServerManagerForm : Form
         try
         {
             _configuration = await Task.Run(_repository.Load);
+            try
+            {
+                var directoryUsers = await Task.Run(_directoryUsers.LoadAuthorizedUsers);
+                var mergedMappings = ActiveDirectoryUserProvider.MergeMappings(
+                    directoryUsers,
+                    _configuration.UserMappings);
+                _configuration.UserMappings.Clear();
+                _configuration.UserMappings.AddRange(mergedMappings);
+            }
+            catch (Exception directoryError)
+            {
+                AddLog("WARNING: Active Directory users could not be refreshed; showing registered SQL users only. " + directoryError.Message);
+            }
             ApplyConfiguration(_configuration);
             AddLog("Shared WHD and Sage settings refreshed from SQL Server.");
         }
@@ -380,8 +420,7 @@ internal sealed class ServerManagerForm : Form
         _whdSyncStatus.Text = FormatStatus(configuration.WhdStatus, false);
         _sageSyncStatus.Text = FormatStatus(configuration.SageStatus, true);
         _confirmSageButton.Visible = configuration.SageStatus.RequiresLargeRemovalConfirmation;
-        _mappingUser.DataSource = configuration.UserMappings.ToList();
-        _mappingTechnician.DataSource = configuration.Technicians.ToList();
+        PopulateMappingGrid(configuration);
     }
 
     private async Task SaveWhdAsync(bool requestSync)
@@ -426,15 +465,86 @@ internal sealed class ServerManagerForm : Form
         });
     }
 
-    private async Task SaveMappingAsync()
+    private async Task SaveMappingsAsync()
     {
-        await RunAsync("Saving WHD user mapping...", async () =>
+        await RunAsync("Saving all WHD user mappings...", async () =>
         {
-            if (_mappingUser.SelectedItem is not UserMapping mapping || _mappingTechnician.SelectedItem is not Technician technician)
-                throw new InvalidOperationException("Select a TechBench user and a WHD technician.");
-            await Task.Run(() => _repository.SaveMapping(mapping.LoginName, technician.ExternalId));
-            AddLog($"WHD technician mapping saved for {mapping.LoginName}."); await RefreshConfigurationAsync(false);
+            _mappingGrid.EndEdit();
+            var assignments = _mappingGrid.Rows
+                .Cast<DataGridViewRow>()
+                .Where(static row => row.Tag is UserMapping)
+                .Select(row =>
+                {
+                    var mapping = (UserMapping)row.Tag!;
+                    return new UserMappingAssignment(
+                        mapping.LoginName,
+                        mapping.DisplayName,
+                        mapping.IsAdmin,
+                        Convert.ToString(row.Cells["WHD technician"].Value) ?? string.Empty);
+                })
+                .ToList();
+            if (assignments.Count == 0)
+                throw new InvalidOperationException("No authorized TechBench AD users were found to map.");
+
+            await Task.Run(() => _repository.SaveMappings(assignments));
+            AddLog($"Saved WHD technician mappings for {assignments.Count} authorized TechBench users.");
+            await RefreshConfigurationAsync(false);
         });
+    }
+
+    private void ConfigureMappingGrid()
+    {
+        if (_mappingGrid.Columns.Count > 0) return;
+        _mappingGrid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "TechBench user",
+            HeaderText = "TechBench user",
+            ReadOnly = true,
+            FillWeight = 45
+        });
+        _mappingGrid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Access",
+            HeaderText = "Access",
+            ReadOnly = true,
+            FillWeight = 15
+        });
+        _mappingGrid.Columns.Add(new DataGridViewComboBoxColumn
+        {
+            Name = "WHD technician",
+            HeaderText = "WHD technician",
+            DisplayMember = nameof(Technician.Label),
+            ValueMember = nameof(Technician.ExternalId),
+            DisplayStyle = DataGridViewComboBoxDisplayStyle.DropDownButton,
+            FlatStyle = FlatStyle.Standard,
+            FillWeight = 40
+        });
+    }
+
+    private void PopulateMappingGrid(SynchronizationConfiguration configuration)
+    {
+        _mappingGrid.Rows.Clear();
+        var technicians = configuration.Technicians.ToList();
+        var technicianColumn = (DataGridViewComboBoxColumn)_mappingGrid.Columns["WHD technician"];
+        technicianColumn.DataSource = technicians;
+        var activeIds = technicians.Select(static technician => technician.ExternalId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var mapping in configuration.UserMappings)
+        {
+            var technicianId = activeIds.Contains(mapping.TechnicianExternalId)
+                ? mapping.TechnicianExternalId
+                : string.Empty;
+            var rowIndex = _mappingGrid.Rows.Add(
+                mapping.Label,
+                mapping.IsAdmin ? "Admin" : "User",
+                technicianId);
+            _mappingGrid.Rows[rowIndex].Tag = mapping;
+        }
+
+        var mappedCount = _mappingGrid.Rows
+            .Cast<DataGridViewRow>()
+            .Count(row => !string.IsNullOrWhiteSpace(Convert.ToString(row.Cells["WHD technician"].Value)));
+        _mappingSummary.Text = $"{configuration.UserMappings.Count} AD users; {mappedCount} mapped";
     }
 
     private async Task CheckForUpdatesAsync()
