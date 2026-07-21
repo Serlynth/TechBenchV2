@@ -4,7 +4,7 @@ TechBench V2 is the multi-user successor to TechBench 1.x. It keeps the existing
 
 The original TechBench workspace is not modified. V1 and V2 have separate product identities, executables, mutex names, settings, credential namespaces, packages, and update feeds.
 
-Current milestone: `5.0.1` - TechBench V2 now uses a standalone release number; “V2” remains the product generation and is assumed. The server-backed client, owner-scoped V1 migration, server-owned WHD and Sage synchronization, Admin-only read-only user preview, compiled server-local TechBench Server Manager, one-click native server setup, bulk AD-to-WHD mapping, and per-user Sage activity settings are implemented. Existing installations preserve their service identity, SQL configuration, and protected WHD/Sage secrets during update or repair. Future maintenance releases increment from 5.0.1.
+Current milestone: `5.0.2` - TechBench V2 uses a standalone release number; “V2” remains the product generation and is assumed. The Server Manager organizes Service, SQL Server, Web Help Desk, Sage 50, and Updates into dedicated tabs; WHD connection settings and user mappings have their own sections; and the activity feed is newest-first. Existing installations preserve their service identity, SQL configuration, and protected WHD/Sage secrets during update or repair.
 
 ## What V2 stores where
 

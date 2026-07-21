@@ -133,7 +133,7 @@ internal sealed class ServerManagerForm : Form
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(18) };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 125));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 150));
         root.Controls.Add(new Label
         {
             Text = "TechBench Server Manager",
@@ -142,21 +142,32 @@ internal sealed class ServerManagerForm : Form
             Margin = new Padding(4, 0, 0, 12)
         }, 0, 0);
 
-        var columns = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
-        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 43));
-        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 57));
-        columns.Controls.Add(BuildServiceColumn(), 0, 0);
-        columns.Controls.Add(BuildConfigurationTabs(), 1, 0);
-        root.Controls.Add(columns, 0, 1);
-        root.Controls.Add(_log, 0, 2);
+        root.Controls.Add(BuildManagerTabs(), 0, 1);
+        var activity = new GroupBox
+        {
+            Text = "Activity (newest first)",
+            Dock = DockStyle.Fill,
+            Padding = new Padding(8),
+            Margin = new Padding(0, 8, 0, 0)
+        };
+        activity.Controls.Add(_log);
+        root.Controls.Add(activity, 0, 2);
         return root;
     }
 
-    private Control BuildServiceColumn()
+    private TabControl BuildManagerTabs()
     {
-        var panel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(0, 0, 10, 0) };
-        panel.SizeChanged += (_, _) => ResizeFlowChildren(panel);
+        var tabs = new TabControl { Dock = DockStyle.Fill };
+        tabs.TabPages.Add(BuildServiceTab());
+        tabs.TabPages.Add(BuildSqlTab());
+        tabs.TabPages.Add(BuildWhdTab());
+        tabs.TabPages.Add(BuildSageTab());
+        tabs.TabPages.Add(BuildUpdatesTab());
+        return tabs;
+    }
 
+    private TabPage BuildServiceTab()
+    {
         var serviceGroup = Group("Service", 190);
         var serviceTable = Grid(4, 4);
         serviceTable.Controls.Add(Label("Status"), 0, 0); serviceTable.Controls.Add(_serviceStatus, 1, 0);
@@ -168,7 +179,7 @@ internal sealed class ServerManagerForm : Form
         _restartButton.Click += async (_, _) => await ServiceActionAsync("Restarting service...", _service.Restart);
         var buttons = ButtonRow(refresh, _startButton, _stopButton, _restartButton);
         serviceTable.Controls.Add(buttons, 0, 3); serviceTable.SetColumnSpan(buttons, 4);
-        serviceGroup.Controls.Add(serviceTable); panel.Controls.Add(serviceGroup);
+        serviceGroup.Controls.Add(serviceTable);
 
         var identityGroup = Group("Windows service identity", 180);
         var identity = Grid(3, 3);
@@ -184,8 +195,13 @@ internal sealed class ServerManagerForm : Form
             _servicePassword.Clear(); await RefreshServiceAsync(); AddLog("Windows service identity updated.");
         });
         identity.Controls.Add(applyIdentity, 1, 2); identity.SetColumnSpan(applyIdentity, 2);
-        identityGroup.Controls.Add(identity); panel.Controls.Add(identityGroup);
+        identityGroup.Controls.Add(identity);
 
+        return BuildStackedTab("Service", serviceGroup, identityGroup);
+    }
+
+    private TabPage BuildSqlTab()
+    {
         var sqlGroup = Group("SQL Server connection", 185);
         var sql = Grid(3, 4);
         sql.Controls.Add(Label("Server"), 0, 0); sql.Controls.Add(_sqlServer, 1, 0); sql.SetColumnSpan(_sqlServer, 2);
@@ -194,14 +210,12 @@ internal sealed class ServerManagerForm : Form
         var saveSql = Button("Save && Test");
         saveSql.Click += async (_, _) => await SaveSqlConfigurationAsync();
         sql.Controls.Add(saveSql, 1, 3);
-        sqlGroup.Controls.Add(sql); panel.Controls.Add(sqlGroup);
+        sqlGroup.Controls.Add(sql);
+        return BuildStackedTab("SQL Server", sqlGroup);
+    }
 
-        var secretGroup = Group("Protected server credentials", 205);
-        var secrets = Grid(4, 4);
-        AddSecretRow(secrets, 0, "WHD secret", _whdSecretBox, _whdSecretStatus, _whdSecret, "WHD");
-        AddSecretRow(secrets, 2, "Sage password", _sageSecretBox, _sageSecretStatus, _sageSecret, "Sage");
-        secretGroup.Controls.Add(secrets); panel.Controls.Add(secretGroup);
-
+    private TabPage BuildUpdatesTab()
+    {
         var updateGroup = Group("Service and Manager updates", 130);
         var update = Grid(3, 2);
         var check = Button("Check for updates");
@@ -209,25 +223,72 @@ internal sealed class ServerManagerForm : Form
         _installUpdateButton.Enabled = false;
         _installUpdateButton.Click += async (_, _) => await InstallUpdateAsync();
         update.Controls.Add(check, 0, 0); update.Controls.Add(_installUpdateButton, 1, 0); update.Controls.Add(_updateStatus, 2, 0);
-        var note = new Label { Text = "Updates are verified, installed by this EXE, and rolled back if the service cannot restart.", AutoSize = true, ForeColor = Color.DimGray };
+        var note = new Label
+        {
+            Text = "Updates are verified, installed by this EXE, and rolled back if the service cannot restart.",
+            AutoSize = true,
+            ForeColor = Color.DimGray,
+            MaximumSize = new Size(900, 0)
+        };
         update.Controls.Add(note, 0, 1); update.SetColumnSpan(note, 3);
-        updateGroup.Controls.Add(update); panel.Controls.Add(updateGroup);
-        return panel;
+        updateGroup.Controls.Add(update);
+        return BuildStackedTab("Updates", updateGroup);
     }
 
-    private TabControl BuildConfigurationTabs()
+    private GroupBox BuildCredentialGroup(
+        string title,
+        string label,
+        TextBox box,
+        Label status,
+        ProtectedSecretStore store,
+        string name)
     {
-        var tabs = new TabControl { Dock = DockStyle.Fill, Margin = new Padding(10, 3, 0, 3) };
-        tabs.TabPages.Add(BuildWhdTab());
-        tabs.TabPages.Add(BuildSageTab());
-        return tabs;
+        var group = Group(title, 120);
+        var layout = Grid(4, 2);
+        AddSecretRow(layout, 0, label, box, status, store, name);
+        group.Controls.Add(layout);
+        return group;
+    }
+
+    private static TabPage BuildStackedTab(string title, params Control[] sections)
+    {
+        var page = new TabPage(title) { Padding = new Padding(16), AutoScroll = true };
+        var panel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            AutoScroll = true,
+            Padding = new Padding(0, 0, 10, 0)
+        };
+        panel.SizeChanged += (_, _) => ResizeFlowChildren(panel);
+        panel.Controls.AddRange(sections);
+        page.Controls.Add(panel);
+        return page;
     }
 
     private TabPage BuildWhdTab()
     {
         _whdMode.Items.AddRange(["Auto", "UsernamePassword", "ApplicationApiKey", "TechnicianApiKey"]);
-        var page = new TabPage("Web Help Desk") { Padding = new Padding(16), AutoScroll = true };
-        var layout = Grid(2, 10);
+        var page = new TabPage("Web Help Desk") { Padding = new Padding(8) };
+        var sections = new TabControl { Dock = DockStyle.Fill };
+        sections.TabPages.Add(BuildWhdConnectionTab());
+        sections.TabPages.Add(BuildWhdMappingsTab());
+        page.Controls.Add(sections);
+        return page;
+    }
+
+    private TabPage BuildWhdConnectionTab()
+    {
+        var credential = BuildCredentialGroup(
+            "Protected WHD credential",
+            "API key, token, or password",
+            _whdSecretBox,
+            _whdSecretStatus,
+            _whdSecret,
+            "WHD");
+        var settings = Group("Connection and synchronization", 335);
+        var layout = Grid(2, 7);
         layout.Controls.Add(Label("Base URL"), 0, 0); layout.Controls.Add(_whdBaseUrl, 1, 0);
         layout.Controls.Add(Label("Authentication mode"), 0, 1); layout.Controls.Add(_whdMode, 1, 1);
         layout.Controls.Add(Label("Organization-wide WHD username"), 0, 2); layout.Controls.Add(_whdUsername, 1, 2);
@@ -240,6 +301,17 @@ internal sealed class ServerManagerForm : Form
         var refresh = Button("Refresh"); refresh.Click += async (_, _) => await RefreshConfigurationAsync(true);
         layout.Controls.Add(ButtonRow(save, sync, refresh), 1, 5);
         layout.Controls.Add(_whdSyncStatus, 0, 6); layout.SetColumnSpan(_whdSyncStatus, 2);
+        settings.Controls.Add(layout);
+        return BuildStackedTab("Connection & Sync", credential, settings);
+    }
+
+    private TabPage BuildWhdMappingsTab()
+    {
+        var page = new TabPage("User Mappings") { Padding = new Padding(16) };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         var mappingHeader = new FlowLayoutPanel
         {
             AutoSize = true,
@@ -256,18 +328,26 @@ internal sealed class ServerManagerForm : Form
             ForeColor = Color.DimGray,
             MaximumSize = new Size(760, 0)
         });
-        layout.Controls.Add(mappingHeader, 0, 7); layout.SetColumnSpan(mappingHeader, 2);
+        layout.Controls.Add(mappingHeader, 0, 0);
         ConfigureMappingGrid();
-        layout.Controls.Add(_mappingGrid, 0, 8); layout.SetColumnSpan(_mappingGrid, 2);
+        layout.Controls.Add(_mappingGrid, 0, 1);
         var map = Button("Save all mappings"); map.Click += async (_, _) => await SaveMappingsAsync();
         var mappingActions = ButtonRow(map, _mappingSummary);
-        layout.Controls.Add(mappingActions, 0, 9); layout.SetColumnSpan(mappingActions, 2);
-        page.Controls.Add(layout); return page;
+        layout.Controls.Add(mappingActions, 0, 2);
+        page.Controls.Add(layout);
+        return page;
     }
 
     private TabPage BuildSageTab()
     {
-        var page = new TabPage("Sage 50") { Padding = new Padding(16), AutoScroll = true };
+        var credential = BuildCredentialGroup(
+            "Protected Sage credential",
+            "ODBC password",
+            _sageSecretBox,
+            _sageSecretStatus,
+            _sageSecret,
+            "Sage");
+        var settings = Group("Customer synchronization", 285);
         var layout = Grid(2, 6);
         layout.Controls.Add(Label("Server 32-bit System DSN"), 0, 0); layout.Controls.Add(_sageDsn, 1, 0);
         layout.Controls.Add(Label("Sage ODBC username"), 0, 1); layout.Controls.Add(_sageUsername, 1, 1);
@@ -284,7 +364,8 @@ internal sealed class ServerManagerForm : Form
             AutoSize = true, MaximumSize = new Size(720, 0), ForeColor = Color.DimGray, Margin = new Padding(3, 18, 3, 3)
         };
         layout.Controls.Add(note, 0, 4); layout.SetColumnSpan(note, 2);
-        page.Controls.Add(layout); return page;
+        settings.Controls.Add(layout);
+        return BuildStackedTab("Sage 50", credential, settings);
     }
 
     private void AddSecretRow(TableLayoutPanel layout, int row, string label, TextBox box, Label status, ProtectedSecretStore store, string name)
@@ -646,7 +727,14 @@ internal sealed class ServerManagerForm : Form
     {
         _servicePassword.Clear(); _whdSecretBox.Clear(); _sageSecretBox.Clear();
     }
-    private void AddLog(string message) => _log.AppendText($"{DateTime.Now:HH:mm:ss} {message}{Environment.NewLine}");
+    private void AddLog(string message)
+    {
+        var entry = $"{DateTime.Now:HH:mm:ss} {message}{Environment.NewLine}";
+        _log.Select(0, 0);
+        _log.SelectedText = entry;
+        _log.Select(0, 0);
+        _log.ScrollToCaret();
+    }
     private void ShowError(string message) => MessageBox.Show(message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
 
     private static string FriendlySqlError(Exception exception)

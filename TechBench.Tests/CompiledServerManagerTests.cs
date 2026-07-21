@@ -29,6 +29,18 @@ public sealed class CompiledServerManagerTests
 
         Assert.Contains("NotifyIcon", form, StringComparison.Ordinal);
         Assert.Contains("WindowState == FormWindowState.Minimized", form, StringComparison.Ordinal);
+        Assert.Contains("BuildManagerTabs", form, StringComparison.Ordinal);
+        Assert.Contains("BuildStackedTab(\"Service\"", form, StringComparison.Ordinal);
+        Assert.Contains("BuildStackedTab(\"SQL Server\"", form, StringComparison.Ordinal);
+        Assert.Contains("new TabPage(\"Web Help Desk\")", form, StringComparison.Ordinal);
+        Assert.Contains("BuildStackedTab(\"Sage 50\"", form, StringComparison.Ordinal);
+        Assert.Contains("BuildStackedTab(\"Updates\"", form, StringComparison.Ordinal);
+        Assert.Contains("Connection & Sync", form, StringComparison.Ordinal);
+        Assert.Contains("User Mappings", form, StringComparison.Ordinal);
+        Assert.Contains("Activity (newest first)", form, StringComparison.Ordinal);
+        Assert.Contains("_log.SelectedText = entry", form, StringComparison.Ordinal);
+        Assert.DoesNotContain("_log.AppendText", form, StringComparison.Ordinal);
+        Assert.DoesNotContain("BuildServiceColumn", form, StringComparison.Ordinal);
         Assert.Contains("ServicePassword", form, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ProtectedSecretStore.Whd", form, StringComparison.Ordinal);
         Assert.Contains("DataGridView", form, StringComparison.Ordinal);
