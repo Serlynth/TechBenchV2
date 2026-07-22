@@ -19254,11 +19254,21 @@ BEGIN
     SET XACT_ABORT ON;
     IF @LeaseSeconds < 120 OR @LeaseSeconds > 3600 THROW 52020, N'Lease seconds must be between 120 and 3600.', 1;
 
-    DECLARE @Sid varbinary(85), @Login nvarchar(256), @Display nvarchar(160),
-            @Tech bit, @Manager bit, @Admin bit, @Sync bit;
-    EXEC [tb_security].[EnsureCurrentUser] @Sid OUTPUT, @Login OUTPUT, @Display OUTPUT,
-        @Tech OUTPUT, @Manager OUTPUT, @Admin OUTPUT, @Sync OUTPUT;
-    IF @Sync = 0 THROW 52021, N'The current identity is not a TechBench sync operator.', 1;
+    /* The Windows service is intentionally isolated in tb_role_sync_service
+       and is not a member of the older workstation sync-operator role. */
+    IF IS_ROLEMEMBER(N'tb_role_sync_service') <> 1
+        THROW 52021, N'The current identity is not the TechBench sync service.', 1;
+
+    DECLARE @Sid varbinary(85) = SUSER_SID(ORIGINAL_LOGIN());
+    IF @Sid IS NULL
+       OR NOT EXISTS
+       (
+           SELECT 1
+           FROM [tb_security].[Users]
+           WHERE [WindowsSid] = @Sid
+             AND [LoginName] = CONVERT(nvarchar(256), ORIGINAL_LOGIN())
+       )
+        THROW 52024, N'The TechBench sync service actor is not registered.', 1;
 
     DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(), @NowLocal datetime=GETDATE(),
             @SourcePath nvarchar(2000)=NULLIF(LTRIM(RTRIM((SELECT [SettingValue] FROM [tb_data].[OrganizationSettings] WHERE [SettingKey]=N'FireDrill.SourcePath'))),N''),
@@ -25005,6 +25015,10 @@ IF CHARINDEX(N'WHERE [SettingKey]=N''FireDrill.SourcePath''), N'''') AS [SourceP
 BEGIN PRINT N'FAIL: the Credentials service configuration does not require an explicitly configured path.'; SET @FailureCount+=1; END;
 IF CHARINDEX(N'@SourcePath IS NOT NULL',@ClaimDefinition)=0
 BEGIN PRINT N'FAIL: automatic Credentials synchronization is not gated on a configured path.'; SET @FailureCount+=1; END;
+IF CHARINDEX(N'IS_ROLEMEMBER(N''tb_role_sync_service'')',@ClaimDefinition)=0
+   OR CHARINDEX(N'SUSER_SID(ORIGINAL_LOGIN())',@ClaimDefinition)=0
+   OR CHARINDEX(N'[tb_security].[EnsureCurrentUser]',@ClaimDefinition)>0
+BEGIN PRINT N'FAIL: Credentials work is not claimed through the dedicated service identity.'; SET @FailureCount+=1; END;
 
 DECLARE @UserProcedures TABLE([Name] nvarchar(300) PRIMARY KEY);
 INSERT INTO @UserProcedures VALUES

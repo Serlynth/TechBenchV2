@@ -47,6 +47,10 @@ IF CHARINDEX(N'WHERE [SettingKey]=N''FireDrill.SourcePath''), N'''') AS [SourceP
 BEGIN PRINT N'FAIL: the Credentials service configuration does not require an explicitly configured path.'; SET @FailureCount+=1; END;
 IF CHARINDEX(N'@SourcePath IS NOT NULL',@ClaimDefinition)=0
 BEGIN PRINT N'FAIL: automatic Credentials synchronization is not gated on a configured path.'; SET @FailureCount+=1; END;
+IF CHARINDEX(N'IS_ROLEMEMBER(N''tb_role_sync_service'')',@ClaimDefinition)=0
+   OR CHARINDEX(N'SUSER_SID(ORIGINAL_LOGIN())',@ClaimDefinition)=0
+   OR CHARINDEX(N'[tb_security].[EnsureCurrentUser]',@ClaimDefinition)>0
+BEGIN PRINT N'FAIL: Credentials work is not claimed through the dedicated service identity.'; SET @FailureCount+=1; END;
 
 DECLARE @UserProcedures TABLE([Name] nvarchar(300) PRIMARY KEY);
 INSERT INTO @UserProcedures VALUES

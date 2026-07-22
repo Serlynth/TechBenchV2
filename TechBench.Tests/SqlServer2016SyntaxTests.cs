@@ -634,6 +634,16 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("Configure the Credentials workbook path in Server Manager", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("WHERE [SettingKey]=N'FireDrill.SourcePath'), N'') AS [SourcePath]", procedureSource, StringComparison.OrdinalIgnoreCase);
 
+        var claimStart = procedureSource.IndexOf(
+            "CREATE OR ALTER PROCEDURE [tb_service].[ClaimFireDrillSyncWork]",
+            StringComparison.OrdinalIgnoreCase);
+        var claimEnd = procedureSource.IndexOf("\nGO", claimStart, StringComparison.OrdinalIgnoreCase);
+        Assert.True(claimStart >= 0 && claimEnd > claimStart);
+        var claimBody = procedureSource[claimStart..claimEnd];
+        Assert.Contains("IS_ROLEMEMBER(N'tb_role_sync_service')", claimBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUSER_SID(ORIGINAL_LOGIN())", claimBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("EnsureCurrentUser", claimBody, StringComparison.OrdinalIgnoreCase);
+
         foreach (var procedure in new[]
                  {
                      "SearchFireDrillCredentials",
