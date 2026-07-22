@@ -1073,7 +1073,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         if (Editor.IsDirty
-            || IsCommonLinkEditorOpen
             || _settingsHaveUnsavedChanges
             || HasPendingTemplateChanges())
         {

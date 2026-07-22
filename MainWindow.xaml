@@ -2208,31 +2208,13 @@
                 </Grid>
 
                 <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Common Links}">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="1.35*" />
-                        <ColumnDefinition Width="14" />
-                        <ColumnDefinition Width="0.85*" />
-                    </Grid.ColumnDefinitions>
-
-                    <Border Grid.Column="0" Style="{StaticResource CardStyle}">
+                    <Border Style="{StaticResource CardStyle}">
                         <DockPanel>
-                            <Grid DockPanel.Dock="Top" Margin="0,0,0,12">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="Common Links"
-                                           Style="{StaticResource SectionHeadingStyle}"
-                                           VerticalAlignment="Center"
-                                           Margin="0" />
-                                <Button Grid.Column="1"
-                                        Content="Add Shared Link"
-                                        Command="{Binding NewCommonLinkCommand}"
-                                        Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                        Style="{StaticResource PrimaryButtonStyle}"
-                                        ToolTip="Shared links are available to every TechBench user and managed by TechBench administrators."
-                                        Padding="12,7" />
-                            </Grid>
+                            <TextBlock DockPanel.Dock="Top"
+                                       Text="Common Links"
+                                       Style="{StaticResource SectionHeadingStyle}"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,0,12" />
 
                             <TextBlock Text="No shared common links saved."
                                        Style="{StaticResource MutedTextStyle}"
@@ -2247,13 +2229,15 @@
                                     <GroupStyle>
                                         <GroupStyle.HeaderTemplate>
                                             <DataTemplate>
-                                                <Border BorderBrush="{DynamicResource BorderBrush}"
-                                                        BorderThickness="0,0,0,1"
-                                                        Margin="8,12,8,0"
-                                                        Padding="0,0,0,7">
+                                                <Border Background="{DynamicResource ControlAltBackgroundBrush}"
+                                                        BorderBrush="{DynamicResource AccentBrush}"
+                                                        BorderThickness="4,0,0,0"
+                                                        CornerRadius="6"
+                                                        Margin="4,18,4,6"
+                                                        Padding="12,9">
                                                     <TextBlock Text="{Binding Name}"
-                                                               Foreground="{DynamicResource SecondaryTextBrush}"
-                                                               FontSize="11"
+                                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                                               FontSize="15"
                                                                FontWeight="Bold" />
                                                 </Border>
                                             </DataTemplate>
@@ -2390,25 +2374,7 @@
                                                                 CommandParameter="{Binding}"
                                                                 Style="{StaticResource PrimaryButtonStyle}"
                                                                 MinWidth="68"
-                                                                Padding="10,6"
-                                                                Margin="0,0,7,0" />
-                                                        <StackPanel Visibility="{Binding DataContext.CanManageOrganizationSettings, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                                            <StackPanel Orientation="Horizontal">
-                                                                <Button Content="Edit"
-                                                                        Command="{Binding DataContext.EditCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                        CommandParameter="{Binding}"
-                                                                        MinWidth="62"
-                                                                        Padding="10,6"
-                                                                        Margin="0,0,7,0" />
-                                                                <Button Content="Remove"
-                                                                        Command="{Binding DataContext.DeleteCommonLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                        CommandParameter="{Binding}"
-                                                                        Style="{StaticResource DangerButtonStyle}"
-                                                                        MinWidth="76"
-                                                                        Padding="10,6"
-                                                                        Visibility="{Binding IsBuiltIn, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
-                                                            </StackPanel>
-                                                        </StackPanel>
+                                                                Padding="10,6" />
                                                     </StackPanel>
                                                     <CheckBox Content="Chrome Incognito"
                                                               IsChecked="{Binding DataContext.MicrosoftAdminOpenInChromeIncognito, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
@@ -2434,64 +2400,6 @@
                                 </ListBox.ItemTemplate>
                             </ListBox>
                         </DockPanel>
-                    </Border>
-
-                    <Border Grid.Column="2"
-                            Style="{StaticResource CardStyle}"
-                            Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
-                        <Grid>
-                            <StackPanel Visibility="{Binding IsCommonLinkEditorOpen, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
-                                <TextBlock Text="Link Details" Style="{StaticResource SectionHeadingStyle}" />
-                                <TextBlock Text="No link selected."
-                                           Style="{StaticResource MutedTextStyle}" />
-                            </StackPanel>
-
-                            <StackPanel Visibility="{Binding IsCommonLinkEditorOpen, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                <TextBlock Text="{Binding CommonLinkEditorTitle}"
-                                           Style="{StaticResource SectionHeadingStyle}" />
-                                <TextBlock Text="Name" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox Text="{Binding CommonLinkName, UpdateSourceTrigger=PropertyChanged}"
-                                         MaxLength="80"
-                                         Margin="0,0,0,12" />
-
-                                <TextBlock Text="Website address" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox Text="{Binding CommonLinkUrl, UpdateSourceTrigger=PropertyChanged}"
-                                         Margin="0,0,0,8" />
-
-                                <TextBlock Text="{Binding CommonLinkValidationMessage}"
-                                           Foreground="{DynamicResource DangerBrush}"
-                                           TextWrapping="Wrap"
-                                           Margin="0,0,0,12"
-                                           Visibility="{Binding CommonLinkValidationMessage, Converter={StaticResource StringToVisibilityConverter}}" />
-
-                                <Grid Margin="0,8,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="10" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <Button Content="Save Link"
-                                            Command="{Binding SaveCommonLinkCommand}"
-                                            Style="{StaticResource PrimaryButtonStyle}"
-                                            Padding="12,7" />
-                                    <Button Grid.Column="2"
-                                            Content="Cancel"
-                                            Command="{Binding CancelCommonLinkCommand}"
-                                            Padding="12,7" />
-                                </Grid>
-                            </StackPanel>
-                        </Grid>
-                    </Border>
-
-                    <Border Grid.Column="2"
-                            Style="{StaticResource CardStyle}"
-                            Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
-                        <StackPanel>
-                            <TextBlock Text="Shared Links" Style="{StaticResource SectionHeadingStyle}" />
-                            <TextBlock Text="Common Links are available to everyone and managed by TechBench Admins."
-                                       Style="{StaticResource MutedTextStyle}"
-                                       TextWrapping="Wrap" />
-                        </StackPanel>
                     </Border>
                 </Grid>
 
