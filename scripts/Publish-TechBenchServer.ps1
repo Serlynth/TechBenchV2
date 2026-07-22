@@ -238,7 +238,12 @@ try {
 
     if (-not $SkipTests) {
         Invoke-Checked $dotnet @(
-            'test', $solutionPath, '-c', $Configuration, '--nologo', '-m:1')
+            'test', $solutionPath,
+            '-c', $Configuration,
+            '--nologo',
+            '-m:1',
+            '-p:TechBenchTestBuild=true',
+            '-p:PlatformTarget=x64')
     }
 
     Reset-RepositoryDirectory $publishDirectory

@@ -58,8 +58,11 @@ public sealed class SharedAdminPolicyTests
         Assert.Contains("My Sage 50 Posting", source, StringComparison.Ordinal);
         Assert.Contains("{Binding SageEmployeeId", source, StringComparison.Ordinal);
         Assert.Contains("{Binding SageActivityItemId", source, StringComparison.Ordinal);
-        Assert.Contains("{Binding SageDsn", source, StringComparison.Ordinal);
-        Assert.Contains("SagePasswordBox", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("{Binding SageDsn", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SagePasswordBox", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("My workstation ODBC DSN", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("My ODBC username", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("My ODBC password", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Test My Sage ODBC", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Text=\"Billing type\"", source, StringComparison.Ordinal);
 
@@ -68,7 +71,22 @@ public sealed class SharedAdminPolicyTests
             "_repository.SaveSetting(\"Sage.ActivityItemId\", SageActivityItemId.Trim())",
             viewModel,
             StringComparison.Ordinal);
+        Assert.DoesNotContain("[\"Sage.Dsn\"]", viewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("[\"Sage.Username\"]", viewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("_sageOdbcClient.ReadCustomersAsync", viewModel, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProductionClientDoesNotPackageSageOdbcComponents()
+    {
+        var project = File.ReadAllText(FindRepositoryFile("TechBench.csproj"));
+
+        Assert.Contains("<Compile Remove=\"Services\\SageOdbcCustomerReader.cs\"", project, StringComparison.Ordinal);
+        Assert.Contains("<Compile Remove=\"Services\\SageOdbcProcessClient.cs\"", project, StringComparison.Ordinal);
+        Assert.Contains("<Compile Remove=\"Services\\SageOdbcTimeTicketVerifier.cs\"", project, StringComparison.Ordinal);
+        Assert.Contains("<Compile Remove=\"Services\\SageOdbcWorker.cs\"", project, StringComparison.Ordinal);
+        Assert.Contains("System.Data.Odbc", project, StringComparison.Ordinal);
+        Assert.Contains("Condition=\"'$(TechBenchTestBuild)' == 'true'\"", project, StringComparison.Ordinal);
     }
 
     [Fact]

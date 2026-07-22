@@ -8,42 +8,16 @@ namespace TechBench.Providers;
 public sealed class SageNativeUiPoster : IWorkEntryPoster
 {
     private const int MaxDurationMinutes = 23 * 60 + 59;
-    private static readonly TimeSpan OdbcVerificationTimeout = TimeSpan.FromSeconds(15);
-    private static readonly TimeSpan[] VerificationDelays =
-    [
-        TimeSpan.Zero,
-        TimeSpan.FromMilliseconds(300),
-        TimeSpan.FromMilliseconds(700),
-        TimeSpan.FromMilliseconds(1500),
-        TimeSpan.FromMilliseconds(2500)
-    ];
-
     private readonly ISageTimeTicketAutomation _automation;
-    private readonly ISageOdbcProcessClient _odbcClient;
 
     public SageNativeUiPoster()
-        : this(new SageNativeUiAutomation(), new SageOdbcProcessClient())
+        : this(new SageNativeUiAutomation())
     {
     }
 
     public SageNativeUiPoster(ISageTimeTicketAutomation automation)
-        : this(automation, new SageOdbcProcessClient())
-    {
-    }
-
-    public SageNativeUiPoster(
-        ISageTimeTicketAutomation automation,
-        ISageTimeTicketVerifier ticketVerifier)
-        : this(automation, new InProcessSageOdbcClient(ticketVerifier))
-    {
-    }
-
-    public SageNativeUiPoster(
-        ISageTimeTicketAutomation automation,
-        ISageOdbcProcessClient odbcClient)
     {
         _automation = automation;
-        _odbcClient = odbcClient;
     }
 
     public string DestinationName => "Sage 50";
@@ -84,18 +58,9 @@ public sealed class SageNativeUiPoster : IWorkEntryPoster
             return PostingResult.Failed(automationResult.Message, payload);
         }
 
-        var reference = request.AutoSave || string.IsNullOrWhiteSpace(automationResult.TicketNumber)
+        var reference = string.IsNullOrWhiteSpace(automationResult.TicketNumber)
             ? null
             : $"SAGE-{automationResult.TicketNumber}";
-
-        if (!request.AutoSave)
-        {
-            return PostingResult.Succeeded(
-                automationResult.Message,
-                payload,
-                reference,
-                markPosted: false);
-        }
 
         if (!automationResult.SaveSubmitted)
         {
@@ -104,79 +69,10 @@ public sealed class SageNativeUiPoster : IWorkEntryPoster
                 payload);
         }
 
-        SageTimeTicketVerificationResult verification;
-        try
-        {
-            verification = await VerifySubmittedSaveAsync(
-                settings,
-                request,
-                ticketNumber: null,
-                cancellationToken);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or TimeoutException)
-        {
-            var detail = ex is TimeoutException
-                ? $"ODBC did not respond within {OdbcVerificationTimeout.TotalSeconds:0} seconds."
-                : ex.Message;
-            return PostingResult.Uncertain(
-                $"{automationResult.Message} Read-only ODBC confirmation could not run: {detail} The entry remains Sage pending.",
-                payload,
-                reference);
-        }
-
-        var verifiedTicketNumber = verification.IsSaved ? verification.TicketNumber : null;
-        reference = string.IsNullOrWhiteSpace(verifiedTicketNumber)
-            ? null
-            : $"SAGE-{verifiedTicketNumber}";
-
-        return verification.IsSaved
-            ? PostingResult.Succeeded(
-                $"{automationResult.Message} {verification.Message}",
-                payload,
-                reference)
-            : PostingResult.Uncertain(
-                $"{automationResult.Message} {verification.Message}",
-                payload,
-                reference);
-    }
-
-    private async Task<SageTimeTicketVerificationResult> VerifySubmittedSaveAsync(
-        IReadOnlyDictionary<string, string> settings,
-        SageTimeTicketRequest request,
-        string? ticketNumber,
-        CancellationToken cancellationToken)
-    {
-        var verificationRequest = new SageTimeTicketVerificationRequest(
-            ticketNumber,
-            request.TicketDate,
-            request.DurationMinutes,
-            request.Note);
-        SageTimeTicketVerificationResult? result = null;
-
-        foreach (var delay in VerificationDelays)
-        {
-            if (delay > TimeSpan.Zero)
-            {
-                await Task.Delay(delay, cancellationToken);
-            }
-
-            result = await _odbcClient.VerifyTimeTicketAsync(
-                settings.GetValueOrDefault("Sage.Dsn", string.Empty),
-                settings.GetValueOrDefault("Sage.Username", string.Empty),
-                settings.GetValueOrDefault("Sage.Password", string.Empty),
-                verificationRequest,
-                cancellationToken);
-            if (result.Found)
-            {
-                break;
-            }
-        }
-
-        return result ?? new SageTimeTicketVerificationResult(
-            false,
-            false,
-            "The saved Sage ticket was not visible through ODBC. The entry remains Sage pending.",
-            ticketNumber);
+        return PostingResult.Succeeded(
+            automationResult.Message,
+            payload,
+            reference);
     }
 
     internal static SageTimeTicketRequest BuildRequest(
@@ -186,10 +82,6 @@ public sealed class SageNativeUiPoster : IWorkEntryPoster
         IReadOnlyDictionary<string, string> settings)
     {
         var customerId = client.SageCustomerId?.Trim() ?? string.Empty;
-        var autoSave = settings.TryGetValue("Sage.NativeAutoSave", out var configuredAutoSave)
-            && bool.TryParse(configuredAutoSave, out var enabled)
-            && enabled;
-
         return new SageTimeTicketRequest(
             entry.Id,
             entry.WorkDate.Date,
@@ -200,7 +92,7 @@ public sealed class SageNativeUiPoster : IWorkEntryPoster
             "Activity Rate",
             "Regular",
             BuildSageNote(entry),
-            autoSave,
+            AutoSave: true,
             settings.GetValueOrDefault("Sage.ExecutablePath", string.Empty).Trim());
     }
 

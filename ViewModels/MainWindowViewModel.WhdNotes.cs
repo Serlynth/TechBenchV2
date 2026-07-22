@@ -87,15 +87,6 @@ public sealed partial class MainWindowViewModel
         bool allowConflictPrompt,
         bool refreshAfter)
     {
-        if (_isSageVerificationRunning)
-        {
-            StatusMessage = "Waiting for the current read-only Sage verification before synchronizing WHD...";
-            while (_isSageVerificationRunning)
-            {
-                await Task.Delay(100);
-            }
-        }
-
         entry = _repository.GetWorkEntry(entry.Id) ?? entry;
         if (entry.SagePosted)
         {

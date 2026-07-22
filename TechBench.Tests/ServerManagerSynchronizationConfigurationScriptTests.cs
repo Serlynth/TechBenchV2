@@ -100,7 +100,11 @@ public sealed class ServerManagerSynchronizationConfigurationScriptTests
         var saveBody = viewModel[saveStart..saveEnd];
         Assert.DoesNotContain("SaveOrganizationSetting", saveBody, StringComparison.Ordinal);
         Assert.Contains("SaveWhdConnectionSettings();", saveBody, StringComparison.Ordinal);
-        Assert.Contains("SaveSageConnectionSettings();", saveBody, StringComparison.Ordinal);
+        Assert.Contains("\"Sage.EmployeeId\"", saveBody, StringComparison.Ordinal);
+        Assert.Contains("\"Sage.ActivityItemId\"", saveBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("Sage.Dsn", saveBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("Sage.Username", saveBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("Sage.Password", saveBody, StringComparison.Ordinal);
     }
 
     [Fact]

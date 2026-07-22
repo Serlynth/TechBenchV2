@@ -1437,9 +1437,6 @@
                                                 <ContextMenu Style="{StaticResource EditorContextMenuStyle}"
                                                              Placement="Top"
                                                              DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                                    <MenuItem Header="Check Sage Save"
-                                                              Command="{Binding VerifySageSaveCommand}"
-                                                              Style="{StaticResource EditorContextMenuItemStyle}" />
                                                     <MenuItem Header="Link Existing Sage Ticket..."
                                                               Command="{Binding LinkSageTicketCommand}"
                                                               Style="{StaticResource EditorContextMenuItemStyle}" />
@@ -2931,57 +2928,6 @@
                 <ScrollViewer Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Settings}"
                               VerticalScrollBarVisibility="Auto">
                     <StackPanel>
-                        <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
-                            <StackPanel>
-                                <TextBlock Text="Application" Style="{StaticResource SectionHeadingStyle}" />
-                                <TextBlock Text="{Binding Updates.CurrentVersionLabel}"
-                                           Foreground="{DynamicResource SecondaryTextBrush}"
-                                           FontWeight="SemiBold"
-                                           Margin="0,0,0,4" />
-                                <TextBlock Text="{Binding Updates.StatusText}"
-                                           Style="{StaticResource MutedTextStyle}"
-                                           TextWrapping="Wrap"
-                                           Margin="0,0,0,10" />
-                                <ProgressBar Height="8"
-                                             Width="260"
-                                             HorizontalAlignment="Left"
-                                             Minimum="0"
-                                             Maximum="100"
-                                             Value="{Binding Updates.DownloadProgress, Mode=OneWay}"
-                                             Margin="0,0,0,12"
-                                             Visibility="{Binding Updates.IsProgressVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                 <CheckBox Content="Light theme" IsChecked="{Binding IsLightTheme}" Margin="0,0,0,12" />
-                                <TextBlock Text="Shared data refresh" Style="{StaticResource FieldLabelStyle}" />
-                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,4">
-                                    <TextBlock Text="Every"
-                                               Foreground="{DynamicResource SecondaryTextBrush}"
-                                               VerticalAlignment="Center"
-                                               Margin="0,0,8,0" />
-                                    <TextBox Text="{Binding RefreshIntervalMinutesText, UpdateSourceTrigger=PropertyChanged}"
-                                             Width="58"
-                                             MaxLength="3"
-                                             Margin="0,0,8,0" />
-                                    <TextBlock Text="minutes (1-120)"
-                                               Foreground="{DynamicResource SecondaryTextBrush}"
-                                               VerticalAlignment="Center" />
-                                </StackPanel>
-                                <TextBlock Text="{Binding SharedDataRefreshStatusLabel}"
-                                           Style="{StaticResource MutedTextStyle}"
-                                           TextWrapping="Wrap"
-                                           Margin="0,0,0,12" />
-                                <WrapPanel>
-                                    <Button Content="Save Settings"
-                                            Command="{Binding SaveSettingsCommand}"
-                                            Style="{StaticResource PrimaryButtonStyle}"
-                                            Margin="0,0,8,8" />
-                                    <Button Content="Check for Updates"
-                                            Command="{Binding Updates.CheckForUpdatesCommand}"
-                                            MinWidth="140"
-                                            Margin="0,0,0,8" />
-                                </WrapPanel>
-                            </StackPanel>
-                        </Border>
-
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="1*" />
@@ -2989,78 +2935,123 @@
                                 <ColumnDefinition Width="1*" />
                             </Grid.ColumnDefinitions>
 
-                            <Border Grid.Column="0" Style="{StaticResource CardStyle}">
-                                <StackPanel>
-                                    <TextBlock Text="My Web Help Desk Posting" Style="{StaticResource SectionHeadingStyle}" />
-                                    <TextBlock Text="These credentials are private to your Windows profile and are used only when you test access or post your own work notes. The shared WHD connection and ticket synchronization are configured in TechBench Server Manager."
-                                               Style="{StaticResource MutedTextStyle}"
-                                               TextWrapping="Wrap"
-                                               Margin="0,0,0,12" />
-                                    <TextBlock Text="My WHD username" Style="{StaticResource FieldLabelStyle}" />
-                                    <TextBox Text="{Binding WhdUsername, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" />
-                                    <TextBlock Text="My API key, password, or token" Style="{StaticResource FieldLabelStyle}" />
-                                    <PasswordBox x:Name="WhdApiTokenPasswordBox"
-                                                 PasswordChanged="WhdApiTokenPasswordBox_PasswordChanged"
-                                                 Margin="0,0,0,8" />
-                                    <Button Content="Test My WHD Posting Access"
-                                            Command="{Binding TestWhdConnectionCommand}"
-                                            HorizontalAlignment="Left"
-                                            MinWidth="190"
-                                            Margin="0,6,0,0" />
-                                </StackPanel>
-                            </Border>
-
-                            <Border Grid.Column="2" Style="{StaticResource CardStyle}">
-                                <StackPanel>
-                                    <TextBlock Text="My Sage 50 Posting" Style="{StaticResource SectionHeadingStyle}" />
-                                    <TextBlock Text="These settings apply only to creating and verifying your own Sage time tickets from this workstation. Shared Sage configuration and customer synchronization are managed in TechBench Server Manager."
-                                               Style="{StaticResource MutedTextStyle}"
-                                               TextWrapping="Wrap"
-                                               Margin="0,0,0,12" />
-                                    <TextBlock Text="My employee ID" Style="{StaticResource FieldLabelStyle}" />
-                                    <TextBox Text="{Binding SageEmployeeId, UpdateSourceTrigger=PropertyChanged}"
-                                             Margin="0,0,0,10" />
-                                    <TextBlock Text="My activity item ID" Style="{StaticResource FieldLabelStyle}" />
-                                    <TextBox Text="{Binding SageActivityItemId, UpdateSourceTrigger=PropertyChanged}"
-                                             Margin="0,0,0,12" />
-                                    <CheckBox Content="Save and verify tickets automatically"
-                                              IsChecked="{Binding SageNativeAutoSave}"
-                                              Margin="0,0,0,12" />
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="12" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                        </Grid.RowDefinitions>
-
-                                        <StackPanel Grid.Row="0" Grid.Column="0">
-                                            <TextBlock Text="My workstation ODBC DSN" Style="{StaticResource FieldLabelStyle}" />
-                                            <TextBox Text="{Binding SageDsn, UpdateSourceTrigger=PropertyChanged}" />
+                            <StackPanel Grid.Column="0">
+                                <Border Style="{StaticResource CardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="App Preferences" Style="{StaticResource SectionHeadingStyle}" />
+                                        <TextBlock Text="{Binding Updates.CurrentVersionLabel}"
+                                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                                   FontWeight="SemiBold"
+                                                   Margin="0,0,0,4" />
+                                        <TextBlock Text="{Binding Updates.StatusText}"
+                                                   Style="{StaticResource MutedTextStyle}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,0,0,10" />
+                                        <ProgressBar Height="8"
+                                                     Width="260"
+                                                     HorizontalAlignment="Left"
+                                                     Minimum="0"
+                                                     Maximum="100"
+                                                     Value="{Binding Updates.DownloadProgress, Mode=OneWay}"
+                                                     Margin="0,0,0,12"
+                                                     Visibility="{Binding Updates.IsProgressVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <CheckBox Content="Light theme" IsChecked="{Binding IsLightTheme}" Margin="0,0,0,12" />
+                                        <TextBlock Text="Shared data refresh" Style="{StaticResource FieldLabelStyle}" />
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,4">
+                                            <TextBlock Text="Every"
+                                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                                       VerticalAlignment="Center"
+                                                       Margin="0,0,8,0" />
+                                            <TextBox Text="{Binding RefreshIntervalMinutesText, UpdateSourceTrigger=PropertyChanged}"
+                                                     Width="58"
+                                                     MaxLength="3"
+                                                     Margin="0,0,8,0" />
+                                            <TextBlock Text="minutes (1-120)"
+                                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                                       VerticalAlignment="Center" />
                                         </StackPanel>
-                                        <StackPanel Grid.Row="0" Grid.Column="2">
-                                            <TextBlock Text="My ODBC username" Style="{StaticResource FieldLabelStyle}" />
-                                            <TextBox Text="{Binding SageUsername, UpdateSourceTrigger=PropertyChanged}" />
-                                        </StackPanel>
+                                        <TextBlock Text="{Binding SharedDataRefreshStatusLabel}"
+                                                   Style="{StaticResource MutedTextStyle}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,0,0,12" />
+                                        <WrapPanel>
+                                            <Button Content="Save Settings"
+                                                    Command="{Binding SaveSettingsCommand}"
+                                                    Style="{StaticResource PrimaryButtonStyle}"
+                                                    Margin="0,0,8,8" />
+                                            <Button Content="Check for Updates"
+                                                    Command="{Binding Updates.CheckForUpdatesCommand}"
+                                                    MinWidth="140"
+                                                    Margin="0,0,0,8" />
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Border>
 
-                                        <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,10,0,0">
-                                            <TextBlock Text="My ODBC password" Style="{StaticResource FieldLabelStyle}" />
-                                            <PasswordBox x:Name="SagePasswordBox"
-                                                         PasswordChanged="SagePasswordBox_PasswordChanged" />
-                                        </StackPanel>
-                                    </Grid>
+                                <Border Style="{StaticResource CardStyle}" Margin="0,14,0,0">
+                                    <StackPanel>
+                                        <TextBlock Text="Personal Data Import" Style="{StaticResource SectionHeadingStyle}" />
+                                        <TextBlock Text="Move your V1 work history, personal notes, posting history, and note links into your SQL account. Shared organization data is not imported."
+                                                   Style="{StaticResource MutedTextStyle}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,0,0,12" />
+                                        <WrapPanel>
+                                            <Button Content="Import V1 Database..."
+                                                    Command="{Binding ImportV1DatabaseCommand}"
+                                                    Style="{StaticResource PrimaryButtonStyle}"
+                                                    MinWidth="164"
+                                                    Margin="0,0,8,8" />
+                                            <Button Content="Import Google Sheets CSV"
+                                                    Command="{Binding ImportGoogleSheetsCommand}"
+                                                    Style="{StaticResource SecondaryButtonStyle}"
+                                                    MinWidth="164"
+                                                    Margin="0,0,0,8" />
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
 
-                                    <WrapPanel Margin="0,12,0,14">
+                            <StackPanel Grid.Column="2">
+                                <Border Style="{StaticResource CardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="My Web Help Desk Posting" Style="{StaticResource SectionHeadingStyle}" />
+                                        <TextBlock Text="Used only to post your work notes as you. Organization ticket synchronization is configured in TechBench Server Manager."
+                                                   Style="{StaticResource MutedTextStyle}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,0,0,12" />
+                                        <TextBlock Text="My WHD username" Style="{StaticResource FieldLabelStyle}" />
+                                        <TextBox Text="{Binding WhdUsername, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" />
+                                        <TextBlock Text="My API key, password, or token" Style="{StaticResource FieldLabelStyle}" />
+                                        <PasswordBox x:Name="WhdApiTokenPasswordBox"
+                                                     PasswordChanged="WhdApiTokenPasswordBox_PasswordChanged"
+                                                     Margin="0,0,0,8" />
+                                        <Button Content="Test My WHD Posting Access"
+                                                Command="{Binding TestWhdConnectionCommand}"
+                                                HorizontalAlignment="Left"
+                                                MinWidth="190"
+                                                Margin="0,6,0,0" />
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource CardStyle}" Margin="0,14,0,0">
+                                    <StackPanel>
+                                        <TextBlock Text="My Sage 50 Posting" Style="{StaticResource SectionHeadingStyle}" />
+                                        <TextBlock Text="TechBench uses Sage Desktop on this workstation to create and save your time tickets. The server owns every Sage ODBC setting and customer synchronization."
+                                                   Style="{StaticResource MutedTextStyle}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,0,0,12" />
+                                        <TextBlock Text="My employee ID" Style="{StaticResource FieldLabelStyle}" />
+                                        <TextBox Text="{Binding SageEmployeeId, UpdateSourceTrigger=PropertyChanged}"
+                                                 Margin="0,0,0,10" />
+                                        <TextBlock Text="My activity item ID" Style="{StaticResource FieldLabelStyle}" />
+                                        <TextBox Text="{Binding SageActivityItemId, UpdateSourceTrigger=PropertyChanged}"
+                                                 Margin="0,0,0,12" />
                                         <Button Content="Check Sage Desktop"
                                                 Command="{Binding TestSageConnectionCommand}"
-                                                MinWidth="140"
-                                                Margin="0,0,0,8" />
-                                    </WrapPanel>
-                                </StackPanel>
-                            </Border>
+                                                HorizontalAlignment="Left"
+                                                MinWidth="140" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
                         </Grid>
 
                         <Border Style="{StaticResource CardStyle}"
@@ -3138,33 +3129,6 @@
                             </Grid>
                         </Border>
 
-                        <Border Style="{StaticResource CardStyle}" Margin="0,14,0,0">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0" Margin="0,0,24,0">
-                                    <TextBlock Text="Personal Data Import" Style="{StaticResource SectionHeadingStyle}" />
-                                    <TextBlock Text="Move your V1 work history, personal notes, posting history, and note links into your SQL account. The source database is opened read-only; shared links, templates, credentials, and organization settings are not imported."
-                                               Foreground="{DynamicResource SecondaryTextBrush}"
-                                               TextWrapping="Wrap"
-                                               MaxWidth="760" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="1"
-                                            VerticalAlignment="Center">
-                                    <Button Content="Import V1 Database..."
-                                            Command="{Binding ImportV1DatabaseCommand}"
-                                            Style="{StaticResource PrimaryButtonStyle}"
-                                            MinWidth="164"
-                                            Margin="0,0,0,8" />
-                                    <Button Content="Import Google Sheets CSV"
-                                            Command="{Binding ImportGoogleSheetsCommand}"
-                                            Style="{StaticResource SecondaryButtonStyle}"
-                                            MinWidth="164" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
                     </StackPanel>
                 </ScrollViewer>
             </Grid>

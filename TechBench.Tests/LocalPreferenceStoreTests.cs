@@ -22,9 +22,6 @@ public sealed class LocalPreferenceStoreTests
             created.WindowHeight = 900;
             created.WindowState = "Maximized";
             created.RefreshIntervalMinutes = 15;
-            created.SageDsn = "CSRI-SAGE";
-            created.SageCompanyPath = @"C:\Sage\Company";
-            created.SageNativeAutoSave = true;
             created.MicrosoftAdminOpenInChromeIncognito = true;
             created.LastUpdateCheckAtUtc = new DateTime(
                 2026,
@@ -47,9 +44,6 @@ public sealed class LocalPreferenceStoreTests
             Assert.Equal(900, loaded.WindowHeight);
             Assert.Equal("Maximized", loaded.WindowState);
             Assert.Equal(15, loaded.RefreshIntervalMinutes);
-            Assert.Equal("CSRI-SAGE", loaded.SageDsn);
-            Assert.Equal(@"C:\Sage\Company", loaded.SageCompanyPath);
-            Assert.True(loaded.SageNativeAutoSave);
             Assert.True(loaded.MicrosoftAdminOpenInChromeIncognito);
             Assert.Equal(created.LastUpdateCheckAtUtc, loaded.LastUpdateCheckAtUtc);
             Assert.Equal("2.0.0-alpha.2", loaded.SkippedUpdateVersion);
@@ -71,8 +65,6 @@ public sealed class LocalPreferenceStoreTests
                 Theme = "unexpected",
                 WindowState = "Fullscreen",
                 RefreshIntervalMinutes = -10,
-                SageDsn = "  techbench  ",
-                SageCompanyPath = "  C:\\Sage\\Company  ",
                 SkippedUpdateVersion = "   "
             }, path);
 
@@ -80,8 +72,6 @@ public sealed class LocalPreferenceStoreTests
             Assert.Equal("Dark", loaded.Theme);
             Assert.Equal("Normal", loaded.WindowState);
             Assert.Equal(1, loaded.RefreshIntervalMinutes);
-            Assert.Equal("techbench", loaded.SageDsn);
-            Assert.Equal(@"C:\Sage\Company", loaded.SageCompanyPath);
             Assert.Null(loaded.SkippedUpdateVersion);
 
             using var document = JsonDocument.Parse(File.ReadAllText(path));

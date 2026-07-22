@@ -35,7 +35,6 @@ public partial class MainWindow : Window
             _localPreferences.DeviceId);
         repository.Initialize();
         var whdRestClient = new WhdRestClient();
-        var sageOdbcClient = new SageOdbcProcessClient();
         _notificationService = new WindowsNotificationService();
         ICredentialStore credentialStore = currentUser.IsReadOnlyPreview
             ? ReadOnlyPreviewCredentialStore.Instance
@@ -48,9 +47,8 @@ public partial class MainWindow : Window
             new SqlServerClientProvider(repository),
             new SqlServerTicketProvider(repository),
             new WhdRestPoster(whdRestClient),
-            new SageNativeUiPoster(new SageNativeUiAutomation(), sageOdbcClient),
+            new SageNativeUiPoster(new SageNativeUiAutomation()),
             whdRestClient,
-            sageOdbcClient,
             new AppDialogService(),
             _notificationService,
             credentialStore,
@@ -81,7 +79,6 @@ public partial class MainWindow : Window
 
         viewModel.Updates.StartAutomaticChecks();
         WhdApiTokenPasswordBox.Password = viewModel.WhdApiToken;
-        SagePasswordBox.Password = viewModel.SagePassword;
     }
 
     protected override void OnClosed(EventArgs e)
@@ -217,14 +214,6 @@ public partial class MainWindow : Window
         if (sender is PasswordBox passwordBox && DataContext is MainWindowViewModel viewModel)
         {
             viewModel.WhdApiToken = passwordBox.Password;
-        }
-    }
-
-    private void SagePasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
-    {
-        if (sender is PasswordBox passwordBox && DataContext is MainWindowViewModel viewModel)
-        {
-            viewModel.SagePassword = passwordBox.Password;
         }
     }
 

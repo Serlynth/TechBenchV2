@@ -35,15 +35,6 @@ public partial class App : System.Windows.Application
     {
         UpdateCompletionVersion = ReadArgumentValue(e.Args, "--updated-to");
 
-        if (e.Args.Any(static argument =>
-                argument.Equals(SageOdbcWorker.WorkerArgument, StringComparison.OrdinalIgnoreCase)))
-        {
-            ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            Environment.ExitCode = SageOdbcWorker.RunAsync().GetAwaiter().GetResult();
-            Shutdown(Environment.ExitCode);
-            return;
-        }
-
         _singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var isFirstInstance);
         if (!isFirstInstance)
         {

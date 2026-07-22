@@ -46,23 +46,18 @@ public sealed class SageNativeUiPosterTests
     }
 
     [Fact]
-    public async Task BuildsNativeRequestAndOnlyMarksPostedAfterOdbcConfirmation()
+    public async Task BuildsNativeRequestAndMarksPostedAfterSageAcceptsSave()
     {
         var automation = new RecordingAutomation(new SageTimeTicketAutomationResult(
             true,
             "Submitted Save for Sage ticket 147773.",
             "147773",
             SaveSubmitted: true));
-        var verifier = new RecordingVerifier(new SageTimeTicketVerificationResult(
-            true,
-            true,
-            "Verified saved Sage time ticket #147773 by read-only ODBC.",
-            "147773"));
-        var poster = new SageNativeUiPoster(automation, verifier);
+        var poster = new SageNativeUiPoster(automation);
         var entry = BuildEntry();
         entry.InternalNote = "- This should stay out of Sage.";
         var client = new Client { Id = 8, Name = "Example Client", SageCustomerId = "80000" };
-        var settings = BuildSettings(autoSave: true);
+        var settings = BuildSettings();
 
         var result = await poster.PostAsync(entry, client, new Ticket { TicketNumber = "4567" }, settings);
 
@@ -77,82 +72,45 @@ public sealed class SageNativeUiPosterTests
         Assert.Equal("Regular", automation.Request.ExpectedPayLevel);
         Assert.Equal("Investigated the issue.", automation.Request.Note);
         Assert.True(automation.Request.AutoSave);
-        Assert.Null(verifier.Request?.TicketNumber);
-        Assert.Equal("SageData", verifier.Dsn);
     }
 
     [Fact]
-    public async Task SubmittedSaveRemainsPendingWhenExactOdbcRowDoesNotMatch()
-    {
-        var automation = new RecordingAutomation(new SageTimeTicketAutomationResult(
-            true,
-            "Submitted Save for Sage ticket 147773.",
-            "147773",
-            SaveSubmitted: true));
-        var verifier = new RecordingVerifier(new SageTimeTicketVerificationResult(
-            false,
-            true,
-            "Sage ticket #147773 exists, but duration does not match. The entry remains Sage pending.",
-            "147773"));
-        var poster = new SageNativeUiPoster(automation, verifier);
-
-        var result = await poster.PostAsync(
-            BuildEntry(),
-            new Client { Id = 8, Name = "Example Client", SageCustomerId = "80000" },
-            null,
-            BuildSettings(autoSave: true));
-
-        Assert.False(result.Success);
-        Assert.False(result.MarkPosted);
-        Assert.True(result.OutcomeUncertain);
-        Assert.Contains("remains Sage pending", result.Message);
-    }
-
-    [Fact]
-    public async Task SubmittedSaveWithoutVisibleTicketNumberCanRecoverItFromOdbc()
+    public async Task SubmittedSaveWithoutVisibleTicketNumberStillMarksPosted()
     {
         var automation = new RecordingAutomation(new SageTimeTicketAutomationResult(
             true,
             "Submitted Save.",
             SaveSubmitted: true));
-        var verifier = new RecordingVerifier(new SageTimeTicketVerificationResult(
-            true,
-            true,
-            "Recovered and verified saved Sage time ticket #147775 by read-only ODBC.",
-            "147775"));
-        var poster = new SageNativeUiPoster(automation, verifier);
-
-        var result = await poster.PostAsync(
-            BuildEntry(),
-            new Client { Id = 8, Name = "Example Client", SageCustomerId = "80000" },
-            null,
-            BuildSettings(autoSave: true));
-
-        Assert.True(result.Success);
-        Assert.True(result.MarkPosted);
-        Assert.Equal("SAGE-147775", result.ExternalReference);
-        Assert.Null(verifier.Request?.TicketNumber);
-        Assert.Equal(1, verifier.CallCount);
-    }
-
-    [Fact]
-    public async Task SuccessfulDryRunDoesNotMarkEntryPosted()
-    {
-        var automation = new RecordingAutomation(new SageTimeTicketAutomationResult(
-            true,
-            "Filled Sage ticket and left it unsaved.",
-            "147774"));
         var poster = new SageNativeUiPoster(automation);
 
         var result = await poster.PostAsync(
             BuildEntry(),
             new Client { Id = 8, Name = "Example Client", SageCustomerId = "80000" },
             null,
-            BuildSettings(autoSave: false));
+            BuildSettings());
 
         Assert.True(result.Success);
+        Assert.True(result.MarkPosted);
+        Assert.Null(result.ExternalReference);
+    }
+
+    [Fact]
+    public async Task DoesNotMarkPostedWhenSaveWasNotSubmitted()
+    {
+        var automation = new RecordingAutomation(new SageTimeTicketAutomationResult(
+            true,
+            "Filled the Sage ticket."));
+        var poster = new SageNativeUiPoster(automation);
+
+        var result = await poster.PostAsync(
+            BuildEntry(),
+            new Client { Id = 8, Name = "Example Client", SageCustomerId = "80000" },
+            null,
+            BuildSettings());
+
+        Assert.False(result.Success);
         Assert.False(result.MarkPosted);
-        Assert.False(automation.Request!.AutoSave);
+        Assert.Contains("without confirming", result.Message);
     }
 
     [Fact]
@@ -160,7 +118,7 @@ public sealed class SageNativeUiPosterTests
     {
         var automation = new RecordingAutomation(new SageTimeTicketAutomationResult(true, "unexpected"));
         var poster = new SageNativeUiPoster(automation);
-        var settings = new Dictionary<string, string>(BuildSettings(autoSave: false))
+        var settings = new Dictionary<string, string>(BuildSettings())
         {
             ["Sage.DefaultCustomerId"] = "WRONG-CUSTOMER"
         };
@@ -192,7 +150,7 @@ public sealed class SageNativeUiPosterTests
             entry,
             new Client { Id = 8, Name = "Example Client", SageCustomerId = "80000" },
             null,
-            BuildSettings(autoSave: false));
+            BuildSettings());
 
         Assert.False(result.Success);
         Assert.Contains(expectedError, result.Message, StringComparison.OrdinalIgnoreCase);
@@ -208,15 +166,11 @@ public sealed class SageNativeUiPosterTests
         Note = "Investigated the issue."
     };
 
-    private static IReadOnlyDictionary<string, string> BuildSettings(bool autoSave) =>
+    private static IReadOnlyDictionary<string, string> BuildSettings() =>
         new Dictionary<string, string>
         {
             ["Sage.EmployeeId"] = "RS",
-            ["Sage.ActivityItemId"] = "13001A",
-            ["Sage.NativeAutoSave"] = autoSave.ToString(),
-            ["Sage.Dsn"] = "SageData",
-            ["Sage.Username"] = "user",
-            ["Sage.Password"] = "password"
+            ["Sage.ActivityItemId"] = "13001A"
         };
 
     private sealed class RecordingAutomation(SageTimeTicketAutomationResult result) : ISageTimeTicketAutomation
@@ -232,22 +186,4 @@ public sealed class SageNativeUiPosterTests
         }
     }
 
-    private sealed class RecordingVerifier(SageTimeTicketVerificationResult result) : ISageTimeTicketVerifier
-    {
-        public int CallCount { get; private set; }
-        public string? Dsn { get; private set; }
-        public SageTimeTicketVerificationRequest? Request { get; private set; }
-
-        public SageTimeTicketVerificationResult Verify(
-            string dsn,
-            string username,
-            string password,
-            SageTimeTicketVerificationRequest request)
-        {
-            CallCount++;
-            Dsn = dsn;
-            Request = request;
-            return result;
-        }
-    }
 }

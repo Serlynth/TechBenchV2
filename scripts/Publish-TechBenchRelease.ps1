@@ -147,7 +147,13 @@ try {
     }
 
     Invoke-Checked $dotnet @('tool', 'restore')
-    Invoke-Checked $dotnet @('test', $testProjectPath, '-c', 'Release', '-m:1')
+    Invoke-Checked $dotnet @(
+        'test', $testProjectPath,
+        '-c', 'Release',
+        '-m:1',
+        '-p:TechBenchTestBuild=true',
+        '-p:PlatformTarget=x64'
+    )
 
     Reset-WorkspaceDirectory $publishDirectory
     Reset-WorkspaceDirectory $releaseDirectory

@@ -162,12 +162,6 @@ public sealed class LocalPreferences
 
     public string? SkippedUpdateVersion { get; set; }
 
-    public string SageDsn { get; set; } = "techbench";
-
-    public string SageCompanyPath { get; set; } = string.Empty;
-
-    public bool SageNativeAutoSave { get; set; }
-
     public bool MicrosoftAdminOpenInChromeIncognito { get; set; }
 
     internal LocalPreferences Normalize()
@@ -184,8 +178,6 @@ public sealed class LocalPreferences
             ? WindowState
             : "Normal";
         RefreshIntervalMinutes = Math.Clamp(RefreshIntervalMinutes, 1, 120);
-        SageDsn = SageDsn.Trim();
-        SageCompanyPath = SageCompanyPath.Trim();
         SkippedUpdateVersion = string.IsNullOrWhiteSpace(SkippedUpdateVersion)
             ? null
             : SkippedUpdateVersion.Trim();
