@@ -10,7 +10,7 @@ public sealed partial class MainWindowViewModel
     private FireDrillCredential? _revealedFireDrillCredential;
 
     public ObservableCollection<FireDrillCredentialSummary> FireDrillCredentials { get; } = new();
-    public ObservableCollection<FireDrillCredentialField> FireDrillRevealedFields { get; } = new();
+    public ObservableCollection<FireDrillCredentialField> FireDrillCredentialFields { get; } = new();
     public RelayCommand SearchFireDrillCommand { get; private set; } = null!;
     public RelayCommand RevealFireDrillCommand { get; private set; } = null!;
     public RelayCommand CopyFireDrillFieldCommand { get; private set; } = null!;
@@ -18,6 +18,7 @@ public sealed partial class MainWindowViewModel
 
     public bool CanAccessFireDrill => !_currentUser.IsReadOnlyPreview;
     public bool HasFireDrillCredentials => FireDrillCredentials.Count > 0;
+    public bool HasSelectedFireDrillCredential => SelectedFireDrillCredential is not null;
     public bool IsFireDrillCredentialRevealed => RevealedFireDrillCredential is not null;
 
     public string FireDrillSearchText
@@ -34,6 +35,8 @@ public sealed partial class MainWindowViewModel
             if (SetProperty(ref _selectedFireDrillCredential, value))
             {
                 ClearRevealedFireDrillCredential();
+                PopulateMaskedFireDrillFields();
+                OnPropertyChanged(nameof(HasSelectedFireDrillCredential));
                 RevealFireDrillCommand.RaiseCanExecuteChanged();
             }
         }
@@ -58,7 +61,7 @@ public sealed partial class MainWindowViewModel
         SearchFireDrillCommand = new RelayCommand(_ => RefreshFireDrillCredentials());
         RevealFireDrillCommand = new RelayCommand(_ => RevealFireDrillCredential(), _ => SelectedFireDrillCredential is not null && CanAccessFireDrill);
         CopyFireDrillFieldCommand = new RelayCommand(CopyFireDrillField, _ => RevealedFireDrillCredential is not null);
-        HideFireDrillCommand = new RelayCommand(_ => ClearRevealedFireDrillCredential(), _ => RevealedFireDrillCredential is not null);
+        HideFireDrillCommand = new RelayCommand(_ => HideFireDrillCredential(), _ => RevealedFireDrillCredential is not null);
     }
 
     private void RefreshFireDrillCredentials()
@@ -80,16 +83,48 @@ public sealed partial class MainWindowViewModel
         if (SelectedFireDrillCredential is null || !CanAccessFireDrill) return;
         RevealedFireDrillCredential = _repository.RevealFireDrillCredential(SelectedFireDrillCredential.CredentialId)
             ?? throw new InvalidOperationException("The selected credential is no longer available.");
-        FireDrillRevealedFields.Clear();
-        FireDrillRevealedFields.Add(new("Admin", "Admin", RevealedFireDrillCredential.Admin));
-        FireDrillRevealedFields.Add(new("csriadmin", "CsriAdmin", RevealedFireDrillCredential.CsriAdmin));
-        FireDrillRevealedFields.Add(new("Firebox-DB\\csri", "FireboxDbCsri", RevealedFireDrillCredential.FireboxDbCsri));
-        FireDrillRevealedFields.Add(new("AuthPoint User", "AuthpointUser", RevealedFireDrillCredential.AuthpointUser));
-        FireDrillRevealedFields.Add(new("SSL VPN Password", "SslVpnPassword", RevealedFireDrillCredential.SslVpnPassword));
-        FireDrillRevealedFields.Add(new("AD Auth User", "AdAuthUser", RevealedFireDrillCredential.AdAuthUser));
-        FireDrillRevealedFields.Add(new("AD Password", "AdPassword", RevealedFireDrillCredential.AdPassword));
-        FireDrillRevealedFields.Add(new("RustPW", "RustPassword", RevealedFireDrillCredential.RustPassword));
+        PopulateRevealedFireDrillFields(RevealedFireDrillCredential);
         StatusMessage = $"Revealed credentials for {RevealedFireDrillCredential.ClientName}.";
+    }
+
+    private void PopulateMaskedFireDrillFields()
+    {
+        FireDrillCredentialFields.Clear();
+        if (SelectedFireDrillCredential is null) return;
+        AddFireDrillFields(_ => "***");
+    }
+
+    private void PopulateRevealedFireDrillFields(FireDrillCredential credential)
+    {
+        FireDrillCredentialFields.Clear();
+        AddFireDrillFields(field => field switch
+        {
+            "FireboxIp" => credential.FireboxIp,
+            "Status" => credential.Status,
+            "Admin" => credential.Admin,
+            "CsriAdmin" => credential.CsriAdmin,
+            "FireboxDbCsri" => credential.FireboxDbCsri,
+            "AuthpointUser" => credential.AuthpointUser,
+            "SslVpnPassword" => credential.SslVpnPassword,
+            "AdAuthUser" => credential.AdAuthUser,
+            "AdPassword" => credential.AdPassword,
+            "RustPassword" => credential.RustPassword,
+            _ => string.Empty
+        });
+    }
+
+    private void AddFireDrillFields(Func<string, string> valueFor)
+    {
+        FireDrillCredentialFields.Add(new("Firebox IP", "FireboxIp", valueFor("FireboxIp")));
+        FireDrillCredentialFields.Add(new("Status", "Status", valueFor("Status")));
+        FireDrillCredentialFields.Add(new("Admin", "Admin", valueFor("Admin")));
+        FireDrillCredentialFields.Add(new("csriadmin", "CsriAdmin", valueFor("CsriAdmin")));
+        FireDrillCredentialFields.Add(new("Firebox-DB\\csri", "FireboxDbCsri", valueFor("FireboxDbCsri")));
+        FireDrillCredentialFields.Add(new("AuthPoint User", "AuthpointUser", valueFor("AuthpointUser")));
+        FireDrillCredentialFields.Add(new("SSL VPN Password", "SslVpnPassword", valueFor("SslVpnPassword")));
+        FireDrillCredentialFields.Add(new("AD Auth User", "AdAuthUser", valueFor("AdAuthUser")));
+        FireDrillCredentialFields.Add(new("AD Password", "AdPassword", valueFor("AdPassword")));
+        FireDrillCredentialFields.Add(new("RustPW", "RustPassword", valueFor("RustPassword")));
     }
 
     private void CopyFireDrillField(object? parameter)
@@ -97,6 +132,8 @@ public sealed partial class MainWindowViewModel
         if (RevealedFireDrillCredential is null || parameter is not string field) return;
         var value = field switch
         {
+            "FireboxIp" => RevealedFireDrillCredential.FireboxIp,
+            "Status" => RevealedFireDrillCredential.Status,
             "Admin" => RevealedFireDrillCredential.Admin,
             "CsriAdmin" => RevealedFireDrillCredential.CsriAdmin,
             "FireboxDbCsri" => RevealedFireDrillCredential.FireboxDbCsri,
@@ -118,7 +155,15 @@ public sealed partial class MainWindowViewModel
 
     private void ClearRevealedFireDrillCredential()
     {
-        FireDrillRevealedFields.Clear();
+        FireDrillCredentialFields.Clear();
         RevealedFireDrillCredential = null;
+    }
+
+    private void HideFireDrillCredential()
+    {
+        RevealedFireDrillCredential = null;
+        PopulateMaskedFireDrillFields();
+        if (SelectedFireDrillCredential is not null)
+            StatusMessage = $"Hid credentials for {SelectedFireDrillCredential.ClientName}.";
     }
 }

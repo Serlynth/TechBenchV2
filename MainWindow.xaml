@@ -2122,7 +2122,7 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBox Grid.Column="0" Text="{Binding FireDrillSearchText, UpdateSourceTrigger=PropertyChanged}"
-                                             ToolTip="Search client name, Firebox IP, or status" Margin="0,0,8,0" />
+                                             ToolTip="Search client name" Margin="0,0,8,0" />
                                     <Button Grid.Column="1" Content="Search" Command="{Binding SearchFireDrillCommand}"
                                             Style="{StaticResource PrimaryButtonStyle}" Padding="14,7" />
                                 </Grid>
@@ -2140,19 +2140,7 @@
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
                                         <Border Style="{StaticResource CardStyle}">
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <StackPanel Grid.Column="0">
-                                                    <TextBlock Text="{Binding ClientName}" FontWeight="SemiBold" FontSize="14" />
-                                                    <TextBlock Text="{Binding FireboxIp}" Foreground="{DynamicResource SecondaryTextBrush}" />
-                                                    <TextBlock Text="{Binding Status}" Style="{StaticResource MutedTextStyle}" />
-                                                </StackPanel>
-                                                <TextBlock Grid.Column="1" Text="{Binding LastSyncedLabel}" Style="{StaticResource MutedTextStyle}"
-                                                           Margin="12,0,0,0" VerticalAlignment="Top" />
-                                            </Grid>
+                                            <TextBlock Text="{Binding ClientName}" FontWeight="SemiBold" FontSize="14" />
                                         </Border>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
@@ -2174,7 +2162,6 @@
                                 <StackPanel Grid.Column="0">
                                     <TextBlock Text="{Binding SelectedFireDrillCredential.ClientName, TargetNullValue=Select a client}"
                                                Style="{StaticResource SectionHeadingStyle}" Margin="0" />
-                                    <TextBlock Text="{Binding SelectedFireDrillCredential.FireboxIp}" Style="{StaticResource MutedTextStyle}" />
                                 </StackPanel>
                                 <WrapPanel Grid.Column="1" HorizontalAlignment="Right">
                                     <Button Content="Hide" Command="{Binding HideFireDrillCommand}" Margin="0,0,8,0" />
@@ -2184,13 +2171,13 @@
                             </Grid>
 
                             <Grid Grid.Row="1">
-                                <TextBlock Text="Select a client, then click Reveal Credentials."
+                                <TextBlock Text="Select a client to view its credential fields."
                                            Style="{StaticResource MutedTextStyle}" TextWrapping="Wrap"
                                            HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460"
-                                           Visibility="{Binding IsFireDrillCredentialRevealed, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                                           Visibility="{Binding HasSelectedFireDrillCredential, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
                                 <ScrollViewer VerticalScrollBarVisibility="Auto"
-                                              Visibility="{Binding IsFireDrillCredentialRevealed, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                    <ItemsControl ItemsSource="{Binding FireDrillRevealedFields}">
+                                              Visibility="{Binding HasSelectedFireDrillCredential, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <ItemsControl ItemsSource="{Binding FireDrillCredentialFields}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
                                                 <Border Background="{DynamicResource PanelAltBackgroundBrush}"
@@ -2207,7 +2194,8 @@
                                                                  FontFamily="Consolas" VerticalContentAlignment="Center" />
                                                         <Button Grid.Column="2" Content="Copy"
                                                                 Command="{Binding DataContext.CopyFireDrillFieldCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                CommandParameter="{Binding FieldName}" Padding="12,6" />
+                                                                CommandParameter="{Binding FieldName}" Padding="12,6"
+                                                                Visibility="{Binding DataContext.IsFireDrillCredentialRevealed, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                                     </Grid>
                                                 </Border>
                                             </DataTemplate>
