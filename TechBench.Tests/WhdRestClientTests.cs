@@ -9,6 +9,12 @@ namespace TechBench.Tests;
 public sealed class WhdRestClientTests
 {
     [Fact]
+    public void DefaultClientAllowsSlowWhdResponses()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(90), WhdRestClient.DefaultRequestTimeout);
+    }
+
+    [Fact]
     public async Task OrganizationSyncRetainsExplicitlyClosedOrDeletedTicketsReturnedByWhd()
     {
         const string responseJson = """
@@ -137,6 +143,66 @@ public sealed class WhdRestClientTests
         Assert.True(result.MarkPosted);
         Assert.Equal("WHD-TECHNOTE-987", result.ExternalReference);
         Assert.Equal(2, handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task VerifiesExactNoteAfterPostResponseTimesOut()
+    {
+        var handler = new RecordingHandler(request =>
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                throw new TaskCanceledException("Simulated WHD response timeout.");
+            }
+
+            return Json(HttpStatusCode.OK, """
+                [{"id":988,"noteText":"Investigated the timeout.","workTime":"15"}]
+                """);
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.PostTicketNoteAsync(
+            ExplicitSettings(),
+            101,
+            "Investigated the timeout.",
+            15);
+
+        Assert.True(result.Success, result.Message);
+        Assert.True(result.MarkPosted);
+        Assert.False(result.OutcomeUncertain);
+        Assert.Equal("WHD-TECHNOTE-988", result.ExternalReference);
+        Assert.Contains("did not return", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task KeepsPostUncertainWhenTimeoutReadbackCannotFindExactNote()
+    {
+        var handler = new RecordingHandler(request =>
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                throw new TaskCanceledException("Simulated WHD response timeout.");
+            }
+
+            return Json(HttpStatusCode.OK, "[]");
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.PostTicketNoteAsync(
+            ExplicitSettings(),
+            101,
+            "Investigated the timeout.",
+            15);
+
+        Assert.False(result.Success);
+        Assert.False(result.MarkPosted);
+        Assert.True(result.OutcomeUncertain);
+        Assert.Null(result.ExternalReference);
+        Assert.Contains("could not find the exact note", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(4, handler.RequestCount);
     }
 
     [Fact]

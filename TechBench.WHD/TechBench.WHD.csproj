@@ -6,9 +6,9 @@
     <Nullable>enable</Nullable>
     <AssemblyName>TechBench.WHD</AssemblyName>
     <RootNamespace>TechBench</RootNamespace>
-    <Version>0.5.16</Version>
-    <AssemblyVersion>0.5.16.0</AssemblyVersion>
-    <FileVersion>0.5.16.0</FileVersion>
+    <Version>0.5.17</Version>
+    <AssemblyVersion>0.5.17.0</AssemblyVersion>
+    <FileVersion>0.5.17.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -16,6 +16,10 @@
     <Compile Include="..\Models\WhdSyncResult.cs" Link="Models\WhdSyncResult.cs" />
     <Compile Include="..\Providers\PostingResult.cs" Link="Providers\PostingResult.cs" />
     <Compile Include="..\Providers\WhdRestClient.cs" Link="Providers\WhdRestClient.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TechBench.Tests" />
   </ItemGroup>
 
 </Project>

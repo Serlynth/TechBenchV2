@@ -15,12 +15,14 @@ public sealed class WhdRestClient
 {
     private const int PageSize = 100;
     private const int MaximumPageCount = 10_000;
+    internal static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan PostReconciliationWindow = TimeSpan.FromSeconds(20);
     private readonly HttpClient _httpClient;
     private readonly ConcurrentDictionary<string, WhdAuthParameters> _authenticationCache = new(StringComparer.Ordinal);
 
     public WhdRestClient() : this(new HttpClient
     {
-        Timeout = TimeSpan.FromSeconds(20)
+        Timeout = DefaultRequestTimeout
     })
     {
     }
@@ -419,9 +421,10 @@ public sealed class WhdRestClient
         var payload = BuildTicketNotePayload(ticketId, noteText, durationMinutes);
 
         var postStarted = false;
+        WhdAuthParameters? auth = null;
         try
         {
-            var auth = await ResolveAuthenticationAsync(settings, cancellationToken);
+            auth = await ResolveAuthenticationAsync(settings, cancellationToken);
             var requestUri = BuildRequestUri(settings.BaseUrl, "TechNotes", auth, new Dictionary<string, string>());
             using var request = new HttpRequestMessage(HttpMethod.Post, requestUri)
             {
@@ -462,9 +465,29 @@ public sealed class WhdRestClient
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
+            if (postStarted
+                && auth is not null
+                && !cancellationToken.IsCancellationRequested)
+            {
+                var reconciledReference = await TryReconcileUnconfirmedTicketNoteAsync(
+                    settings,
+                    auth,
+                    ticketId,
+                    noteText,
+                    durationMinutes,
+                    cancellationToken);
+                if (!string.IsNullOrWhiteSpace(reconciledReference))
+                {
+                    return PostingResult.Succeeded(
+                        "Web Help Desk did not return a usable POST response, but TechBench found and verified the saved Sage/WHD Note.",
+                        payload,
+                        reconciledReference);
+                }
+            }
+
             return postStarted
                 ? PostingResult.Uncertain(
-                    $"Web Help Desk did not return a confirmable result after the note request began: {ex.Message} Verify WHD before retrying.",
+                    $"Web Help Desk did not return a confirmable result after the note request began, and TechBench could not find the exact note during automatic verification: {ex.Message} Verify WHD before retrying.",
                     payload)
                 : PostingResult.Failed($"Web Help Desk post failed: {ex.Message}", payload);
         }
@@ -1085,6 +1108,36 @@ public sealed class WhdRestClient
         }
 
         return null;
+    }
+
+    private async Task<string?> TryReconcileUnconfirmedTicketNoteAsync(
+        WhdConnectionSettings settings,
+        WhdAuthParameters auth,
+        int ticketId,
+        string expectedNote,
+        int expectedDurationMinutes,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var verificationTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            verificationTimeout.CancelAfter(PostReconciliationWindow);
+            return await FindPostedTicketNoteAsync(
+                settings,
+                auth,
+                ticketId,
+                expectedNote,
+                expectedDurationMinutes,
+                verificationTimeout.Token);
+        }
+        catch (Exception ex) when (ex is HttpRequestException
+                                       or TaskCanceledException
+                                       or JsonException
+                                       or InvalidOperationException
+                                       or UriFormatException)
+        {
+            return null;
+        }
     }
 
     private static IEnumerable<JsonElement> EnumerateRecords(JsonElement root)
