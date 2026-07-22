@@ -74,13 +74,23 @@ internal sealed class SqlAdminRepository(AppPaths paths)
         return reader.Read() ? ReadString(reader, "Status", "Queued") : "Queued";
     }
 
-    public string RequestFireDrillSync()
+    public SyncRequestReceipt RequestFireDrillSync()
     {
         using var connection = OpenAdminConnection();
         using var command = StoredProcedure(connection, "tb_app.AdminRequestFireDrillSync");
         command.Parameters.Add("@RequestId", SqlDbType.UniqueIdentifier).Value = Guid.NewGuid();
         using var reader = command.ExecuteReader();
-        return reader.Read() ? ReadString(reader, "Status", "Queued") : "Queued";
+        if (!reader.Read())
+            throw new InvalidOperationException("SQL Server did not return the FireDrill synchronization request.");
+        var requestId = ReadNullableGuid(reader, "RequestId")
+            ?? throw new InvalidOperationException("SQL Server returned a FireDrill synchronization request without an ID.");
+        return new SyncRequestReceipt(requestId, ReadString(reader, "Status", "Queued"));
+    }
+
+    public SyncStatus LoadFireDrillStatus()
+    {
+        using var connection = OpenAdminConnection();
+        return LoadStatus(connection, "tb_app.GetFireDrillSyncStatus", true);
     }
 
     public void SaveMappings(IReadOnlyCollection<UserMappingAssignment> mappings)

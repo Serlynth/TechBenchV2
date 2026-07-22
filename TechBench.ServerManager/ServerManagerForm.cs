@@ -620,9 +620,74 @@ internal sealed class ServerManagerForm : Form
             };
             await Task.Run(() => _repository.SaveSettings(settings, _configuration?.RowVersions ?? new Dictionary<string, byte[]>()));
             AddLog("Shared FireDrill configuration saved.");
-            if (requestSync) AddLog("FireDrill sync request: " + await Task.Run(_repository.RequestFireDrillSync));
-            await RefreshConfigurationAsync(false);
+            if (requestSync)
+            {
+                var receipt = await Task.Run(_repository.RequestFireDrillSync);
+                AddLog("FireDrill sync request: " + receipt.Status);
+                await MonitorFireDrillSyncAsync(receipt.RequestId);
+            }
+            else
+            {
+                await RefreshConfigurationAsync(false);
+            }
         });
+    }
+
+    private async Task MonitorFireDrillSyncAsync(Guid requestId)
+    {
+        var claimDeadline = DateTime.UtcNow.AddSeconds(60);
+        var completionDeadline = DateTime.UtcNow.AddMinutes(3);
+        string? previousStatus = null;
+
+        while (DateTime.UtcNow < completionDeadline)
+        {
+            var status = await Task.Run(_repository.LoadFireDrillStatus);
+            if (_configuration is not null) _configuration.FireDrillStatus = status;
+            _fireDrillSyncStatus.Text = FormatStatus(status, true);
+
+            if (status.RequestId == requestId &&
+                !status.Status.Equals(previousStatus, StringComparison.OrdinalIgnoreCase))
+            {
+                AddLog($"FireDrill synchronization: {status.Status}.");
+                previousStatus = status.Status;
+            }
+
+            if (status.RequestId == requestId &&
+                status.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase))
+            {
+                AddLog(string.IsNullOrWhiteSpace(status.Message)
+                    ? "FireDrill synchronization completed."
+                    : status.Message);
+                return;
+            }
+
+            if (status.RequestId == requestId &&
+                status.Status.Equals("Failed", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(status.LastError)
+                    ? status.Message
+                    : status.LastError);
+            }
+
+            if (DateTime.UtcNow >= claimDeadline &&
+                status.RequestId == requestId &&
+                status.Status.Equals("Queued", StringComparison.OrdinalIgnoreCase))
+            {
+                var service = await Task.Run(_service.GetDetails);
+                var warning = service.Installed && service.Status.Equals("Running", StringComparison.OrdinalIgnoreCase)
+                    ? $"The request is still queued. The running Sync Service ({service.Version}) is not claiming FireDrill work. Restart it from the Service tab; if it remains queued, install the current server package."
+                    : $"The request is still queued because the TechBench Sync Service is {service.Status}. Start it from the Service tab.";
+                _fireDrillSyncStatus.Text += "\r\n" + warning;
+                AddLog("WARNING: " + warning);
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(2));
+        }
+
+        const string timeout = "FireDrill synchronization is still running. It will continue on the server; use Refresh to see the final result.";
+        _fireDrillSyncStatus.Text += "\r\n" + timeout;
+        AddLog(timeout);
     }
 
     private async Task SaveMappingsAsync()

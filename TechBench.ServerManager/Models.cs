@@ -2,6 +2,8 @@ namespace TechBench.ServerManager;
 
 internal sealed record ServiceDetails(bool Installed, string Status, string Account, string Version);
 
+internal sealed record SyncRequestReceipt(Guid RequestId, string Status);
+
 internal sealed class SynchronizationConfiguration
 {
     public Dictionary<string, string> Settings { get; } = new(StringComparer.OrdinalIgnoreCase);

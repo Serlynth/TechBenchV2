@@ -47,6 +47,9 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("Save all mappings", form, StringComparison.Ordinal);
         Assert.Contains("Save settings + mappings", form, StringComparison.Ordinal);
         Assert.Contains("CommitEdit(DataGridViewDataErrorContexts.Commit)", form, StringComparison.Ordinal);
+        Assert.Contains("MonitorFireDrillSyncAsync", form, StringComparison.Ordinal);
+        Assert.Contains("The request is still queued", form, StringComparison.Ordinal);
+        Assert.Contains("LoadFireDrillStatus", sql, StringComparison.Ordinal);
         Assert.Equal(4, CountOccurrences(form, "SavePendingMappingsAsync("));
         Assert.Contains("TechBench_Users", directory, StringComparison.Ordinal);
         Assert.Contains("TechBench_Admins", directory, StringComparison.Ordinal);
