@@ -108,7 +108,20 @@ public sealed class V1ImportSafetyContractTests
         Assert.Contains("SQLitePCLRaw.core.dll", script, StringComparison.Ordinal);
         Assert.Contains("SQLitePCLRaw.provider.e_sqlite3.dll", script, StringComparison.Ordinal);
         Assert.Contains("e_sqlite3.dll", script, StringComparison.Ordinal);
+        Assert.Contains("TechBench.WHD.dll", script, StringComparison.Ordinal);
+        Assert.Contains("incompatible TechBench.WHD assembly", script, StringComparison.Ordinal);
+        Assert.Contains("-p:PlatformTarget=x86", script, StringComparison.Ordinal);
         Assert.Contains("0x014c", script, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SharedWhdBuildOutputsAreIsolatedByTargetArchitecture()
+    {
+        var project = File.ReadAllText(
+            RepositoryFile(@"TechBench.WHD\TechBench.WHD.csproj"));
+
+        Assert.Contains(@"bin\$(Configuration)\$(PlatformTarget)\", project, StringComparison.Ordinal);
+        Assert.Contains(@"obj\$(Configuration)\$(PlatformTarget)\", project, StringComparison.Ordinal);
     }
 
     [Fact]

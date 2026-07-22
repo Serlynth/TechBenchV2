@@ -95,6 +95,27 @@ function Assert-ServerBackedPublishOutput {
         throw 'The read-only V1 database importer dependency is missing from the V2 publish.'
     }
 
+    $whdAssemblyPath = Join-Path $Path 'TechBench.WHD.dll'
+    if (-not (Test-Path -LiteralPath $whdAssemblyPath)) {
+        throw 'The shared TechBench.WHD assembly is missing from the V2 publish.'
+    }
+
+    $whdAssemblyBytes = [IO.File]::ReadAllBytes($whdAssemblyPath)
+    if ($whdAssemblyBytes.Length -lt 64) {
+        throw 'The shared TechBench.WHD assembly is not a valid PE file.'
+    }
+
+    $whdPeOffset = [BitConverter]::ToInt32($whdAssemblyBytes, 0x3c)
+    if ($whdPeOffset -lt 0 -or $whdPeOffset + 6 -gt $whdAssemblyBytes.Length) {
+        throw 'The shared TechBench.WHD assembly has an invalid PE header.'
+    }
+
+    $whdMachine = [BitConverter]::ToUInt16($whdAssemblyBytes, $whdPeOffset + 4)
+    if ($whdMachine -ne 0x014c) {
+        throw ("The x86 client contains an incompatible TechBench.WHD assembly (PE machine 0x{0:X4})." `
+            -f $whdMachine)
+    }
+
     foreach ($requiredAssembly in @(
         'Microsoft.Data.Sqlite.dll',
         'SQLitePCLRaw.core.dll',
@@ -211,6 +232,7 @@ try {
         '-r', 'win-x86',
         '--self-contained', 'true',
         '-o', $publishDirectory,
+        '-p:PlatformTarget=x86',
         '-p:PublishSingleFile=false',
         '-p:DebugType=None',
         '-p:DebugSymbols=false',
