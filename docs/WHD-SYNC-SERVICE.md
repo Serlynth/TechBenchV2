@@ -1,6 +1,6 @@
 # TechBench Sync Service
 
-`TechBench.SyncService` is the server-side worker that performs organization-wide Web Help Desk (WHD) synchronization, manually requested Sage customer synchronization, and the daily encrypted FireDrill workbook import. Install it on a domain-joined Windows Server that can reach TechBench SQL Server, the WHD endpoint, Sage company data, and the FireDrill file share.
+`TechBench.SyncService` is the server-side worker that performs organization-wide Web Help Desk (WHD) synchronization, manually requested Sage customer synchronization, and the daily encrypted Credentials workbook import. Install it on a domain-joined Windows Server that can reach TechBench SQL Server, the WHD endpoint, Sage company data, and the Credentials file share.
 
 ## Build the service package
 
@@ -51,7 +51,7 @@ if ($actualHash -ne $expectedHash) { throw 'TechBench SQL SHA-256 does not match
 - Confirm the service host trusts the SQL Server certificate used by `CSRI-SQL.CSRI.local`; production keeps `TrustServerCertificate` set to `false`.
 - Install the supported 32-bit Sage ODBC driver on the service host. Use `%windir%\SysWOW64\odbcad32.exe` to create a **System DSN**; a User DSN or mapped drive will not be visible reliably to the Windows service.
 - Give `CSRI\TechBench_Sync` read access to the Sage data location and any other file/share rights required by the Sage ODBC driver. Use UNC paths rather than mapped drive letters.
-- Give the TechBench sync-service identity read access at both the share and NTFS levels to the configured FireDrill workbook.
+- Give the TechBench sync-service identity read access at both the share and NTFS levels to the configured Credentials workbook.
 
 ## Install or update
 
@@ -59,9 +59,9 @@ Download and run the one-click installer:
 
 `https://github.com/Serlynth/TechBenchV2-Releases/releases/download/v0.5.10/TechBenchServerSetup.exe`
 
-Windows requests administrator approval. For a new installation, leave the service account as `CSRI\TechBench_Sync`, select **Install**, and enter that account's password in the secure dialog. The password can be revealed temporarily for verification and is never written to the command line, configuration, package, output, or logs. After installation, Server Manager opens so the WHD, Sage, and FireDrill secrets and shared configuration can be entered.
+Windows requests administrator approval. For a new installation, leave the service account as `CSRI\TechBench_Sync`, select **Install**, and enter that account's password in the secure dialog. The password can be revealed temporarily for verification and is never written to the command line, configuration, package, output, or logs. After installation, Server Manager opens so the WHD, Sage, and Credentials secrets and shared configuration can be entered.
 
-For an existing installation, select **Update / Repair**. Setup closes Server Manager, verifies its embedded package and every manifest hash, stops the service, preserves the Windows service identity, SQL configuration, and machine-protected WHD/Sage/FireDrill secrets, replaces the service and Manager binaries, restores inherited read-and-execute access for the installed service identity, repairs the Start Menu shortcut, restarts the service, and opens the Manager. A same-schema update does not require the interactive setup operator to have SQL access. A release that requires a different schema remains blocked until the DBA applies the matching SQL deployment.
+For an existing installation, select **Update / Repair**. Setup closes Server Manager, verifies its embedded package and every manifest hash, stops the service, preserves the Windows service identity, SQL configuration, and machine-protected WHD/Sage/Credentials secrets, replaces the service and Manager binaries, restores inherited read-and-execute access for the installed service identity, repairs the Start Menu shortcut, restarts the service, and opens the Manager. A same-schema update does not require the interactive setup operator to have SQL access. A release that requires a different schema remains blocked until the DBA applies the matching SQL deployment.
 
 The setup EXE and its `.sha256` sidecar are published together. The versioned ZIP remains available for controlled advanced or unattended deployment, but normal installation and repair do not require extracting it, changing execution policy, or typing PowerShell commands. The standalone SQL asset is `TechBenchV2-SQLServer2016-0.5.10.sql`.
 
@@ -88,8 +88,8 @@ Installation places the self-contained GUI under `%ProgramFiles%\CSRI\TechBench 
 - current service status, installed version, and Windows service identity;
 - Start, Stop, Restart, and Refresh controls;
 - an Install/Apply Password action for the first installation or for rotating the password of the service's existing domain identity;
-- protected WHD, Sage, and FireDrill workbook credential rotation with a separate Show control beside each secret;
-- Admin-only shared WHD endpoint/authentication/username/schedule configuration, server Sage DSN/username configuration, FireDrill path/daily schedule, synchronization health and manual triggers, large-removal confirmation, and AD-user-to-WHD-technician mappings; and
+- protected WHD, Sage, and Credentials workbook credential rotation with a separate Show control beside each secret;
+- Admin-only shared WHD endpoint/authentication/username/schedule configuration, server Sage DSN/username configuration, Credentials path/daily schedule, synchronization health and manual triggers, large-removal confirmation, and AD-user-to-WHD-technician mappings; and
 - Check for Updates and Download & Install actions for the server service.
 
 Minimizing or closing Server Manager hides it in the Windows notification area and clears every typed password or secret field. Double-click the tray icon or select **Open** to restore and activate it. Select **Exit** from the tray menu to terminate it. Only one Manager instance may run; a second launch directs the operator to the existing tray icon.
@@ -98,7 +98,7 @@ Minimizing or closing Server Manager hides it in the Windows notification area a
 
 Run the current `TechBenchServerSetup.exe` and select **Update / Repair**. This is the supported transition from every earlier script-based or compiled V2 Manager. It does not change the Windows service identity, SQL settings, or either protected secret.
 
-The service-account password and WHD/Sage/FireDrill source secrets are never placed in command-line arguments, configuration, output, or logs. They exist briefly in the visible form field when entered and are cleared immediately after use. Server Manager uses the elevated operator's Windows identity and Admin-only stored procedures to manage non-secret synchronization configuration in SQL Server. Source-system secrets remain machine-protected outside SQL.
+The service-account password and WHD/Sage/Credentials source secrets are never placed in command-line arguments, configuration, output, or logs. They exist briefly in the visible form field when entered and are cleared immediately after use. Server Manager uses the elevated operator's Windows identity and Admin-only stored procedures to manage non-secret synchronization configuration in SQL Server. Source-system secrets remain machine-protected outside SQL.
 
 Routine service updates do not request the service-account password and do not recreate the Windows service. Server Manager downloads the exact versioned ZIP and SHA-256 sidecar from the public release repository, rejects unexpected URLs and unsafe archive paths, and verifies the outer hash and every file in `package-manifest.json`. The one-click setup can update an existing installation without interactive SQL access when the installed and target packages declare the same required schema. A schema change still requires successful database verification after the matching DBA deployment.
 
@@ -130,9 +130,9 @@ The script protects it with machine-scoped DPAPI in `%ProgramData%\CSRI\TechBenc
 
 Sage customer synchronization has no automatic schedule. A TechBench Admin selects **Sync now** on Server Manager's **Sage 50** tab; the request is stored in SQL Server, and the service claims it. SQL Server rejects empty, malformed, over-length, or duplicate-ID snapshots without changing customer data. If a snapshot would remove at least 10 and at least 25 percent of 20 or more existing Sage mappings, the failed request reports the exact counts and Server Manager enables **Confirm large removal**. That second action displays a warning and queues a new request bound to the rejected request. It is accepted only within one hour and only when the fresh read has exactly the same read, existing, and stale counts; otherwise no customer data changes and the Admin must review the new proposal. WHD synchronization continues automatically every five minutes and may also be requested immediately from Server Manager.
 
-## Configure FireDrill synchronization
+## Configure Credentials synchronization
 
-Open Server Manager's **FireDrill** tab. Enter the workbook UNC path, leave daily synchronization enabled at **4:00 AM**, enter the workbook open password, and select **Save / Rotate**. Select **Save settings**, then **Sync now** for the initial import. The path is an Admin-only server setting and is not embedded in the public package or returned to ordinary clients. The service opens the file read-only with sharing enabled, so employees can keep it open for editing; a file caught mid-save is rejected and retried later without changing the current SQL snapshot. The first visible worksheet must use the documented headers exactly. All imported credential values are encrypted in SQL Server, and every client reveal or copy is audited.
+Open Server Manager's **Credentials** tab. Enter the workbook UNC path, leave daily synchronization enabled at **4:00 AM**, enter the workbook open password, and select **Save / Rotate**. Select **Save settings**, then **Sync now** for the initial import. The path is an Admin-only server setting and is not embedded in the public package or returned to ordinary clients. The service opens the file read-only with sharing enabled, so employees can keep it open for editing; a file caught mid-save is rejected and retried later without changing the current SQL snapshot. The first visible worksheet must use the documented headers exactly. All imported credential values are encrypted in SQL Server.
 
 ## Verify and remove
 

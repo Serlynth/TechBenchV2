@@ -597,7 +597,7 @@ public sealed partial class SqlServer2016SyntaxTests
     }
 
     [Fact]
-    public void V0008PublishesEncryptedFireDrillContractsForAllTechBenchUsers()
+    public void V0008PublishesEncryptedCredentialContractsWithoutRevealOrCopyAuditing()
     {
         var sqlDirectory = FindSqlDirectory();
         var schemaSource = File.ReadAllText(Path.Combine(
@@ -624,19 +624,20 @@ public sealed partial class SqlServer2016SyntaxTests
         var revealBody = procedureSource[revealStart..revealEnd];
         Assert.Contains("SESSION_CONTEXT(N'TechBench.PreviewSessionId')", revealBody, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("EnsureCurrentUser", revealBody, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("FireDrillCredentialRevealed", procedureSource, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("FireDrillCredentialCopied", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("WriteAuditEvent", revealBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("FireDrillCredentialRevealed", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("FireDrillCredentialCopied", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("DROP PROCEDURE [tb_app].[AuditFireDrillCredentialCopy]", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("N'04:00'", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("[SettingKey] <> N'FireDrill.SourcePath' OR @CanReadServerPaths = 1", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("@IsReadOnlyPreview = 0", procedureSource, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Configure the FireDrill workbook path in Server Manager", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Configure the Credentials workbook path in Server Manager", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("WHERE [SettingKey]=N'FireDrill.SourcePath'), N'') AS [SourcePath]", procedureSource, StringComparison.OrdinalIgnoreCase);
 
         foreach (var procedure in new[]
                  {
                      "SearchFireDrillCredentials",
-                     "RevealFireDrillCredential",
-                     "AuditFireDrillCredentialCopy"
+                     "RevealFireDrillCredential"
                  })
         {
             Assert.Contains(
@@ -644,6 +645,11 @@ public sealed partial class SqlServer2016SyntaxTests
                 grantSource,
                 StringComparison.OrdinalIgnoreCase);
         }
+
+        Assert.DoesNotContain(
+            "GRANT EXECUTE ON OBJECT::[tb_app].[AuditFireDrillCredentialCopy]",
+            grantSource,
+            StringComparison.OrdinalIgnoreCase);
 
         Assert.Contains(
             "GRANT EXECUTE ON OBJECT::[tb_app].[AdminRequestFireDrillSync] TO [tb_role_admin]",

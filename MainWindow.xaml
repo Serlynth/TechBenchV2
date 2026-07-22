@@ -2114,7 +2114,7 @@
                         <DockPanel>
                             <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
                                 <TextBlock Text="Client Credentials" Style="{StaticResource SectionHeadingStyle}" />
-                                <TextBlock Text="Search the server-synchronized FireDrill workbook. Passwords remain hidden until you explicitly reveal a client."
+                                <TextBlock Text="Search the server-synchronized client credentials. Passwords remain hidden until you explicitly reveal a client."
                                            Style="{StaticResource MutedTextStyle}" TextWrapping="Wrap" Margin="0,0,0,12" />
                                 <Grid>
                                     <Grid.ColumnDefinitions>
@@ -2128,7 +2128,7 @@
                                 </Grid>
                             </StackPanel>
 
-                            <TextBlock Text="No matching FireDrill clients."
+                            <TextBlock Text="No matching credential clients."
                                        Style="{StaticResource MutedTextStyle}"
                                        HorizontalAlignment="Center" VerticalAlignment="Center"
                                        Visibility="{Binding HasFireDrillCredentials, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
@@ -2184,7 +2184,7 @@
                             </Grid>
 
                             <Grid Grid.Row="1">
-                                <TextBlock Text="Select a client, then click Reveal Credentials. Every reveal and copy is recorded in the SQL audit trail."
+                                <TextBlock Text="Select a client, then click Reveal Credentials."
                                            Style="{StaticResource MutedTextStyle}" TextWrapping="Wrap"
                                            HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460"
                                            Visibility="{Binding IsFireDrillCredentialRevealed, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />

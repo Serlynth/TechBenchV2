@@ -18,7 +18,7 @@ public sealed class FireDrillSyncWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("TechBench FireDrill synchronization worker {WorkerId} started.", _workerId);
+        _logger.LogInformation("TechBench Credentials synchronization worker {WorkerId} started.", _workerId);
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -30,7 +30,7 @@ public sealed class FireDrillSyncWorker : BackgroundService
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "The FireDrill synchronization poll failed.");
+                _logger.LogError(ex, "The Credentials synchronization poll failed.");
                 try { await Task.Delay(_options.PollInterval, stoppingToken).ConfigureAwait(false); }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             }
@@ -47,9 +47,9 @@ public sealed class FireDrillSyncWorker : BackgroundService
             (result, token) => _repository.CompleteFireDrillWorkAsync(work, _workerId, true, result.Message, result.SourceModifiedAtUtc, token),
             (failure, token) => _repository.CompleteFireDrillWorkAsync(work, _workerId, false, failure.Message, null, token)).ConfigureAwait(false);
         if (lifecycle.Outcome == SyncWorkLifecycleOutcome.Succeeded)
-            _logger.LogInformation("Completed FireDrill synchronization: {Message}", lifecycle.ExecutionResult!.Message);
+            _logger.LogInformation("Completed Credentials synchronization: {Message}", lifecycle.ExecutionResult!.Message);
         else if (lifecycle.Outcome != SyncWorkLifecycleOutcome.Interrupted)
-            _logger.LogError(lifecycle.Failure, "FireDrill synchronization failed with outcome {Outcome}.", lifecycle.Outcome);
+            _logger.LogError(lifecycle.Failure, "Credentials synchronization failed with outcome {Outcome}.", lifecycle.Outcome);
     }
 
     private async Task RenewUntilCancelledAsync(FireDrillSyncWork work, CancellationTokenSource executionCancellation, CancellationToken stoppingToken)

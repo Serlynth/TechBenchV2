@@ -81,9 +81,9 @@ internal sealed class SqlAdminRepository(AppPaths paths)
         command.Parameters.Add("@RequestId", SqlDbType.UniqueIdentifier).Value = Guid.NewGuid();
         using var reader = command.ExecuteReader();
         if (!reader.Read())
-            throw new InvalidOperationException("SQL Server did not return the FireDrill synchronization request.");
+            throw new InvalidOperationException("SQL Server did not return the Credentials synchronization request.");
         var requestId = ReadNullableGuid(reader, "RequestId")
-            ?? throw new InvalidOperationException("SQL Server returned a FireDrill synchronization request without an ID.");
+            ?? throw new InvalidOperationException("SQL Server returned a Credentials synchronization request without an ID.");
         return new SyncRequestReceipt(requestId, ReadString(reader, "Status", "Queued"));
     }
 

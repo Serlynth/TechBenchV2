@@ -124,8 +124,6 @@ public interface ITechBenchRepository
 
     FireDrillCredential? RevealFireDrillCredential(long credentialId) => null;
 
-    void AuditFireDrillCredentialCopy(long credentialId, string fieldName) { }
-
     int SaveCommonLink(CommonLink link);
 
     void DeleteCommonLink(int id);

@@ -4,7 +4,7 @@ TechBench V2 is the multi-user successor to TechBench 1.x. It keeps the existing
 
 The original TechBench workspace is not modified. V1 and V2 have separate product identities, executables, mutex names, settings, credential namespaces, packages, and update feeds.
 
-Current milestone: `0.5.10` - TechBench V2 uses the `0.5.x` development release line; “V2” remains the product generation and is assumed. The connection screen can now check, download, and install client updates without opening the SQL-backed workspace, including automatic recovery when the database schema is newer than the installed client. The server-owned synchronization service imports the password-encrypted FireDrill workbook into encrypted SQL Server storage once daily at 4:00 AM, while every authenticated TechBench user can search and explicitly reveal credentials from the client. Reveals and copies are audited, configuration/manual sync remain Admin-only, and the workbook password remains machine-protected on the service host.
+Current milestone: `0.5.10` - TechBench V2 uses the `0.5.x` development release line; “V2” remains the product generation and is assumed. The connection screen can now check, download, and install client updates without opening the SQL-backed workspace, including automatic recovery when the database schema is newer than the installed client. The server-owned synchronization service imports the password-encrypted Credentials workbook into encrypted SQL Server storage once daily at 4:00 AM, while every authenticated TechBench user can search and explicitly reveal credentials from the client. Configuration and manual synchronization remain Admin-only, and the workbook password remains machine-protected on the service host.
 
 ## What V2 stores where
 
@@ -19,7 +19,7 @@ SQL Server is the source of truth for:
 - posting logs, durable posting attempts, and posting leases
 - server-side WHD synchronization requests, leases, cursors, health, technicians, groups, and AD-user mappings
 - server-side Sage customer synchronization requests, leases, health, and snapshot results
-- encrypted FireDrill credential records plus synchronization requests, leases, health, and reveal/copy audit history
+- encrypted credential records plus synchronization requests, leases, and health
 - import batches, legacy-ID mappings, and audit history
 
 The workstation keeps only non-business state:
@@ -37,7 +37,7 @@ The production client packages the SQLite runtime only for the read-only **Impor
 
 There is no TechBench web server, public API, or container. V2 includes one small internal Windows service for organization-wide WHD reads and Sage customer synchronization.
 
-The service host is installed or repaired by the administrator-only, self-contained `TechBenchServerSetup.exe` and receives the self-contained `TechBench.ServerManager.exe`. The Start Menu shortcut targets the Manager executable directly and Windows requests elevation from both manifests; users do not extract packages or run commands. The Manager controls the fixed TechBench service, SQL connection configuration, organization-wide WHD/Sage/FireDrill configuration and manual requests, machine-protected external-system secrets, and verified service updates while preserving SQL-owned configuration and the existing Windows service identity. It minimizes to the notification area and is an operations tool, not an application server or a general workstation-settings editor.
+The service host is installed or repaired by the administrator-only, self-contained `TechBenchServerSetup.exe` and receives the self-contained `TechBench.ServerManager.exe`. The Start Menu shortcut targets the Manager executable directly and Windows requests elevation from both manifests; users do not extract packages or run commands. The Manager controls the fixed TechBench service, SQL connection configuration, organization-wide WHD/Sage/Credentials configuration and manual requests, machine-protected external-system secrets, and verified service updates while preserving SQL-owned configuration and the existing Windows service identity. It minimizes to the notification area and is an operations tool, not an application server or a general workstation-settings editor.
 
 ~~~text
 WHD
@@ -47,9 +47,9 @@ Sage 50 customer data
     -> 32-bit System DSN and isolated x86 ODBC worker
     -> the same TechBench Sync Service
     -> approved tb_service stored procedures over encrypted TDS
-Password-encrypted FireDrill.xlsx on the internal file share
+Password-encrypted Credentials workbook on the internal file share
     -> read-only daily import by the same TechBench Sync Service
-    -> encrypted credential columns and audited reveal/copy procedures
+    -> encrypted credential columns and explicit reveal procedures
     -> TechBench database, schema version 8
 
 TechBench V2 WPF clients (x86)
@@ -62,7 +62,7 @@ The service performs the initial full organization ticket import, five-minute ov
 
 Sage customer synchronization is manual-only. A TechBench Admin queues it from Server Manager, the Windows service runs the isolated 32-bit ODBC reader, and SQL Server validates every returned row before atomically applying the customer snapshot. Empty, malformed, over-length, or duplicate-ID snapshots change no customer data. If an established snapshot would remove at least 10 and at least 25 percent of existing Sage mappings, SQL Server rejects it and Server Manager exposes a separate Admin confirmation action showing the proposed counts. The approval references that rejected request and is accepted only when the rerun has exactly the same read, existing, and stale counts; a changed rerun is blocked for fresh review. The server Sage password is machine-protected on the service host. Personal Sage desktop time-ticket posting remains workstation-side and continues to use each technician's own protected credential and local Sage preferences.
 
-FireDrill synchronization is server-owned and defaults to 4:00 AM server local time. A TechBench Admin enters the workbook UNC path only in Server Manager; no organization-specific location is embedded in the application or deployment package, and ordinary clients do not receive the saved path. The service opens the configured workbook with read sharing, so another employee may keep it open for editing. It copies one stable snapshot into memory, opens the first visible worksheet with the server-local DPAPI-protected workbook password, validates the exact header contract, and atomically encrypts the values in SQL Server. If the file changes during the read, is temporarily inaccessible while saving, has a wrong password, or contains malformed/duplicate data, the current SQL snapshot is left intact. Every TechBench user may search/reveal/copy; only Admins can configure or manually sync it, and every reveal/copy is audited.
+Credentials synchronization is server-owned and defaults to 4:00 AM server local time. A TechBench Admin enters the workbook UNC path only in Server Manager; no organization-specific location is embedded in the application or deployment package, and ordinary clients do not receive the saved path. The service opens the configured workbook with read sharing, so another employee may keep it open for editing. It copies one stable snapshot into memory, opens the first visible worksheet with the server-local DPAPI-protected workbook password, validates the exact header contract, and atomically encrypts the values in SQL Server. If the file changes during the read, is temporarily inaccessible while saving, has a wrong password, or contains malformed/duplicate data, the current SQL snapshot is left intact. Every TechBench user may search, reveal, and copy; only Admins can configure or manually sync it.
 
 The V2 client uses short-lived pooled connections and stored procedures. It does not hold a database transaction open while calling WHD or Sage.
 
@@ -82,7 +82,7 @@ The prepared CSRI mapping is:
 
 The database derives the caller's durable owner identity from the Windows SID. Stored procedures enforce owner and role checks, and a SQL Server row-level-security policy applies the WHD technician/group assignment boundary to every ticket-table access path. Hiding or disabling a WPF control is only a user-interface convenience and is not the authorization boundary.
 
-Only members of `CSRI\TechBench_Admins` may change organization-wide configuration or manually queue WHD, Sage, or FireDrill synchronization. Only the dedicated service principal can claim those jobs and apply organization-wide snapshots. All authenticated TechBench users may search and explicitly reveal/copy the shared FireDrill credentials; ordinary users can otherwise read their mapped direct/group WHD tickets and the resulting shared catalogs while managing their own work, notes, drafts, personal posting credentials, and user-specific identifiers.
+Only members of `CSRI\TechBench_Admins` may change organization-wide configuration or manually queue WHD, Sage, or Credentials synchronization. Only the dedicated service principal can claim those jobs and apply organization-wide snapshots. All authenticated TechBench users may search and explicitly reveal/copy the shared credentials; ordinary users can otherwise read their mapped direct/group WHD tickets and the resulting shared catalogs while managing their own work, notes, drafts, personal posting credentials, and user-specific identifiers.
 
 Settings does not provide a second manual Sage customer-mapping editor. Administrators manage customer matching in the dedicated Client Matching workspace so there is one shared, audited workflow.
 
@@ -133,7 +133,7 @@ Application Name=TechBench V2;
 
 No SQL username, `sa` password, or other credential belongs in the client connection configuration.
 
-The desktop application and Server Manager check schema compatibility and refuse an incompatible deployment. Version `0.5.10` requires database schema version `8`, including the encrypted FireDrill storage, service-only import contract, user reveal/copy procedures, and Admin-only configuration/request boundary. If the database is newer than the client, the connection screen checks the public release channel and offers to install a compatible client before any workspace connection is attempted.
+The desktop application and Server Manager check schema compatibility and refuse an incompatible deployment. Version `0.5.10` requires database schema version `8`, including encrypted Credentials storage, the service-only import contract, user reveal procedures, and the Admin-only configuration/request boundary. If the database is newer than the client, the connection screen checks the public release channel and offers to install a compatible client before any workspace connection is attempted.
 
 ### Coordinated 0.5.10 upgrade
 
@@ -143,7 +143,7 @@ The database and client must be upgraded as one planned cutover:
 2. Stop the existing V2 clients and sync service, run the complete schema-version-8 standalone deployment, and confirm all verification output passes. If the Results grid reports a newly generated database-master-key recovery password, store it in the protected administrative password vault before closing SSMS.
 3. Run the 0.5.10 `TechBenchServerSetup.exe` as Administrator. It installs or repairs the x64 TechBench Sync Service under `CSRI\TechBench_Sync`, preserves existing machine-protected secrets, restores the required service and Manager read-and-execute ACLs, and installs the compiled Manager and direct EXE Start Menu shortcut.
 4. On the service host, create the 32-bit Sage **System DSN**, grant the service identity the required Sage read access, and provision the separate machine-protected Sage password.
-5. Grant `CSRI\TechBench_Sync` read access to both the FireDrill share and workbook. In Server Manager, open **FireDrill**, enter the UNC path and confirm the 4:00 AM schedule, select **Save settings**, enter the workbook open password under **Workbook open password**, select **Save / Rotate**, then select **Sync now**. Install the 0.5.10 client on workstations.
+5. Grant `CSRI\TechBench_Sync` read access to both the Credentials share and workbook. In Server Manager, open **Credentials**, enter the UNC path and confirm the 4:00 AM schedule, select **Save settings**, enter the workbook open password under **Workbook open password**, select **Save / Rotate**, then select **Sync now**. Install the 0.5.10 client on workstations.
 6. Test with at least one ordinary domain user and one TechBench administrator. Confirm the initial WHD full sync, a later automatic delta, a manually requested Sage customer sync, malformed/empty snapshot rejection, the explicit large-removal confirmation path, service health, and direct/group ticket visibility.
 7. Verify ordinary users cannot queue either server job or change shared configuration. Verify an Admin can open a read-only preview, cannot write through it, and cannot see another user's Personal Note or editor draft.
 8. Verify shared clients, tickets, canonical customer matching, aliases, tags, templates, Common Links, work entries, Personal Note privacy, drafts, posting coordination, automatic refresh, and optimistic-concurrency conflicts.

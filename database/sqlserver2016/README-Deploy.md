@@ -5,7 +5,7 @@ WPF client and the dedicated TechBench sync service. Both use Windows Integrated
 Authentication; the service has a separate least-privilege database role.
 
 TechBench V2 `0.5.10` requires schema version `8`, including the server-owned
-WHD/Sage/FireDrill synchronization contracts, encrypted FireDrill credential
+WHD/Sage/Credentials synchronization contracts and encrypted credential
 storage, restricted Admin read-only user preview, administrator-only shared-
 configuration boundary, and owner-scoped V1 import contract in this package.
 
@@ -52,19 +52,19 @@ do not need membership in both AD groups.
 
 The TechBench service uses the separate `CSRI\TechBench_Sync` AD account, which is
 mapped only to `tb_role_sync_service`. It is not an application Admin and has
-execution rights only for the leased `tb_service` WHD, Sage, and FireDrill contracts. The prepared
+execution rights only for the leased `tb_service` WHD, Sage, and Credentials contracts. The prepared
 CSRI deployment maps that service account directly; no same-named AD group is
 required. Do not place the service account in either TechBench application
 group.
 
-Organization-wide configuration and manual WHD/Sage/FireDrill synchronization requests require
+Organization-wide configuration and manual WHD/Sage/Credentials synchronization requests require
 the effective `tb_role_admin` role. `tb_role_sync_operator` is retained for upgrade
 compatibility and synchronization-history inspection; membership in that role
 alone does not authorize a shared synchronization run. Ordinary users can read
 shared catalogs but cannot change matching or aliases, Common Links, note
 templates, organization defaults, the WHD automatic-sync schedule, or snapshot
 state. Every authenticated TechBench user may execute only the approved
-FireDrill search, explicit reveal, and copy-audit procedures. All encrypted
+Credentials search and explicit reveal procedures. All encrypted
 credential tables and SQL encryption keys remain inaccessible directly.
 
 Application groups receive stored-procedure execution rights only. They are not

@@ -950,7 +950,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Client List" => "Showing synced/imported clients",
             "Ticket List" => "Showing my assigned and group non-closed tickets",
             "Common Links" => "Showing commonly used websites",
-            "Client Credentials" => "Showing synchronized FireDrill client credentials",
+            "Client Credentials" => "Showing synchronized client credentials",
             _ => $"Showing {section}"
         };
     }

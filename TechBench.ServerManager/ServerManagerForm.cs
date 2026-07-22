@@ -393,11 +393,11 @@ internal sealed class ServerManagerForm : Form
             _fireDrillSecretBox,
             _fireDrillSecretStatus,
             _fireDrillSecret,
-            "FireDrill workbook");
+            "credentials workbook");
         var settings = Group("Read-only workbook synchronization", 320);
         var layout = Grid(2, 7);
         _fireDrillPath.PlaceholderText = @"\\server\share\folder\workbook.xlsx";
-        _fireDrillPath.AccessibleDescription = "Admin-only UNC path to the password-protected FireDrill workbook.";
+        _fireDrillPath.AccessibleDescription = "Admin-only UNC path to the password-protected credentials workbook.";
         layout.Controls.Add(Label("Workbook UNC path (Admin-only)"), 0, 0); layout.Controls.Add(_fireDrillPath, 1, 0);
         layout.Controls.Add(_fireDrillDaily, 1, 1);
         layout.Controls.Add(Label("Daily time (server local time)"), 0, 2); layout.Controls.Add(_fireDrillTime, 1, 2);
@@ -410,12 +410,12 @@ internal sealed class ServerManagerForm : Form
         {
             Text = "The service opens the encrypted workbook read-only, including while another user has it open for editing. " +
                    "The path is stored as an Admin-only server setting and can be changed here if the workbook moves. " +
-                   "Grant the TechBench service identity read access to both the share and file. Password values are encrypted in SQL Server and reveals are audited.",
+                   "Grant the TechBench service identity read access to both the share and file. Password values are encrypted in SQL Server.",
             AutoSize = true, MaximumSize = new Size(900, 0), ForeColor = Color.DimGray, Margin = new Padding(3, 16, 3, 3)
         };
         layout.Controls.Add(note, 0, 5); layout.SetColumnSpan(note, 2);
         settings.Controls.Add(layout);
-        return BuildStackedTab("FireDrill", credential, settings);
+        return BuildStackedTab("Credentials", credential, settings);
     }
 
     private void AddSecretRow(TableLayoutPanel layout, int row, string label, TextBox box, Label status, ProtectedSecretStore store, string name)
@@ -607,11 +607,11 @@ internal sealed class ServerManagerForm : Form
 
     private async Task SaveFireDrillAsync(bool requestSync)
     {
-        await RunAsync(requestSync ? "Saving FireDrill settings and requesting synchronization..." : "Saving FireDrill settings...", async () =>
+        await RunAsync(requestSync ? "Saving Credentials settings and requesting synchronization..." : "Saving Credentials settings...", async () =>
         {
             var path = _fireDrillPath.Text.Trim();
             if (!path.StartsWith(@"\\", StringComparison.Ordinal) || !path.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Enter the complete UNC path to the FireDrill .xlsx workbook.");
+                throw new InvalidOperationException("Enter the complete UNC path to the credentials .xlsx workbook.");
             var settings = new Dictionary<string, string>
             {
                 ["FireDrill.SourcePath"] = path,
@@ -619,11 +619,11 @@ internal sealed class ServerManagerForm : Form
                 ["FireDrill.DailySyncTime"] = _fireDrillTime.Value.ToString("HH:mm")
             };
             await Task.Run(() => _repository.SaveSettings(settings, _configuration?.RowVersions ?? new Dictionary<string, byte[]>()));
-            AddLog("Shared FireDrill configuration saved.");
+            AddLog("Shared Credentials configuration saved.");
             if (requestSync)
             {
                 var receipt = await Task.Run(_repository.RequestFireDrillSync);
-                AddLog("FireDrill sync request: " + receipt.Status);
+                AddLog("Credentials sync request: " + receipt.Status);
                 await MonitorFireDrillSyncAsync(receipt.RequestId);
             }
             else
@@ -648,7 +648,7 @@ internal sealed class ServerManagerForm : Form
             if (status.RequestId == requestId &&
                 !status.Status.Equals(previousStatus, StringComparison.OrdinalIgnoreCase))
             {
-                AddLog($"FireDrill synchronization: {status.Status}.");
+                AddLog($"Credentials synchronization: {status.Status}.");
                 previousStatus = status.Status;
             }
 
@@ -656,7 +656,7 @@ internal sealed class ServerManagerForm : Form
                 status.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase))
             {
                 AddLog(string.IsNullOrWhiteSpace(status.Message)
-                    ? "FireDrill synchronization completed."
+                    ? "Credentials synchronization completed."
                     : status.Message);
                 return;
             }
@@ -675,7 +675,7 @@ internal sealed class ServerManagerForm : Form
             {
                 var service = await Task.Run(_service.GetDetails);
                 var warning = service.Installed && service.Status.Equals("Running", StringComparison.OrdinalIgnoreCase)
-                    ? $"The request is still queued. The running Sync Service ({service.Version}) is not claiming FireDrill work. Restart it from the Service tab; if it remains queued, install the current server package."
+                    ? $"The request is still queued. The running Sync Service ({service.Version}) is not claiming Credentials work. Restart it from the Service tab; if it remains queued, install the current server package."
                     : $"The request is still queued because the TechBench Sync Service is {service.Status}. Start it from the Service tab.";
                 _fireDrillSyncStatus.Text += "\r\n" + warning;
                 AddLog("WARNING: " + warning);
@@ -685,7 +685,7 @@ internal sealed class ServerManagerForm : Form
             await Task.Delay(TimeSpan.FromSeconds(2));
         }
 
-        const string timeout = "FireDrill synchronization is still running. It will continue on the server; use Refresh to see the final result.";
+        const string timeout = "Credentials synchronization is still running. It will continue on the server; use Refresh to see the final result.";
         _fireDrillSyncStatus.Text += "\r\n" + timeout;
         AddLog(timeout);
     }

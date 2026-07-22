@@ -72,14 +72,14 @@ public sealed partial class MainWindowViewModel
             ? FireDrillCredentials.FirstOrDefault(item => item.CredentialId == selectedId.Value)
             : null;
         OnPropertyChanged(nameof(HasFireDrillCredentials));
-        StatusMessage = $"Showing {FireDrillCredentials.Count} FireDrill client credential record(s).";
+        StatusMessage = $"Showing {FireDrillCredentials.Count} client credential record(s).";
     }
 
     private void RevealFireDrillCredential()
     {
         if (SelectedFireDrillCredential is null || !CanAccessFireDrill) return;
         RevealedFireDrillCredential = _repository.RevealFireDrillCredential(SelectedFireDrillCredential.CredentialId)
-            ?? throw new InvalidOperationException("The selected FireDrill credential is no longer available.");
+            ?? throw new InvalidOperationException("The selected credential is no longer available.");
         FireDrillRevealedFields.Clear();
         FireDrillRevealedFields.Add(new("Admin", "Admin", RevealedFireDrillCredential.Admin));
         FireDrillRevealedFields.Add(new("csriadmin", "CsriAdmin", RevealedFireDrillCredential.CsriAdmin));
@@ -89,7 +89,7 @@ public sealed partial class MainWindowViewModel
         FireDrillRevealedFields.Add(new("AD Auth User", "AdAuthUser", RevealedFireDrillCredential.AdAuthUser));
         FireDrillRevealedFields.Add(new("AD Password", "AdPassword", RevealedFireDrillCredential.AdPassword));
         FireDrillRevealedFields.Add(new("RustPW", "RustPassword", RevealedFireDrillCredential.RustPassword));
-        StatusMessage = $"Revealed credentials for {RevealedFireDrillCredential.ClientName}; access was recorded in the SQL audit trail.";
+        StatusMessage = $"Revealed credentials for {RevealedFireDrillCredential.ClientName}.";
     }
 
     private void CopyFireDrillField(object? parameter)
@@ -112,9 +112,8 @@ public sealed partial class MainWindowViewModel
             StatusMessage = "That credential field is blank.";
             return;
         }
-        _repository.AuditFireDrillCredentialCopy(RevealedFireDrillCredential.CredentialId, field);
         System.Windows.Clipboard.SetText(value);
-        StatusMessage = $"Copied {field} for {RevealedFireDrillCredential.ClientName}; the copy was recorded in the SQL audit trail.";
+        StatusMessage = $"Copied {field} for {RevealedFireDrillCredential.ClientName}.";
     }
 
     private void ClearRevealedFireDrillCredential()

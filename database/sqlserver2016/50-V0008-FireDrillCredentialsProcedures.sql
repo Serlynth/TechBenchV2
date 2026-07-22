@@ -81,7 +81,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     IF USER_NAME() = N'tb_preview_reader'
-        THROW 52000, N'FireDrill credentials are unavailable in Admin user-preview mode.', 1;
+        THROW 52000, N'Credentials are unavailable in Admin user-preview mode.', 1;
 
     DECLARE @Sid varbinary(85), @Login nvarchar(256), @Display nvarchar(160),
             @Tech bit, @Manager bit, @Admin bit, @Sync bit;
@@ -110,10 +110,10 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
     IF SESSION_CONTEXT(N'TechBench.PreviewSessionId') IS NOT NULL
-        THROW 52001, N'FireDrill credentials are unavailable in Admin user-preview mode.', 1;
+        THROW 52001, N'Credentials are unavailable in Admin user-preview mode.', 1;
 
     IF NOT EXISTS (SELECT 1 FROM [tb_data].[FireDrillCredentials] WHERE [CredentialId] = @CredentialId AND [IsCurrent] = 1)
-        THROW 52002, N'The FireDrill credential was not found or is no longer current.', 1;
+        THROW 52002, N'The credential was not found or is no longer current.', 1;
 
     SELECT [CredentialId], [ClientName], [FireboxIp], [Status], [LastSyncedAtUtc],
         CONVERT(nvarchar(max), DecryptByKeyAutoCert(CERT_ID(N'tb_FireDrillCredentialCertificate'),NULL,[AdminEncrypted],1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',[ClientKey]),2))) AS [Admin],
@@ -127,36 +127,11 @@ BEGIN
     FROM [tb_data].[FireDrillCredentials]
     WHERE [CredentialId] = @CredentialId AND [IsCurrent] = 1;
 
-    DECLARE @AuditEntityId nvarchar(120)=CONVERT(nvarchar(120),@CredentialId);
-    EXEC [tb_security].[WriteAuditEvent]
-        @Action=N'FireDrillCredentialRevealed', @EntityType=N'FireDrillCredential',
-        @EntityId=@AuditEntityId, @RequestId=NULL, @DataJson=NULL;
 END;
 GO
 
-CREATE OR ALTER PROCEDURE [tb_app].[AuditFireDrillCredentialCopy]
-    @CredentialId bigint,
-    @FieldName nvarchar(40)
-AS
-BEGIN
-    SET NOCOUNT ON;
-    IF USER_NAME() = N'tb_preview_reader'
-        THROW 52003, N'FireDrill credentials are unavailable in Admin user-preview mode.', 1;
-    IF @FieldName NOT IN (N'Admin', N'CsriAdmin', N'FireboxDbCsri', N'AuthpointUser', N'SslVpnPassword', N'AdAuthUser', N'AdPassword', N'RustPassword')
-        THROW 52004, N'The FireDrill field name is invalid.', 1;
-    IF NOT EXISTS (SELECT 1 FROM [tb_data].[FireDrillCredentials] WHERE [CredentialId] = @CredentialId AND [IsCurrent] = 1)
-        THROW 52005, N'The FireDrill credential was not found or is no longer current.', 1;
-
-    DECLARE @Sid varbinary(85), @Login nvarchar(256), @Display nvarchar(160),
-            @Tech bit, @Manager bit, @Admin bit, @Sync bit;
-    EXEC [tb_security].[EnsureCurrentUser] @Sid OUTPUT, @Login OUTPUT, @Display OUTPUT,
-        @Tech OUTPUT, @Manager OUTPUT, @Admin OUTPUT, @Sync OUTPUT;
-    DECLARE @Json nvarchar(max) = N'{"field":"' + STRING_ESCAPE(@FieldName, 'json') + N'"}';
-    DECLARE @AuditEntityId nvarchar(120)=CONVERT(nvarchar(120),@CredentialId);
-    EXEC [tb_security].[WriteAuditEvent]
-        @Action=N'FireDrillCredentialCopied', @EntityType=N'FireDrillCredential',
-        @EntityId=@AuditEntityId, @RequestId=NULL, @DataJson=@Json;
-END;
+IF OBJECT_ID(N'tb_app.AuditFireDrillCredentialCopy', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AuditFireDrillCredentialCopy];
 GO
 
 CREATE OR ALTER PROCEDURE [tb_app].[AdminRequestFireDrillSync]
@@ -169,14 +144,14 @@ BEGIN
             @Tech bit, @Manager bit, @Admin bit, @Sync bit;
     EXEC [tb_security].[EnsureCurrentUser] @Sid OUTPUT, @Login OUTPUT, @Display OUTPUT,
         @Tech OUTPUT, @Manager OUTPUT, @Admin OUTPUT, @Sync OUTPUT;
-    IF @Admin = 0 THROW 52010, N'Only a TechBench Admin can request FireDrill synchronization.', 1;
+    IF @Admin = 0 THROW 52010, N'Only a TechBench Admin can request Credentials synchronization.', 1;
     IF NOT EXISTS
     (
         SELECT 1 FROM [tb_data].[OrganizationSettings]
         WHERE [SettingKey] = N'FireDrill.SourcePath'
           AND NULLIF(LTRIM(RTRIM([SettingValue])), N'') IS NOT NULL
     )
-        THROW 52011, N'Configure the FireDrill workbook path in Server Manager before requesting synchronization.', 1;
+        THROW 52011, N'Configure the Credentials workbook path in Server Manager before requesting synchronization.', 1;
     SET @RequestId = COALESCE(@RequestId, NEWID());
 
     BEGIN TRANSACTION;
@@ -291,7 +266,7 @@ BEGIN
     UPDATE [tb_sync].[FireDrillSyncLeases]
     SET [ExpiresAtUtc]=DATEADD(second,@LeaseSeconds,SYSUTCDATETIME())
     WHERE [RequestId]=@RequestId AND [LeaseId]=@LeaseId AND [WorkerId]=@WorkerId AND [ExpiresAtUtc]>SYSUTCDATETIME();
-    IF @@ROWCOUNT<>1 THROW 52022, N'The FireDrill synchronization lease is no longer valid.', 1;
+    IF @@ROWCOUNT<>1 THROW 52022, N'The Credentials synchronization lease is no longer valid.', 1;
 END;
 GO
 
@@ -307,7 +282,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
-    IF ISJSON(@RowsJson)<>1 THROW 52030, N'The FireDrill snapshot is not valid JSON.', 1;
+    IF ISJSON(@RowsJson)<>1 THROW 52030, N'The Credentials snapshot is not valid JSON.', 1;
 
     CREATE TABLE #Rows
     (
@@ -333,8 +308,8 @@ BEGIN
         [AdAuthUser] nvarchar(3000) N'$.adAuthUser', [AdPassword] nvarchar(3000) N'$.adPassword', [RustPassword] nvarchar(3000) N'$.rustPassword'
     );
 
-    IF NOT EXISTS(SELECT 1 FROM #Rows) THROW 52031, N'The FireDrill snapshot contained no client rows; existing data was not changed.', 1;
-    IF EXISTS(SELECT 1 FROM #Rows WHERE LEN([ClientKey])=0) THROW 52032, N'A FireDrill row has no client name.', 1;
+    IF NOT EXISTS(SELECT 1 FROM #Rows) THROW 52031, N'The Credentials snapshot contained no client rows; existing data was not changed.', 1;
+    IF EXISTS(SELECT 1 FROM #Rows WHERE LEN([ClientKey])=0) THROW 52032, N'A Credentials row has no client name.', 1;
 
     UPDATE #Rows SET [RowHash]=HASHBYTES('SHA2_256',
         HASHBYTES('SHA2_256',CONVERT(varbinary(max),ISNULL([ClientName],N'<NULL>'))) +
@@ -356,7 +331,7 @@ BEGIN
     (
         SELECT 1 FROM [tb_sync].[FireDrillSyncLeases]
         WHERE [RequestId]=@RequestId AND [LeaseId]=@LeaseId AND [WorkerId]=@WorkerId AND [ExpiresAtUtc]>SYSUTCDATETIME()
-    ) THROW 52033, N'The FireDrill synchronization lease is no longer valid.', 1;
+    ) THROW 52033, N'The Credentials synchronization lease is no longer valid.', 1;
 
     OPEN SYMMETRIC KEY [tb_FireDrillCredentialKey] DECRYPTION BY CERTIFICATE [tb_FireDrillCredentialCertificate];
 
@@ -421,7 +396,7 @@ BEGIN
     BEGIN TRY
     BEGIN TRANSACTION;
     IF NOT EXISTS(SELECT 1 FROM [tb_sync].[FireDrillSyncLeases] WHERE [RequestId]=@RequestId AND [LeaseId]=@LeaseId AND [WorkerId]=@WorkerId)
-        THROW 52040, N'The FireDrill synchronization lease is no longer valid.', 1;
+        THROW 52040, N'The Credentials synchronization lease is no longer valid.', 1;
     UPDATE [tb_sync].[FireDrillSyncRequests]
     SET [Status]=CASE WHEN @Succeeded=1 THEN N'Completed' ELSE N'Failed' END,
         [CompletedAtUtc]=SYSUTCDATETIME(), [Message]=LEFT(@Message,2000)
@@ -443,5 +418,5 @@ BEGIN
 END;
 GO
 
-PRINT N'TechBench V0008 FireDrill credential procedures created.';
+PRINT N'TechBench V0008 Credentials procedures created.';
 GO

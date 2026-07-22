@@ -43,13 +43,4 @@ public sealed partial class SqlServerTechBenchRepository
             CancellationToken.None).GetAwaiter().GetResult();
     }
 
-    public void AuditFireDrillCredentialCopy(long credentialId, string fieldName) =>
-        ExecuteNonQueryAsync(
-            Procedures.AuditFireDrillCredentialCopy,
-            command =>
-            {
-                AddBigInt(command, "@CredentialId", credentialId);
-                AddRequiredText(command, "@FieldName", 40, fieldName);
-            },
-            CancellationToken.None).GetAwaiter().GetResult();
 }

@@ -6,11 +6,10 @@ GO
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
-/* Every authenticated TechBench user may search, explicitly reveal, and copy.
-   The procedures own encryption-key access and write an audit trail. */
+/* Every authenticated TechBench user may search and explicitly reveal.
+   The procedures own encryption-key access. */
 GRANT EXECUTE ON OBJECT::[tb_app].[SearchFireDrillCredentials] TO [tb_role_user];
 GRANT EXECUTE ON OBJECT::[tb_app].[RevealFireDrillCredential] TO [tb_role_user];
-GRANT EXECUTE ON OBJECT::[tb_app].[AuditFireDrillCredentialCopy] TO [tb_role_user];
 
 GRANT EXECUTE ON OBJECT::[tb_app].[AdminRequestFireDrillSync] TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[GetFireDrillSyncStatus] TO [tb_role_admin];
@@ -23,9 +22,8 @@ GRANT EXECUTE ON OBJECT::[tb_service].[CompleteFireDrillSyncWork] TO [tb_role_sy
 
 REVOKE EXECUTE ON OBJECT::[tb_app].[SearchFireDrillCredentials] FROM [tb_preview_reader];
 REVOKE EXECUTE ON OBJECT::[tb_app].[RevealFireDrillCredential] FROM [tb_preview_reader];
-REVOKE EXECUTE ON OBJECT::[tb_app].[AuditFireDrillCredentialCopy] FROM [tb_preview_reader];
 REVOKE EXECUTE ON OBJECT::[tb_app].[AdminRequestFireDrillSync] FROM [tb_preview_reader];
 REVOKE EXECUTE ON OBJECT::[tb_app].[GetFireDrillSyncStatus] FROM [tb_preview_reader];
 
-PRINT N'TechBench V0008 FireDrill credential grants applied.';
+PRINT N'TechBench V0008 Credentials grants applied.';
 GO

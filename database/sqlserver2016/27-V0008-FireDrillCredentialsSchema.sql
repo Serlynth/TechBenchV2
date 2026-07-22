@@ -14,7 +14,7 @@ IF NOT EXISTS
       AND [SchemaVersion] = 7
 )
 BEGIN
-    RAISERROR(N'V0007 must be installed before FireDrillCredentials.0008.', 16, 1);
+    RAISERROR(N'V0007 must be installed before Credentials schema version 8.', 16, 1);
     RETURN;
 END;
 
@@ -29,7 +29,7 @@ BEGIN TRY
             N'CREATE MASTER KEY ENCRYPTION BY PASSWORD = N''' + REPLACE(@MasterKeyPassword, N'''', N'''''') + N''';';
         EXEC sys.sp_executesql @CreateMasterKeySql;
 
-        PRINT N'IMPORTANT: A database master key was created for FireDrill credential encryption.';
+        PRINT N'IMPORTANT: A database master key was created for Credentials encryption.';
         SELECT @MasterKeyPassword AS [DatabaseMasterKeyRecoveryPassword];
         PRINT N'Store the recovery password shown in the Results grid in your protected administrative password vault.';
     END;
@@ -154,5 +154,5 @@ BEGIN CATCH
     THROW;
 END CATCH;
 
-PRINT N'SqlServer2016.FireDrillCredentials.0008 installed.';
+PRINT N'SqlServer2016.Credentials.0008 installed.';
 GO

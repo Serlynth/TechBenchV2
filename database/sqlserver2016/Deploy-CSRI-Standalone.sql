@@ -2713,7 +2713,7 @@ IF NOT EXISTS
       AND [SchemaVersion] = 7
 )
 BEGIN
-    RAISERROR(N'V0007 must be installed before FireDrillCredentials.0008.', 16, 1);
+    RAISERROR(N'V0007 must be installed before Credentials schema version 8.', 16, 1);
     RETURN;
 END;
 
@@ -2728,7 +2728,7 @@ BEGIN TRY
             N'CREATE MASTER KEY ENCRYPTION BY PASSWORD = N''' + REPLACE(@MasterKeyPassword, N'''', N'''''') + N''';';
         EXEC sys.sp_executesql @CreateMasterKeySql;
 
-        PRINT N'IMPORTANT: A database master key was created for FireDrill credential encryption.';
+        PRINT N'IMPORTANT: A database master key was created for Credentials encryption.';
         SELECT @MasterKeyPassword AS [DatabaseMasterKeyRecoveryPassword];
         PRINT N'Store the recovery password shown in the Results grid in your protected administrative password vault.';
     END;
@@ -2853,7 +2853,7 @@ BEGIN CATCH
     THROW;
 END CATCH;
 
-PRINT N'SqlServer2016.FireDrillCredentials.0008 installed.';
+PRINT N'SqlServer2016.Credentials.0008 installed.';
 GO
 
 -- ============================================================================
@@ -19130,7 +19130,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     IF USER_NAME() = N'tb_preview_reader'
-        THROW 52000, N'FireDrill credentials are unavailable in Admin user-preview mode.', 1;
+        THROW 52000, N'Credentials are unavailable in Admin user-preview mode.', 1;
 
     DECLARE @Sid varbinary(85), @Login nvarchar(256), @Display nvarchar(160),
             @Tech bit, @Manager bit, @Admin bit, @Sync bit;
@@ -19159,10 +19159,10 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
     IF SESSION_CONTEXT(N'TechBench.PreviewSessionId') IS NOT NULL
-        THROW 52001, N'FireDrill credentials are unavailable in Admin user-preview mode.', 1;
+        THROW 52001, N'Credentials are unavailable in Admin user-preview mode.', 1;
 
     IF NOT EXISTS (SELECT 1 FROM [tb_data].[FireDrillCredentials] WHERE [CredentialId] = @CredentialId AND [IsCurrent] = 1)
-        THROW 52002, N'The FireDrill credential was not found or is no longer current.', 1;
+        THROW 52002, N'The credential was not found or is no longer current.', 1;
 
     SELECT [CredentialId], [ClientName], [FireboxIp], [Status], [LastSyncedAtUtc],
         CONVERT(nvarchar(max), DecryptByKeyAutoCert(CERT_ID(N'tb_FireDrillCredentialCertificate'),NULL,[AdminEncrypted],1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',[ClientKey]),2))) AS [Admin],
@@ -19176,36 +19176,11 @@ BEGIN
     FROM [tb_data].[FireDrillCredentials]
     WHERE [CredentialId] = @CredentialId AND [IsCurrent] = 1;
 
-    DECLARE @AuditEntityId nvarchar(120)=CONVERT(nvarchar(120),@CredentialId);
-    EXEC [tb_security].[WriteAuditEvent]
-        @Action=N'FireDrillCredentialRevealed', @EntityType=N'FireDrillCredential',
-        @EntityId=@AuditEntityId, @RequestId=NULL, @DataJson=NULL;
 END;
 GO
 
-CREATE OR ALTER PROCEDURE [tb_app].[AuditFireDrillCredentialCopy]
-    @CredentialId bigint,
-    @FieldName nvarchar(40)
-AS
-BEGIN
-    SET NOCOUNT ON;
-    IF USER_NAME() = N'tb_preview_reader'
-        THROW 52003, N'FireDrill credentials are unavailable in Admin user-preview mode.', 1;
-    IF @FieldName NOT IN (N'Admin', N'CsriAdmin', N'FireboxDbCsri', N'AuthpointUser', N'SslVpnPassword', N'AdAuthUser', N'AdPassword', N'RustPassword')
-        THROW 52004, N'The FireDrill field name is invalid.', 1;
-    IF NOT EXISTS (SELECT 1 FROM [tb_data].[FireDrillCredentials] WHERE [CredentialId] = @CredentialId AND [IsCurrent] = 1)
-        THROW 52005, N'The FireDrill credential was not found or is no longer current.', 1;
-
-    DECLARE @Sid varbinary(85), @Login nvarchar(256), @Display nvarchar(160),
-            @Tech bit, @Manager bit, @Admin bit, @Sync bit;
-    EXEC [tb_security].[EnsureCurrentUser] @Sid OUTPUT, @Login OUTPUT, @Display OUTPUT,
-        @Tech OUTPUT, @Manager OUTPUT, @Admin OUTPUT, @Sync OUTPUT;
-    DECLARE @Json nvarchar(max) = N'{"field":"' + STRING_ESCAPE(@FieldName, 'json') + N'"}';
-    DECLARE @AuditEntityId nvarchar(120)=CONVERT(nvarchar(120),@CredentialId);
-    EXEC [tb_security].[WriteAuditEvent]
-        @Action=N'FireDrillCredentialCopied', @EntityType=N'FireDrillCredential',
-        @EntityId=@AuditEntityId, @RequestId=NULL, @DataJson=@Json;
-END;
+IF OBJECT_ID(N'tb_app.AuditFireDrillCredentialCopy', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AuditFireDrillCredentialCopy];
 GO
 
 CREATE OR ALTER PROCEDURE [tb_app].[AdminRequestFireDrillSync]
@@ -19218,14 +19193,14 @@ BEGIN
             @Tech bit, @Manager bit, @Admin bit, @Sync bit;
     EXEC [tb_security].[EnsureCurrentUser] @Sid OUTPUT, @Login OUTPUT, @Display OUTPUT,
         @Tech OUTPUT, @Manager OUTPUT, @Admin OUTPUT, @Sync OUTPUT;
-    IF @Admin = 0 THROW 52010, N'Only a TechBench Admin can request FireDrill synchronization.', 1;
+    IF @Admin = 0 THROW 52010, N'Only a TechBench Admin can request Credentials synchronization.', 1;
     IF NOT EXISTS
     (
         SELECT 1 FROM [tb_data].[OrganizationSettings]
         WHERE [SettingKey] = N'FireDrill.SourcePath'
           AND NULLIF(LTRIM(RTRIM([SettingValue])), N'') IS NOT NULL
     )
-        THROW 52011, N'Configure the FireDrill workbook path in Server Manager before requesting synchronization.', 1;
+        THROW 52011, N'Configure the Credentials workbook path in Server Manager before requesting synchronization.', 1;
     SET @RequestId = COALESCE(@RequestId, NEWID());
 
     BEGIN TRANSACTION;
@@ -19340,7 +19315,7 @@ BEGIN
     UPDATE [tb_sync].[FireDrillSyncLeases]
     SET [ExpiresAtUtc]=DATEADD(second,@LeaseSeconds,SYSUTCDATETIME())
     WHERE [RequestId]=@RequestId AND [LeaseId]=@LeaseId AND [WorkerId]=@WorkerId AND [ExpiresAtUtc]>SYSUTCDATETIME();
-    IF @@ROWCOUNT<>1 THROW 52022, N'The FireDrill synchronization lease is no longer valid.', 1;
+    IF @@ROWCOUNT<>1 THROW 52022, N'The Credentials synchronization lease is no longer valid.', 1;
 END;
 GO
 
@@ -19356,7 +19331,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
-    IF ISJSON(@RowsJson)<>1 THROW 52030, N'The FireDrill snapshot is not valid JSON.', 1;
+    IF ISJSON(@RowsJson)<>1 THROW 52030, N'The Credentials snapshot is not valid JSON.', 1;
 
     CREATE TABLE #Rows
     (
@@ -19382,8 +19357,8 @@ BEGIN
         [AdAuthUser] nvarchar(3000) N'$.adAuthUser', [AdPassword] nvarchar(3000) N'$.adPassword', [RustPassword] nvarchar(3000) N'$.rustPassword'
     );
 
-    IF NOT EXISTS(SELECT 1 FROM #Rows) THROW 52031, N'The FireDrill snapshot contained no client rows; existing data was not changed.', 1;
-    IF EXISTS(SELECT 1 FROM #Rows WHERE LEN([ClientKey])=0) THROW 52032, N'A FireDrill row has no client name.', 1;
+    IF NOT EXISTS(SELECT 1 FROM #Rows) THROW 52031, N'The Credentials snapshot contained no client rows; existing data was not changed.', 1;
+    IF EXISTS(SELECT 1 FROM #Rows WHERE LEN([ClientKey])=0) THROW 52032, N'A Credentials row has no client name.', 1;
 
     UPDATE #Rows SET [RowHash]=HASHBYTES('SHA2_256',
         HASHBYTES('SHA2_256',CONVERT(varbinary(max),ISNULL([ClientName],N'<NULL>'))) +
@@ -19405,7 +19380,7 @@ BEGIN
     (
         SELECT 1 FROM [tb_sync].[FireDrillSyncLeases]
         WHERE [RequestId]=@RequestId AND [LeaseId]=@LeaseId AND [WorkerId]=@WorkerId AND [ExpiresAtUtc]>SYSUTCDATETIME()
-    ) THROW 52033, N'The FireDrill synchronization lease is no longer valid.', 1;
+    ) THROW 52033, N'The Credentials synchronization lease is no longer valid.', 1;
 
     OPEN SYMMETRIC KEY [tb_FireDrillCredentialKey] DECRYPTION BY CERTIFICATE [tb_FireDrillCredentialCertificate];
 
@@ -19470,7 +19445,7 @@ BEGIN
     BEGIN TRY
     BEGIN TRANSACTION;
     IF NOT EXISTS(SELECT 1 FROM [tb_sync].[FireDrillSyncLeases] WHERE [RequestId]=@RequestId AND [LeaseId]=@LeaseId AND [WorkerId]=@WorkerId)
-        THROW 52040, N'The FireDrill synchronization lease is no longer valid.', 1;
+        THROW 52040, N'The Credentials synchronization lease is no longer valid.', 1;
     UPDATE [tb_sync].[FireDrillSyncRequests]
     SET [Status]=CASE WHEN @Succeeded=1 THEN N'Completed' ELSE N'Failed' END,
         [CompletedAtUtc]=SYSUTCDATETIME(), [Message]=LEFT(@Message,2000)
@@ -19492,7 +19467,7 @@ BEGIN
 END;
 GO
 
-PRINT N'TechBench V0008 FireDrill credential procedures created.';
+PRINT N'TechBench V0008 Credentials procedures created.';
 GO
 
 -- ============================================================================
@@ -20164,11 +20139,10 @@ GO
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
-/* Every authenticated TechBench user may search, explicitly reveal, and copy.
-   The procedures own encryption-key access and write an audit trail. */
+/* Every authenticated TechBench user may search and explicitly reveal.
+   The procedures own encryption-key access. */
 GRANT EXECUTE ON OBJECT::[tb_app].[SearchFireDrillCredentials] TO [tb_role_user];
 GRANT EXECUTE ON OBJECT::[tb_app].[RevealFireDrillCredential] TO [tb_role_user];
-GRANT EXECUTE ON OBJECT::[tb_app].[AuditFireDrillCredentialCopy] TO [tb_role_user];
 
 GRANT EXECUTE ON OBJECT::[tb_app].[AdminRequestFireDrillSync] TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[GetFireDrillSyncStatus] TO [tb_role_admin];
@@ -20181,11 +20155,10 @@ GRANT EXECUTE ON OBJECT::[tb_service].[CompleteFireDrillSyncWork] TO [tb_role_sy
 
 REVOKE EXECUTE ON OBJECT::[tb_app].[SearchFireDrillCredentials] FROM [tb_preview_reader];
 REVOKE EXECUTE ON OBJECT::[tb_app].[RevealFireDrillCredential] FROM [tb_preview_reader];
-REVOKE EXECUTE ON OBJECT::[tb_app].[AuditFireDrillCredentialCopy] FROM [tb_preview_reader];
 REVOKE EXECUTE ON OBJECT::[tb_app].[AdminRequestFireDrillSync] FROM [tb_preview_reader];
 REVOKE EXECUTE ON OBJECT::[tb_app].[GetFireDrillSyncStatus] FROM [tb_preview_reader];
 
-PRINT N'TechBench V0008 FireDrill credential grants applied.';
+PRINT N'TechBench V0008 Credentials grants applied.';
 GO
 
 -- ============================================================================
@@ -25009,7 +24982,7 @@ INSERT INTO @Objects VALUES
  (N'tb_data.FireDrillCredentials',N'U'),(N'tb_sync.FireDrillSyncRequests',N'U'),
  (N'tb_sync.FireDrillSyncLeases',N'U'),(N'tb_sync.FireDrillSyncHealth',N'U'),
  (N'tb_app.SearchFireDrillCredentials',N'P'),(N'tb_app.RevealFireDrillCredential',N'P'),
- (N'tb_app.AuditFireDrillCredentialCopy',N'P'),(N'tb_app.AdminRequestFireDrillSync',N'P'),
+ (N'tb_app.AdminRequestFireDrillSync',N'P'),
  (N'tb_app.GetFireDrillSyncStatus',N'P'),(N'tb_service.GetFireDrillSyncConfiguration',N'P'),
  (N'tb_service.ClaimFireDrillSyncWork',N'P'),(N'tb_service.RenewFireDrillSyncLease',N'P'),
  (N'tb_service.ApplyFireDrillCredentialSnapshot',N'P'),(N'tb_service.CompleteFireDrillSyncWork',N'P');
@@ -25018,21 +24991,24 @@ BEGIN PRINT N'FAIL: one or more V0008 objects are missing.'; SET @FailureCount+=
 
 IF NOT EXISTS(SELECT 1 FROM sys.certificates WHERE [name]=N'tb_FireDrillCredentialCertificate')
    OR NOT EXISTS(SELECT 1 FROM sys.symmetric_keys WHERE [name]=N'tb_FireDrillCredentialKey')
-BEGIN PRINT N'FAIL: FireDrill encryption objects are missing.'; SET @FailureCount+=1; END;
+BEGIN PRINT N'FAIL: Credentials encryption objects are missing.'; SET @FailureCount+=1; END;
+
+IF OBJECT_ID(N'tb_app.AuditFireDrillCredentialCopy',N'P') IS NOT NULL
+BEGIN PRINT N'FAIL: the obsolete Credentials copy-audit procedure still exists.'; SET @FailureCount+=1; END;
 
 DECLARE @GetSettingsDefinition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetSettings'));
 DECLARE @ServiceConfigurationDefinition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'tb_service.GetFireDrillSyncConfiguration'));
 DECLARE @ClaimDefinition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ClaimFireDrillSyncWork'));
 IF CHARINDEX(N'[SettingKey] <> N''FireDrill.SourcePath'' OR @CanReadServerPaths = 1',@GetSettingsDefinition)=0
-BEGIN PRINT N'FAIL: ordinary clients are not blocked from receiving the FireDrill source path.'; SET @FailureCount+=1; END;
+BEGIN PRINT N'FAIL: ordinary clients are not blocked from receiving the Credentials source path.'; SET @FailureCount+=1; END;
 IF CHARINDEX(N'WHERE [SettingKey]=N''FireDrill.SourcePath''), N'''') AS [SourcePath]',@ServiceConfigurationDefinition)=0
-BEGIN PRINT N'FAIL: the FireDrill service configuration does not require an explicitly configured path.'; SET @FailureCount+=1; END;
+BEGIN PRINT N'FAIL: the Credentials service configuration does not require an explicitly configured path.'; SET @FailureCount+=1; END;
 IF CHARINDEX(N'@SourcePath IS NOT NULL',@ClaimDefinition)=0
-BEGIN PRINT N'FAIL: automatic FireDrill synchronization is not gated on a configured path.'; SET @FailureCount+=1; END;
+BEGIN PRINT N'FAIL: automatic Credentials synchronization is not gated on a configured path.'; SET @FailureCount+=1; END;
 
 DECLARE @UserProcedures TABLE([Name] nvarchar(300) PRIMARY KEY);
 INSERT INTO @UserProcedures VALUES
- (N'tb_app.SearchFireDrillCredentials'),(N'tb_app.RevealFireDrillCredential'),(N'tb_app.AuditFireDrillCredentialCopy');
+ (N'tb_app.SearchFireDrillCredentials'),(N'tb_app.RevealFireDrillCredential');
 IF EXISTS
 (
  SELECT 1 FROM @UserProcedures required
@@ -25044,7 +25020,7 @@ IF EXISTS
     AND permission_row.[permission_name]=N'EXECUTE' AND permission_row.[state] IN (N'G',N'W')
  )
 )
-BEGIN PRINT N'FAIL: a FireDrill user procedure grant is missing.'; SET @FailureCount+=1; END;
+BEGIN PRINT N'FAIL: a Credentials user procedure grant is missing.'; SET @FailureCount+=1; END;
 
 IF EXISTS
 (
@@ -25061,15 +25037,15 @@ IF EXISTS
      OR (permission_row.[class]=3 AND permission_row.[major_id] IN (SCHEMA_ID(N'tb_data'),SCHEMA_ID(N'tb_sync')))
    )
 )
-BEGIN PRINT N'FAIL: a FireDrill role has direct data/control permission.'; SET @FailureCount+=1; END;
+BEGIN PRINT N'FAIL: a Credentials role has direct data/control permission.'; SET @FailureCount+=1; END;
 
 IF @FailureCount>0
 BEGIN
-    DECLARE @Message nvarchar(2048)=N'TechBench V0008 FireDrill verification failed with '+CONVERT(nvarchar(20),@FailureCount)+N' issue(s).';
+    DECLARE @Message nvarchar(2048)=N'TechBench V0008 Credentials verification failed with '+CONVERT(nvarchar(20),@FailureCount)+N' issue(s).';
     THROW 50000,@Message,1;
 END;
 
-PRINT N'TechBench V0008 FireDrill credential verification passed.';
+PRINT N'TechBench V0008 Credentials verification passed.';
 GO
 
 -- ============================================================================
