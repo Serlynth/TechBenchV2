@@ -24,7 +24,11 @@ try
         request.Password,
         maxRows: 0,
         includeInactive: false,
-        preserveInvalidRows: true);
+        // Match the established client-side Sage import behavior: records with
+        // no usable ID cannot be synchronized, and a blank display name safely
+        // falls back to the ID. Other malformed data, duplicate IDs, and length
+        // violations remain protected by SQL snapshot validation.
+        preserveInvalidRows: false);
     response = new SageOdbcWorkerResponse(true, Customers: customers);
 }
 catch (Exception ex)
