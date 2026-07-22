@@ -1262,7 +1262,7 @@ public sealed class TechBenchRepository : ITechBenchRepository
         throw new NotSupportedException(
             "V1 import recovery is available only in the SQL Server-backed TechBench V2 client.");
 
-    public void DeleteWorkEntry(int id)
+    public void DeleteWorkEntry(int id, bool confirmMissingWhdTechNote = false)
     {
         using var connection = _connectionFactory.CreateConnection();
         connection.Open();
@@ -1272,7 +1272,9 @@ public sealed class TechBenchRepository : ITechBenchRepository
             throw new InvalidOperationException("Entries posted to Sage are permanently locked and cannot be deleted.");
         }
 
-        if (IsWhdPosted(connection, transaction, id))
+        if (IsWhdPosted(connection, transaction, id)
+            && (!confirmMissingWhdTechNote
+                || !HasVerifiedMissingWhdTechNote(connection, transaction, id)))
         {
             throw new InvalidOperationException("Entries synchronized to WHD cannot be deleted because their exact TechNote tracking must be preserved.");
         }
@@ -1295,6 +1297,38 @@ public sealed class TechBenchRepository : ITechBenchRepository
         }
 
         transaction.Commit();
+    }
+
+    private static bool HasVerifiedMissingWhdTechNote(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        int workEntryId)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT EXISTS
+            (
+                SELECT 1
+                FROM WorkEntries w
+                WHERE w.Id = $id
+                  AND w.WhdPosted = 1
+                  AND w.SagePosted = 0
+                  AND LOWER(COALESCE(w.LastError, '')) LIKE 'whd sync pending:%technote #%was not found.%'
+                  AND EXISTS
+                  (
+                      SELECT 1
+                      FROM PostingLogs p
+                      WHERE p.WorkEntryId = w.Id
+                        AND p.Destination = 'WHD'
+                        AND p.Success = 0
+                        AND UPPER(COALESCE(p.ExternalReference, '')) LIKE 'WHD-TECHNOTE-%'
+                        AND LOWER(COALESCE(p.Message, '')) LIKE '%technote #%was not found.%'
+                  )
+            )
+            """;
+        command.Parameters.AddWithValue("$id", workEntryId);
+        return Convert.ToInt32(command.ExecuteScalar()) == 1;
     }
 
     public IReadOnlyList<WorkEntryLink> GetWorkEntryLinks(int workEntryId)

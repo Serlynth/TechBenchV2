@@ -2021,7 +2021,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var entry = _repository.GetWorkEntry(Editor.Id);
-        if (entry is null || entry.WhdPosted || entry.SagePosted)
+        if (entry is null || entry.SagePosted || (entry.WhdPosted && !entry.HasVerifiedMissingWhdTechNote))
         {
             StatusMessage = entry?.SagePosted == true
                 ? "Entries posted to Sage are permanently locked and cannot be deleted."
@@ -2029,10 +2029,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        var deletingVerifiedMissingWhdNote = entry.HasVerifiedMissingWhdTechNote;
         var confirmed = _dialogService.Confirm(
-            "Delete entry",
-            "Delete this work entry? You can undo this until another entry is deleted.",
-            "Delete",
+            deletingVerifiedMissingWhdNote ? "Delete local entry" : "Delete entry",
+            deletingVerifiedMissingWhdNote
+                ? "TechBench verified that the tracked WHD TechNote no longer exists. Delete this local work entry and its posting history? This does not change WHD. You can undo this until another entry is deleted."
+                : "Delete this work entry? You can undo this until another entry is deleted.",
+            deletingVerifiedMissingWhdNote ? "Delete local entry" : "Delete",
             "Cancel");
         if (!confirmed)
         {
@@ -2041,7 +2044,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _lastDeletedEntry = entry;
         _lastDeletedEntryLinks = _repository.GetWorkEntryLinks(entry.Id).ToArray();
-        _repository.DeleteWorkEntry(Editor.Id);
+        _repository.DeleteWorkEntry(Editor.Id, deletingVerifiedMissingWhdNote);
+        if (deletingVerifiedMissingWhdNote)
+        {
+            _lastDeletedEntry.WhdPosted = false;
+            _lastDeletedEntry.WhdPostedAt = null;
+            _lastDeletedEntry.LastError = null;
+            WorkEntryPostingStatusCalculator.Update(_lastDeletedEntry);
+        }
         RefreshAll();
         NewEntry();
         OnPropertyChanged(nameof(HasUndoDelete));
@@ -2681,9 +2691,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private bool CanDeleteEditorEntry() => CanWrite
         && Editor.Id > 0
-        && !Editor.WhdPosted
         && !Editor.SagePosted
+        && (!Editor.WhdPosted || IsVerifiedMissingWhdTechNote(Editor.LastError))
         && !IsEntryOperationRunning;
+
+    private static bool IsVerifiedMissingWhdTechNote(string? lastError) =>
+        lastError?.StartsWith("WHD sync pending:", StringComparison.OrdinalIgnoreCase) == true
+        && lastError.Contains("TechNote #", StringComparison.OrdinalIgnoreCase)
+        && lastError.Contains("was not found.", StringComparison.OrdinalIgnoreCase);
 
     private bool CanVerifySageSave(object? parameter)
     {

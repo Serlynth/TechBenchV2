@@ -166,7 +166,7 @@ internal sealed class SqlAdminRepository(AppPaths paths)
             var schema = ReadInt(reader, "SchemaVersion");
             var isAdmin = ReadBool(reader, "IsAdmin");
             var login = ReadString(reader, "AuthenticatedLoginName");
-            if (requireExactVersion && schema != 8)
+            if (requireExactVersion && schema != 9)
                 throw new InvalidOperationException($"Server Manager requires database schema 8; SQL Server reports {schema}.");
             if (!isAdmin)
                 throw new UnauthorizedAccessException($"'{login}' is not a TechBench Admin. Add this Windows account to CSRI\\TechBench_Admins.");

@@ -193,11 +193,12 @@ public sealed partial class SqlServerTechBenchRepository
         }
     }
 
-    public void DeleteWorkEntry(int id) =>
-        DeleteWorkEntryAsync(id).GetAwaiter().GetResult();
+    public void DeleteWorkEntry(int id, bool confirmMissingWhdTechNote = false) =>
+        DeleteWorkEntryAsync(id, confirmMissingWhdTechNote).GetAwaiter().GetResult();
 
     public async Task DeleteWorkEntryAsync(
         int id,
+        bool confirmMissingWhdTechNote = false,
         CancellationToken cancellationToken = default)
     {
         await ExecuteNonQueryAsync(
@@ -211,6 +212,7 @@ public sealed partial class SqlServerTechBenchRepository
                         8,
                         GetTrackedRowVersion("WorkEntry", id));
                     AddGuid(command, "@RequestId", Guid.NewGuid());
+                    AddBit(command, "@ConfirmMissingWhdTechNote", confirmMissingWhdTechNote);
                 },
                 cancellationToken)
             .ConfigureAwait(false);

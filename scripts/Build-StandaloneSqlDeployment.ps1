@@ -24,6 +24,7 @@ $orderedScripts = @(
     '25-V0006-WhdServerSyncSchema.sql'
     '26-V0007-ServerOwnedSageAndAdminPreviewSchema.sql'
     '27-V0008-FireDrillCredentialsSchema.sql'
+    '28-V0009-WhdMissingNoteRecovery.sql'
     '30-Security.sql'
     '40-StoredProcedures.sql'
     '41-V0002-WorkProcedures.sql'
@@ -51,6 +52,7 @@ $orderedScripts = @(
     '95-V0006-WhdServerSyncVerify.sql'
     '96-V0007-ServerOwnedSageAndAdminPreviewVerify.sql'
     '97-V0008-FireDrillCredentialsVerify.sql'
+    '98-V0009-WhdMissingNoteRecoveryVerify.sql'
 )
 
 $sections = [System.Collections.Generic.List[string]]::new()

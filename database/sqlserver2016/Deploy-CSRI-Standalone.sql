@@ -2861,6 +2861,50 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 28-V0009-WhdMissingNoteRecovery.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.FireDrillCredentials.0008'
+      AND [SchemaVersion] = 8
+)
+BEGIN
+    RAISERROR(N'V0008 must be installed before WHD missing-TechNote recovery schema version 9.', 16, 1);
+    RETURN;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.WhdMissingNoteRecovery.0009'
+)
+BEGIN
+    INSERT INTO [tb_deploy].[SchemaMigrations]
+        ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+    VALUES
+        (N'SqlServer2016.WhdMissingNoteRecovery.0009', 9, N'0.5.20', NULL);
+END;
+
+PRINT N'SqlServer2016.WhdMissingNoteRecovery.0009 installed.';
+GO
+
+-- ============================================================================
+-- END 28-V0009-WhdMissingNoteRecovery.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 30-Security.sql
 -- ============================================================================
 
@@ -4966,7 +5010,8 @@ GO
 CREATE PROCEDURE [tb_app].[DeleteWorkEntry]
     @Id int,
     @ExpectedRowVersion binary(8),
-    @RequestId uniqueidentifier = NULL
+    @RequestId uniqueidentifier = NULL,
+    @ConfirmMissingWhdTechNote bit = 0
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -4981,6 +5026,7 @@ BEGIN
     DECLARE @IsSyncOperator bit;
     DECLARE @WhdPosted bit;
     DECLARE @SagePosted bit;
+    DECLARE @LastError nvarchar(2000);
 
     EXEC [tb_security].[EnsureCurrentUser]
         @UserSid = @UserSid OUTPUT,
@@ -4996,7 +5042,8 @@ BEGIN
 
         SELECT
             @WhdPosted = [WhdPosted],
-            @SagePosted = [SagePosted]
+            @SagePosted = [SagePosted],
+            @LastError = [LastError]
         FROM [tb_data].[WorkEntries] WITH (UPDLOCK, HOLDLOCK)
         WHERE [Id] = @Id
           AND [OwnerWindowsSid] = @UserSid
@@ -5017,8 +5064,27 @@ BEGIN
             THROW 51134, N'The work entry changed after it was loaded.', 1;
         END;
 
-        IF @WhdPosted = 1 OR @SagePosted = 1
-            THROW 51138, N'A work entry posted to WHD or Sage cannot be deleted.', 1;
+        IF @SagePosted = 1
+            THROW 51138, N'A work entry posted to Sage cannot be deleted.', 1;
+
+        IF @WhdPosted = 1
+           AND
+           (
+               @ConfirmMissingWhdTechNote <> 1
+               OR COALESCE(@LastError, N'') NOT LIKE N'WHD sync pending:%TechNote #%was not found.%'
+               OR NOT EXISTS
+               (
+                   SELECT 1
+                   FROM [tb_ops].[PostingLogs] AS posting_log WITH (UPDLOCK, HOLDLOCK)
+                   WHERE posting_log.[WorkEntryId] = @Id
+                     AND posting_log.[OwnerWindowsSid] = @UserSid
+                     AND posting_log.[Destination] = N'WHD'
+                     AND posting_log.[Success] = 0
+                     AND COALESCE(posting_log.[ExternalReference], N'') LIKE N'WHD-TECHNOTE-%'
+                     AND posting_log.[Message] LIKE N'%TechNote #%was not found.%'
+               )
+           )
+            THROW 51140, N'Only a work entry whose tracked WHD TechNote was verified missing may be deleted after WHD posting.', 1;
 
         IF EXISTS
         (
@@ -19065,7 +19131,7 @@ BEGIN
     EXEC [tb_security].[GetCurrentAccess]
         @UserSid=@UserSid OUTPUT, @IsManager=@IsManager OUTPUT,
         @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
-    SELECT CONVERT(int, 8) AS [SchemaVersion], CONVERT(bit, 0) AS [FullTextSearchAvailable],
+    SELECT CONVERT(int, 9) AS [SchemaVersion], CONVERT(bit, 0) AS [FullTextSearchAvailable],
         CONVERT(bit, 1) AS [SupportsTickets], CONVERT(bit, 1) AS [SupportsWorkEntries],
         CONVERT(bit, 1) AS [SupportsPrivateNotes], CONVERT(bit, 1) AS [SupportsPostingLeases],
         CONVERT(bit, 1) AS [SupportsSyncLeases], CONVERT(bit, 1) AS [SupportsImports],
@@ -20605,9 +20671,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8)
+IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9)
 BEGIN
-    PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, 5, 6, 7, or 8.';
+    PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
 END;
 
@@ -20858,10 +20924,13 @@ BEGIN
 END;
 
 IF CHARINDEX(
-       N'IF @WhdPosted = 1 OR @SagePosted = 1',
+       N'IF @SagePosted = 1',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteWorkEntry'))) = 0
+   OR CHARINDEX(
+       N'@ConfirmMissingWhdTechNote <> 1',
        OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteWorkEntry'))) = 0
 BEGIN
-    PRINT N'FAIL: DeleteWorkEntry does not block deletion after WHD or Sage posting.';
+    PRINT N'FAIL: DeleteWorkEntry does not preserve Sage locking and explicit WHD recovery confirmation.';
     SET @FailureCount += 1;
 END;
 
@@ -21358,9 +21427,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8)
+IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9)
 BEGIN
-    PRINT N'FAIL: V0003 verification supports installed schema version 3, 4, 5, 6, 7, or 8.';
+    PRINT N'FAIL: V0003 verification supports installed schema version 3, 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
 END;
 
@@ -21842,9 +21911,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8)
+IF @InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9)
 BEGIN
-    PRINT N'FAIL: V0004 verification supports installed schema version 4, 5, 6, 7, or 8.';
+    PRINT N'FAIL: V0004 verification supports installed schema version 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
 END;
 
@@ -22560,9 +22629,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (5, 6, 7, 8)
+IF @InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9)
 BEGIN
-    PRINT N'FAIL: V0005 verification supports installed schema version 5, 6, 7, or 8.';
+    PRINT N'FAIL: V0005 verification supports installed schema version 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
 END;
 
@@ -23767,9 +23836,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (6, 7, 8)
+IF @InstalledSchemaVersion NOT IN (6, 7, 8, 9)
 BEGIN
-    PRINT N'FAIL: V0006 verification supports installed schema version 6, 7, or 8.';
+    PRINT N'FAIL: V0006 verification supports installed schema version 6, 7, 8, or 9.';
     SET @FailureCount += 1;
 END;
 
@@ -24322,9 +24391,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (7, 8)
+IF @InstalledSchemaVersion NOT IN (7, 8, 9)
 BEGIN
-    PRINT N'FAIL: V0007 verification supports installed schema version 7 or 8.';
+    PRINT N'FAIL: V0007 verification supports installed schema version 7, 8, or 9.';
     SET @FailureCount += 1;
 END;
 
@@ -24984,8 +25053,8 @@ IF NOT EXISTS
 )
 BEGIN PRINT N'FAIL: V0008 migration marker is missing or invalid.'; SET @FailureCount+=1; END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations])<>8
-BEGIN PRINT N'FAIL: installed schema version is not 8.'; SET @FailureCount+=1; END;
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (8, 9)
+BEGIN PRINT N'FAIL: installed schema version is not 8 or 9.'; SET @FailureCount+=1; END;
 
 DECLARE @Objects TABLE([Name] nvarchar(300) PRIMARY KEY,[Type] char(2));
 INSERT INTO @Objects VALUES
@@ -25064,6 +25133,83 @@ GO
 
 -- ============================================================================
 -- END 97-V0008-FireDrillCredentialsVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 98-V0009-WhdMissingNoteRecoveryVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @FailureCount int = 0;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.WhdMissingNoteRecovery.0009'
+      AND [SchemaVersion] = 9
+      AND [ReleaseVersion] = N'0.5.20'
+)
+BEGIN
+    PRINT N'FAIL: V0009 migration marker is missing or invalid.';
+    SET @FailureCount += 1;
+END;
+
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) <> 9
+BEGIN
+    PRINT N'FAIL: installed schema version is not 9.';
+    SET @FailureCount += 1;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.parameters
+    WHERE [object_id] = OBJECT_ID(N'tb_app.DeleteWorkEntry', N'P')
+      AND [name] = N'@ConfirmMissingWhdTechNote'
+      AND [system_type_id] = TYPE_ID(N'bit')
+)
+BEGIN
+    PRINT N'FAIL: DeleteWorkEntry does not require explicit missing-TechNote confirmation.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @DeleteDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteWorkEntry', N'P'));
+IF CHARINDEX(N'@SagePosted = 1', @DeleteDefinition) = 0
+   OR CHARINDEX(N'@ConfirmMissingWhdTechNote <> 1', @DeleteDefinition) = 0
+   OR CHARINDEX(N'WHD sync pending:%TechNote #%was not found.%', @DeleteDefinition) = 0
+   OR CHARINDEX(N'posting_log.[ExternalReference]', @DeleteDefinition) = 0
+   OR CHARINDEX(N'WHD-TECHNOTE-%', @DeleteDefinition) = 0
+   OR CHARINDEX(N'posting_log.[Success] = 0', @DeleteDefinition) = 0
+BEGIN
+    PRINT N'FAIL: DeleteWorkEntry does not preserve the verified missing-TechNote recovery boundary.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'CONVERT(int, 9) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+BEGIN
+    PRINT N'FAIL: GetRepositoryCapabilities does not report schema version 9.';
+    SET @FailureCount += 1;
+END;
+
+IF @FailureCount > 0
+BEGIN
+    RAISERROR(N'TechBench V0009 WHD missing-TechNote recovery verification failed with %d issue(s).', 16, 1, @FailureCount);
+    RETURN;
+END;
+
+PRINT N'TechBench V0009 WHD missing-TechNote recovery verification passed.';
+GO
+
+-- ============================================================================
+-- END 98-V0009-WhdMissingNoteRecoveryVerify.sql
 -- ============================================================================
 
 PRINT N'TechBench deployment completed successfully on CSRI-SQL.';

@@ -25,9 +25,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8)
+IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9)
 BEGIN
-    PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, 5, 6, 7, or 8.';
+    PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
 END;
 
@@ -278,10 +278,13 @@ BEGIN
 END;
 
 IF CHARINDEX(
-       N'IF @WhdPosted = 1 OR @SagePosted = 1',
+       N'IF @SagePosted = 1',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteWorkEntry'))) = 0
+   OR CHARINDEX(
+       N'@ConfirmMissingWhdTechNote <> 1',
        OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteWorkEntry'))) = 0
 BEGIN
-    PRINT N'FAIL: DeleteWorkEntry does not block deletion after WHD or Sage posting.';
+    PRINT N'FAIL: DeleteWorkEntry does not preserve Sage locking and explicit WHD recovery confirmation.';
     SET @FailureCount += 1;
 END;
 

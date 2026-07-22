@@ -92,7 +92,7 @@ public sealed partial class SqlServer2016SyntaxTests
         var source = File.ReadAllText(path);
 
         Assert.Contains(
-            "@InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8)",
+            "@InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9)",
             source,
             StringComparison.OrdinalIgnoreCase);
 
@@ -147,13 +147,13 @@ public sealed partial class SqlServer2016SyntaxTests
     [Theory]
     [InlineData(
         "92-V0003-SharedReferenceVerify.sql",
-        "@InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8)")]
+        "@InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9)")]
     [InlineData(
         "93-V0004-AdminSharedVerify.sql",
-        "@InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8)")]
+        "@InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9)")]
     [InlineData(
         "94-V0005-TechBenchV1ImportVerify.sql",
-        "@InstalledSchemaVersion NOT IN (5, 6, 7, 8)")]
+        "@InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9)")]
     public void EarlierSchemaVerifiersAcceptTheFinalSchemaVersion(
         string fileName,
         string expectedVersionCheck)
@@ -703,6 +703,30 @@ public sealed partial class SqlServer2016SyntaxTests
         var verify = source.IndexOf("97-V0008-FireDrillCredentialsVerify.sql", StringComparison.Ordinal);
 
         Assert.True(schema >= 0 && procedures > schema && grants > procedures && verify > grants);
+    }
+
+    [Fact]
+    public void V0009PermitsOnlyVerifiedMissingWhdTechNoteRecoveryDeletion()
+    {
+        var sqlDirectory = FindSqlDirectory();
+        var procedureSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "41-V0002-WorkProcedures.sql"));
+        var body = ProcedureBody(procedureSource, "DeleteWorkEntry", "tb_app");
+
+        Assert.Contains("@ConfirmMissingWhdTechNote bit = 0", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("@SagePosted = 1", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WHD sync pending:%TechNote #%was not found.%", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("posting_log.[ExternalReference]", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WHD-TECHNOTE-%", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("posting_log.[Success] = 0", body, StringComparison.OrdinalIgnoreCase);
+
+        var root = Directory.GetParent(sqlDirectory)!.Parent!.FullName;
+        var builder = File.ReadAllText(Path.Combine(root, "scripts", "Build-StandaloneSqlDeployment.ps1"));
+        var migration = builder.IndexOf("28-V0009-WhdMissingNoteRecovery.sql", StringComparison.Ordinal);
+        var procedures = builder.IndexOf("41-V0002-WorkProcedures.sql", StringComparison.Ordinal);
+        var verification = builder.IndexOf("98-V0009-WhdMissingNoteRecoveryVerify.sql", StringComparison.Ordinal);
+        Assert.True(migration >= 0 && procedures > migration && verification > procedures);
     }
 
     private static string ProcedureBody(

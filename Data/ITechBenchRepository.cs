@@ -91,7 +91,7 @@ public interface ITechBenchRepository
 
     void AbandonV1Import();
 
-    void DeleteWorkEntry(int id);
+    void DeleteWorkEntry(int id, bool confirmMissingWhdTechNote = false);
 
     IReadOnlyList<WorkEntryLink> GetWorkEntryLinks(int workEntryId);
 

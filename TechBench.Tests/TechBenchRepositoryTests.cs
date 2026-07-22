@@ -265,6 +265,41 @@ public sealed class TechBenchRepositoryTests
     }
 
     [Fact]
+    public void WhdPostedEntryCanBeDeletedOnlyAfterVerifiedTrackedTechNoteIsMissing()
+    {
+        WithRepository((repository, _) =>
+        {
+            var entry = new WorkEntry
+            {
+                WorkDate = new DateTime(2026, 7, 22),
+                ManualClientName = "Deleted WHD Test Note",
+                TicketNumberText = "31689",
+                DurationMinutes = 15,
+                Note = "test",
+                WhdPosted = true,
+                WhdPostedAt = DateTime.Now.AddMinutes(-5),
+                LastError = "WHD sync pending: Web Help Desk ticket #31689 is available, but TechNote #52445 was not found."
+            };
+            repository.SaveWorkEntry(entry);
+            repository.AddPostingLog(new PostingLog
+            {
+                WorkEntryId = entry.Id,
+                Destination = "WHD",
+                Payload = "test",
+                Success = false,
+                Message = entry.LastError,
+                ExternalReference = "WHD-TECHNOTE-52445"
+            });
+
+            Assert.Throws<InvalidOperationException>(() => repository.DeleteWorkEntry(entry.Id));
+
+            repository.DeleteWorkEntry(entry.Id, confirmMissingWhdTechNote: true);
+
+            Assert.Null(repository.GetWorkEntry(entry.Id));
+        });
+    }
+
+    [Fact]
     public void RemovesLegacyMockSettingsAndRestoresMockOnlyPostingStateToLivePending()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"TechBenchTests-{Guid.NewGuid():N}");

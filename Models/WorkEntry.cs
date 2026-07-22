@@ -85,6 +85,11 @@ public sealed class WorkEntry
         ? $"{FollowUpLabel} {FollowUpDueDate.Value:M/d}"
         : FollowUpLabel;
     public bool HasWhdSyncConflict => LastError?.StartsWith("WHD sync conflict:", StringComparison.OrdinalIgnoreCase) == true;
+    public bool HasVerifiedMissingWhdTechNote => WhdPosted
+        && !SagePosted
+        && LastError?.StartsWith("WHD sync pending:", StringComparison.OrdinalIgnoreCase) == true
+        && LastError?.Contains("TechNote #", StringComparison.OrdinalIgnoreCase) == true
+        && LastError?.Contains("was not found.", StringComparison.OrdinalIgnoreCase) == true;
     public bool NeedsWhdPosting => HasTicket
         && !SagePosted
         && (!WhdPosted || !WhdPostedAt.HasValue || ModifiedAfterPosting || HasWhdSyncConflict);

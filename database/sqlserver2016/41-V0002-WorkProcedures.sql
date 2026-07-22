@@ -1214,7 +1214,8 @@ GO
 CREATE PROCEDURE [tb_app].[DeleteWorkEntry]
     @Id int,
     @ExpectedRowVersion binary(8),
-    @RequestId uniqueidentifier = NULL
+    @RequestId uniqueidentifier = NULL,
+    @ConfirmMissingWhdTechNote bit = 0
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -1229,6 +1230,7 @@ BEGIN
     DECLARE @IsSyncOperator bit;
     DECLARE @WhdPosted bit;
     DECLARE @SagePosted bit;
+    DECLARE @LastError nvarchar(2000);
 
     EXEC [tb_security].[EnsureCurrentUser]
         @UserSid = @UserSid OUTPUT,
@@ -1244,7 +1246,8 @@ BEGIN
 
         SELECT
             @WhdPosted = [WhdPosted],
-            @SagePosted = [SagePosted]
+            @SagePosted = [SagePosted],
+            @LastError = [LastError]
         FROM [tb_data].[WorkEntries] WITH (UPDLOCK, HOLDLOCK)
         WHERE [Id] = @Id
           AND [OwnerWindowsSid] = @UserSid
@@ -1265,8 +1268,27 @@ BEGIN
             THROW 51134, N'The work entry changed after it was loaded.', 1;
         END;
 
-        IF @WhdPosted = 1 OR @SagePosted = 1
-            THROW 51138, N'A work entry posted to WHD or Sage cannot be deleted.', 1;
+        IF @SagePosted = 1
+            THROW 51138, N'A work entry posted to Sage cannot be deleted.', 1;
+
+        IF @WhdPosted = 1
+           AND
+           (
+               @ConfirmMissingWhdTechNote <> 1
+               OR COALESCE(@LastError, N'') NOT LIKE N'WHD sync pending:%TechNote #%was not found.%'
+               OR NOT EXISTS
+               (
+                   SELECT 1
+                   FROM [tb_ops].[PostingLogs] AS posting_log WITH (UPDLOCK, HOLDLOCK)
+                   WHERE posting_log.[WorkEntryId] = @Id
+                     AND posting_log.[OwnerWindowsSid] = @UserSid
+                     AND posting_log.[Destination] = N'WHD'
+                     AND posting_log.[Success] = 0
+                     AND COALESCE(posting_log.[ExternalReference], N'') LIKE N'WHD-TECHNOTE-%'
+                     AND posting_log.[Message] LIKE N'%TechNote #%was not found.%'
+               )
+           )
+            THROW 51140, N'Only a work entry whose tracked WHD TechNote was verified missing may be deleted after WHD posting.', 1;
 
         IF EXISTS
         (
