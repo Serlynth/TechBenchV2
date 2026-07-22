@@ -54,6 +54,8 @@ INSERT INTO @RequiredObjects([ObjectName], [ObjectType]) VALUES
     (N'tb_service.RenewSageSyncLease', N'P'),
     (N'tb_service.ApplySageCustomerSnapshot', N'P'),
     (N'tb_service.CompleteSageSyncWork', N'P'),
+    (N'tb_service.GetAutomaticClientMatchCandidates', N'P'),
+    (N'tb_service.ApplyAutomaticClientMatch', N'P'),
     (N'tb_app.AdminListPreviewUsers', N'P'),
     (N'tb_app.AdminBeginUserPreview', N'P'),
     (N'tb_app.ActivateReadOnlyPreview', N'P'),
@@ -176,6 +178,11 @@ INSERT INTO @RequiredParameters([ProcedureName], [ParameterName]) VALUES
     (N'tb_service.CompleteSageSyncWork', N'@WorkerId'),
     (N'tb_service.CompleteSageSyncWork', N'@Succeeded'),
     (N'tb_service.CompleteSageSyncWork', N'@Message'),
+    (N'tb_service.ApplyAutomaticClientMatch', N'@WhdClientId'),
+    (N'tb_service.ApplyAutomaticClientMatch', N'@SageClientId'),
+    (N'tb_service.ApplyAutomaticClientMatch', N'@ExpectedWhdRowVersion'),
+    (N'tb_service.ApplyAutomaticClientMatch', N'@ExpectedSageRowVersion'),
+    (N'tb_service.ApplyAutomaticClientMatch', N'@MatchScore'),
     (N'tb_app.AdminBeginUserPreview', N'@TargetLoginName'),
     (N'tb_app.AdminBeginUserPreview', N'@ClientInstanceId'),
     (N'tb_app.ActivateReadOnlyPreview', N'@PreviewSessionId'),
@@ -296,7 +303,9 @@ INSERT INTO @ServiceProcedures([ObjectName]) VALUES
     (N'tb_service.ClaimSageSyncWork'),
     (N'tb_service.RenewSageSyncLease'),
     (N'tb_service.ApplySageCustomerSnapshot'),
-    (N'tb_service.CompleteSageSyncWork');
+    (N'tb_service.CompleteSageSyncWork'),
+    (N'tb_service.GetAutomaticClientMatchCandidates'),
+    (N'tb_service.ApplyAutomaticClientMatch');
 
 IF EXISTS
 (

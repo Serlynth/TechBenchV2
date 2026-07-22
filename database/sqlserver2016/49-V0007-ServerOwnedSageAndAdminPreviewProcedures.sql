@@ -1734,3 +1734,244 @@ GO
 
 PRINT N'TechBench V0007 server-owned Sage sync and read-only Admin preview procedures created.';
 GO
+
+/* Automatic WHD-to-Sage matching is calculated by the Windows service with
+   the same conservative, mutual-best-match algorithm previously used by the
+   desktop client. These two narrow procedures expose only the candidate read
+   and validated merge operations required by that service. */
+IF OBJECT_ID(N'tb_service.GetAutomaticClientMatchCandidates', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_service].[GetAutomaticClientMatchCandidates];
+GO
+
+CREATE PROCEDURE [tb_service].[GetAutomaticClientMatchCandidates]
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        client.[Id],
+        client.[Name],
+        client.[Source],
+        CASE
+            WHEN client.[Source] = N'WHD' THEN whd_identity.[ExternalId]
+            ELSE client.[ExternalId]
+        END AS [ExternalId],
+        client.[IsActive],
+        client.[WhdLocationName],
+        client.[SageCustomerId],
+        client.[SageCustomerName],
+        client.[RowVersion]
+    FROM [tb_data].[Clients] AS client
+    OUTER APPLY
+    (
+        SELECT TOP (1) identity_row.[ExternalId]
+        FROM [tb_data].[ClientExternalIdentities] AS identity_row
+        WHERE identity_row.[ClientId] = client.[Id]
+          AND identity_row.[SourceSystem] = N'WHD'
+          AND identity_row.[ExternalId] LIKE N'WHD-LOCATION-%'
+        ORDER BY identity_row.[Id]
+    ) AS whd_identity
+    WHERE client.[IsActive] = 1
+      AND
+      (
+          (
+              client.[Source] = N'WHD'
+              AND NULLIF(LTRIM(RTRIM(client.[SageCustomerId])), N'') IS NULL
+              AND whd_identity.[ExternalId] IS NOT NULL
+          )
+          OR
+          (
+              client.[Source] = N'Sage'
+              AND NULLIF(LTRIM(RTRIM(client.[SageCustomerId])), N'') IS NOT NULL
+              AND EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientExternalIdentities] AS sage_identity
+                  WHERE sage_identity.[ClientId] = client.[Id]
+                    AND sage_identity.[SourceSystem] = N'Sage'
+                    AND sage_identity.[ExternalId] = client.[SageCustomerId]
+              )
+          )
+      )
+    ORDER BY client.[Id];
+END;
+GO
+
+IF OBJECT_ID(N'tb_service.ApplyAutomaticClientMatch', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_service].[ApplyAutomaticClientMatch];
+GO
+
+CREATE PROCEDURE [tb_service].[ApplyAutomaticClientMatch]
+    @WhdClientId int,
+    @SageClientId int,
+    @ExpectedWhdRowVersion binary(8),
+    @ExpectedSageRowVersion binary(8),
+    @MatchScore decimal(6,5)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF @WhdClientId IS NULL
+       OR @SageClientId IS NULL
+       OR @WhdClientId = @SageClientId
+       OR @ExpectedWhdRowVersion IS NULL
+       OR @ExpectedSageRowVersion IS NULL
+       OR @MatchScore < CONVERT(decimal(6,5), 0.86000)
+       OR @MatchScore > CONVERT(decimal(6,5), 1.00000)
+    BEGIN
+        SELECT CONVERT(int, 0) AS [AppliedCount];
+        RETURN;
+    END;
+
+    DECLARE @ActorSid varbinary(85) =
+    (
+        SELECT [WindowsSid]
+        FROM [tb_security].[Users]
+        WHERE [LoginName] = N'$(SyncServicePrincipal)'
+    );
+    IF @ActorSid IS NULL
+        THROW 51970, N'The configured sync service principal has no TechBench service actor.', 1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[Clients] AS whd_client WITH (UPDLOCK, HOLDLOCK)
+            WHERE whd_client.[Id] = @WhdClientId
+              AND whd_client.[RowVersion] = @ExpectedWhdRowVersion
+              AND whd_client.[IsActive] = 1
+              AND whd_client.[Source] = N'WHD'
+              AND NULLIF(LTRIM(RTRIM(whd_client.[SageCustomerId])), N'') IS NULL
+              AND EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientExternalIdentities] AS whd_identity WITH (UPDLOCK, HOLDLOCK)
+                  WHERE whd_identity.[ClientId] = whd_client.[Id]
+                    AND whd_identity.[SourceSystem] = N'WHD'
+                    AND whd_identity.[ExternalId] LIKE N'WHD-LOCATION-%'
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientExternalIdentities] AS existing_sage WITH (UPDLOCK, HOLDLOCK)
+                  WHERE existing_sage.[ClientId] = whd_client.[Id]
+                    AND existing_sage.[SourceSystem] = N'Sage'
+              )
+        )
+        OR NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[Clients] AS sage_client WITH (UPDLOCK, HOLDLOCK)
+            WHERE sage_client.[Id] = @SageClientId
+              AND sage_client.[RowVersion] = @ExpectedSageRowVersion
+              AND sage_client.[IsActive] = 1
+              AND sage_client.[Source] = N'Sage'
+              AND NULLIF(LTRIM(RTRIM(sage_client.[SageCustomerId])), N'') IS NOT NULL
+              AND EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientExternalIdentities] AS sage_identity WITH (UPDLOCK, HOLDLOCK)
+                  WHERE sage_identity.[ClientId] = sage_client.[Id]
+                    AND sage_identity.[SourceSystem] = N'Sage'
+                    AND sage_identity.[ExternalId] = sage_client.[SageCustomerId]
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientExternalIdentities] AS existing_whd WITH (UPDLOCK, HOLDLOCK)
+                  WHERE existing_whd.[ClientId] = sage_client.[Id]
+                    AND existing_whd.[SourceSystem] = N'WHD'
+              )
+        )
+        BEGIN
+            COMMIT TRANSACTION;
+            SELECT CONVERT(int, 0) AS [AppliedCount];
+            RETURN;
+        END;
+
+        UPDATE whd_client
+        SET
+            [Source] = N'Both',
+            [IsActive] = CONVERT(bit, 1),
+            [LastSyncedAtUtc] =
+                CASE
+                    WHEN sage_client.[LastSyncedAtUtc] IS NULL THEN whd_client.[LastSyncedAtUtc]
+                    WHEN whd_client.[LastSyncedAtUtc] IS NULL
+                      OR sage_client.[LastSyncedAtUtc] > whd_client.[LastSyncedAtUtc]
+                        THEN sage_client.[LastSyncedAtUtc]
+                    ELSE whd_client.[LastSyncedAtUtc]
+                END,
+            [SageCustomerId] = sage_client.[SageCustomerId],
+            [SageCustomerName] = sage_client.[SageCustomerName],
+            [SageContactName] = sage_client.[SageContactName],
+            [SageTelephone] = sage_client.[SageTelephone],
+            [MatchStatus] = N'Matched',
+            [UpdatedByWindowsSid] = @ActorSid,
+            [UpdatedAtUtc] = SYSUTCDATETIME()
+        FROM [tb_data].[Clients] AS whd_client
+        CROSS JOIN [tb_data].[Clients] AS sage_client
+        WHERE whd_client.[Id] = @WhdClientId
+          AND sage_client.[Id] = @SageClientId;
+
+        UPDATE [tb_data].[Tickets]
+        SET [ClientId] = @WhdClientId,
+            [UpdatedByWindowsSid] = @ActorSid,
+            [UpdatedAtUtc] = SYSUTCDATETIME()
+        WHERE [ClientId] = @SageClientId;
+
+        UPDATE [tb_data].[WorkEntries]
+        SET [ClientId] = @WhdClientId,
+            [UpdatedByWindowsSid] = @ActorSid,
+            [UpdatedAtUtc] = SYSUTCDATETIME()
+        WHERE [ClientId] = @SageClientId;
+
+        UPDATE [tb_data].[ClientAliases]
+        SET [ClientId] = @WhdClientId,
+            [UpdatedByWindowsSid] = @ActorSid,
+            [UpdatedAtUtc] = SYSUTCDATETIME()
+        WHERE [ClientId] = @SageClientId;
+
+        DELETE source_identity
+        FROM [tb_data].[ClientExternalIdentities] AS source_identity
+        WHERE source_identity.[ClientId] = @SageClientId
+          AND EXISTS
+          (
+              SELECT 1
+              FROM [tb_data].[ClientExternalIdentities] AS target_identity
+              WHERE target_identity.[ClientId] = @WhdClientId
+                AND target_identity.[SourceSystem] = source_identity.[SourceSystem]
+                AND target_identity.[ExternalId] = source_identity.[ExternalId]
+          );
+
+        UPDATE [tb_data].[ClientExternalIdentities]
+        SET [ClientId] = @WhdClientId,
+            [UpdatedByWindowsSid] = @ActorSid,
+            [UpdatedAtUtc] = SYSUTCDATETIME()
+        WHERE [ClientId] = @SageClientId;
+
+        DELETE FROM [tb_data].[Clients]
+        WHERE [Id] = @SageClientId
+          AND [RowVersion] = @ExpectedSageRowVersion;
+        IF @@ROWCOUNT <> 1
+            THROW 51971, N'The Sage client changed during automatic matching.', 1;
+
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @WhdClientId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action = N'ClientAutoMatched',
+            @EntityType = N'Client',
+            @EntityId = @AuditEntityId,
+            @RequestId = NULL;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT CONVERT(int, 1) AS [AppliedCount];
+END;
+GO

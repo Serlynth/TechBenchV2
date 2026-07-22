@@ -166,4 +166,38 @@ public sealed class ClientMatchingServiceTests
 
         Assert.Empty(ClientMatchingService.FindSafeAutomaticMatches([whd], [sage]));
     }
+
+    [Fact]
+    public void DoesNotAutomaticallyChooseWhenMultipleWhdLocationsCompeteForOneSageCustomer()
+    {
+        var whdClients = new[]
+        {
+            new Client
+            {
+                Id = 1,
+                Name = "9Prime - Restaurant",
+                Source = "WHD",
+                ExternalId = "WHD-LOCATION-402",
+                WhdLocationName = "9Prime - Restaurant"
+            },
+            new Client
+            {
+                Id = 2,
+                Name = "9Prime - Speak Easy",
+                Source = "WHD",
+                ExternalId = "WHD-LOCATION-403",
+                WhdLocationName = "9Prime - Speak Easy"
+            }
+        };
+        var sage = new Client
+        {
+            Id = 3,
+            Name = "9Prime",
+            Source = "Sage",
+            SageCustomerId = "68767",
+            SageCustomerName = "9Prime"
+        };
+
+        Assert.Empty(ClientMatchingService.FindSafeAutomaticMatches(whdClients, [sage]));
+    }
 }

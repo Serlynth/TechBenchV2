@@ -147,13 +147,23 @@ public sealed class SyncSqlRepository
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    public Task ApplyClientsAsync(
+    public async Task ApplyClientsAsync(
         WhdSyncWork work,
         Guid workerId,
         string json,
         DateTimeOffset syncedAt,
-        CancellationToken cancellationToken) =>
-        ApplyJsonAsync("[tb_service].[ApplyWhdClientSnapshot]", work, workerId, json, syncedAt, cancellationToken);
+        CancellationToken cancellationToken)
+    {
+        await ApplyJsonAsync(
+                "[tb_service].[ApplyWhdClientSnapshot]",
+                work,
+                workerId,
+                json,
+                syncedAt,
+                cancellationToken)
+            .ConfigureAwait(false);
+        await ReconcileAutomaticClientMatchesAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     public Task ApplyTicketsAsync(
         WhdSyncWork work,
@@ -206,7 +216,7 @@ public sealed class SyncSqlRepository
                 "SQL Server returned no result for the Sage customer snapshot.");
         }
 
-        return new SageSyncCounts(
+        var counts = new SageSyncCounts(
             GetInt32(reader, "ReadCount", 0),
             GetInt32(reader, "SavedCount", 0),
             GetInt32(reader, "StaleCount", 0),
@@ -214,6 +224,73 @@ public sealed class SyncSqlRepository
             GetInt32(reader, "ExistingCount", 0),
             GetBoolean(reader, "RequiresLargeRemovalConfirmation", false),
             GetString(reader, "Message"));
+        await reader.DisposeAsync().ConfigureAwait(false);
+
+        if (!counts.RequiresLargeRemovalConfirmation)
+        {
+            var automaticMatches = await ReconcileAutomaticClientMatchesAsync(cancellationToken)
+                .ConfigureAwait(false);
+            counts = counts with { MatchedCount = counts.MatchedCount + automaticMatches };
+        }
+
+        return counts;
+    }
+
+    internal async Task<int> ReconcileAutomaticClientMatchesAsync(
+        CancellationToken cancellationToken)
+    {
+        var candidates = await GetAutomaticClientMatchCandidatesAsync(cancellationToken)
+            .ConfigureAwait(false);
+        var matches = ServerAutomaticClientMatcher.FindSafeAutomaticMatches(candidates);
+        var appliedCount = 0;
+
+        foreach (var match in matches)
+        {
+            if (match.WhdClient.RowVersion is not { Length: 8 } whdRowVersion
+                || match.SageClient.RowVersion is not { Length: 8 } sageRowVersion)
+            {
+                continue;
+            }
+
+            await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+            await using var command = CreateCommand(connection, "[tb_service].[ApplyAutomaticClientMatch]");
+            Add(command, "@WhdClientId", SqlDbType.Int, match.WhdClient.Id);
+            Add(command, "@SageClientId", SqlDbType.Int, match.SageClient.Id);
+            Add(command, "@ExpectedWhdRowVersion", SqlDbType.Binary, whdRowVersion, 8);
+            Add(command, "@ExpectedSageRowVersion", SqlDbType.Binary, sageRowVersion, 8);
+            Add(command, "@MatchScore", SqlDbType.Decimal, Convert.ToDecimal(match.Score, CultureInfo.InvariantCulture));
+            command.Parameters["@MatchScore"].Precision = 6;
+            command.Parameters["@MatchScore"].Scale = 5;
+            appliedCount += Convert.ToInt32(
+                await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
+                CultureInfo.InvariantCulture);
+        }
+
+        return appliedCount;
+    }
+
+    private async Task<IReadOnlyList<AutomaticClientMatchCandidate>> GetAutomaticClientMatchCandidatesAsync(
+        CancellationToken cancellationToken)
+    {
+        var candidates = new List<AutomaticClientMatchCandidate>();
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = CreateCommand(connection, "[tb_service].[GetAutomaticClientMatchCandidates]");
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            candidates.Add(new AutomaticClientMatchCandidate(
+                GetInt32(reader, "Id", 0),
+                GetString(reader, "Name"),
+                GetString(reader, "Source"),
+                GetNullableString(reader, "ExternalId"),
+                GetBoolean(reader, "IsActive", true),
+                GetNullableString(reader, "WhdLocationName"),
+                GetNullableString(reader, "SageCustomerId"),
+                GetNullableString(reader, "SageCustomerName"),
+                GetBytes(reader, "RowVersion")));
+        }
+
+        return candidates;
     }
 
     public async Task CompleteWorkAsync(
@@ -339,6 +416,22 @@ public sealed class SyncSqlRepository
         return ordinal < 0 || reader.IsDBNull(ordinal)
             ? fallback
             : Convert.ToString(reader.GetValue(ordinal), CultureInfo.InvariantCulture) ?? fallback;
+    }
+
+    private static string? GetNullableString(SqlDataReader reader, string name)
+    {
+        var ordinal = FindOrdinal(reader, name);
+        return ordinal < 0 || reader.IsDBNull(ordinal)
+            ? null
+            : Convert.ToString(reader.GetValue(ordinal), CultureInfo.InvariantCulture);
+    }
+
+    private static byte[]? GetBytes(SqlDataReader reader, string name)
+    {
+        var ordinal = FindOrdinal(reader, name);
+        return ordinal < 0 || reader.IsDBNull(ordinal)
+            ? null
+            : (byte[])reader.GetValue(ordinal);
     }
 
     private static bool GetBoolean(SqlDataReader reader, string name, bool fallback)

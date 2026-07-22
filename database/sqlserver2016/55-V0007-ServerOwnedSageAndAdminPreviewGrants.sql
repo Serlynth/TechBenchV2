@@ -38,6 +38,8 @@ GRANT EXECUTE ON OBJECT::[tb_service].[ClaimSageSyncWork] TO [tb_role_sync_servi
 GRANT EXECUTE ON OBJECT::[tb_service].[RenewSageSyncLease] TO [tb_role_sync_service];
 GRANT EXECUTE ON OBJECT::[tb_service].[ApplySageCustomerSnapshot] TO [tb_role_sync_service];
 GRANT EXECUTE ON OBJECT::[tb_service].[CompleteSageSyncWork] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[GetAutomaticClientMatchCandidates] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[ApplyAutomaticClientMatch] TO [tb_role_sync_service];
 
 /* Admin preview is server-issued and activated per physical SQL connection.
    Only the Admin role may impersonate the WITHOUT LOGIN reader principal. */

@@ -306,6 +306,8 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("CONVERT(int, 7) AS [SchemaVersion]", procedureSource);
         Assert.Contains("CREATE PROCEDURE [tb_service].[ClaimSageSyncWork]", procedureSource);
         Assert.Contains("CREATE PROCEDURE [tb_service].[ApplySageCustomerSnapshot]", procedureSource);
+        Assert.Contains("CREATE PROCEDURE [tb_service].[GetAutomaticClientMatchCandidates]", procedureSource);
+        Assert.Contains("CREATE PROCEDURE [tb_service].[ApplyAutomaticClientMatch]", procedureSource);
         var requestSageBody = ProcedureBody(
             procedureSource,
             "AdminRequestSageSync",
@@ -365,6 +367,24 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("confirmed_request.[ReadCount] = @ReadCount", applySageBody);
         Assert.Contains("confirmed_request.[StaleCount] = @StaleCount", applySageBody);
         Assert.Contains("[RequiresLargeRemovalConfirmation] = 1", applySageBody);
+
+        var automaticMatchBody = ProcedureBody(
+            procedureSource,
+            "ApplyAutomaticClientMatch",
+            "tb_service");
+        Assert.Contains("@MatchScore < CONVERT(decimal(6,5), 0.86000)", automaticMatchBody);
+        Assert.Contains("whd_client.[Source] = N'WHD'", automaticMatchBody);
+        Assert.Contains("sage_client.[Source] = N'Sage'", automaticMatchBody);
+        Assert.Contains("[MatchStatus] = N'Matched'", automaticMatchBody);
+        Assert.Contains("@Action = N'ClientAutoMatched'", automaticMatchBody);
+        Assert.Contains(
+            "GRANT EXECUTE ON OBJECT::[tb_service].[GetAutomaticClientMatchCandidates] TO [tb_role_sync_service]",
+            grantSource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "GRANT EXECUTE ON OBJECT::[tb_service].[ApplyAutomaticClientMatch] TO [tb_role_sync_service]",
+            grantSource,
+            StringComparison.OrdinalIgnoreCase);
 
         Assert.Contains(
             "GRANT IMPERSONATE ON USER::[tb_preview_reader] TO [tb_role_admin]",
