@@ -118,8 +118,8 @@ BEGIN
 END;
 
 IF CHARINDEX(
-       N'CONVERT(int, ' + CONVERT(nvarchar(10), @InstalledSchemaVersion) + N')',
-       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'))) = 0
+       N'CONVERT(int,' + CONVERT(nvarchar(10), @InstalledSchemaVersion) + N')',
+       REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities')), N' ', N'')) = 0
 BEGIN
     PRINT N'FAIL: GetRepositoryCapabilities does not report the installed schema version.';
     SET @FailureCount += 1;

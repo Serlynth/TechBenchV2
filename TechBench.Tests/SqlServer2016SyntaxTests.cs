@@ -165,6 +165,24 @@ public sealed partial class SqlServer2016SyntaxTests
             StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData("92-V0003-SharedReferenceVerify.sql")]
+    [InlineData("93-V0004-AdminSharedVerify.sql")]
+    [InlineData("94-V0005-TechBenchV1ImportVerify.sql")]
+    public void EarlierSchemaVerifiersIgnoreCapabilityProcedureWhitespace(string fileName)
+    {
+        var source = File.ReadAllText(Path.Combine(FindSqlDirectory(), fileName));
+
+        Assert.Contains(
+            "N'CONVERT(int,' + CONVERT(nvarchar(10), @InstalledSchemaVersion) + N')'",
+            source,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities')), N' ', N'')",
+            source,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void V0004VerifierUsesTheSchemaV6AndV7ServiceGrantBoundaries()
     {

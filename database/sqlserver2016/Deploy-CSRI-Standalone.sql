@@ -19065,12 +19065,12 @@ BEGIN
     EXEC [tb_security].[GetCurrentAccess]
         @UserSid=@UserSid OUTPUT, @IsManager=@IsManager OUTPUT,
         @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
-    SELECT CONVERT(int,8) AS [SchemaVersion], CONVERT(bit,0) AS [FullTextSearchAvailable],
-        CONVERT(bit,1) AS [SupportsTickets], CONVERT(bit,1) AS [SupportsWorkEntries],
-        CONVERT(bit,1) AS [SupportsPrivateNotes], CONVERT(bit,1) AS [SupportsPostingLeases],
-        CONVERT(bit,1) AS [SupportsSyncLeases], CONVERT(bit,1) AS [SupportsImports],
-        CONVERT(bit,1) AS [SupportsTechBenchV1Import], CONVERT(bit,1) AS [SupportsServerSageSync],
-        CONVERT(bit,1) AS [SupportsAdminUserPreview], CONVERT(bit,1) AS [SupportsFireDrillCredentials];
+    SELECT CONVERT(int, 8) AS [SchemaVersion], CONVERT(bit, 0) AS [FullTextSearchAvailable],
+        CONVERT(bit, 1) AS [SupportsTickets], CONVERT(bit, 1) AS [SupportsWorkEntries],
+        CONVERT(bit, 1) AS [SupportsPrivateNotes], CONVERT(bit, 1) AS [SupportsPostingLeases],
+        CONVERT(bit, 1) AS [SupportsSyncLeases], CONVERT(bit, 1) AS [SupportsImports],
+        CONVERT(bit, 1) AS [SupportsTechBenchV1Import], CONVERT(bit, 1) AS [SupportsServerSageSync],
+        CONVERT(bit, 1) AS [SupportsAdminUserPreview], CONVERT(bit, 1) AS [SupportsFireDrillCredentials];
 END;
 GO
 
@@ -21646,8 +21646,8 @@ BEGIN
 END;
 
 IF CHARINDEX(
-       N'CONVERT(int, ' + CONVERT(nvarchar(10), @InstalledSchemaVersion) + N')',
-       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'))) = 0
+       N'CONVERT(int,' + CONVERT(nvarchar(10), @InstalledSchemaVersion) + N')',
+       REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities')), N' ', N'')) = 0
 BEGIN
     PRINT N'FAIL: GetRepositoryCapabilities does not report the installed schema version.';
     SET @FailureCount += 1;
@@ -21894,8 +21894,8 @@ BEGIN
 END;
 
 IF CHARINDEX(
-       N'CONVERT(int, ' + CONVERT(nvarchar(10), @InstalledSchemaVersion) + N')',
-       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'))) = 0
+       N'CONVERT(int,' + CONVERT(nvarchar(10), @InstalledSchemaVersion) + N')',
+       REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities')), N' ', N'')) = 0
 BEGIN
     PRINT N'FAIL: GetRepositoryCapabilities does not report the installed schema version.';
     SET @FailureCount += 1;
@@ -23649,8 +23649,8 @@ BEGIN
 END;
 
 IF CHARINDEX(
-       N'CONVERT(int, ' + CONVERT(nvarchar(10), @InstalledSchemaVersion) + N')',
-       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'))) = 0
+       N'CONVERT(int,' + CONVERT(nvarchar(10), @InstalledSchemaVersion) + N')',
+       REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities')), N' ', N'')) = 0
    OR CHARINDEX(
        N'[SupportsTechBenchV1Import]',
        OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'))) = 0
