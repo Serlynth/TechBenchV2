@@ -67,3 +67,36 @@ public sealed record SageSyncCustomer(
     string? ContactName,
     string? Telephone,
     bool IsActive);
+
+public sealed record FireDrillSyncConfiguration(
+    string SourcePath,
+    bool DailySyncEnabled,
+    string DailySyncTime)
+{
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(SourcePath);
+}
+
+public sealed record FireDrillSyncWork(
+    Guid WorkId,
+    Guid LeaseId,
+    DateTimeOffset LeaseExpiresUtc);
+
+public sealed record FireDrillCredentialRow(
+    string ClientName,
+    string? FireboxIp,
+    string? Status,
+    string? Admin,
+    string? CsriAdmin,
+    string? FireboxDbCsri,
+    string? AuthpointUser,
+    string? SslVpnPassword,
+    string? AdAuthUser,
+    string? AdPassword,
+    string? RustPassword);
+
+public sealed record FireDrillSyncCounts(int ReadCount, int SavedCount, int StaleCount);
+
+public sealed record FireDrillSyncExecutionResult(
+    FireDrillSyncCounts Counts,
+    DateTimeOffset SourceModifiedAtUtc,
+    string Message);

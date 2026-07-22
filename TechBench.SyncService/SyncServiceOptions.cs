@@ -14,6 +14,7 @@ public sealed class SyncServiceOptions
     public int WhdRequestTimeoutSeconds { get; set; } = 90;
     public string? SecretPath { get; set; }
     public string? SageSecretPath { get; set; }
+    public string? FireDrillSecretPath { get; set; }
     public string? SageOdbcWorkerPath { get; set; }
     public int SageOdbcTimeoutSeconds { get; set; } = 120;
     public int FinalizationTimeoutSeconds { get; set; } = 15;
@@ -52,6 +53,20 @@ public sealed class SyncServiceOptions
             "CSRI",
             "TechBench Sync Service",
             "sage.secret");
+    }
+
+    public string ResolveFireDrillSecretPath()
+    {
+        if (!string.IsNullOrWhiteSpace(FireDrillSecretPath))
+        {
+            return Path.GetFullPath(Environment.ExpandEnvironmentVariables(FireDrillSecretPath));
+        }
+
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "CSRI",
+            "TechBench Sync Service",
+            "firedrill.secret");
     }
 
     public string ResolveSageOdbcWorkerPath()

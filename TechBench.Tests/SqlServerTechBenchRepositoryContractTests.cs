@@ -9,7 +9,7 @@ public sealed class SqlServerTechBenchRepositoryContractTests
     [Fact]
     public void ClientTargetsV0007Schema()
     {
-        Assert.Equal(7, SqlServerConnectionFactory.SupportedSchemaVersion);
+        Assert.Equal(8, SqlServerConnectionFactory.SupportedSchemaVersion);
     }
 
     [Fact]

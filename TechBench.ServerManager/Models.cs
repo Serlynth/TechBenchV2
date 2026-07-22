@@ -8,6 +8,7 @@ internal sealed class SynchronizationConfiguration
     public Dictionary<string, byte[]> RowVersions { get; } = new(StringComparer.OrdinalIgnoreCase);
     public SyncStatus WhdStatus { get; set; } = new();
     public SyncStatus SageStatus { get; set; } = new();
+    public SyncStatus FireDrillStatus { get; set; } = new();
     public List<UserMapping> UserMappings { get; } = [];
     public List<Technician> Technicians { get; } = [];
 }

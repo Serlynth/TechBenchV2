@@ -7,6 +7,7 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
 DECLARE @FailureCount int = 0;
+DECLARE @InstalledSchemaVersion int = (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]);
 
 IF NOT EXISTS
 (
@@ -20,9 +21,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) <> 7
+IF @InstalledSchemaVersion NOT IN (7, 8)
 BEGIN
-    PRINT N'FAIL: installed schema version is not 7.';
+    PRINT N'FAIL: V0007 verification supports installed schema version 7 or 8.';
     SET @FailureCount += 1;
 END;
 
@@ -313,6 +314,16 @@ INSERT INTO @ServiceProcedures([ObjectName]) VALUES
     (N'tb_service.GetAutomaticClientMatchCandidates'),
     (N'tb_service.ApplyAutomaticClientMatch'),
     (N'tb_service.ApplyAutomaticWhdFamilyMember');
+
+IF @InstalledSchemaVersion >= 8
+BEGIN
+    INSERT INTO @ServiceProcedures([ObjectName]) VALUES
+        (N'tb_service.GetFireDrillSyncConfiguration'),
+        (N'tb_service.ClaimFireDrillSyncWork'),
+        (N'tb_service.RenewFireDrillSyncLease'),
+        (N'tb_service.ApplyFireDrillCredentialSnapshot'),
+        (N'tb_service.CompleteFireDrillSyncWork');
+END;
 
 IF EXISTS
 (
@@ -615,9 +626,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF CHARINDEX(N'CONVERT(int,7)', REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities')), N' ', N'')) = 0
+IF CHARINDEX(N'CONVERT(int,' + CONVERT(nvarchar(10),@InstalledSchemaVersion) + N')', REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities')), N' ', N'')) = 0
 BEGIN
-    PRINT N'FAIL: GetRepositoryCapabilities does not report schema version 7.';
+    PRINT N'FAIL: GetRepositoryCapabilities does not report the installed schema version.';
     SET @FailureCount += 1;
 END;
 

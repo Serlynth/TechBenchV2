@@ -92,7 +92,7 @@ public sealed partial class SqlServer2016SyntaxTests
         var source = File.ReadAllText(path);
 
         Assert.Contains(
-            "@InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7)",
+            "@InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8)",
             source,
             StringComparison.OrdinalIgnoreCase);
 
@@ -147,13 +147,13 @@ public sealed partial class SqlServer2016SyntaxTests
     [Theory]
     [InlineData(
         "92-V0003-SharedReferenceVerify.sql",
-        "@InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7)")]
+        "@InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8)")]
     [InlineData(
         "93-V0004-AdminSharedVerify.sql",
-        "@InstalledSchemaVersion NOT IN (4, 5, 6, 7)")]
+        "@InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8)")]
     [InlineData(
         "94-V0005-TechBenchV1ImportVerify.sql",
-        "@InstalledSchemaVersion NOT IN (5, 6, 7)")]
+        "@InstalledSchemaVersion NOT IN (5, 6, 7, 8)")]
     public void EarlierSchemaVerifiersAcceptTheFinalSchemaVersion(
         string fileName,
         string expectedVersionCheck)
@@ -574,6 +574,78 @@ public sealed partial class SqlServer2016SyntaxTests
         var procedures = source.IndexOf("49-V0007-ServerOwnedSageAndAdminPreviewProcedures.sql", StringComparison.Ordinal);
         var grants = source.IndexOf("55-V0007-ServerOwnedSageAndAdminPreviewGrants.sql", StringComparison.Ordinal);
         var verify = source.IndexOf("96-V0007-ServerOwnedSageAndAdminPreviewVerify.sql", StringComparison.Ordinal);
+
+        Assert.True(schema >= 0 && procedures > schema && grants > procedures && verify > grants);
+    }
+
+    [Fact]
+    public void V0008PublishesEncryptedFireDrillContractsForAllTechBenchUsers()
+    {
+        var sqlDirectory = FindSqlDirectory();
+        var schemaSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "27-V0008-FireDrillCredentialsSchema.sql"));
+        var procedureSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "50-V0008-FireDrillCredentialsProcedures.sql"));
+        var grantSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "56-V0008-FireDrillCredentialsGrants.sql"));
+
+        Assert.Contains("WITH ALGORITHM = AES_256", schemaSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[AdminEncrypted] varbinary(max)", schemaSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[AdPasswordEncrypted] varbinary(max)", schemaSource, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("[AdPassword] nvarchar", schemaSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WITH EXECUTE AS OWNER", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("DecryptByKeyAutoCert", procedureSource, StringComparison.OrdinalIgnoreCase);
+        var revealStart = procedureSource.IndexOf(
+            "CREATE OR ALTER PROCEDURE [tb_app].[RevealFireDrillCredential]",
+            StringComparison.OrdinalIgnoreCase);
+        var revealEnd = procedureSource.IndexOf("\nGO", revealStart, StringComparison.OrdinalIgnoreCase);
+        Assert.True(revealStart >= 0 && revealEnd > revealStart);
+        var revealBody = procedureSource[revealStart..revealEnd];
+        Assert.Contains("SESSION_CONTEXT(N'TechBench.PreviewSessionId')", revealBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("EnsureCurrentUser", revealBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("FireDrillCredentialRevealed", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("FireDrillCredentialCopied", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("N'04:00'", procedureSource, StringComparison.OrdinalIgnoreCase);
+
+        foreach (var procedure in new[]
+                 {
+                     "SearchFireDrillCredentials",
+                     "RevealFireDrillCredential",
+                     "AuditFireDrillCredentialCopy"
+                 })
+        {
+            Assert.Contains(
+                $"GRANT EXECUTE ON OBJECT::[tb_app].[{procedure}] TO [tb_role_user]",
+                grantSource,
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        Assert.Contains(
+            "GRANT EXECUTE ON OBJECT::[tb_app].[AdminRequestFireDrillSync] TO [tb_role_admin]",
+            grantSource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            "GRANT EXECUTE ON OBJECT::[tb_app].[AdminRequestFireDrillSync] TO [tb_role_user]",
+            grantSource,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void StandaloneBuilderOrdersAllV0008Stages()
+    {
+        var root = Directory.GetParent(FindSqlDirectory())!.Parent!.FullName;
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "scripts",
+            "Build-StandaloneSqlDeployment.ps1"));
+
+        var schema = source.IndexOf("27-V0008-FireDrillCredentialsSchema.sql", StringComparison.Ordinal);
+        var procedures = source.IndexOf("50-V0008-FireDrillCredentialsProcedures.sql", StringComparison.Ordinal);
+        var grants = source.IndexOf("56-V0008-FireDrillCredentialsGrants.sql", StringComparison.Ordinal);
+        var verify = source.IndexOf("97-V0008-FireDrillCredentialsVerify.sql", StringComparison.Ordinal);
 
         Assert.True(schema >= 0 && procedures > schema && grants > procedures && verify > grants);
     }

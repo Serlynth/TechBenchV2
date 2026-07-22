@@ -25,6 +25,7 @@ internal sealed record AppPaths(
     public string ConfigurationPath => Path.Combine(ServiceDirectory, "appsettings.json");
     public string WhdSecretPath => Path.Combine(DataDirectory, "whd.secret");
     public string SageSecretPath => Path.Combine(DataDirectory, "sage.secret");
+    public string FireDrillSecretPath => Path.Combine(DataDirectory, "firedrill.secret");
     public string ManagerExecutable => Path.Combine(ManagerDirectory, "TechBench.ServerManager.exe");
 
     public ServiceConfiguration ReadConfiguration()

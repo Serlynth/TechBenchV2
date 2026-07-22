@@ -13,6 +13,7 @@ internal sealed class SqlAdminRepository(AppPaths paths)
         LoadSettings(connection, configuration);
         configuration.WhdStatus = LoadStatus(connection, "tb_app.GetWhdSyncStatus", false);
         configuration.SageStatus = LoadStatus(connection, "tb_app.GetSageSyncStatus", true);
+        configuration.FireDrillStatus = LoadStatus(connection, "tb_app.GetFireDrillSyncStatus", true);
         LoadMappings(connection, configuration);
         LoadTechnicians(connection, configuration);
         return configuration;
@@ -69,6 +70,15 @@ internal sealed class SqlAdminRepository(AppPaths paths)
         command.Parameters.Add("@RequestId", SqlDbType.UniqueIdentifier).Value = Guid.NewGuid();
         command.Parameters.Add("@AllowLargeRemoval", SqlDbType.Bit).Value = allowLargeRemoval;
         command.Parameters.Add("@ConfirmedRequestId", SqlDbType.UniqueIdentifier).Value = confirmedRequestId ?? (object)DBNull.Value;
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? ReadString(reader, "Status", "Queued") : "Queued";
+    }
+
+    public string RequestFireDrillSync()
+    {
+        using var connection = OpenAdminConnection();
+        using var command = StoredProcedure(connection, "tb_app.AdminRequestFireDrillSync");
+        command.Parameters.Add("@RequestId", SqlDbType.UniqueIdentifier).Value = Guid.NewGuid();
         using var reader = command.ExecuteReader();
         return reader.Read() ? ReadString(reader, "Status", "Queued") : "Queued";
     }
@@ -146,8 +156,8 @@ internal sealed class SqlAdminRepository(AppPaths paths)
             var schema = ReadInt(reader, "SchemaVersion");
             var isAdmin = ReadBool(reader, "IsAdmin");
             var login = ReadString(reader, "AuthenticatedLoginName");
-            if (requireExactVersion && schema != 7)
-                throw new InvalidOperationException($"Server Manager requires database schema 7; SQL Server reports {schema}.");
+            if (requireExactVersion && schema != 8)
+                throw new InvalidOperationException($"Server Manager requires database schema 8; SQL Server reports {schema}.");
             if (!isAdmin)
                 throw new UnauthorizedAccessException($"'{login}' is not a TechBench Admin. Add this Windows account to CSRI\\TechBench_Admins.");
             return connection;
@@ -182,7 +192,8 @@ internal sealed class SqlAdminRepository(AppPaths paths)
         var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "Whd.BaseUrl", "Whd.AuthenticationMode", "Whd.ServiceUsername", "Whd.AutoSyncEnabled",
-            "Whd.AutoSyncMinutes", "Sage.SyncDsn", "Sage.SyncUsername"
+            "Whd.AutoSyncMinutes", "Sage.SyncDsn", "Sage.SyncUsername",
+            "FireDrill.SourcePath", "FireDrill.DailySyncEnabled", "FireDrill.DailySyncTime"
         };
         using var command = StoredProcedure(connection, "tb_app.GetSettings");
         using var reader = command.ExecuteReader();

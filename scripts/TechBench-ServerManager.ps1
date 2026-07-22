@@ -2493,7 +2493,7 @@ function Open-TechBenchAdminDatabaseConnection {
         }
 
         if ($schemaVersion -ne 7) {
-            throw "Server Manager requires TechBench database schema 7; the installed schema is $schemaVersion."
+            throw "Server Manager requires TechBench database schema 8; the installed schema is $schemaVersion."
         }
         if (-not $isAdmin) {
             throw "'$loginName' is not a member of the TechBench Admin role. Sign in with an account in CSRI\TechBench_Admins."

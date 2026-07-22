@@ -2694,6 +2694,173 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 27-V0008-FireDrillCredentialsSchema.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.ServerOwnedSageAndAdminPreview.0007'
+      AND [SchemaVersion] = 7
+)
+BEGIN
+    RAISERROR(N'V0007 must be installed before FireDrillCredentials.0008.', 16, 1);
+    RETURN;
+END;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF NOT EXISTS (SELECT 1 FROM sys.symmetric_keys WHERE [name] = N'##MS_DatabaseMasterKey##')
+    BEGIN
+        DECLARE @MasterKeyPassword nvarchar(128) =
+            N'TB-' + CONVERT(nvarchar(36), NEWID()) + N'-' + CONVERT(nvarchar(36), NEWID());
+        DECLARE @CreateMasterKeySql nvarchar(max) =
+            N'CREATE MASTER KEY ENCRYPTION BY PASSWORD = N''' + REPLACE(@MasterKeyPassword, N'''', N'''''') + N''';';
+        EXEC sys.sp_executesql @CreateMasterKeySql;
+
+        PRINT N'IMPORTANT: A database master key was created for FireDrill credential encryption.';
+        SELECT @MasterKeyPassword AS [DatabaseMasterKeyRecoveryPassword];
+        PRINT N'Store the recovery password shown in the Results grid in your protected administrative password vault.';
+    END;
+
+    IF NOT EXISTS (SELECT 1 FROM sys.certificates WHERE [name] = N'tb_FireDrillCredentialCertificate')
+        CREATE CERTIFICATE [tb_FireDrillCredentialCertificate]
+            WITH SUBJECT = N'TechBench FireDrill credential encryption';
+
+    IF NOT EXISTS (SELECT 1 FROM sys.symmetric_keys WHERE [name] = N'tb_FireDrillCredentialKey')
+        CREATE SYMMETRIC KEY [tb_FireDrillCredentialKey]
+            WITH ALGORITHM = AES_256
+            ENCRYPTION BY CERTIFICATE [tb_FireDrillCredentialCertificate];
+
+    IF OBJECT_ID(N'tb_data.FireDrillCredentials', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_data].[FireDrillCredentials]
+        (
+            [CredentialId] bigint IDENTITY(1,1) NOT NULL,
+            [ClientKey] nvarchar(200) NOT NULL,
+            [ClientName] nvarchar(240) NOT NULL,
+            [FireboxIp] nvarchar(120) NULL,
+            [Status] nvarchar(120) NULL,
+            [AdminEncrypted] varbinary(max) NULL,
+            [CsriAdminEncrypted] varbinary(max) NULL,
+            [FireboxDbCsriEncrypted] varbinary(max) NULL,
+            [AuthpointUserEncrypted] varbinary(max) NULL,
+            [SslVpnPasswordEncrypted] varbinary(max) NULL,
+            [AdAuthUserEncrypted] varbinary(max) NULL,
+            [AdPasswordEncrypted] varbinary(max) NULL,
+            [RustPasswordEncrypted] varbinary(max) NULL,
+            [SourceRowHash] binary(32) NOT NULL,
+            [SourceModifiedAtUtc] datetime2(3) NOT NULL,
+            [LastSyncedAtUtc] datetime2(3) NOT NULL,
+            [IsCurrent] bit NOT NULL CONSTRAINT [DF_FireDrillCredentials_IsCurrent] DEFAULT (1),
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_FireDrillCredentials] PRIMARY KEY CLUSTERED ([CredentialId]),
+            CONSTRAINT [UQ_FireDrillCredentials_ClientKey] UNIQUE ([ClientKey]),
+            CONSTRAINT [CK_FireDrillCredentials_ClientKey] CHECK (LEN(LTRIM(RTRIM([ClientKey]))) > 0),
+            CONSTRAINT [CK_FireDrillCredentials_ClientName] CHECK (LEN(LTRIM(RTRIM([ClientName]))) > 0)
+        );
+
+        CREATE INDEX [IX_FireDrillCredentials_Search]
+            ON [tb_data].[FireDrillCredentials]([IsCurrent], [ClientName], [CredentialId])
+            INCLUDE ([FireboxIp], [Status], [LastSyncedAtUtc]);
+    END;
+
+    IF OBJECT_ID(N'tb_sync.FireDrillSyncRequests', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_sync].[FireDrillSyncRequests]
+        (
+            [RequestId] uniqueidentifier NOT NULL,
+            [RequestedByWindowsSid] varbinary(85) NOT NULL,
+            [RequestType] nvarchar(20) NOT NULL,
+            [RequestedAtUtc] datetime2(3) NOT NULL CONSTRAINT [DF_FireDrillSyncRequests_Requested] DEFAULT (SYSUTCDATETIME()),
+            [StartedAtUtc] datetime2(3) NULL,
+            [CompletedAtUtc] datetime2(3) NULL,
+            [Status] nvarchar(30) NOT NULL CONSTRAINT [DF_FireDrillSyncRequests_Status] DEFAULT (N'Queued'),
+            [ReadCount] int NOT NULL CONSTRAINT [DF_FireDrillSyncRequests_ReadCount] DEFAULT (0),
+            [SavedCount] int NOT NULL CONSTRAINT [DF_FireDrillSyncRequests_SavedCount] DEFAULT (0),
+            [StaleCount] int NOT NULL CONSTRAINT [DF_FireDrillSyncRequests_StaleCount] DEFAULT (0),
+            [AttemptCount] int NOT NULL CONSTRAINT [DF_FireDrillSyncRequests_AttemptCount] DEFAULT (0),
+            [Message] nvarchar(2000) NULL,
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_FireDrillSyncRequests] PRIMARY KEY CLUSTERED ([RequestId]),
+            CONSTRAINT [FK_FireDrillSyncRequests_Requester] FOREIGN KEY ([RequestedByWindowsSid]) REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [CK_FireDrillSyncRequests_Type] CHECK ([RequestType] IN (N'Automatic', N'Manual')),
+            CONSTRAINT [CK_FireDrillSyncRequests_Status] CHECK ([Status] IN (N'Queued', N'Running', N'Completed', N'Failed')),
+            CONSTRAINT [CK_FireDrillSyncRequests_Counts] CHECK ([ReadCount] >= 0 AND [SavedCount] >= 0 AND [StaleCount] >= 0 AND [AttemptCount] >= 0)
+        );
+
+        CREATE INDEX [IX_FireDrillSyncRequests_StatusRequested]
+            ON [tb_sync].[FireDrillSyncRequests]([Status], [RequestedAtUtc], [RequestId])
+            INCLUDE ([StartedAtUtc], [CompletedAtUtc], [RequestType], [AttemptCount]);
+    END;
+
+    IF OBJECT_ID(N'tb_sync.FireDrillSyncLeases', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_sync].[FireDrillSyncLeases]
+        (
+            [RequestId] uniqueidentifier NOT NULL,
+            [LeaseId] uniqueidentifier NOT NULL,
+            [WorkerId] uniqueidentifier NOT NULL,
+            [AcquiredAtUtc] datetime2(3) NOT NULL CONSTRAINT [DF_FireDrillSyncLeases_Acquired] DEFAULT (SYSUTCDATETIME()),
+            [ExpiresAtUtc] datetime2(3) NOT NULL,
+            CONSTRAINT [PK_FireDrillSyncLeases] PRIMARY KEY CLUSTERED ([RequestId]),
+            CONSTRAINT [UQ_FireDrillSyncLeases_LeaseId] UNIQUE ([LeaseId]),
+            CONSTRAINT [FK_FireDrillSyncLeases_Request] FOREIGN KEY ([RequestId]) REFERENCES [tb_sync].[FireDrillSyncRequests]([RequestId]),
+            CONSTRAINT [CK_FireDrillSyncLeases_Expiry] CHECK ([ExpiresAtUtc] > [AcquiredAtUtc])
+        );
+    END;
+
+    IF OBJECT_ID(N'tb_sync.FireDrillSyncHealth', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_sync].[FireDrillSyncHealth]
+        (
+            [HealthId] tinyint NOT NULL CONSTRAINT [PK_FireDrillSyncHealth] PRIMARY KEY CONSTRAINT [CK_FireDrillSyncHealth_OneRow] CHECK ([HealthId] = 1),
+            [LastAttemptAtUtc] datetime2(3) NULL,
+            [LastSuccessfulAtUtc] datetime2(3) NULL,
+            [LastSourceModifiedAtUtc] datetime2(3) NULL,
+            [LastError] nvarchar(2000) NULL,
+            [UpdatedAtUtc] datetime2(3) NOT NULL CONSTRAINT [DF_FireDrillSyncHealth_Updated] DEFAULT (SYSUTCDATETIME())
+        );
+    END;
+
+    IF NOT EXISTS (SELECT 1 FROM [tb_sync].[FireDrillSyncHealth] WHERE [HealthId] = 1)
+        INSERT INTO [tb_sync].[FireDrillSyncHealth]([HealthId]) VALUES (1);
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM [tb_deploy].[SchemaMigrations]
+        WHERE [MigrationId] = N'SqlServer2016.FireDrillCredentials.0008'
+    )
+        INSERT INTO [tb_deploy].[SchemaMigrations]
+            ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+        VALUES
+            (N'SqlServer2016.FireDrillCredentials.0008', 8, N'0.5.6', NULL);
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+PRINT N'SqlServer2016.FireDrillCredentials.0008 installed.';
+GO
+
+-- ============================================================================
+-- END 27-V0008-FireDrillCredentialsSchema.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 30-Security.sql
 -- ============================================================================
 
@@ -18877,6 +19044,405 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 50-V0008-FireDrillCredentialsProcedures.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+GO
+
+ALTER PROCEDURE [tb_app].[GetRepositoryCapabilities]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @UserSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@UserSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    SELECT CONVERT(int,8) AS [SchemaVersion], CONVERT(bit,0) AS [FullTextSearchAvailable],
+        CONVERT(bit,1) AS [SupportsTickets], CONVERT(bit,1) AS [SupportsWorkEntries],
+        CONVERT(bit,1) AS [SupportsPrivateNotes], CONVERT(bit,1) AS [SupportsPostingLeases],
+        CONVERT(bit,1) AS [SupportsSyncLeases], CONVERT(bit,1) AS [SupportsImports],
+        CONVERT(bit,1) AS [SupportsTechBenchV1Import], CONVERT(bit,1) AS [SupportsServerSageSync],
+        CONVERT(bit,1) AS [SupportsAdminUserPreview], CONVERT(bit,1) AS [SupportsFireDrillCredentials];
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [tb_app].[SearchFireDrillCredentials]
+    @Search nvarchar(240) = NULL,
+    @Limit int = 250
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF USER_NAME() = N'tb_preview_reader'
+        THROW 52000, N'FireDrill credentials are unavailable in Admin user-preview mode.', 1;
+
+    DECLARE @Sid varbinary(85), @Login nvarchar(256), @Display nvarchar(160),
+            @Tech bit, @Manager bit, @Admin bit, @Sync bit;
+    EXEC [tb_security].[EnsureCurrentUser] @Sid OUTPUT, @Login OUTPUT, @Display OUTPUT,
+        @Tech OUTPUT, @Manager OUTPUT, @Admin OUTPUT, @Sync OUTPUT;
+
+    SET @Search = NULLIF(LTRIM(RTRIM(@Search)), N'');
+    SET @Limit = CASE WHEN @Limit IS NULL OR @Limit < 1 THEN 250 WHEN @Limit > 1000 THEN 1000 ELSE @Limit END;
+
+    SELECT TOP (@Limit)
+        [CredentialId], [ClientName], [FireboxIp], [Status], [LastSyncedAtUtc]
+    FROM [tb_data].[FireDrillCredentials]
+    WHERE [IsCurrent] = 1
+      AND (@Search IS NULL OR [ClientName] LIKE N'%' + @Search + N'%'
+           OR [FireboxIp] LIKE N'%' + @Search + N'%'
+           OR [Status] LIKE N'%' + @Search + N'%')
+    ORDER BY [ClientName], [CredentialId];
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [tb_app].[RevealFireDrillCredential]
+    @CredentialId bigint
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    IF SESSION_CONTEXT(N'TechBench.PreviewSessionId') IS NOT NULL
+        THROW 52001, N'FireDrill credentials are unavailable in Admin user-preview mode.', 1;
+
+    IF NOT EXISTS (SELECT 1 FROM [tb_data].[FireDrillCredentials] WHERE [CredentialId] = @CredentialId AND [IsCurrent] = 1)
+        THROW 52002, N'The FireDrill credential was not found or is no longer current.', 1;
+
+    SELECT [CredentialId], [ClientName], [FireboxIp], [Status], [LastSyncedAtUtc],
+        CONVERT(nvarchar(max), DecryptByKeyAutoCert(CERT_ID(N'tb_FireDrillCredentialCertificate'),NULL,[AdminEncrypted],1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',[ClientKey]),2))) AS [Admin],
+        CONVERT(nvarchar(max), DecryptByKeyAutoCert(CERT_ID(N'tb_FireDrillCredentialCertificate'),NULL,[CsriAdminEncrypted],1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',[ClientKey]),2))) AS [CsriAdmin],
+        CONVERT(nvarchar(max), DecryptByKeyAutoCert(CERT_ID(N'tb_FireDrillCredentialCertificate'),NULL,[FireboxDbCsriEncrypted],1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',[ClientKey]),2))) AS [FireboxDbCsri],
+        CONVERT(nvarchar(max), DecryptByKeyAutoCert(CERT_ID(N'tb_FireDrillCredentialCertificate'),NULL,[AuthpointUserEncrypted],1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',[ClientKey]),2))) AS [AuthpointUser],
+        CONVERT(nvarchar(max), DecryptByKeyAutoCert(CERT_ID(N'tb_FireDrillCredentialCertificate'),NULL,[SslVpnPasswordEncrypted],1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',[ClientKey]),2))) AS [SslVpnPassword],
+        CONVERT(nvarchar(max), DecryptByKeyAutoCert(CERT_ID(N'tb_FireDrillCredentialCertificate'),NULL,[AdAuthUserEncrypted],1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',[ClientKey]),2))) AS [AdAuthUser],
+        CONVERT(nvarchar(max), DecryptByKeyAutoCert(CERT_ID(N'tb_FireDrillCredentialCertificate'),NULL,[AdPasswordEncrypted],1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',[ClientKey]),2))) AS [AdPassword],
+        CONVERT(nvarchar(max), DecryptByKeyAutoCert(CERT_ID(N'tb_FireDrillCredentialCertificate'),NULL,[RustPasswordEncrypted],1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',[ClientKey]),2))) AS [RustPassword]
+    FROM [tb_data].[FireDrillCredentials]
+    WHERE [CredentialId] = @CredentialId AND [IsCurrent] = 1;
+
+    DECLARE @AuditEntityId nvarchar(120)=CONVERT(nvarchar(120),@CredentialId);
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action=N'FireDrillCredentialRevealed', @EntityType=N'FireDrillCredential',
+        @EntityId=@AuditEntityId, @RequestId=NULL, @DataJson=NULL;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [tb_app].[AuditFireDrillCredentialCopy]
+    @CredentialId bigint,
+    @FieldName nvarchar(40)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF USER_NAME() = N'tb_preview_reader'
+        THROW 52003, N'FireDrill credentials are unavailable in Admin user-preview mode.', 1;
+    IF @FieldName NOT IN (N'Admin', N'CsriAdmin', N'FireboxDbCsri', N'AuthpointUser', N'SslVpnPassword', N'AdAuthUser', N'AdPassword', N'RustPassword')
+        THROW 52004, N'The FireDrill field name is invalid.', 1;
+    IF NOT EXISTS (SELECT 1 FROM [tb_data].[FireDrillCredentials] WHERE [CredentialId] = @CredentialId AND [IsCurrent] = 1)
+        THROW 52005, N'The FireDrill credential was not found or is no longer current.', 1;
+
+    DECLARE @Sid varbinary(85), @Login nvarchar(256), @Display nvarchar(160),
+            @Tech bit, @Manager bit, @Admin bit, @Sync bit;
+    EXEC [tb_security].[EnsureCurrentUser] @Sid OUTPUT, @Login OUTPUT, @Display OUTPUT,
+        @Tech OUTPUT, @Manager OUTPUT, @Admin OUTPUT, @Sync OUTPUT;
+    DECLARE @Json nvarchar(max) = N'{"field":"' + STRING_ESCAPE(@FieldName, 'json') + N'"}';
+    DECLARE @AuditEntityId nvarchar(120)=CONVERT(nvarchar(120),@CredentialId);
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action=N'FireDrillCredentialCopied', @EntityType=N'FireDrillCredential',
+        @EntityId=@AuditEntityId, @RequestId=NULL, @DataJson=@Json;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [tb_app].[AdminRequestFireDrillSync]
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @Sid varbinary(85), @Login nvarchar(256), @Display nvarchar(160),
+            @Tech bit, @Manager bit, @Admin bit, @Sync bit;
+    EXEC [tb_security].[EnsureCurrentUser] @Sid OUTPUT, @Login OUTPUT, @Display OUTPUT,
+        @Tech OUTPUT, @Manager OUTPUT, @Admin OUTPUT, @Sync OUTPUT;
+    IF @Admin = 0 THROW 52010, N'Only a TechBench Admin can request FireDrill synchronization.', 1;
+    SET @RequestId = COALESCE(@RequestId, NEWID());
+
+    BEGIN TRANSACTION;
+    IF EXISTS (SELECT 1 FROM [tb_sync].[FireDrillSyncRequests] WITH (UPDLOCK, HOLDLOCK) WHERE [Status] IN (N'Queued', N'Running'))
+    BEGIN
+        SELECT TOP (1) [RequestId], N'AlreadyQueued' AS [Status]
+        FROM [tb_sync].[FireDrillSyncRequests]
+        WHERE [Status] IN (N'Queued', N'Running') ORDER BY [RequestedAtUtc];
+        COMMIT TRANSACTION;
+        RETURN;
+    END;
+    INSERT INTO [tb_sync].[FireDrillSyncRequests]([RequestId], [RequestedByWindowsSid], [RequestType])
+        VALUES (@RequestId, @Sid, N'Manual');
+    COMMIT TRANSACTION;
+    SELECT @RequestId AS [RequestId], N'Queued' AS [Status];
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [tb_app].[GetFireDrillSyncStatus]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP (1) [RequestId], [Status], [Message], [RequestedAtUtc], [CompletedAtUtc],
+        [ReadCount], [SavedCount], [StaleCount],
+        (SELECT COUNT(*) FROM [tb_sync].[FireDrillSyncRequests] WHERE [Status] IN (N'Queued', N'Running')) AS [QueueDepth]
+    FROM [tb_sync].[FireDrillSyncRequests]
+    ORDER BY [RequestedAtUtc] DESC, [RequestId] DESC;
+
+    SELECT [LastAttemptAtUtc], [LastSuccessfulAtUtc], [LastSourceModifiedAtUtc], [LastError]
+    FROM [tb_sync].[FireDrillSyncHealth] WHERE [HealthId] = 1;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [tb_service].[GetFireDrillSyncConfiguration]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT
+        COALESCE((SELECT [SettingValue] FROM [tb_data].[OrganizationSettings] WHERE [SettingKey]=N'FireDrill.SourcePath'), N'\\csri-file\Public\Client Data\1 Infosheets\Current Clients\FireDrill.xlsx') AS [SourcePath],
+        COALESCE(TRY_CONVERT(bit, (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings] WHERE [SettingKey]=N'FireDrill.DailySyncEnabled')), 1) AS [DailySyncEnabled],
+        COALESCE((SELECT [SettingValue] FROM [tb_data].[OrganizationSettings] WHERE [SettingKey]=N'FireDrill.DailySyncTime'), N'04:00') AS [DailySyncTime];
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [tb_service].[ClaimFireDrillSyncWork]
+    @WorkerId uniqueidentifier,
+    @LeaseSeconds int = 300
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    IF @LeaseSeconds < 120 OR @LeaseSeconds > 3600 THROW 52020, N'Lease seconds must be between 120 and 3600.', 1;
+
+    DECLARE @Sid varbinary(85), @Login nvarchar(256), @Display nvarchar(160),
+            @Tech bit, @Manager bit, @Admin bit, @Sync bit;
+    EXEC [tb_security].[EnsureCurrentUser] @Sid OUTPUT, @Login OUTPUT, @Display OUTPUT,
+        @Tech OUTPUT, @Manager OUTPUT, @Admin OUTPUT, @Sync OUTPUT;
+    IF @Sync = 0 THROW 52021, N'The current identity is not a TechBench sync operator.', 1;
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(), @NowLocal datetime=GETDATE(),
+            @Enabled bit=COALESCE(TRY_CONVERT(bit,(SELECT [SettingValue] FROM [tb_data].[OrganizationSettings] WHERE [SettingKey]=N'FireDrill.DailySyncEnabled')),1),
+            @At time(0)=COALESCE(TRY_CONVERT(time(0),(SELECT [SettingValue] FROM [tb_data].[OrganizationSettings] WHERE [SettingKey]=N'FireDrill.DailySyncTime')),CONVERT(time(0),N'04:00')),
+            @RequestId uniqueidentifier, @LeaseId uniqueidentifier=NEWID();
+
+    BEGIN TRANSACTION;
+    DELETE FROM [tb_sync].[FireDrillSyncLeases] WHERE [ExpiresAtUtc] <= @NowUtc;
+    UPDATE request_row SET [Status]=N'Queued', [StartedAtUtc]=NULL,
+        [Message]=N'Previous service lease expired; queued for retry.'
+    FROM [tb_sync].[FireDrillSyncRequests] request_row
+    WHERE request_row.[Status]=N'Running'
+      AND NOT EXISTS (SELECT 1 FROM [tb_sync].[FireDrillSyncLeases] lease_row WHERE lease_row.[RequestId]=request_row.[RequestId]);
+
+    IF @Enabled=1 AND CONVERT(time(0),@NowLocal)>=@At
+       AND NOT EXISTS
+       (
+           SELECT 1 FROM [tb_sync].[FireDrillSyncRequests]
+           WHERE [RequestType]=N'Automatic' AND CONVERT(date,[RequestedAtUtc])=CONVERT(date,@NowUtc)
+             AND ([Status]<>N'Failed' OR [RequestedAtUtc]>DATEADD(minute,-30,@NowUtc))
+       )
+    BEGIN
+        DECLARE @AutomaticRequestId uniqueidentifier=NEWID();
+        INSERT INTO [tb_sync].[FireDrillSyncRequests]([RequestId],[RequestedByWindowsSid],[RequestType])
+            VALUES(@AutomaticRequestId,@Sid,N'Automatic');
+    END;
+
+    SELECT TOP (1) @RequestId=[RequestId]
+    FROM [tb_sync].[FireDrillSyncRequests] WITH (UPDLOCK, READPAST, ROWLOCK)
+    WHERE [Status]=N'Queued' ORDER BY [RequestedAtUtc], [RequestId];
+
+    IF @RequestId IS NOT NULL
+    BEGIN
+        UPDATE [tb_sync].[FireDrillSyncRequests]
+        SET [Status]=N'Running', [StartedAtUtc]=@NowUtc, [CompletedAtUtc]=NULL,
+            [AttemptCount]=[AttemptCount]+1, [Message]=N'Workbook synchronization is running.'
+        WHERE [RequestId]=@RequestId;
+        INSERT INTO [tb_sync].[FireDrillSyncLeases]([RequestId],[LeaseId],[WorkerId],[ExpiresAtUtc])
+            VALUES(@RequestId,@LeaseId,@WorkerId,DATEADD(second,@LeaseSeconds,@NowUtc));
+    END;
+    COMMIT TRANSACTION;
+
+    IF @RequestId IS NOT NULL
+        SELECT @RequestId AS [WorkId], @LeaseId AS [LeaseId], DATEADD(second,@LeaseSeconds,@NowUtc) AS [LeaseExpiresUtc];
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [tb_service].[RenewFireDrillSyncLease]
+    @RequestId uniqueidentifier, @LeaseId uniqueidentifier, @WorkerId uniqueidentifier, @LeaseSeconds int=300
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE [tb_sync].[FireDrillSyncLeases]
+    SET [ExpiresAtUtc]=DATEADD(second,@LeaseSeconds,SYSUTCDATETIME())
+    WHERE [RequestId]=@RequestId AND [LeaseId]=@LeaseId AND [WorkerId]=@WorkerId AND [ExpiresAtUtc]>SYSUTCDATETIME();
+    IF @@ROWCOUNT<>1 THROW 52022, N'The FireDrill synchronization lease is no longer valid.', 1;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [tb_service].[ApplyFireDrillCredentialSnapshot]
+    @RequestId uniqueidentifier,
+    @LeaseId uniqueidentifier,
+    @WorkerId uniqueidentifier,
+    @RowsJson nvarchar(max),
+    @SourceModifiedAtUtc datetime2(3),
+    @SyncedAtUtc datetime2(3)
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    IF ISJSON(@RowsJson)<>1 THROW 52030, N'The FireDrill snapshot is not valid JSON.', 1;
+
+    CREATE TABLE #Rows
+    (
+        [ClientKey] nvarchar(200) NOT NULL PRIMARY KEY,
+        [ClientName] nvarchar(240) NOT NULL,
+        [FireboxIp] nvarchar(120) NULL, [Status] nvarchar(120) NULL,
+        [Admin] nvarchar(3000) NULL, [CsriAdmin] nvarchar(3000) NULL,
+        [FireboxDbCsri] nvarchar(3000) NULL, [AuthpointUser] nvarchar(3000) NULL,
+        [SslVpnPassword] nvarchar(3000) NULL, [AdAuthUser] nvarchar(3000) NULL,
+        [AdPassword] nvarchar(3000) NULL, [RustPassword] nvarchar(3000) NULL,
+        [RowHash] binary(32) NULL
+    );
+
+    INSERT INTO #Rows([ClientKey],[ClientName],[FireboxIp],[Status],[Admin],[CsriAdmin],[FireboxDbCsri],[AuthpointUser],[SslVpnPassword],[AdAuthUser],[AdPassword],[RustPassword])
+    SELECT LOWER(LTRIM(RTRIM([ClientName]))), LTRIM(RTRIM([ClientName])), NULLIF(LTRIM(RTRIM([FireboxIp])),N''), NULLIF(LTRIM(RTRIM([Status])),N''),
+        [Admin],[CsriAdmin],[FireboxDbCsri],[AuthpointUser],[SslVpnPassword],[AdAuthUser],[AdPassword],[RustPassword]
+    FROM OPENJSON(@RowsJson)
+    WITH
+    (
+        [ClientName] nvarchar(240) N'$.clientName', [FireboxIp] nvarchar(120) N'$.fireboxIp', [Status] nvarchar(120) N'$.status',
+        [Admin] nvarchar(3000) N'$.admin', [CsriAdmin] nvarchar(3000) N'$.csriAdmin', [FireboxDbCsri] nvarchar(3000) N'$.fireboxDbCsri',
+        [AuthpointUser] nvarchar(3000) N'$.authpointUser', [SslVpnPassword] nvarchar(3000) N'$.sslVpnPassword',
+        [AdAuthUser] nvarchar(3000) N'$.adAuthUser', [AdPassword] nvarchar(3000) N'$.adPassword', [RustPassword] nvarchar(3000) N'$.rustPassword'
+    );
+
+    IF NOT EXISTS(SELECT 1 FROM #Rows) THROW 52031, N'The FireDrill snapshot contained no client rows; existing data was not changed.', 1;
+    IF EXISTS(SELECT 1 FROM #Rows WHERE LEN([ClientKey])=0) THROW 52032, N'A FireDrill row has no client name.', 1;
+
+    UPDATE #Rows SET [RowHash]=HASHBYTES('SHA2_256',
+        HASHBYTES('SHA2_256',CONVERT(varbinary(max),ISNULL([ClientName],N'<NULL>'))) +
+        HASHBYTES('SHA2_256',CONVERT(varbinary(max),ISNULL([FireboxIp],N'<NULL>'))) +
+        HASHBYTES('SHA2_256',CONVERT(varbinary(max),ISNULL([Status],N'<NULL>'))) +
+        HASHBYTES('SHA2_256',CONVERT(varbinary(max),ISNULL([Admin],N'<NULL>'))) +
+        HASHBYTES('SHA2_256',CONVERT(varbinary(max),ISNULL([CsriAdmin],N'<NULL>'))) +
+        HASHBYTES('SHA2_256',CONVERT(varbinary(max),ISNULL([FireboxDbCsri],N'<NULL>'))) +
+        HASHBYTES('SHA2_256',CONVERT(varbinary(max),ISNULL([AuthpointUser],N'<NULL>'))) +
+        HASHBYTES('SHA2_256',CONVERT(varbinary(max),ISNULL([SslVpnPassword],N'<NULL>'))) +
+        HASHBYTES('SHA2_256',CONVERT(varbinary(max),ISNULL([AdAuthUser],N'<NULL>'))) +
+        HASHBYTES('SHA2_256',CONVERT(varbinary(max),ISNULL([AdPassword],N'<NULL>'))) +
+        HASHBYTES('SHA2_256',CONVERT(varbinary(max),ISNULL([RustPassword],N'<NULL>'))));
+
+    DECLARE @ReadCount int=(SELECT COUNT(*) FROM #Rows), @SavedCount int=0, @StaleCount int=0;
+    BEGIN TRY
+    BEGIN TRANSACTION;
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM [tb_sync].[FireDrillSyncLeases]
+        WHERE [RequestId]=@RequestId AND [LeaseId]=@LeaseId AND [WorkerId]=@WorkerId AND [ExpiresAtUtc]>SYSUTCDATETIME()
+    ) THROW 52033, N'The FireDrill synchronization lease is no longer valid.', 1;
+
+    OPEN SYMMETRIC KEY [tb_FireDrillCredentialKey] DECRYPTION BY CERTIFICATE [tb_FireDrillCredentialCertificate];
+
+    UPDATE target SET [ClientName]=source_row.[ClientName], [FireboxIp]=source_row.[FireboxIp], [Status]=source_row.[Status],
+        [AdminEncrypted]=CASE WHEN source_row.[Admin] IS NULL THEN NULL ELSE EncryptByKey(Key_GUID(N'tb_FireDrillCredentialKey'),CONVERT(varbinary(max),source_row.[Admin]),1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',source_row.[ClientKey]),2)) END,
+        [CsriAdminEncrypted]=CASE WHEN source_row.[CsriAdmin] IS NULL THEN NULL ELSE EncryptByKey(Key_GUID(N'tb_FireDrillCredentialKey'),CONVERT(varbinary(max),source_row.[CsriAdmin]),1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',source_row.[ClientKey]),2)) END,
+        [FireboxDbCsriEncrypted]=CASE WHEN source_row.[FireboxDbCsri] IS NULL THEN NULL ELSE EncryptByKey(Key_GUID(N'tb_FireDrillCredentialKey'),CONVERT(varbinary(max),source_row.[FireboxDbCsri]),1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',source_row.[ClientKey]),2)) END,
+        [AuthpointUserEncrypted]=CASE WHEN source_row.[AuthpointUser] IS NULL THEN NULL ELSE EncryptByKey(Key_GUID(N'tb_FireDrillCredentialKey'),CONVERT(varbinary(max),source_row.[AuthpointUser]),1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',source_row.[ClientKey]),2)) END,
+        [SslVpnPasswordEncrypted]=CASE WHEN source_row.[SslVpnPassword] IS NULL THEN NULL ELSE EncryptByKey(Key_GUID(N'tb_FireDrillCredentialKey'),CONVERT(varbinary(max),source_row.[SslVpnPassword]),1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',source_row.[ClientKey]),2)) END,
+        [AdAuthUserEncrypted]=CASE WHEN source_row.[AdAuthUser] IS NULL THEN NULL ELSE EncryptByKey(Key_GUID(N'tb_FireDrillCredentialKey'),CONVERT(varbinary(max),source_row.[AdAuthUser]),1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',source_row.[ClientKey]),2)) END,
+        [AdPasswordEncrypted]=CASE WHEN source_row.[AdPassword] IS NULL THEN NULL ELSE EncryptByKey(Key_GUID(N'tb_FireDrillCredentialKey'),CONVERT(varbinary(max),source_row.[AdPassword]),1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',source_row.[ClientKey]),2)) END,
+        [RustPasswordEncrypted]=CASE WHEN source_row.[RustPassword] IS NULL THEN NULL ELSE EncryptByKey(Key_GUID(N'tb_FireDrillCredentialKey'),CONVERT(varbinary(max),source_row.[RustPassword]),1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',source_row.[ClientKey]),2)) END,
+        [SourceRowHash]=source_row.[RowHash], [SourceModifiedAtUtc]=@SourceModifiedAtUtc, [LastSyncedAtUtc]=@SyncedAtUtc, [IsCurrent]=1
+    FROM [tb_data].[FireDrillCredentials] target INNER JOIN #Rows source_row ON source_row.[ClientKey]=target.[ClientKey]
+    WHERE target.[SourceRowHash]<>source_row.[RowHash] OR target.[IsCurrent]=0;
+    SET @SavedCount=@@ROWCOUNT;
+
+    INSERT INTO [tb_data].[FireDrillCredentials]
+        ([ClientKey],[ClientName],[FireboxIp],[Status],[AdminEncrypted],[CsriAdminEncrypted],[FireboxDbCsriEncrypted],[AuthpointUserEncrypted],[SslVpnPasswordEncrypted],[AdAuthUserEncrypted],[AdPasswordEncrypted],[RustPasswordEncrypted],[SourceRowHash],[SourceModifiedAtUtc],[LastSyncedAtUtc],[IsCurrent])
+    SELECT source_row.[ClientKey],source_row.[ClientName],source_row.[FireboxIp],source_row.[Status],
+        CASE WHEN source_row.[Admin] IS NULL THEN NULL ELSE EncryptByKey(Key_GUID(N'tb_FireDrillCredentialKey'),CONVERT(varbinary(max),source_row.[Admin]),1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',source_row.[ClientKey]),2)) END,
+        CASE WHEN source_row.[CsriAdmin] IS NULL THEN NULL ELSE EncryptByKey(Key_GUID(N'tb_FireDrillCredentialKey'),CONVERT(varbinary(max),source_row.[CsriAdmin]),1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',source_row.[ClientKey]),2)) END,
+        CASE WHEN source_row.[FireboxDbCsri] IS NULL THEN NULL ELSE EncryptByKey(Key_GUID(N'tb_FireDrillCredentialKey'),CONVERT(varbinary(max),source_row.[FireboxDbCsri]),1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',source_row.[ClientKey]),2)) END,
+        CASE WHEN source_row.[AuthpointUser] IS NULL THEN NULL ELSE EncryptByKey(Key_GUID(N'tb_FireDrillCredentialKey'),CONVERT(varbinary(max),source_row.[AuthpointUser]),1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',source_row.[ClientKey]),2)) END,
+        CASE WHEN source_row.[SslVpnPassword] IS NULL THEN NULL ELSE EncryptByKey(Key_GUID(N'tb_FireDrillCredentialKey'),CONVERT(varbinary(max),source_row.[SslVpnPassword]),1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',source_row.[ClientKey]),2)) END,
+        CASE WHEN source_row.[AdAuthUser] IS NULL THEN NULL ELSE EncryptByKey(Key_GUID(N'tb_FireDrillCredentialKey'),CONVERT(varbinary(max),source_row.[AdAuthUser]),1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',source_row.[ClientKey]),2)) END,
+        CASE WHEN source_row.[AdPassword] IS NULL THEN NULL ELSE EncryptByKey(Key_GUID(N'tb_FireDrillCredentialKey'),CONVERT(varbinary(max),source_row.[AdPassword]),1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',source_row.[ClientKey]),2)) END,
+        CASE WHEN source_row.[RustPassword] IS NULL THEN NULL ELSE EncryptByKey(Key_GUID(N'tb_FireDrillCredentialKey'),CONVERT(varbinary(max),source_row.[RustPassword]),1,CONVERT(nvarchar(64),HASHBYTES('SHA2_256',source_row.[ClientKey]),2)) END,
+        source_row.[RowHash],@SourceModifiedAtUtc,@SyncedAtUtc,1
+    FROM #Rows source_row
+    WHERE NOT EXISTS(SELECT 1 FROM [tb_data].[FireDrillCredentials] target WHERE target.[ClientKey]=source_row.[ClientKey]);
+    SET @SavedCount+=@@ROWCOUNT;
+
+    UPDATE target SET [IsCurrent]=0,[LastSyncedAtUtc]=@SyncedAtUtc
+    FROM [tb_data].[FireDrillCredentials] target
+    WHERE target.[IsCurrent]=1 AND NOT EXISTS(SELECT 1 FROM #Rows source_row WHERE source_row.[ClientKey]=target.[ClientKey]);
+    SET @StaleCount=@@ROWCOUNT;
+    CLOSE SYMMETRIC KEY [tb_FireDrillCredentialKey];
+
+    UPDATE [tb_sync].[FireDrillSyncRequests]
+    SET [ReadCount]=@ReadCount,[SavedCount]=@SavedCount,[StaleCount]=@StaleCount
+    WHERE [RequestId]=@RequestId;
+    COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF EXISTS (SELECT 1 FROM sys.openkeys WHERE [key_name]=N'tb_FireDrillCredentialKey')
+            CLOSE SYMMETRIC KEY [tb_FireDrillCredentialKey];
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+    SELECT @ReadCount AS [ReadCount],@SavedCount AS [SavedCount],@StaleCount AS [StaleCount];
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [tb_service].[CompleteFireDrillSyncWork]
+    @RequestId uniqueidentifier, @LeaseId uniqueidentifier, @WorkerId uniqueidentifier,
+    @Succeeded bit, @Message nvarchar(2000), @SourceModifiedAtUtc datetime2(3)=NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRY
+    BEGIN TRANSACTION;
+    IF NOT EXISTS(SELECT 1 FROM [tb_sync].[FireDrillSyncLeases] WHERE [RequestId]=@RequestId AND [LeaseId]=@LeaseId AND [WorkerId]=@WorkerId)
+        THROW 52040, N'The FireDrill synchronization lease is no longer valid.', 1;
+    UPDATE [tb_sync].[FireDrillSyncRequests]
+    SET [Status]=CASE WHEN @Succeeded=1 THEN N'Completed' ELSE N'Failed' END,
+        [CompletedAtUtc]=SYSUTCDATETIME(), [Message]=LEFT(@Message,2000)
+    WHERE [RequestId]=@RequestId;
+    DELETE FROM [tb_sync].[FireDrillSyncLeases] WHERE [RequestId]=@RequestId;
+    UPDATE [tb_sync].[FireDrillSyncHealth]
+    SET [LastAttemptAtUtc]=SYSUTCDATETIME(),
+        [LastSuccessfulAtUtc]=CASE WHEN @Succeeded=1 THEN SYSUTCDATETIME() ELSE [LastSuccessfulAtUtc] END,
+        [LastSourceModifiedAtUtc]=CASE WHEN @Succeeded=1 THEN @SourceModifiedAtUtc ELSE [LastSourceModifiedAtUtc] END,
+        [LastError]=CASE WHEN @Succeeded=1 THEN NULL ELSE LEFT(@Message,2000) END,
+        [UpdatedAtUtc]=SYSUTCDATETIME()
+    WHERE [HealthId]=1;
+    COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+GO
+
+PRINT N'TechBench V0008 FireDrill credential procedures created.';
+GO
+
+-- ============================================================================
+-- END 50-V0008-FireDrillCredentialsProcedures.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 50-Grants.sql
 -- ============================================================================
 
@@ -19530,6 +20096,46 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 56-V0008-FireDrillCredentialsGrants.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+/* Every authenticated TechBench user may search, explicitly reveal, and copy.
+   The procedures own encryption-key access and write an audit trail. */
+GRANT EXECUTE ON OBJECT::[tb_app].[SearchFireDrillCredentials] TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[RevealFireDrillCredential] TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[AuditFireDrillCredentialCopy] TO [tb_role_user];
+
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminRequestFireDrillSync] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetFireDrillSyncStatus] TO [tb_role_admin];
+
+GRANT EXECUTE ON OBJECT::[tb_service].[GetFireDrillSyncConfiguration] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[ClaimFireDrillSyncWork] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[RenewFireDrillSyncLease] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[ApplyFireDrillCredentialSnapshot] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[CompleteFireDrillSyncWork] TO [tb_role_sync_service];
+
+REVOKE EXECUTE ON OBJECT::[tb_app].[SearchFireDrillCredentials] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[RevealFireDrillCredential] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AuditFireDrillCredentialCopy] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminRequestFireDrillSync] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[GetFireDrillSyncStatus] FROM [tb_preview_reader];
+
+PRINT N'TechBench V0008 FireDrill credential grants applied.';
+GO
+
+-- ============================================================================
+-- END 56-V0008-FireDrillCredentialsGrants.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 90-Verify.sql
 -- ============================================================================
 
@@ -19959,9 +20565,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7)
+IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8)
 BEGIN
-    PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, 5, 6, or 7.';
+    PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, 5, 6, 7, or 8.';
     SET @FailureCount += 1;
 END;
 
@@ -20712,9 +21318,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7)
+IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8)
 BEGIN
-    PRINT N'FAIL: V0003 verification supports installed schema version 3, 4, 5, 6, or 7.';
+    PRINT N'FAIL: V0003 verification supports installed schema version 3, 4, 5, 6, 7, or 8.';
     SET @FailureCount += 1;
 END;
 
@@ -21196,9 +21802,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (4, 5, 6, 7)
+IF @InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8)
 BEGIN
-    PRINT N'FAIL: V0004 verification supports installed schema version 4, 5, 6, or 7.';
+    PRINT N'FAIL: V0004 verification supports installed schema version 4, 5, 6, 7, or 8.';
     SET @FailureCount += 1;
 END;
 
@@ -21914,9 +22520,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (5, 6, 7)
+IF @InstalledSchemaVersion NOT IN (5, 6, 7, 8)
 BEGIN
-    PRINT N'FAIL: V0005 verification supports installed schema version 5, 6, or 7.';
+    PRINT N'FAIL: V0005 verification supports installed schema version 5, 6, 7, or 8.';
     SET @FailureCount += 1;
 END;
 
@@ -23121,9 +23727,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (6, 7)
+IF @InstalledSchemaVersion NOT IN (6, 7, 8)
 BEGIN
-    PRINT N'FAIL: V0006 verification supports installed schema version 6 or 7.';
+    PRINT N'FAIL: V0006 verification supports installed schema version 6, 7, or 8.';
     SET @FailureCount += 1;
 END;
 
@@ -23375,6 +23981,16 @@ BEGIN
         (N'tb_service.GetAutomaticClientMatchCandidates'),
         (N'tb_service.ApplyAutomaticClientMatch'),
         (N'tb_service.ApplyAutomaticWhdFamilyMember');
+END;
+
+IF @InstalledSchemaVersion >= 8
+BEGIN
+    INSERT INTO @ServiceProcedures([ObjectName]) VALUES
+        (N'tb_service.GetFireDrillSyncConfiguration'),
+        (N'tb_service.ClaimFireDrillSyncWork'),
+        (N'tb_service.RenewFireDrillSyncLease'),
+        (N'tb_service.ApplyFireDrillCredentialSnapshot'),
+        (N'tb_service.CompleteFireDrillSyncWork');
 END;
 
 IF EXISTS
@@ -23652,6 +24268,7 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
 DECLARE @FailureCount int = 0;
+DECLARE @InstalledSchemaVersion int = (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]);
 
 IF NOT EXISTS
 (
@@ -23665,9 +24282,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) <> 7
+IF @InstalledSchemaVersion NOT IN (7, 8)
 BEGIN
-    PRINT N'FAIL: installed schema version is not 7.';
+    PRINT N'FAIL: V0007 verification supports installed schema version 7 or 8.';
     SET @FailureCount += 1;
 END;
 
@@ -23958,6 +24575,16 @@ INSERT INTO @ServiceProcedures([ObjectName]) VALUES
     (N'tb_service.GetAutomaticClientMatchCandidates'),
     (N'tb_service.ApplyAutomaticClientMatch'),
     (N'tb_service.ApplyAutomaticWhdFamilyMember');
+
+IF @InstalledSchemaVersion >= 8
+BEGIN
+    INSERT INTO @ServiceProcedures([ObjectName]) VALUES
+        (N'tb_service.GetFireDrillSyncConfiguration'),
+        (N'tb_service.ClaimFireDrillSyncWork'),
+        (N'tb_service.RenewFireDrillSyncLease'),
+        (N'tb_service.ApplyFireDrillCredentialSnapshot'),
+        (N'tb_service.CompleteFireDrillSyncWork');
+END;
 
 IF EXISTS
 (
@@ -24260,9 +24887,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF CHARINDEX(N'CONVERT(int,7)', REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities')), N' ', N'')) = 0
+IF CHARINDEX(N'CONVERT(int,' + CONVERT(nvarchar(10),@InstalledSchemaVersion) + N')', REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities')), N' ', N'')) = 0
 BEGIN
-    PRINT N'FAIL: GetRepositoryCapabilities does not report schema version 7.';
+    PRINT N'FAIL: GetRepositoryCapabilities does not report the installed schema version.';
     SET @FailureCount += 1;
 END;
 
@@ -24293,6 +24920,93 @@ GO
 
 -- ============================================================================
 -- END 96-V0007-ServerOwnedSageAndAdminPreviewVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 97-V0008-FireDrillCredentialsVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @FailureCount int=0;
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId]=N'SqlServer2016.FireDrillCredentials.0008'
+      AND [SchemaVersion]=8 AND [ReleaseVersion]=N'0.5.6'
+)
+BEGIN PRINT N'FAIL: V0008 migration marker is missing or invalid.'; SET @FailureCount+=1; END;
+
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations])<>8
+BEGIN PRINT N'FAIL: installed schema version is not 8.'; SET @FailureCount+=1; END;
+
+DECLARE @Objects TABLE([Name] nvarchar(300) PRIMARY KEY,[Type] char(2));
+INSERT INTO @Objects VALUES
+ (N'tb_data.FireDrillCredentials',N'U'),(N'tb_sync.FireDrillSyncRequests',N'U'),
+ (N'tb_sync.FireDrillSyncLeases',N'U'),(N'tb_sync.FireDrillSyncHealth',N'U'),
+ (N'tb_app.SearchFireDrillCredentials',N'P'),(N'tb_app.RevealFireDrillCredential',N'P'),
+ (N'tb_app.AuditFireDrillCredentialCopy',N'P'),(N'tb_app.AdminRequestFireDrillSync',N'P'),
+ (N'tb_app.GetFireDrillSyncStatus',N'P'),(N'tb_service.GetFireDrillSyncConfiguration',N'P'),
+ (N'tb_service.ClaimFireDrillSyncWork',N'P'),(N'tb_service.RenewFireDrillSyncLease',N'P'),
+ (N'tb_service.ApplyFireDrillCredentialSnapshot',N'P'),(N'tb_service.CompleteFireDrillSyncWork',N'P');
+IF EXISTS(SELECT 1 FROM @Objects WHERE OBJECT_ID([Name],[Type]) IS NULL)
+BEGIN PRINT N'FAIL: one or more V0008 objects are missing.'; SET @FailureCount+=1; END;
+
+IF NOT EXISTS(SELECT 1 FROM sys.certificates WHERE [name]=N'tb_FireDrillCredentialCertificate')
+   OR NOT EXISTS(SELECT 1 FROM sys.symmetric_keys WHERE [name]=N'tb_FireDrillCredentialKey')
+BEGIN PRINT N'FAIL: FireDrill encryption objects are missing.'; SET @FailureCount+=1; END;
+
+DECLARE @UserProcedures TABLE([Name] nvarchar(300) PRIMARY KEY);
+INSERT INTO @UserProcedures VALUES
+ (N'tb_app.SearchFireDrillCredentials'),(N'tb_app.RevealFireDrillCredential'),(N'tb_app.AuditFireDrillCredentialCopy');
+IF EXISTS
+(
+ SELECT 1 FROM @UserProcedures required
+ WHERE NOT EXISTS
+ (
+  SELECT 1 FROM sys.database_permissions permission_row
+  WHERE permission_row.[grantee_principal_id]=DATABASE_PRINCIPAL_ID(N'tb_role_user')
+    AND permission_row.[class]=1 AND permission_row.[major_id]=OBJECT_ID(required.[Name],N'P')
+    AND permission_row.[permission_name]=N'EXECUTE' AND permission_row.[state] IN (N'G',N'W')
+ )
+)
+BEGIN PRINT N'FAIL: a FireDrill user procedure grant is missing.'; SET @FailureCount+=1; END;
+
+IF EXISTS
+(
+ SELECT 1 FROM sys.database_permissions permission_row
+ WHERE permission_row.[grantee_principal_id] IN
+       (DATABASE_PRINCIPAL_ID(N'tb_role_user'),DATABASE_PRINCIPAL_ID(N'tb_role_admin'),DATABASE_PRINCIPAL_ID(N'tb_role_sync_service'))
+   AND permission_row.[class] IN (0,1,3)
+   AND permission_row.[permission_name] IN (N'SELECT',N'INSERT',N'UPDATE',N'DELETE',N'CONTROL',N'ALTER',N'VIEW DEFINITION')
+   AND
+   (
+     permission_row.[class]=0
+     OR permission_row.[major_id] IN
+        (OBJECT_ID(N'tb_data.FireDrillCredentials'),OBJECT_ID(N'tb_sync.FireDrillSyncRequests'),OBJECT_ID(N'tb_sync.FireDrillSyncLeases'))
+     OR (permission_row.[class]=3 AND permission_row.[major_id] IN (SCHEMA_ID(N'tb_data'),SCHEMA_ID(N'tb_sync')))
+   )
+)
+BEGIN PRINT N'FAIL: a FireDrill role has direct data/control permission.'; SET @FailureCount+=1; END;
+
+IF @FailureCount>0
+BEGIN
+    DECLARE @Message nvarchar(2048)=N'TechBench V0008 FireDrill verification failed with '+CONVERT(nvarchar(20),@FailureCount)+N' issue(s).';
+    THROW 50000,@Message,1;
+END;
+
+PRINT N'TechBench V0008 FireDrill credential verification passed.';
+GO
+
+-- ============================================================================
+-- END 97-V0008-FireDrillCredentialsVerify.sql
 -- ============================================================================
 
 PRINT N'TechBench deployment completed successfully on CSRI-SQL.';

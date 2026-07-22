@@ -51,4 +51,9 @@ internal sealed class ProtectedSecretStore(string path, string entropyLabel, str
         paths.SageSecretPath,
         "CSRI.TechBench.SyncService.SageOdbc.v1",
         "Sage ODBC password");
+
+    public static ProtectedSecretStore FireDrill(AppPaths paths) => new(
+        paths.FireDrillSecretPath,
+        "CSRI.TechBench.SyncService.FireDrillWorkbook.v1",
+        "FireDrill workbook password");
 }

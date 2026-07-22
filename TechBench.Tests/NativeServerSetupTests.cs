@@ -16,10 +16,10 @@ public sealed class NativeServerSetupTests
         {
             Directory.CreateDirectory(root);
             File.WriteAllText(Path.Combine(root, "package-manifest.json"), """
-                { "Product": "TechBench Sync Service", "PackageFormatVersion": 1, "RequiredDatabaseSchemaVersion": 7 }
+                { "Product": "TechBench Sync Service", "PackageFormatVersion": 1, "RequiredDatabaseSchemaVersion": 8 }
                 """, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-            Assert.True(PackageInstaller.InstalledPackageDeclaresRequiredSchema(paths, 7));
-            Assert.False(PackageInstaller.InstalledPackageDeclaresRequiredSchema(paths, 8));
+            Assert.True(PackageInstaller.InstalledPackageDeclaresRequiredSchema(paths, 8));
+            Assert.False(PackageInstaller.InstalledPackageDeclaresRequiredSchema(paths, 7));
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }

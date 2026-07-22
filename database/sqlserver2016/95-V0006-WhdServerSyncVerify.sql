@@ -25,9 +25,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (6, 7)
+IF @InstalledSchemaVersion NOT IN (6, 7, 8)
 BEGIN
-    PRINT N'FAIL: V0006 verification supports installed schema version 6 or 7.';
+    PRINT N'FAIL: V0006 verification supports installed schema version 6, 7, or 8.';
     SET @FailureCount += 1;
 END;
 
@@ -279,6 +279,16 @@ BEGIN
         (N'tb_service.GetAutomaticClientMatchCandidates'),
         (N'tb_service.ApplyAutomaticClientMatch'),
         (N'tb_service.ApplyAutomaticWhdFamilyMember');
+END;
+
+IF @InstalledSchemaVersion >= 8
+BEGIN
+    INSERT INTO @ServiceProcedures([ObjectName]) VALUES
+        (N'tb_service.GetFireDrillSyncConfiguration'),
+        (N'tb_service.ClaimFireDrillSyncWork'),
+        (N'tb_service.RenewFireDrillSyncLease'),
+        (N'tb_service.ApplyFireDrillCredentialSnapshot'),
+        (N'tb_service.CompleteFireDrillSyncWork');
 END;
 
 IF EXISTS

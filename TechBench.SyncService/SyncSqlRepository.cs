@@ -6,7 +6,7 @@ using TechBench.Models;
 
 namespace TechBench.SyncService;
 
-public sealed class SyncSqlRepository
+public sealed partial class SyncSqlRepository
 {
     private readonly SyncServiceOptions _options;
     private readonly string _connectionString;

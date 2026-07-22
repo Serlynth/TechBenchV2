@@ -93,6 +93,7 @@ builder.Services.AddWindowsService(options =>
 });
 builder.Services.AddSingleton<WhdSecretStore>();
 builder.Services.AddSingleton<SageSecretStore>();
+builder.Services.AddSingleton<FireDrillSecretStore>();
 builder.Services.AddSingleton<SyncSqlRepository>();
 builder.Services.AddSingleton<ISageOdbcWorkerProcessClient, SageOdbcWorkerProcessClient>();
 builder.Services.AddSingleton(serviceProvider =>
@@ -102,8 +103,10 @@ builder.Services.AddSingleton(serviceProvider =>
 });
 builder.Services.AddSingleton<WhdSyncEngine>();
 builder.Services.AddSingleton<SageCustomerSyncEngine>();
+builder.Services.AddSingleton<FireDrillSyncEngine>();
 builder.Services.AddHostedService<WhdSyncWorker>();
 builder.Services.AddHostedService<SageCustomerSyncWorker>();
+builder.Services.AddHostedService<FireDrillSyncWorker>();
 
 await builder.Build().RunAsync();
 

@@ -12,6 +12,7 @@ internal sealed class ServerManagerForm : Form
     private readonly ReleaseUpdater _updater;
     private readonly ProtectedSecretStore _whdSecret;
     private readonly ProtectedSecretStore _sageSecret;
+    private readonly ProtectedSecretStore _fireDrillSecret;
     private SynchronizationConfiguration? _configuration;
     private ReleasePackage? _availableUpdate;
     private bool _allowExit;
@@ -29,6 +30,8 @@ internal sealed class ServerManagerForm : Form
     private readonly Label _sageSecretStatus = ValueLabel();
     private readonly TextBox _whdSecretBox = PasswordField();
     private readonly TextBox _sageSecretBox = PasswordField();
+    private readonly Label _fireDrillSecretStatus = ValueLabel();
+    private readonly TextBox _fireDrillSecretBox = PasswordField();
     private readonly Label _updateStatus = ValueLabel();
     private readonly Button _installUpdateButton = Button("Download && Install");
     private readonly RichTextBox _log = new() { Dock = DockStyle.Fill, ReadOnly = true, BackColor = Color.White, DetectUrls = false };
@@ -65,6 +68,18 @@ internal sealed class ServerManagerForm : Form
     private readonly Label _sageSyncStatus = StatusLabel();
     private readonly Button _confirmSageButton = Button("Confirm large-removal sync");
 
+    private readonly TextBox _fireDrillPath = Field();
+    private readonly CheckBox _fireDrillDaily = new() { Text = "Synchronize once each day", AutoSize = true };
+    private readonly DateTimePicker _fireDrillTime = new()
+    {
+        Format = DateTimePickerFormat.Custom,
+        CustomFormat = "h:mm tt",
+        ShowUpDown = true,
+        Width = 120,
+        Value = DateTime.Today.AddHours(4)
+    };
+    private readonly Label _fireDrillSyncStatus = StatusLabel();
+
     private readonly NotifyIcon _trayIcon;
     private readonly ToolStripMenuItem _trayStart = new("Start service");
     private readonly ToolStripMenuItem _trayStop = new("Stop service");
@@ -77,6 +92,7 @@ internal sealed class ServerManagerForm : Form
         _updater = new(paths);
         _whdSecret = ProtectedSecretStore.Whd(paths);
         _sageSecret = ProtectedSecretStore.Sage(paths);
+        _fireDrillSecret = ProtectedSecretStore.FireDrill(paths);
 
         Text = "TechBench Server Manager";
         StartPosition = FormStartPosition.CenterScreen;
@@ -162,6 +178,7 @@ internal sealed class ServerManagerForm : Form
         tabs.TabPages.Add(BuildSqlTab());
         tabs.TabPages.Add(BuildWhdTab());
         tabs.TabPages.Add(BuildSageTab());
+        tabs.TabPages.Add(BuildFireDrillTab());
         tabs.TabPages.Add(BuildUpdatesTab());
         return tabs;
     }
@@ -368,6 +385,36 @@ internal sealed class ServerManagerForm : Form
         return BuildStackedTab("Sage 50", credential, settings);
     }
 
+    private TabPage BuildFireDrillTab()
+    {
+        var credential = BuildCredentialGroup(
+            "Protected workbook credential",
+            "Workbook open password",
+            _fireDrillSecretBox,
+            _fireDrillSecretStatus,
+            _fireDrillSecret,
+            "FireDrill workbook");
+        var settings = Group("Read-only workbook synchronization", 320);
+        var layout = Grid(2, 7);
+        layout.Controls.Add(Label("Workbook UNC path"), 0, 0); layout.Controls.Add(_fireDrillPath, 1, 0);
+        layout.Controls.Add(_fireDrillDaily, 1, 1);
+        layout.Controls.Add(Label("Daily time (server local time)"), 0, 2); layout.Controls.Add(_fireDrillTime, 1, 2);
+        var save = Button("Save settings"); save.Click += async (_, _) => await SaveFireDrillAsync(false);
+        var sync = Button("Sync now"); sync.Click += async (_, _) => await SaveFireDrillAsync(true);
+        var refresh = Button("Refresh"); refresh.Click += async (_, _) => await RefreshConfigurationAsync(true);
+        layout.Controls.Add(ButtonRow(save, sync, refresh), 1, 3);
+        layout.Controls.Add(_fireDrillSyncStatus, 0, 4); layout.SetColumnSpan(_fireDrillSyncStatus, 2);
+        var note = new Label
+        {
+            Text = "The service opens the encrypted workbook read-only, including while another user has it open for editing. " +
+                   "Grant CSRI\\TechBench_Sync read access to both the share and file. Password values are encrypted in SQL Server and reveals are audited.",
+            AutoSize = true, MaximumSize = new Size(900, 0), ForeColor = Color.DimGray, Margin = new Padding(3, 16, 3, 3)
+        };
+        layout.Controls.Add(note, 0, 5); layout.SetColumnSpan(note, 2);
+        settings.Controls.Add(layout);
+        return BuildStackedTab("FireDrill", credential, settings);
+    }
+
     private void AddSecretRow(TableLayoutPanel layout, int row, string label, TextBox box, Label status, ProtectedSecretStore store, string name)
     {
         layout.Controls.Add(Label(label), 0, row); layout.Controls.Add(box, 1, row);
@@ -456,6 +503,7 @@ internal sealed class ServerManagerForm : Form
     {
         _whdSecretStatus.Text = _whdSecret.Exists ? "Configured" : "Not configured";
         _sageSecretStatus.Text = _sageSecret.Exists ? "Configured" : "Not configured";
+        _fireDrillSecretStatus.Text = _fireDrillSecret.Exists ? "Configured" : "Not configured";
     }
 
     private async Task RefreshConfigurationAsync(bool showErrors)
@@ -483,6 +531,7 @@ internal sealed class ServerManagerForm : Form
         {
             _whdSyncStatus.Text = "Configuration unavailable: " + FriendlySqlError(ex);
             _sageSyncStatus.Text = _whdSyncStatus.Text;
+            _fireDrillSyncStatus.Text = _whdSyncStatus.Text;
             AddLog("ERROR: " + FriendlySqlError(ex));
             if (showErrors) ShowError(FriendlySqlError(ex));
         }
@@ -498,8 +547,13 @@ internal sealed class ServerManagerForm : Form
         _whdAuto.Checked = bool.TryParse(Setting("Whd.AutoSyncEnabled"), out var enabled) && enabled;
         if (decimal.TryParse(Setting("Whd.AutoSyncMinutes"), out var minutes)) _whdMinutes.Value = Math.Clamp(minutes, 1, 120);
         _sageDsn.Text = Setting("Sage.SyncDsn"); _sageUsername.Text = Setting("Sage.SyncUsername");
+        _fireDrillPath.Text = Setting("FireDrill.SourcePath", @"\\csri-file\Public\Client Data\1 Infosheets\Current Clients\FireDrill.xlsx");
+        _fireDrillDaily.Checked = !bool.TryParse(Setting("FireDrill.DailySyncEnabled", "True"), out var fireDrillEnabled) || fireDrillEnabled;
+        if (TimeSpan.TryParse(Setting("FireDrill.DailySyncTime", "04:00"), out var dailyTime))
+            _fireDrillTime.Value = DateTime.Today.Add(dailyTime);
         _whdSyncStatus.Text = FormatStatus(configuration.WhdStatus, false);
         _sageSyncStatus.Text = FormatStatus(configuration.SageStatus, true);
+        _fireDrillSyncStatus.Text = FormatStatus(configuration.FireDrillStatus, true);
         _confirmSageButton.Visible = configuration.SageStatus.RequiresLargeRemovalConfirmation;
         PopulateMappingGrid(configuration);
     }
@@ -544,6 +598,26 @@ internal sealed class ServerManagerForm : Form
                 if (confirmLargeRemoval && confirmedId is null) throw new InvalidOperationException("No rejected Sage snapshot is waiting for confirmation.");
                 AddLog("Sage sync request: " + await Task.Run(() => _repository.RequestSageSync(confirmLargeRemoval, confirmedId)));
             }
+            await RefreshConfigurationAsync(false);
+        });
+    }
+
+    private async Task SaveFireDrillAsync(bool requestSync)
+    {
+        await RunAsync(requestSync ? "Saving FireDrill settings and requesting synchronization..." : "Saving FireDrill settings...", async () =>
+        {
+            var path = _fireDrillPath.Text.Trim();
+            if (!path.StartsWith(@"\\", StringComparison.Ordinal) || !path.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Enter the complete UNC path to the FireDrill .xlsx workbook.");
+            var settings = new Dictionary<string, string>
+            {
+                ["FireDrill.SourcePath"] = path,
+                ["FireDrill.DailySyncEnabled"] = _fireDrillDaily.Checked.ToString(),
+                ["FireDrill.DailySyncTime"] = _fireDrillTime.Value.ToString("HH:mm")
+            };
+            await Task.Run(() => _repository.SaveSettings(settings, _configuration?.RowVersions ?? new Dictionary<string, byte[]>()));
+            AddLog("Shared FireDrill configuration saved.");
+            if (requestSync) AddLog("FireDrill sync request: " + await Task.Run(_repository.RequestFireDrillSync));
             await RefreshConfigurationAsync(false);
         });
     }
@@ -725,7 +799,7 @@ internal sealed class ServerManagerForm : Form
     }
     private void ClearSecretFields()
     {
-        _servicePassword.Clear(); _whdSecretBox.Clear(); _sageSecretBox.Clear();
+        _servicePassword.Clear(); _whdSecretBox.Clear(); _sageSecretBox.Clear(); _fireDrillSecretBox.Clear();
     }
     private void AddLog(string message)
     {

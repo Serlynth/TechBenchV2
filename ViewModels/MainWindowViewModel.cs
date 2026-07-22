@@ -186,6 +186,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         InitializeNoteFeatures();
         InitializeV1DatabaseImport();
         InitializeCommonLinks();
+        InitializeFireDrillCredentials();
 
         StatusFilterOptions.Add("Any");
         StatusFilterOptions.Add("Draft");
@@ -928,6 +929,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void Navigate(string section)
     {
+        if (!section.Equals("Client Credentials", StringComparison.Ordinal))
+        {
+            ClearRevealedFireDrillCredential();
+        }
         if (section == "Today")
         {
             SelectedDate = DateTime.Today;
@@ -945,6 +950,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Client List" => "Showing synced/imported clients",
             "Ticket List" => "Showing my assigned and group non-closed tickets",
             "Common Links" => "Showing commonly used websites",
+            "Client Credentials" => "Showing synchronized FireDrill client credentials",
             _ => $"Showing {section}"
         };
     }
@@ -980,6 +986,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             case "Common Links":
                 RefreshCommonLinks();
                 break;
+            case "Client Credentials":
+                RefreshFireDrillCredentials();
+                break;
         }
     }
 
@@ -989,6 +998,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         RefreshTicketStatusOptions();
         RefreshTicketList();
         RefreshCommonLinks();
+        RefreshFireDrillCredentials();
         RefreshTagSuggestions();
         RefreshTodayEntries();
         RefreshWeek();
