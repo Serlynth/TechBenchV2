@@ -279,6 +279,10 @@ public sealed partial class SqlServer2016SyntaxTests
             "(N'tb_service.ApplyAutomaticClientMatch')",
             schemaV7AllowList,
             StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "(N'tb_service.ApplyAutomaticWhdFamilyMember')",
+            schemaV7AllowList,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -336,6 +340,7 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("CREATE PROCEDURE [tb_service].[ApplySageCustomerSnapshot]", procedureSource);
         Assert.Contains("CREATE PROCEDURE [tb_service].[GetAutomaticClientMatchCandidates]", procedureSource);
         Assert.Contains("CREATE PROCEDURE [tb_service].[ApplyAutomaticClientMatch]", procedureSource);
+        Assert.Contains("CREATE PROCEDURE [tb_service].[ApplyAutomaticWhdFamilyMember]", procedureSource);
         var requestSageBody = ProcedureBody(
             procedureSource,
             "AdminRequestSageSync",
@@ -405,12 +410,25 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("sage_client.[Source] = N'Sage'", automaticMatchBody);
         Assert.Contains("[MatchStatus] = N'Matched'", automaticMatchBody);
         Assert.Contains("@Action = N'ClientAutoMatched'", automaticMatchBody);
+        var familyMatchBody = ProcedureBody(
+            procedureSource,
+            "ApplyAutomaticWhdFamilyMember",
+            "tb_service");
+        Assert.Contains("@MatchScore < CONVERT(decimal(6,5), 0.86000)", familyMatchBody);
+        Assert.Contains("target_client.[Source] = N'Both'", familyMatchBody);
+        Assert.Contains("source_client.[Source] = N'WHD'", familyMatchBody);
+        Assert.Contains("sage_identity.[SourceSystem] = N'Sage'", familyMatchBody);
+        Assert.Contains("@Action = N'ClientAutoMatchedLocationFamily'", familyMatchBody);
         Assert.Contains(
             "GRANT EXECUTE ON OBJECT::[tb_service].[GetAutomaticClientMatchCandidates] TO [tb_role_sync_service]",
             grantSource,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
             "GRANT EXECUTE ON OBJECT::[tb_service].[ApplyAutomaticClientMatch] TO [tb_role_sync_service]",
+            grantSource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "GRANT EXECUTE ON OBJECT::[tb_service].[ApplyAutomaticWhdFamilyMember] TO [tb_role_sync_service]",
             grantSource,
             StringComparison.OrdinalIgnoreCase);
 

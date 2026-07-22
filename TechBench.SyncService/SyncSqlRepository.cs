@@ -244,29 +244,96 @@ public sealed class SyncSqlRepository
         var matches = ServerAutomaticClientMatcher.FindSafeAutomaticMatches(candidates);
         var appliedCount = 0;
 
-        foreach (var match in matches)
+        foreach (var matchGroup in matches
+                     .GroupBy(static match => match.SageClient.Id)
+                     .OrderBy(static group => group.Key))
         {
-            if (match.WhdClient.RowVersion is not { Length: 8 } whdRowVersion
-                || match.SageClient.RowVersion is not { Length: 8 } sageRowVersion)
+            var orderedMatches = matchGroup
+                .OrderBy(static match => match.WhdClient.Id)
+                .ToList();
+            var primary = orderedMatches[0];
+            var primaryApplied = await ApplyAutomaticClientMatchAsync(
+                    primary,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            appliedCount += primaryApplied;
+            if (primaryApplied == 0
+                || orderedMatches.Count == 1
+                || string.IsNullOrWhiteSpace(primary.SageClient.SageCustomerId))
             {
                 continue;
             }
 
-            await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
-            await using var command = CreateCommand(connection, "[tb_service].[ApplyAutomaticClientMatch]");
-            Add(command, "@WhdClientId", SqlDbType.Int, match.WhdClient.Id);
-            Add(command, "@SageClientId", SqlDbType.Int, match.SageClient.Id);
-            Add(command, "@ExpectedWhdRowVersion", SqlDbType.Binary, whdRowVersion, 8);
-            Add(command, "@ExpectedSageRowVersion", SqlDbType.Binary, sageRowVersion, 8);
-            Add(command, "@MatchScore", SqlDbType.Decimal, Convert.ToDecimal(match.Score, CultureInfo.InvariantCulture));
-            command.Parameters["@MatchScore"].Precision = 6;
-            command.Parameters["@MatchScore"].Scale = 5;
-            appliedCount += Convert.ToInt32(
-                await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
-                CultureInfo.InvariantCulture);
+            foreach (var additionalMatch in orderedMatches.Skip(1))
+            {
+                appliedCount += await ApplyAutomaticWhdFamilyMemberAsync(
+                        primary.WhdClient.Id,
+                        primary.SageClient.SageCustomerId,
+                        additionalMatch,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
 
         return appliedCount;
+    }
+
+    private async Task<int> ApplyAutomaticClientMatchAsync(
+        ServerAutomaticClientMatch match,
+        CancellationToken cancellationToken)
+    {
+        if (match.WhdClient.RowVersion is not { Length: 8 } whdRowVersion
+            || match.SageClient.RowVersion is not { Length: 8 } sageRowVersion)
+        {
+            return 0;
+        }
+
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = CreateCommand(connection, "[tb_service].[ApplyAutomaticClientMatch]");
+        Add(command, "@WhdClientId", SqlDbType.Int, match.WhdClient.Id);
+        Add(command, "@SageClientId", SqlDbType.Int, match.SageClient.Id);
+        Add(command, "@ExpectedWhdRowVersion", SqlDbType.Binary, whdRowVersion, 8);
+        Add(command, "@ExpectedSageRowVersion", SqlDbType.Binary, sageRowVersion, 8);
+        AddMatchScore(command, match.Score);
+        return Convert.ToInt32(
+            await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
+            CultureInfo.InvariantCulture);
+    }
+
+    private async Task<int> ApplyAutomaticWhdFamilyMemberAsync(
+        int targetClientId,
+        string expectedSageCustomerId,
+        ServerAutomaticClientMatch match,
+        CancellationToken cancellationToken)
+    {
+        if (match.WhdClient.RowVersion is not { Length: 8 } whdRowVersion)
+        {
+            return 0;
+        }
+
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = CreateCommand(
+            connection,
+            "[tb_service].[ApplyAutomaticWhdFamilyMember]");
+        Add(command, "@TargetClientId", SqlDbType.Int, targetClientId);
+        Add(command, "@SourceWhdClientId", SqlDbType.Int, match.WhdClient.Id);
+        Add(command, "@ExpectedSourceWhdRowVersion", SqlDbType.Binary, whdRowVersion, 8);
+        Add(command, "@ExpectedSageCustomerId", SqlDbType.NVarChar, expectedSageCustomerId, 120);
+        AddMatchScore(command, match.Score);
+        return Convert.ToInt32(
+            await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
+            CultureInfo.InvariantCulture);
+    }
+
+    private static void AddMatchScore(SqlCommand command, double score)
+    {
+        Add(
+            command,
+            "@MatchScore",
+            SqlDbType.Decimal,
+            Convert.ToDecimal(score, CultureInfo.InvariantCulture));
+        command.Parameters["@MatchScore"].Precision = 6;
+        command.Parameters["@MatchScore"].Scale = 5;
     }
 
     private async Task<IReadOnlyList<AutomaticClientMatchCandidate>> GetAutomaticClientMatchCandidatesAsync(

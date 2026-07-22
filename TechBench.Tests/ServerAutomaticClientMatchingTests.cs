@@ -25,6 +25,25 @@ public sealed class ServerAutomaticClientMatchingTests
     }
 
     [Fact]
+    public void ServiceMatcherGroupsNumberedWhdLocationsUnderOneSageCustomer()
+    {
+        var candidates = new[]
+        {
+            Candidate(1, "WHD", "People for People 700", "WHD-LOCATION-299"),
+            Candidate(2, "WHD", "People for People 800", "WHD-LOCATION-298"),
+            Candidate(3, "Sage", "People for People Charter School", sageCustomerId: "37313")
+        };
+
+        var matches = ServerAutomaticClientMatcher.FindSafeAutomaticMatches(candidates);
+
+        Assert.Equal(2, matches.Count);
+        Assert.All(matches, match => Assert.Equal(3, match.SageClient.Id));
+        Assert.Contains(matches, match => match.WhdClient.Id == 1);
+        Assert.Contains(matches, match => match.WhdClient.Id == 2);
+        Assert.All(matches, match => Assert.True(match.Score >= 0.86));
+    }
+
+    [Fact]
     public void SyncServiceRunsSafeMatchingAfterBothWhdAndSageCustomerSnapshots()
     {
         var root = FindRepositoryRoot();
@@ -48,6 +67,14 @@ public sealed class ServerAutomaticClientMatchingTests
             StringComparison.Ordinal);
         Assert.Contains(
             "[tb_service].[ApplyAutomaticClientMatch]",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[tb_service].[ApplyAutomaticWhdFamilyMember]",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ".GroupBy(static match => match.SageClient.Id)",
             source,
             StringComparison.Ordinal);
         Assert.Contains(

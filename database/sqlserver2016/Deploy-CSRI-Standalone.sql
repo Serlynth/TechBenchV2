@@ -18675,6 +18675,203 @@ BEGIN
 END;
 GO
 
+IF OBJECT_ID(N'tb_service.ApplyAutomaticWhdFamilyMember', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_service].[ApplyAutomaticWhdFamilyMember];
+GO
+
+CREATE PROCEDURE [tb_service].[ApplyAutomaticWhdFamilyMember]
+    @TargetClientId int,
+    @SourceWhdClientId int,
+    @ExpectedSourceWhdRowVersion binary(8),
+    @ExpectedSageCustomerId nvarchar(120),
+    @MatchScore decimal(6,5)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    SET @ExpectedSageCustomerId =
+        NULLIF(LTRIM(RTRIM(@ExpectedSageCustomerId)), N'');
+    IF @TargetClientId IS NULL
+       OR @SourceWhdClientId IS NULL
+       OR @TargetClientId = @SourceWhdClientId
+       OR @ExpectedSourceWhdRowVersion IS NULL
+       OR @ExpectedSageCustomerId IS NULL
+       OR @MatchScore < CONVERT(decimal(6,5), 0.86000)
+       OR @MatchScore > CONVERT(decimal(6,5), 1.00000)
+    BEGIN
+        SELECT CONVERT(int, 0) AS [AppliedCount];
+        RETURN;
+    END;
+
+    DECLARE @ActorSid varbinary(85) =
+    (
+        SELECT [WindowsSid]
+        FROM [tb_security].[Users]
+        WHERE [LoginName] = N'$(SyncServicePrincipal)'
+    );
+    IF @ActorSid IS NULL
+        THROW 51972, N'The configured sync service principal has no TechBench service actor.', 1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[Clients] AS target_client WITH (UPDLOCK, HOLDLOCK)
+            WHERE target_client.[Id] = @TargetClientId
+              AND target_client.[IsActive] = 1
+              AND target_client.[Source] = N'Both'
+              AND LTRIM(RTRIM(target_client.[SageCustomerId])) = @ExpectedSageCustomerId
+              AND EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientExternalIdentities] AS sage_identity WITH (UPDLOCK, HOLDLOCK)
+                  WHERE sage_identity.[ClientId] = target_client.[Id]
+                    AND sage_identity.[SourceSystem] = N'Sage'
+                    AND sage_identity.[ExternalId] = @ExpectedSageCustomerId
+              )
+              AND EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientExternalIdentities] AS whd_identity WITH (UPDLOCK, HOLDLOCK)
+                  WHERE whd_identity.[ClientId] = target_client.[Id]
+                    AND whd_identity.[SourceSystem] = N'WHD'
+                    AND whd_identity.[ExternalId] LIKE N'WHD-LOCATION-%'
+              )
+        )
+        OR NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[Clients] AS source_client WITH (UPDLOCK, HOLDLOCK)
+            WHERE source_client.[Id] = @SourceWhdClientId
+              AND source_client.[RowVersion] = @ExpectedSourceWhdRowVersion
+              AND source_client.[IsActive] = 1
+              AND source_client.[Source] = N'WHD'
+              AND NULLIF(LTRIM(RTRIM(source_client.[SageCustomerId])), N'') IS NULL
+              AND EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientExternalIdentities] AS whd_identity WITH (UPDLOCK, HOLDLOCK)
+                  WHERE whd_identity.[ClientId] = source_client.[Id]
+                    AND whd_identity.[SourceSystem] = N'WHD'
+                    AND whd_identity.[ExternalId] LIKE N'WHD-LOCATION-%'
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientExternalIdentities] AS sage_identity WITH (UPDLOCK, HOLDLOCK)
+                  WHERE sage_identity.[ClientId] = source_client.[Id]
+                    AND sage_identity.[SourceSystem] = N'Sage'
+              )
+        )
+        BEGIN
+            COMMIT TRANSACTION;
+            SELECT CONVERT(int, 0) AS [AppliedCount];
+            RETURN;
+        END;
+
+        UPDATE target_client
+        SET
+            [LastSyncedAtUtc] =
+                CASE
+                    WHEN source_client.[LastSyncedAtUtc] IS NULL
+                        THEN target_client.[LastSyncedAtUtc]
+                    WHEN target_client.[LastSyncedAtUtc] IS NULL
+                      OR source_client.[LastSyncedAtUtc] > target_client.[LastSyncedAtUtc]
+                        THEN source_client.[LastSyncedAtUtc]
+                    ELSE target_client.[LastSyncedAtUtc]
+                END,
+            [MatchStatus] = N'Matched',
+            [UpdatedByWindowsSid] = @ActorSid,
+            [UpdatedAtUtc] = SYSUTCDATETIME()
+        FROM [tb_data].[Clients] AS target_client
+        CROSS JOIN [tb_data].[Clients] AS source_client
+        WHERE target_client.[Id] = @TargetClientId
+          AND source_client.[Id] = @SourceWhdClientId;
+
+        UPDATE [tb_data].[Tickets]
+        SET [ClientId] = @TargetClientId,
+            [UpdatedByWindowsSid] = @ActorSid,
+            [UpdatedAtUtc] = SYSUTCDATETIME()
+        WHERE [ClientId] = @SourceWhdClientId;
+
+        UPDATE [tb_data].[WorkEntries]
+        SET [ClientId] = @TargetClientId,
+            [UpdatedByWindowsSid] = @ActorSid,
+            [UpdatedAtUtc] = SYSUTCDATETIME()
+        WHERE [ClientId] = @SourceWhdClientId;
+
+        DELETE source_alias
+        FROM [tb_data].[ClientAliases] AS source_alias
+        WHERE source_alias.[ClientId] = @SourceWhdClientId
+          AND EXISTS
+          (
+              SELECT 1
+              FROM [tb_data].[ClientAliases] AS target_alias
+              WHERE target_alias.[ClientId] = @TargetClientId
+                AND target_alias.[ScopeType] = source_alias.[ScopeType]
+                AND
+                (
+                    target_alias.[OwnerWindowsSid] = source_alias.[OwnerWindowsSid]
+                    OR
+                    (
+                        target_alias.[OwnerWindowsSid] IS NULL
+                        AND source_alias.[OwnerWindowsSid] IS NULL
+                    )
+                )
+                AND target_alias.[Alias] = source_alias.[Alias]
+          );
+
+        UPDATE [tb_data].[ClientAliases]
+        SET [ClientId] = @TargetClientId,
+            [UpdatedByWindowsSid] = @ActorSid,
+            [UpdatedAtUtc] = SYSUTCDATETIME()
+        WHERE [ClientId] = @SourceWhdClientId;
+
+        DELETE source_identity
+        FROM [tb_data].[ClientExternalIdentities] AS source_identity
+        WHERE source_identity.[ClientId] = @SourceWhdClientId
+          AND EXISTS
+          (
+              SELECT 1
+              FROM [tb_data].[ClientExternalIdentities] AS target_identity
+              WHERE target_identity.[ClientId] = @TargetClientId
+                AND target_identity.[SourceSystem] = source_identity.[SourceSystem]
+                AND target_identity.[ExternalId] = source_identity.[ExternalId]
+          );
+
+        UPDATE [tb_data].[ClientExternalIdentities]
+        SET [ClientId] = @TargetClientId,
+            [UpdatedByWindowsSid] = @ActorSid,
+            [UpdatedAtUtc] = SYSUTCDATETIME()
+        WHERE [ClientId] = @SourceWhdClientId;
+
+        DELETE FROM [tb_data].[Clients]
+        WHERE [Id] = @SourceWhdClientId
+          AND [RowVersion] = @ExpectedSourceWhdRowVersion;
+        IF @@ROWCOUNT <> 1
+            THROW 51973, N'The additional WHD location changed during automatic matching.', 1;
+
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @TargetClientId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action = N'ClientAutoMatchedLocationFamily',
+            @EntityType = N'Client',
+            @EntityId = @AuditEntityId,
+            @RequestId = NULL;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT CONVERT(int, 1) AS [AppliedCount];
+END;
+GO
+
 -- ============================================================================
 -- END 49-V0007-ServerOwnedSageAndAdminPreviewProcedures.sql
 -- ============================================================================
@@ -19277,6 +19474,7 @@ GRANT EXECUTE ON OBJECT::[tb_service].[ApplySageCustomerSnapshot] TO [tb_role_sy
 GRANT EXECUTE ON OBJECT::[tb_service].[CompleteSageSyncWork] TO [tb_role_sync_service];
 GRANT EXECUTE ON OBJECT::[tb_service].[GetAutomaticClientMatchCandidates] TO [tb_role_sync_service];
 GRANT EXECUTE ON OBJECT::[tb_service].[ApplyAutomaticClientMatch] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[ApplyAutomaticWhdFamilyMember] TO [tb_role_sync_service];
 
 /* Admin preview is server-issued and activated per physical SQL connection.
    Only the Admin role may impersonate the WITHOUT LOGIN reader principal. */
@@ -23175,7 +23373,8 @@ BEGIN
         (N'tb_service.ApplySageCustomerSnapshot'),
         (N'tb_service.CompleteSageSyncWork'),
         (N'tb_service.GetAutomaticClientMatchCandidates'),
-        (N'tb_service.ApplyAutomaticClientMatch');
+        (N'tb_service.ApplyAutomaticClientMatch'),
+        (N'tb_service.ApplyAutomaticWhdFamilyMember');
 END;
 
 IF EXISTS
@@ -23502,6 +23701,7 @@ INSERT INTO @RequiredObjects([ObjectName], [ObjectType]) VALUES
     (N'tb_service.CompleteSageSyncWork', N'P'),
     (N'tb_service.GetAutomaticClientMatchCandidates', N'P'),
     (N'tb_service.ApplyAutomaticClientMatch', N'P'),
+    (N'tb_service.ApplyAutomaticWhdFamilyMember', N'P'),
     (N'tb_app.AdminListPreviewUsers', N'P'),
     (N'tb_app.AdminBeginUserPreview', N'P'),
     (N'tb_app.ActivateReadOnlyPreview', N'P'),
@@ -23629,6 +23829,11 @@ INSERT INTO @RequiredParameters([ProcedureName], [ParameterName]) VALUES
     (N'tb_service.ApplyAutomaticClientMatch', N'@ExpectedWhdRowVersion'),
     (N'tb_service.ApplyAutomaticClientMatch', N'@ExpectedSageRowVersion'),
     (N'tb_service.ApplyAutomaticClientMatch', N'@MatchScore'),
+    (N'tb_service.ApplyAutomaticWhdFamilyMember', N'@TargetClientId'),
+    (N'tb_service.ApplyAutomaticWhdFamilyMember', N'@SourceWhdClientId'),
+    (N'tb_service.ApplyAutomaticWhdFamilyMember', N'@ExpectedSourceWhdRowVersion'),
+    (N'tb_service.ApplyAutomaticWhdFamilyMember', N'@ExpectedSageCustomerId'),
+    (N'tb_service.ApplyAutomaticWhdFamilyMember', N'@MatchScore'),
     (N'tb_app.AdminBeginUserPreview', N'@TargetLoginName'),
     (N'tb_app.AdminBeginUserPreview', N'@ClientInstanceId'),
     (N'tb_app.ActivateReadOnlyPreview', N'@PreviewSessionId'),
@@ -23751,7 +23956,8 @@ INSERT INTO @ServiceProcedures([ObjectName]) VALUES
     (N'tb_service.ApplySageCustomerSnapshot'),
     (N'tb_service.CompleteSageSyncWork'),
     (N'tb_service.GetAutomaticClientMatchCandidates'),
-    (N'tb_service.ApplyAutomaticClientMatch');
+    (N'tb_service.ApplyAutomaticClientMatch'),
+    (N'tb_service.ApplyAutomaticWhdFamilyMember');
 
 IF EXISTS
 (

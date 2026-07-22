@@ -200,4 +200,43 @@ public sealed class ClientMatchingServiceTests
 
         Assert.Empty(ClientMatchingService.FindSafeAutomaticMatches(whdClients, [sage]));
     }
+
+    [Fact]
+    public void AutomaticallyGroupsNumberedWhdLocationsUnderOneSageCustomer()
+    {
+        var whdClients = new[]
+        {
+            new Client
+            {
+                Id = 1,
+                Name = "People for People 700",
+                Source = "WHD",
+                ExternalId = "WHD-LOCATION-299",
+                WhdLocationName = "People for People 700"
+            },
+            new Client
+            {
+                Id = 2,
+                Name = "People for People 800",
+                Source = "WHD",
+                ExternalId = "WHD-LOCATION-298",
+                WhdLocationName = "People for People 800"
+            }
+        };
+        var sage = new Client
+        {
+            Id = 3,
+            Name = "People for People Charter School",
+            Source = "Sage",
+            SageCustomerId = "37313",
+            SageCustomerName = "People for People Charter School"
+        };
+
+        var matches = ClientMatchingService.FindSafeAutomaticMatches(whdClients, [sage]);
+
+        Assert.Equal(2, matches.Count);
+        Assert.All(matches, match => Assert.Equal(sage.Id, match.SageClient.Id));
+        Assert.Contains(matches, match => match.WhdClient.Id == 1);
+        Assert.Contains(matches, match => match.WhdClient.Id == 2);
+    }
 }

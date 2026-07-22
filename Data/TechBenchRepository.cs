@@ -651,10 +651,25 @@ public sealed class TechBenchRepository : ITechBenchRepository
         var clients = GetClients(includeInactive: true);
         var matches = ClientMatchingService.FindSafeAutomaticMatches(clients, clients);
         var matchedCount = 0;
-        foreach (var match in matches)
+        foreach (var matchGroup in matches
+                     .GroupBy(static match => match.SageClient.Id)
+                     .OrderBy(static group => group.Key))
         {
-            MergeClientRecords(match.WhdClient.Id, match.SageClient.Id);
+            var orderedMatches = matchGroup
+                .OrderBy(static match => match.WhdClient.Id)
+                .ToList();
+            var canonical = MergeClientRecords(
+                orderedMatches[0].WhdClient.Id,
+                orderedMatches[0].SageClient.Id);
             matchedCount++;
+
+            foreach (var additionalMatch in orderedMatches.Skip(1))
+            {
+                canonical = MergeClientRecords(
+                    additionalMatch.WhdClient.Id,
+                    canonical.Id);
+                matchedCount++;
+            }
         }
 
         return matchedCount;

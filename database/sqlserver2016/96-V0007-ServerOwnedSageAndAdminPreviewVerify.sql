@@ -56,6 +56,7 @@ INSERT INTO @RequiredObjects([ObjectName], [ObjectType]) VALUES
     (N'tb_service.CompleteSageSyncWork', N'P'),
     (N'tb_service.GetAutomaticClientMatchCandidates', N'P'),
     (N'tb_service.ApplyAutomaticClientMatch', N'P'),
+    (N'tb_service.ApplyAutomaticWhdFamilyMember', N'P'),
     (N'tb_app.AdminListPreviewUsers', N'P'),
     (N'tb_app.AdminBeginUserPreview', N'P'),
     (N'tb_app.ActivateReadOnlyPreview', N'P'),
@@ -183,6 +184,11 @@ INSERT INTO @RequiredParameters([ProcedureName], [ParameterName]) VALUES
     (N'tb_service.ApplyAutomaticClientMatch', N'@ExpectedWhdRowVersion'),
     (N'tb_service.ApplyAutomaticClientMatch', N'@ExpectedSageRowVersion'),
     (N'tb_service.ApplyAutomaticClientMatch', N'@MatchScore'),
+    (N'tb_service.ApplyAutomaticWhdFamilyMember', N'@TargetClientId'),
+    (N'tb_service.ApplyAutomaticWhdFamilyMember', N'@SourceWhdClientId'),
+    (N'tb_service.ApplyAutomaticWhdFamilyMember', N'@ExpectedSourceWhdRowVersion'),
+    (N'tb_service.ApplyAutomaticWhdFamilyMember', N'@ExpectedSageCustomerId'),
+    (N'tb_service.ApplyAutomaticWhdFamilyMember', N'@MatchScore'),
     (N'tb_app.AdminBeginUserPreview', N'@TargetLoginName'),
     (N'tb_app.AdminBeginUserPreview', N'@ClientInstanceId'),
     (N'tb_app.ActivateReadOnlyPreview', N'@PreviewSessionId'),
@@ -305,7 +311,8 @@ INSERT INTO @ServiceProcedures([ObjectName]) VALUES
     (N'tb_service.ApplySageCustomerSnapshot'),
     (N'tb_service.CompleteSageSyncWork'),
     (N'tb_service.GetAutomaticClientMatchCandidates'),
-    (N'tb_service.ApplyAutomaticClientMatch');
+    (N'tb_service.ApplyAutomaticClientMatch'),
+    (N'tb_service.ApplyAutomaticWhdFamilyMember');
 
 IF EXISTS
 (
