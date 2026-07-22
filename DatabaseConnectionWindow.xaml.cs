@@ -3,18 +3,26 @@ using System.Windows;
 using Microsoft.Data.SqlClient;
 using TechBench.Data;
 using TechBench.Models;
+using TechBench.Services;
 
 namespace TechBench;
 
 public partial class DatabaseConnectionWindow : Window
 {
     private readonly Guid _clientInstanceId = Guid.NewGuid();
+    private readonly IAppUpdateService _updateService;
+    private readonly CancellationTokenSource _updateCancellation = new();
+    private AppUpdateRelease? _availableUpdate;
+    private bool _isCheckingOrInstallingUpdate;
+    private bool _schemaVersionMismatch;
 
     public DatabaseConnectionWindow(
         SqlServerConnectionOptions? initialOptions,
-        string? initialStatus = null)
+        string? initialStatus = null,
+        IAppUpdateService? updateService = null)
     {
         InitializeComponent();
+        _updateService = updateService ?? new V2AppUpdateService();
         ServerTextBox.Text =
             initialOptions?.Server ?? SqlServerConnectionOptions.DefaultServerName;
         DatabaseTextBox.Text =
@@ -24,23 +32,10 @@ public partial class DatabaseConnectionWindow : Window
         WindowsIdentityTextBlock.Text =
             WindowsIdentity.GetCurrent().Name ?? Environment.UserName;
         StatusTextBlock.Text = initialStatus ?? string.Empty;
-        Loaded += (_, _) =>
-        {
-            FitToWorkingArea();
-
-            if (string.IsNullOrWhiteSpace(ServerTextBox.Text))
-            {
-                ServerTextBox.Focus();
-            }
-            else if (string.IsNullOrWhiteSpace(DatabaseTextBox.Text))
-            {
-                DatabaseTextBox.Focus();
-            }
-            else
-            {
-                ConnectButton.Focus();
-            }
-        };
+        _schemaVersionMismatch = IsSchemaVersionMismatch(initialStatus);
+        UpdateConnectButtonState();
+        Loaded += DatabaseConnectionWindow_Loaded;
+        Closed += DatabaseConnectionWindow_Closed;
     }
 
     public SqlServerConnectionFactory? ConnectionFactory { get; private set; }
@@ -48,6 +43,48 @@ public partial class DatabaseConnectionWindow : Window
     public CurrentUserContext? CurrentUser { get; private set; }
 
     public CurrentUserContext? AuthenticatedUser { get; private set; }
+
+    internal static bool IsSchemaVersionMismatch(string? status)
+    {
+        return !string.IsNullOrWhiteSpace(status)
+            && status.Contains(
+                "database schema is version",
+                StringComparison.OrdinalIgnoreCase)
+            && status.Contains(
+                "client requires version",
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async void DatabaseConnectionWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        FitToWorkingArea();
+
+        if (_schemaVersionMismatch)
+        {
+            UpdateButton.Focus();
+            await CheckForUpdatesAsync(automaticRecovery: true);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(ServerTextBox.Text))
+        {
+            ServerTextBox.Focus();
+        }
+        else if (string.IsNullOrWhiteSpace(DatabaseTextBox.Text))
+        {
+            DatabaseTextBox.Focus();
+        }
+        else
+        {
+            ConnectButton.Focus();
+        }
+    }
+
+    private void DatabaseConnectionWindow_Closed(object? sender, EventArgs e)
+    {
+        _updateCancellation.Cancel();
+        _updateCancellation.Dispose();
+    }
 
     private async void ConnectButton_Click(object sender, RoutedEventArgs e)
     {
@@ -118,6 +155,11 @@ public partial class DatabaseConnectionWindow : Window
                 or UnauthorizedAccessException)
         {
             StatusTextBlock.Text = ex.Message;
+            _schemaVersionMismatch = IsSchemaVersionMismatch(ex.Message);
+            if (_schemaVersionMismatch)
+            {
+                await CheckForUpdatesAsync(automaticRecovery: true);
+            }
         }
         finally
         {
@@ -134,8 +176,122 @@ public partial class DatabaseConnectionWindow : Window
                 }
             }
 
-            ConnectButton.IsEnabled = true;
+            UpdateConnectButtonState();
         }
+    }
+
+    private async void UpdateButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_availableUpdate is null)
+        {
+            await CheckForUpdatesAsync(automaticRecovery: false);
+            return;
+        }
+
+        await DownloadAndInstallUpdateAsync();
+    }
+
+    private async Task CheckForUpdatesAsync(bool automaticRecovery)
+    {
+        if (_isCheckingOrInstallingUpdate)
+        {
+            return;
+        }
+
+        if (!_updateService.IsInstalled)
+        {
+            StatusTextBlock.Text =
+                "This portable copy cannot update itself. Install the current TechBenchV2Setup.exe once to enable automatic updates.";
+            return;
+        }
+
+        SetUpdateBusy(true);
+        StatusTextBlock.Text = automaticRecovery
+            ? "The database is newer than this client. Checking for a compatible TechBench update..."
+            : "Checking for TechBench updates...";
+
+        try
+        {
+            _availableUpdate = await _updateService.CheckForUpdatesAsync(
+                _updateCancellation.Token);
+            if (_availableUpdate is null)
+            {
+                UpdateButton.Content = "Check for updates";
+                StatusTextBlock.Text = _schemaVersionMismatch
+                    ? $"No compatible update is published yet. This client is version {_updateService.CurrentVersion}; install the matching client before connecting."
+                    : $"TechBench {_updateService.CurrentVersion} is up to date.";
+                return;
+            }
+
+            UpdateButton.Content = $"Install {_availableUpdate.Version}";
+            StatusTextBlock.Text = _schemaVersionMismatch
+                ? $"TechBench {_availableUpdate.Version} is available and matches the newer server. Select Install to update and restart."
+                : $"TechBench {_availableUpdate.Version} is available. Select Install to update and restart.";
+        }
+        catch (OperationCanceledException) when (_updateCancellation.IsCancellationRequested)
+        {
+            // The connection window is closing.
+        }
+        catch (Exception ex)
+        {
+            StatusTextBlock.Text = $"Update check failed: {ex.Message}";
+        }
+        finally
+        {
+            SetUpdateBusy(false);
+        }
+    }
+
+    private async Task DownloadAndInstallUpdateAsync()
+    {
+        if (_availableUpdate is null || _isCheckingOrInstallingUpdate)
+        {
+            return;
+        }
+
+        var version = _availableUpdate.Version;
+        SetUpdateBusy(true);
+        try
+        {
+            var progress = new Progress<int>(value =>
+            {
+                StatusTextBlock.Text =
+                    $"Downloading TechBench {version}: {Math.Clamp(value, 0, 100)}%";
+            });
+            await _updateService.DownloadUpdateAsync(
+                progress,
+                _updateCancellation.Token);
+
+            StatusTextBlock.Text =
+                $"Installing TechBench {version} and restarting...";
+            _updateService.BeginApplyAndRestart();
+            System.Windows.Application.Current.Shutdown();
+        }
+        catch (OperationCanceledException) when (_updateCancellation.IsCancellationRequested)
+        {
+            // The connection window is closing.
+        }
+        catch (Exception ex)
+        {
+            StatusTextBlock.Text = $"Update failed: {ex.Message}";
+        }
+        finally
+        {
+            SetUpdateBusy(false);
+        }
+    }
+
+    private void SetUpdateBusy(bool value)
+    {
+        _isCheckingOrInstallingUpdate = value;
+        UpdateButton.IsEnabled = !value;
+        UpdateConnectButtonState();
+    }
+
+    private void UpdateConnectButtonState()
+    {
+        ConnectButton.IsEnabled =
+            !_isCheckingOrInstallingUpdate && !_schemaVersionMismatch;
     }
 
     private void CancelButton_Click(object sender, RoutedEventArgs e)

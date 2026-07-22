@@ -143,23 +143,31 @@
                 BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="0,1,0,0">
             <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
 
                 <TextBlock x:Name="StatusTextBlock"
-                           Grid.Column="0"
-                           Margin="0,0,18,0"
+                           Grid.Row="0"
                            VerticalAlignment="Center"
                            FontSize="14"
                            LineHeight="20"
                            Foreground="#D6E2EF"
                            TextWrapping="Wrap" />
 
-                <StackPanel Grid.Column="1"
+                <StackPanel Grid.Row="1"
+                            Margin="0,12,0,0"
                             Orientation="Horizontal"
                             HorizontalAlignment="Right">
+                    <Button x:Name="UpdateButton"
+                            MinWidth="150"
+                            MinHeight="44"
+                            Margin="0,0,10,0"
+                            Padding="14,10"
+                            FontSize="14"
+                            Click="UpdateButton_Click"
+                            Content="Check for updates" />
                     <Button MinWidth="96"
                             MinHeight="44"
                             Margin="0,0,10,0"
