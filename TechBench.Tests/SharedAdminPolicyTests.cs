@@ -60,6 +60,7 @@ public sealed class SharedAdminPolicyTests
         Assert.Contains("{Binding SageActivityItemId", source, StringComparison.Ordinal);
         Assert.Contains("{Binding SageDsn", source, StringComparison.Ordinal);
         Assert.Contains("SagePasswordBox", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Test My Sage ODBC", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Text=\"Billing type\"", source, StringComparison.Ordinal);
 
         var viewModel = File.ReadAllText(FindRepositoryFile("ViewModels", "MainWindowViewModel.cs"));
@@ -67,6 +68,7 @@ public sealed class SharedAdminPolicyTests
             "_repository.SaveSetting(\"Sage.ActivityItemId\", SageActivityItemId.Trim())",
             viewModel,
             StringComparison.Ordinal);
+        Assert.DoesNotContain("_sageOdbcClient.ReadCustomersAsync", viewModel, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -116,6 +118,13 @@ public sealed class SharedAdminPolicyTests
                 System.Reflection.BindingFlags.Instance
                 | System.Reflection.BindingFlags.NonPublic),
             field => field.Name.Contains("WhdAutoSyncTimer", StringComparison.Ordinal));
+
+        var source = File.ReadAllText(FindRepositoryFile(
+            "ViewModels",
+            "MainWindowViewModel.cs"));
+        Assert.DoesNotContain("_whdRestClient.GetTicketAsync", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("_whdRestClient.GetOrganizationTickets", source, StringComparison.Ordinal);
+        Assert.Contains("server-synchronized ticket inventory", source, StringComparison.Ordinal);
     }
 
     [Fact]

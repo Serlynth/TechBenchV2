@@ -182,7 +182,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         SaveSettingsCommand = new RelayCommand(_ => SaveSettings(), _ => CanWrite);
         TestWhdConnectionCommand = new AsyncRelayCommand(TestWhdConnectionAsync, _ => CanWrite);
         TestSageConnectionCommand = new RelayCommand(_ => TestSageConnection(), _ => CanWrite);
-        TestSageOdbcCommand = new AsyncRelayCommand(TestSageOdbcAsync, _ => CanWrite);
         InitializeNoteFeatures();
         InitializeV1DatabaseImport();
         InitializeCommonLinks();
@@ -303,7 +302,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public RelayCommand SaveSettingsCommand { get; }
     public AsyncRelayCommand TestWhdConnectionCommand { get; }
     public RelayCommand TestSageConnectionCommand { get; }
-    public AsyncRelayCommand TestSageOdbcCommand { get; }
 
     public string DatabasePath => _repository.DatabasePath;
     public bool CanWrite => _currentUser.CanWrite;
@@ -2466,21 +2464,29 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             && CreateWhdTicketReference(entry.TicketNumberText, entry.ClientId ?? 0) is { } otherWhdTicket
             && TryResolveWhdTicketId(otherWhdTicket, out var otherWhdTicketId))
         {
-            StatusMessage = $"Checking Web Help Desk ticket #{otherWhdTicketId}...";
-            var lookup = await _whdRestClient.GetTicketAsync(BuildWhdConnectionSettings(), otherWhdTicketId);
-            if (!lookup.Success || lookup.Ticket is null)
+            StatusMessage = $"Checking the server-synchronized ticket inventory for WHD ticket #{otherWhdTicketId}...";
+            var target = _repository.GetTickets(
+                    searchTerm: otherWhdTicketId.ToString(),
+                    includeClosed: true)
+                .FirstOrDefault(candidate =>
+                    candidate.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase)
+                    && TryResolveWhdTicketId(candidate, out var candidateWhdTicketId)
+                    && candidateWhdTicketId == otherWhdTicketId);
+            if (target is null)
             {
-                StatusMessage = lookup.Message;
-                _dialogService.Error("Post to another WHD ticket", lookup.Message);
+                var message = $"WHD ticket #{otherWhdTicketId} is not available in your server-synchronized SQL ticket inventory. "
+                    + "Wait for the server service to synchronize it, or ask a TechBench Admin to verify your WHD technician mapping.";
+                StatusMessage = message;
+                _dialogService.Error("Post to another WHD ticket", message);
                 return false;
             }
 
-            var target = lookup.Ticket;
+            var targetClient = _repository.GetClient(target.ClientId);
             var confirmed = _dialogService.Confirm(
                 "Post to another WHD ticket",
                 $"Post this Sage/WHD Note to WHD ticket #{otherWhdTicketId}?\n\n"
                 + $"{target.Subject}\n"
-                + $"WHD client: {target.Client.Name}\n"
+                + $"WHD client: {targetClient?.Name ?? "Unknown client"}\n"
                 + $"TechBench entry: {entry.ClientDisplay}\n"
                 + $"Status: {target.Status}\n\n"
                 + "This adds a hidden TechNote without changing the ticket's assignment or status.",
@@ -2492,18 +2498,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 return false;
             }
 
-            ticket = new Ticket
-            {
-                Id = 0,
-                TicketNumber = otherWhdTicketId.ToString(),
-                ClientId = entry.ClientId ?? 0,
-                Subject = target.Subject,
-                Status = target.Status,
-                Source = "WHD",
-                ExternalId = target.ExternalId,
-                WhdStatusTypeId = target.StatusTypeId,
-                IsClosed = target.IsClosed
-            };
+            ticket = target;
         }
         var outstandingAttempt = _repository.GetOutstandingPostingAttempt(entry.Id, destination);
         if (outstandingAttempt is not null)
@@ -3438,40 +3433,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         else
         {
             _dialogService.Error("Sage 50", result);
-        }
-    }
-
-    private async Task TestSageOdbcAsync(object? parameter)
-    {
-        SaveSageConnectionSettings();
-
-        if (string.IsNullOrWhiteSpace(SageDsn))
-        {
-            const string message = "Enter the Sage ODBC DSN before testing the customer table.";
-            StatusMessage = message;
-            _dialogService.Error("Sage ODBC", message);
-            return;
-        }
-
-        StatusMessage = "Testing Sage ODBC customer access...";
-        try
-        {
-            var sampleCustomers = await _sageOdbcClient.ReadCustomersAsync(
-                SageDsn,
-                SageUsername,
-                SagePassword,
-                maxRows: 1);
-            var sampleText = sampleCustomers.Count == 0
-                ? "Connected to Sage ODBC, but no customers were returned."
-                : $"Connected to Sage ODBC. Sample customer: {sampleCustomers[0].CustomerId} - {sampleCustomers[0].CustomerName}.";
-            StatusMessage = sampleText;
-            _dialogService.Info("Sage ODBC", sampleText);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or TimeoutException)
-        {
-            var message = $"Sage ODBC customer test failed: {ex.Message}";
-            StatusMessage = message;
-            _dialogService.Error("Sage ODBC", message);
         }
     }
 

@@ -15,6 +15,73 @@ public sealed class WhdRestClientTests
     }
 
     [Fact]
+    public async Task PersonalConnectionTestUsesOnlyTheAuthenticationSessionResource()
+    {
+        var handler = new RecordingHandler(request =>
+            request.Method == HttpMethod.Get
+                ? Json(HttpStatusCode.OK, "{\"sessionKey\":\"temporary-key\",\"currentTechId\":7,\"instanceId\":-1}")
+                : Json(HttpStatusCode.OK, "{}"));
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.TestConnectionAsync(new WhdConnectionSettings
+        {
+            BaseUrl = "https://whd.example.test",
+            Username = "technician",
+            Secret = "secret"
+        });
+
+        Assert.True(result.Success, result.Message);
+        Assert.Empty(result.Tickets);
+        Assert.Contains("No tickets were downloaded or synchronized", result.Message, StringComparison.Ordinal);
+        Assert.Equal(2, handler.RequestCount);
+        Assert.All(handler.Requests, request => Assert.EndsWith("/Session", request.Uri?.AbsolutePath, StringComparison.Ordinal));
+        Assert.DoesNotContain(handler.Requests, request =>
+            request.Uri?.AbsolutePath.Contains("/Tickets", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    [Fact]
+    public async Task AutoAuthenticationBeforePostingNeverReadsTickets()
+    {
+        var handler = new RecordingHandler(request =>
+        {
+            if (request.Method == HttpMethod.Delete)
+            {
+                return Json(HttpStatusCode.OK, "{}");
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/Session", StringComparison.Ordinal) == true)
+            {
+                var query = Uri.UnescapeDataString(request.RequestUri.Query);
+                return query.Contains("password=", StringComparison.Ordinal)
+                    ? Json(HttpStatusCode.Unauthorized, "Authentication required.")
+                    : Json(HttpStatusCode.OK, "{\"sessionKey\":\"temporary-key\",\"currentTechId\":7,\"instanceId\":-1}");
+            }
+
+            return Json(HttpStatusCode.OK, "{\"id\":987}");
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.PostTicketNoteAsync(
+            new WhdConnectionSettings
+            {
+                BaseUrl = "https://whd.example.test",
+                Username = "technician",
+                Secret = "application-key"
+            },
+            101,
+            "Investigated the issue.",
+            15);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Contains(handler.Requests, request => request.Method == HttpMethod.Post);
+        Assert.DoesNotContain(handler.Requests, request =>
+            request.Uri?.AbsolutePath.Contains("/Tickets", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.Equal(2, handler.Requests.Count(request => request.Method == HttpMethod.Get));
+    }
+
+    [Fact]
     public async Task OrganizationSyncRetainsExplicitlyClosedOrDeletedTicketsReturnedByWhd()
     {
         const string responseJson = """
@@ -48,7 +115,8 @@ public sealed class WhdRestClientTests
         {
             BaseUrl = "https://whd.example.test",
             Username = "technician",
-            Secret = "secret"
+            Secret = "secret",
+            AuthenticationMode = WhdAuthenticationMode.ApplicationApiKey
         });
 
         Assert.True(result.Success);
@@ -349,7 +417,17 @@ public sealed class WhdRestClientTests
     public async Task AutoAuthenticationUsesPermissionLightProbeOnlyOncePerConnection()
     {
         const string response = "[{\"id\":1,\"subject\":\"One\",\"clientReporter\":{\"id\":1,\"displayName\":\"Client\"}}]";
-        var handler = new RecordingHandler(_ => Json(HttpStatusCode.OK, response));
+        var handler = new RecordingHandler(request =>
+        {
+            if (request.RequestUri?.AbsolutePath.EndsWith("/Session", StringComparison.Ordinal) == true)
+            {
+                return request.Method == HttpMethod.Get
+                    ? Json(HttpStatusCode.OK, "{\"sessionKey\":\"temporary-key\",\"currentTechId\":7,\"instanceId\":-1}")
+                    : Json(HttpStatusCode.OK, "{}");
+            }
+
+            return Json(HttpStatusCode.OK, response);
+        });
         using var httpClient = new HttpClient(handler);
         var client = new WhdRestClient(httpClient);
         var settings = new WhdConnectionSettings
@@ -361,14 +439,14 @@ public sealed class WhdRestClientTests
 
         Assert.True((await client.GetOrganizationTicketsAsync(settings)).Success);
         Assert.True((await client.GetOrganizationTicketsAsync(settings)).Success);
-        Assert.Equal(3, handler.RequestCount);
-        Assert.EndsWith("/Tickets/mine", handler.Requests[0].Uri?.AbsolutePath, StringComparison.Ordinal);
+        Assert.Equal(4, handler.RequestCount);
+        Assert.EndsWith("/Session", handler.Requests[0].Uri?.AbsolutePath, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "qualifier=",
             Uri.UnescapeDataString(handler.Requests[0].Uri?.Query ?? string.Empty),
             StringComparison.OrdinalIgnoreCase);
         Assert.All(
-            handler.Requests.Skip(1),
+            handler.Requests.Skip(2),
             request =>
             {
                 Assert.EndsWith("/Tickets", request.Uri?.AbsolutePath, StringComparison.Ordinal);
@@ -377,6 +455,8 @@ public sealed class WhdRestClientTests
                     Uri.UnescapeDataString(request.Uri?.Query ?? string.Empty),
                     StringComparison.Ordinal);
             });
+        Assert.DoesNotContain(handler.Requests, request =>
+            request.Uri?.AbsolutePath.EndsWith("/Tickets/mine", StringComparison.OrdinalIgnoreCase) == true);
     }
 
     [Fact]

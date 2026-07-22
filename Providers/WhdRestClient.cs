@@ -42,16 +42,10 @@ public sealed class WhdRestClient
 
         try
         {
-            var auth = await ResolveAuthenticationAsync(settings, cancellationToken);
-            var tickets = await GetAuthenticationProbeTicketsPageAsync(
-                settings,
-                auth,
-                page: 1,
-                limit: 1,
-                cancellationToken);
+            await ResolveAuthenticationAsync(settings, cancellationToken, requireFreshProbe: true);
             return WhdSyncResult.Succeeded(
-                $"Connected to Web Help Desk as {settings.Username}. Ticket filter returned {tickets.Count} sample item(s).",
-                tickets);
+                $"Web Help Desk accepted the personal credentials for {settings.Username}. No tickets were downloaded or synchronized.",
+                Array.Empty<WhdSyncedTicket>());
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
         {
@@ -728,17 +722,30 @@ public sealed class WhdRestClient
         }
     }
 
-    private async Task<WhdAuthParameters> ResolveAuthenticationAsync(WhdConnectionSettings settings, CancellationToken cancellationToken)
+    private async Task<WhdAuthParameters> ResolveAuthenticationAsync(
+        WhdConnectionSettings settings,
+        CancellationToken cancellationToken,
+        bool requireFreshProbe = false)
     {
         var explicitAuthentication = GetExplicitAuthentication(settings);
         if (explicitAuthentication is not null)
         {
+            if (requireFreshProbe)
+            {
+                await ProbeAuthenticationAsync(settings, explicitAuthentication, cancellationToken);
+            }
+
             return explicitAuthentication;
         }
 
         var cacheKey = BuildAuthenticationCacheKey(settings);
         if (_authenticationCache.TryGetValue(cacheKey, out var cached))
         {
+            if (requireFreshProbe)
+            {
+                await ProbeAuthenticationAsync(settings, cached, cancellationToken);
+            }
+
             return cached;
         }
 
@@ -754,12 +761,7 @@ public sealed class WhdRestClient
         {
             try
             {
-                await GetAuthenticationProbeTicketsPageAsync(
-                    settings,
-                    candidate,
-                    page: 1,
-                    limit: 1,
-                    cancellationToken);
+                await ProbeAuthenticationAsync(settings, candidate, cancellationToken);
                 _authenticationCache[cacheKey] = candidate;
                 return candidate;
             }
@@ -775,21 +777,65 @@ public sealed class WhdRestClient
                 : $"Authentication failed using {string.Join(", ", failures)}.");
     }
 
-    private Task<IReadOnlyList<WhdSyncedTicket>> GetAuthenticationProbeTicketsPageAsync(
+    private async Task ProbeAuthenticationAsync(
         WhdConnectionSettings settings,
         WhdAuthParameters auth,
-        int page,
-        int limit,
         CancellationToken cancellationToken)
     {
-        var requestUri = BuildRequestUri(settings.BaseUrl, "Tickets/mine", auth, new Dictionary<string, string>
+        var requestUri = BuildRequestUri(
+            settings.BaseUrl,
+            "Session",
+            auth,
+            new Dictionary<string, string>());
+        using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
         {
-            ["style"] = "long",
-            ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
-            ["page"] = page.ToString(CultureInfo.InvariantCulture)
-        });
+            var message = string.IsNullOrWhiteSpace(content) ? response.ReasonPhrase : content.Trim();
+            throw new HttpRequestException(
+                $"HTTP {(int)response.StatusCode} from Web Help Desk authentication: {message}",
+                null,
+                response.StatusCode);
+        }
 
-        return GetTicketsPageAsync(requestUri, cancellationToken);
+        string? sessionKey;
+        try
+        {
+            using var document = JsonDocument.Parse(content);
+            sessionKey = ReadString(document.RootElement, "sessionKey");
+        }
+        catch (JsonException)
+        {
+            throw new InvalidOperationException("Web Help Desk authenticated the request but did not return a valid Session response.");
+        }
+
+        if (string.IsNullOrWhiteSpace(sessionKey))
+        {
+            throw new InvalidOperationException("Web Help Desk authenticated the request but did not return a temporary session key.");
+        }
+
+        await TryTerminateProbeSessionAsync(settings, sessionKey, cancellationToken);
+    }
+
+    private async Task TryTerminateProbeSessionAsync(
+        WhdConnectionSettings settings,
+        string sessionKey,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var requestUri = BuildRequestUri(
+                settings.BaseUrl,
+                "Session",
+                WhdAuthParameters.SessionKey(sessionKey),
+                new Dictionary<string, string>());
+            using var request = new HttpRequestMessage(HttpMethod.Delete, requestUri);
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+        }
+        catch (HttpRequestException)
+        {
+            // Authentication already succeeded; WHD will expire an unclosed probe session.
+        }
     }
 
     private Task<IReadOnlyList<WhdSyncedTicket>> GetOrganizationTicketsPageAsync(
@@ -2131,6 +2177,13 @@ public sealed class WhdRestClient
             {
                 ["username"] = username,
                 ["password"] = password
+            });
+
+        public static WhdAuthParameters SessionKey(string sessionKey) => new(
+            "temporary session key",
+            new Dictionary<string, string>
+            {
+                ["sessionKey"] = sessionKey
             });
 
         public IEnumerable<KeyValuePair<string, string>> ToQueryParameters() => _parameters;

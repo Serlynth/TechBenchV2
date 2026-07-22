@@ -3054,10 +3054,6 @@
                                     </Grid>
 
                                     <WrapPanel Margin="0,12,0,14">
-                                        <Button Content="Test My Sage ODBC"
-                                                Command="{Binding TestSageOdbcCommand}"
-                                                MinWidth="130"
-                                                Margin="0,0,8,8" />
                                         <Button Content="Check Sage Desktop"
                                                 Command="{Binding TestSageConnectionCommand}"
                                                 MinWidth="140"
