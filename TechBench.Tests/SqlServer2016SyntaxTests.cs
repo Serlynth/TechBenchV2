@@ -628,6 +628,7 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("FireDrillCredentialCopied", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("N'04:00'", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("[SettingKey] <> N'FireDrill.SourcePath' OR @CanReadServerPaths = 1", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("@IsReadOnlyPreview = 0", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Configure the FireDrill workbook path in Server Manager", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("WHERE [SettingKey]=N'FireDrill.SourcePath'), N'') AS [SourcePath]", procedureSource, StringComparison.OrdinalIgnoreCase);
 

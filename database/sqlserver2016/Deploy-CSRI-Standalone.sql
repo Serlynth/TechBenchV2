@@ -19088,8 +19088,10 @@ BEGIN
     EXEC [tb_security].[GetCurrentAccess]
         @UserSid=@UserSid OUTPUT, @IsManager=@IsManager OUTPUT,
         @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    DECLARE @IsReadOnlyPreview bit =
+        CONVERT(bit, CASE WHEN USER_NAME() = N'tb_preview_reader' THEN 1 ELSE 0 END);
     DECLARE @CanReadServerPaths bit = CONVERT(bit, CASE
-        WHEN @IsAdmin = 1 AND USER_NAME() <> N'tb_preview_reader' THEN 1 ELSE 0 END);
+        WHEN @IsAdmin = 1 AND @IsReadOnlyPreview = 0 THEN 1 ELSE 0 END);
 
     ;WITH settings AS
     (
@@ -19105,7 +19107,7 @@ BEGIN
             CONVERT(int, 2) AS [ScopePriority]
         FROM [tb_user].[UserSettings]
         WHERE [OwnerWindowsSid] = @UserSid
-          AND USER_NAME() <> N'tb_preview_reader'
+          AND @IsReadOnlyPreview = 0
     ),
     ranked AS
     (
