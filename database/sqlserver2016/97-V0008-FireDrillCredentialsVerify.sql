@@ -35,6 +35,16 @@ IF NOT EXISTS(SELECT 1 FROM sys.certificates WHERE [name]=N'tb_FireDrillCredenti
    OR NOT EXISTS(SELECT 1 FROM sys.symmetric_keys WHERE [name]=N'tb_FireDrillCredentialKey')
 BEGIN PRINT N'FAIL: FireDrill encryption objects are missing.'; SET @FailureCount+=1; END;
 
+DECLARE @GetSettingsDefinition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetSettings'));
+DECLARE @ServiceConfigurationDefinition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'tb_service.GetFireDrillSyncConfiguration'));
+DECLARE @ClaimDefinition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ClaimFireDrillSyncWork'));
+IF CHARINDEX(N'[SettingKey] <> N''FireDrill.SourcePath'' OR @CanReadServerPaths = 1',@GetSettingsDefinition)=0
+BEGIN PRINT N'FAIL: ordinary clients are not blocked from receiving the FireDrill source path.'; SET @FailureCount+=1; END;
+IF CHARINDEX(N'WHERE [SettingKey]=N''FireDrill.SourcePath''), N'''') AS [SourcePath]',@ServiceConfigurationDefinition)=0
+BEGIN PRINT N'FAIL: the FireDrill service configuration does not require an explicitly configured path.'; SET @FailureCount+=1; END;
+IF CHARINDEX(N'@SourcePath IS NOT NULL',@ClaimDefinition)=0
+BEGIN PRINT N'FAIL: automatic FireDrill synchronization is not gated on a configured path.'; SET @FailureCount+=1; END;
+
 DECLARE @UserProcedures TABLE([Name] nvarchar(300) PRIMARY KEY);
 INSERT INTO @UserProcedures VALUES
  (N'tb_app.SearchFireDrillCredentials'),(N'tb_app.RevealFireDrillCredential'),(N'tb_app.AuditFireDrillCredentialCopy');

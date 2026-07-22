@@ -7,19 +7,19 @@
 From the repository root, create a self-contained `win-x64` service package with its isolated self-contained `win-x86` Sage ODBC worker:
 
 ```powershell
-.\scripts\Publish-TechBenchServer.ps1 -Version 0.5.7
+.\scripts\Publish-TechBenchServer.ps1 -Version 0.5.8
 ```
 
-The publisher creates the directly runnable `dist\TechBenchServerSetup.exe` and its SHA-256 sidecar. The setup executable embeds the complete verified `TechBenchSyncService-0.5.7-win-x64.zip` payload, including the x64 service, x86 Sage worker, compiled Server Manager, configuration template, runbook, credential helpers, and matching SQLCMD deployment. Do not place any external-system secret in the package or in `appsettings.json`.
+The publisher creates the directly runnable `dist\TechBenchServerSetup.exe` and its SHA-256 sidecar. The setup executable embeds the complete verified `TechBenchSyncService-0.5.8-win-x64.zip` payload, including the x64 service, x86 Sage worker, compiled Server Manager, configuration template, runbook, credential helpers, and matching SQLCMD deployment. Do not place any external-system secret in the package or in `appsettings.json`.
 
 The same command also creates the directly downloadable
-`dist\TechBenchV2-SQLServer2016-0.5.7.sql` and its checksum. After the
-matching client publisher has created GitHub release `v0.5.7`, attach
+`dist\TechBenchV2-SQLServer2016-0.5.8.sql` and its checksum. After the
+matching client publisher has created GitHub release `v0.5.8`, attach
 the installer, service ZIP, SQL file, and their checksums with:
 
 ```powershell
 .\scripts\Publish-TechBenchServer.ps1 `
-  -Version 0.5.7 `
+  -Version 0.5.8 `
   -Publish
 ```
 
@@ -29,13 +29,13 @@ server/SQL assets.
 
 ## Deploy the database first
 
-Before installing 0.5.7, stop the old V2 clients and sync service, have the DBA back up `TechBench`, and apply schema version 8. Review `database\README-Deploy.md` and execute `database\Deploy-CSRI-Standalone.sql` in SSMS while connected to `CSRI-SQL` as a SQL Server sysadmin with **Query > SQLCMD Mode** enabled. Stop if any verification reports a failure. If the Results grid reports a newly created database-master-key recovery password, save it in the protected administrative password vault.
+Before installing 0.5.8, stop the old V2 clients and sync service, have the DBA back up `TechBench`, and apply schema version 8. Review `database\README-Deploy.md` and execute `database\Deploy-CSRI-Standalone.sql` in SSMS while connected to `CSRI-SQL` as a SQL Server sysadmin with **Query > SQLCMD Mode** enabled. Stop if any verification reports a failure. If the Results grid reports a newly created database-master-key recovery password, save it in the protected administrative password vault.
 
 If you download the versioned standalone SQL asset instead of taking it from
 the service ZIP, verify its sidecar before opening it in SSMS:
 
 ```powershell
-$sql = '.\TechBenchV2-SQLServer2016-0.5.7.sql'
+$sql = '.\TechBenchV2-SQLServer2016-0.5.8.sql'
 $expectedHash = ((Get-Content "$sql.sha256" -Raw) -split '\s+')[0]
 $actualHash = (Get-FileHash $sql -Algorithm SHA256).Hash
 if ($actualHash -ne $expectedHash) { throw 'TechBench SQL SHA-256 does not match.' }
@@ -51,19 +51,19 @@ if ($actualHash -ne $expectedHash) { throw 'TechBench SQL SHA-256 does not match
 - Confirm the service host trusts the SQL Server certificate used by `CSRI-SQL.CSRI.local`; production keeps `TrustServerCertificate` set to `false`.
 - Install the supported 32-bit Sage ODBC driver on the service host. Use `%windir%\SysWOW64\odbcad32.exe` to create a **System DSN**; a User DSN or mapped drive will not be visible reliably to the Windows service.
 - Give `CSRI\TechBench_Sync` read access to the Sage data location and any other file/share rights required by the Sage ODBC driver. Use UNC paths rather than mapped drive letters.
-- Give `CSRI\TechBench_Sync` read access at both the share and NTFS levels to `\\csri-file\Public\Client Data\1 Infosheets\Current Clients\FireDrill.xlsx`.
+- Give the TechBench sync-service identity read access at both the share and NTFS levels to the configured FireDrill workbook.
 
 ## Install or update
 
 Download and run the one-click installer:
 
-`https://github.com/Serlynth/TechBenchV2-Releases/releases/download/v0.5.7/TechBenchServerSetup.exe`
+`https://github.com/Serlynth/TechBenchV2-Releases/releases/download/v0.5.8/TechBenchServerSetup.exe`
 
 Windows requests administrator approval. For a new installation, leave the service account as `CSRI\TechBench_Sync`, select **Install**, and enter that account's password in the secure dialog. The password can be revealed temporarily for verification and is never written to the command line, configuration, package, output, or logs. After installation, Server Manager opens so the WHD, Sage, and FireDrill secrets and shared configuration can be entered.
 
 For an existing installation, select **Update / Repair**. Setup closes Server Manager, verifies its embedded package and every manifest hash, stops the service, preserves the Windows service identity, SQL configuration, and machine-protected WHD/Sage/FireDrill secrets, replaces the service and Manager binaries, restores inherited read-and-execute access for the installed service identity, repairs the Start Menu shortcut, restarts the service, and opens the Manager. A same-schema update does not require the interactive setup operator to have SQL access. A release that requires a different schema remains blocked until the DBA applies the matching SQL deployment.
 
-The setup EXE and its `.sha256` sidecar are published together. The versioned ZIP remains available for controlled advanced or unattended deployment, but normal installation and repair do not require extracting it, changing execution policy, or typing PowerShell commands. The standalone SQL asset is `TechBenchV2-SQLServer2016-0.5.7.sql`.
+The setup EXE and its `.sha256` sidecar are published together. The versioned ZIP remains available for controlled advanced or unattended deployment, but normal installation and repair do not require extracting it, changing execution policy, or typing PowerShell commands. The standalone SQL asset is `TechBenchV2-SQLServer2016-0.5.8.sql`.
 
 The prepared CSRI deployment does not use a gMSA. If a future deployment
 switches to one, first redeploy SQL with that exact gMSA (or a dedicated group
@@ -132,7 +132,7 @@ Sage customer synchronization has no automatic schedule. A TechBench Admin selec
 
 ## Configure FireDrill synchronization
 
-Open Server Manager's **FireDrill** tab. Confirm the workbook path is `\\csri-file\Public\Client Data\1 Infosheets\Current Clients\FireDrill.xlsx`, leave daily synchronization enabled at **4:00 AM**, enter the workbook open password, and select **Save / Rotate**. Select **Sync now** for the initial import. The service opens the file read-only with sharing enabled, so employees can keep it open for editing; a file caught mid-save is rejected and retried later without changing the current SQL snapshot. The first visible worksheet must use the documented headers exactly. All imported credential values are encrypted in SQL Server, and every client reveal or copy is audited.
+Open Server Manager's **FireDrill** tab. Enter the workbook UNC path, leave daily synchronization enabled at **4:00 AM**, enter the workbook open password, and select **Save / Rotate**. Select **Save settings**, then **Sync now** for the initial import. The path is an Admin-only server setting and is not embedded in the public package or returned to ordinary clients. The service opens the file read-only with sharing enabled, so employees can keep it open for editing; a file caught mid-save is rejected and retried later without changing the current SQL snapshot. The first visible worksheet must use the documented headers exactly. All imported credential values are encrypted in SQL Server, and every client reveal or copy is audited.
 
 ## Verify and remove
 

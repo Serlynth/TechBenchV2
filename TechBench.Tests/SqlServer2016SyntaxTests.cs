@@ -627,6 +627,9 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("FireDrillCredentialRevealed", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("FireDrillCredentialCopied", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("N'04:00'", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[SettingKey] <> N'FireDrill.SourcePath' OR @CanReadServerPaths = 1", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Configure the FireDrill workbook path in Server Manager", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WHERE [SettingKey]=N'FireDrill.SourcePath'), N'') AS [SourcePath]", procedureSource, StringComparison.OrdinalIgnoreCase);
 
         foreach (var procedure in new[]
                  {
@@ -649,6 +652,23 @@ public sealed partial class SqlServer2016SyntaxTests
             "GRANT EXECUTE ON OBJECT::[tb_app].[AdminRequestFireDrillSync] TO [tb_role_user]",
             grantSource,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void FireDrillWorkbookLocationMustBeConfiguredInServerManager()
+    {
+        var root = Directory.GetParent(FindSqlDirectory())!.Parent!.FullName;
+        var managerSource = File.ReadAllText(Path.Combine(
+            root,
+            "TechBench.ServerManager",
+            "ServerManagerForm.cs"));
+        var procedureSource = File.ReadAllText(Path.Combine(
+            FindSqlDirectory(),
+            "50-V0008-FireDrillCredentialsProcedures.sql"));
+
+        Assert.Contains("Setting(\"FireDrill.SourcePath\")", managerSource, StringComparison.Ordinal);
+        Assert.Contains("Workbook UNC path (Admin-only)", managerSource, StringComparison.Ordinal);
+        Assert.Contains("WHERE [SettingKey]=N'FireDrill.SourcePath'), N'') AS [SourcePath]", procedureSource, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -25,6 +25,53 @@ BEGIN
 END;
 GO
 
+/* The server-only workbook location is an Admin setting. Ordinary clients and
+   read-only Admin preview sessions must not receive it through GetSettings. */
+ALTER PROCEDURE [tb_app].[GetSettings]
+    @ScopeType nvarchar(40) = NULL,
+    @DeviceId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@UserSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    DECLARE @CanReadServerPaths bit = CONVERT(bit, CASE
+        WHEN @IsAdmin = 1 AND USER_NAME() <> N'tb_preview_reader' THEN 1 ELSE 0 END);
+
+    ;WITH settings AS
+    (
+        SELECT CONVERT(nvarchar(20), N'Organization') AS [ScopeType],
+            [SettingKey], [SettingValue], [UpdatedAtUtc], [RowVersion],
+            CONVERT(int, 1) AS [ScopePriority]
+        FROM [tb_data].[OrganizationSettings]
+
+        UNION ALL
+
+        SELECT CONVERT(nvarchar(20), N'User') AS [ScopeType],
+            [SettingKey], [SettingValue], [UpdatedAtUtc], [RowVersion],
+            CONVERT(int, 2) AS [ScopePriority]
+        FROM [tb_user].[UserSettings]
+        WHERE [OwnerWindowsSid] = @UserSid
+          AND USER_NAME() <> N'tb_preview_reader'
+    ),
+    ranked AS
+    (
+        SELECT [ScopeType], [SettingKey], [SettingValue], [UpdatedAtUtc], [RowVersion],
+            ROW_NUMBER() OVER (PARTITION BY [SettingKey] ORDER BY [ScopePriority] DESC) AS [Rank]
+        FROM settings
+    )
+    SELECT [ScopeType], [SettingKey], [SettingValue], [UpdatedAtUtc] AS [UpdatedAt], [RowVersion]
+    FROM ranked
+    WHERE [Rank] = 1
+      AND ([SettingKey] <> N'FireDrill.SourcePath' OR @CanReadServerPaths = 1)
+    ORDER BY [SettingKey];
+END;
+GO
+
 CREATE OR ALTER PROCEDURE [tb_app].[SearchFireDrillCredentials]
     @Search nvarchar(240) = NULL,
     @Limit int = 250
@@ -121,6 +168,13 @@ BEGIN
     EXEC [tb_security].[EnsureCurrentUser] @Sid OUTPUT, @Login OUTPUT, @Display OUTPUT,
         @Tech OUTPUT, @Manager OUTPUT, @Admin OUTPUT, @Sync OUTPUT;
     IF @Admin = 0 THROW 52010, N'Only a TechBench Admin can request FireDrill synchronization.', 1;
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM [tb_data].[OrganizationSettings]
+        WHERE [SettingKey] = N'FireDrill.SourcePath'
+          AND NULLIF(LTRIM(RTRIM([SettingValue])), N'') IS NOT NULL
+    )
+        THROW 52011, N'Configure the FireDrill workbook path in Server Manager before requesting synchronization.', 1;
     SET @RequestId = COALESCE(@RequestId, NEWID());
 
     BEGIN TRANSACTION;
@@ -159,7 +213,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     SELECT
-        COALESCE((SELECT [SettingValue] FROM [tb_data].[OrganizationSettings] WHERE [SettingKey]=N'FireDrill.SourcePath'), N'\\csri-file\Public\Client Data\1 Infosheets\Current Clients\FireDrill.xlsx') AS [SourcePath],
+        COALESCE((SELECT [SettingValue] FROM [tb_data].[OrganizationSettings] WHERE [SettingKey]=N'FireDrill.SourcePath'), N'') AS [SourcePath],
         COALESCE(TRY_CONVERT(bit, (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings] WHERE [SettingKey]=N'FireDrill.DailySyncEnabled')), 1) AS [DailySyncEnabled],
         COALESCE((SELECT [SettingValue] FROM [tb_data].[OrganizationSettings] WHERE [SettingKey]=N'FireDrill.DailySyncTime'), N'04:00') AS [DailySyncTime];
 END;
@@ -181,6 +235,7 @@ BEGIN
     IF @Sync = 0 THROW 52021, N'The current identity is not a TechBench sync operator.', 1;
 
     DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(), @NowLocal datetime=GETDATE(),
+            @SourcePath nvarchar(2000)=NULLIF(LTRIM(RTRIM((SELECT [SettingValue] FROM [tb_data].[OrganizationSettings] WHERE [SettingKey]=N'FireDrill.SourcePath'))),N''),
             @Enabled bit=COALESCE(TRY_CONVERT(bit,(SELECT [SettingValue] FROM [tb_data].[OrganizationSettings] WHERE [SettingKey]=N'FireDrill.DailySyncEnabled')),1),
             @At time(0)=COALESCE(TRY_CONVERT(time(0),(SELECT [SettingValue] FROM [tb_data].[OrganizationSettings] WHERE [SettingKey]=N'FireDrill.DailySyncTime')),CONVERT(time(0),N'04:00')),
             @RequestId uniqueidentifier, @LeaseId uniqueidentifier=NEWID();
@@ -193,7 +248,7 @@ BEGIN
     WHERE request_row.[Status]=N'Running'
       AND NOT EXISTS (SELECT 1 FROM [tb_sync].[FireDrillSyncLeases] lease_row WHERE lease_row.[RequestId]=request_row.[RequestId]);
 
-    IF @Enabled=1 AND CONVERT(time(0),@NowLocal)>=@At
+    IF @Enabled=1 AND @SourcePath IS NOT NULL AND CONVERT(time(0),@NowLocal)>=@At
        AND NOT EXISTS
        (
            SELECT 1 FROM [tb_sync].[FireDrillSyncRequests]

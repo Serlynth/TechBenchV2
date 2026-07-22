@@ -396,7 +396,9 @@ internal sealed class ServerManagerForm : Form
             "FireDrill workbook");
         var settings = Group("Read-only workbook synchronization", 320);
         var layout = Grid(2, 7);
-        layout.Controls.Add(Label("Workbook UNC path"), 0, 0); layout.Controls.Add(_fireDrillPath, 1, 0);
+        _fireDrillPath.PlaceholderText = @"\\server\share\folder\workbook.xlsx";
+        _fireDrillPath.AccessibleDescription = "Admin-only UNC path to the password-protected FireDrill workbook.";
+        layout.Controls.Add(Label("Workbook UNC path (Admin-only)"), 0, 0); layout.Controls.Add(_fireDrillPath, 1, 0);
         layout.Controls.Add(_fireDrillDaily, 1, 1);
         layout.Controls.Add(Label("Daily time (server local time)"), 0, 2); layout.Controls.Add(_fireDrillTime, 1, 2);
         var save = Button("Save settings"); save.Click += async (_, _) => await SaveFireDrillAsync(false);
@@ -407,7 +409,8 @@ internal sealed class ServerManagerForm : Form
         var note = new Label
         {
             Text = "The service opens the encrypted workbook read-only, including while another user has it open for editing. " +
-                   "Grant CSRI\\TechBench_Sync read access to both the share and file. Password values are encrypted in SQL Server and reveals are audited.",
+                   "The path is stored as an Admin-only server setting and can be changed here if the workbook moves. " +
+                   "Grant the TechBench service identity read access to both the share and file. Password values are encrypted in SQL Server and reveals are audited.",
             AutoSize = true, MaximumSize = new Size(900, 0), ForeColor = Color.DimGray, Margin = new Padding(3, 16, 3, 3)
         };
         layout.Controls.Add(note, 0, 5); layout.SetColumnSpan(note, 2);
@@ -547,7 +550,7 @@ internal sealed class ServerManagerForm : Form
         _whdAuto.Checked = bool.TryParse(Setting("Whd.AutoSyncEnabled"), out var enabled) && enabled;
         if (decimal.TryParse(Setting("Whd.AutoSyncMinutes"), out var minutes)) _whdMinutes.Value = Math.Clamp(minutes, 1, 120);
         _sageDsn.Text = Setting("Sage.SyncDsn"); _sageUsername.Text = Setting("Sage.SyncUsername");
-        _fireDrillPath.Text = Setting("FireDrill.SourcePath", @"\\csri-file\Public\Client Data\1 Infosheets\Current Clients\FireDrill.xlsx");
+        _fireDrillPath.Text = Setting("FireDrill.SourcePath");
         _fireDrillDaily.Checked = !bool.TryParse(Setting("FireDrill.DailySyncEnabled", "True"), out var fireDrillEnabled) || fireDrillEnabled;
         if (TimeSpan.TryParse(Setting("FireDrill.DailySyncTime", "04:00"), out var dailyTime))
             _fireDrillTime.Value = DateTime.Today.Add(dailyTime);
