@@ -3,6 +3,21 @@ namespace TechBench.Tests;
 public sealed class CredentialWorkspaceLayoutTests
 {
     [Fact]
+    public void SidebarUsesFullClientCredentialsLabel()
+    {
+        var xaml = ReadRepositoryFile("MainWindow.xaml");
+
+        Assert.Contains(
+            "Content=\"Client Credentials\" Command=\"{Binding NavigateCommand}\" CommandParameter=\"Client Credentials\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Content=\"Credentials\" Command=\"{Binding NavigateCommand}\" CommandParameter=\"Client Credentials\"",
+            xaml,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ResultCardsExposeOnlyClientName()
     {
         var xaml = ReadRepositoryFile("MainWindow.xaml");

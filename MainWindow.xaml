@@ -447,7 +447,7 @@
                     <Button Content="Clients" Command="{Binding NavigateCommand}" CommandParameter="Client List" Style="{StaticResource NavClientsStyle}" />
                     <Button Content="Tickets" Command="{Binding NavigateCommand}" CommandParameter="Ticket List" Style="{StaticResource NavTicketsStyle}" />
                     <Button Content="Links" Command="{Binding NavigateCommand}" CommandParameter="Common Links" Style="{StaticResource NavLinksStyle}" />
-                    <Button Content="Credentials" Command="{Binding NavigateCommand}" CommandParameter="Client Credentials" Style="{StaticResource NavCredentialsStyle}"
+                    <Button Content="Client Credentials" Command="{Binding NavigateCommand}" CommandParameter="Client Credentials" Style="{StaticResource NavCredentialsStyle}"
                             Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
                     <TextBlock Text="SYSTEM" Style="{StaticResource SidebarGroupLabelStyle}" />
