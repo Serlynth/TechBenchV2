@@ -10,9 +10,13 @@ public sealed class FireDrillSyncEngine
     private static readonly string[] ExpectedHeaders =
     [
         "Client", "Firebox IP", "Status", "Admin", "csriadmin",
-        "*if enabled-Firebox-DB\\csri", "Authpoint User", "sslvpnpassword",
+        "*if enabled -Firebox-DB\\csri", "Authpoint User", "sslvpnpassword",
         "AD Auth User", "AD Password", "RustPW"
     ];
+    private static readonly IReadOnlyDictionary<int, string[]> HeaderAliases = new Dictionary<int, string[]>
+    {
+        [5] = ["*if enabled-Firebox-DB\\csri"]
+    };
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly SyncSqlRepository _repository;
     private readonly FireDrillSecretStore _secretStore;
@@ -63,7 +67,7 @@ public sealed class FireDrillSyncEngine
         for (var index = 0; index < ExpectedHeaders.Length; index++)
         {
             var actual = CellText(reader.GetValue(index))?.Trim() ?? string.Empty;
-            if (!actual.Equals(ExpectedHeaders[index], StringComparison.OrdinalIgnoreCase))
+            if (!IsExpectedHeader(index, actual))
                 throw new InvalidDataException($"Credentials column {index + 1} must be '{ExpectedHeaders[index]}', but is '{actual}'. No data was changed.");
         }
 
@@ -100,6 +104,18 @@ public sealed class FireDrillSyncEngine
         if (rows.Count == 0) throw new InvalidDataException("The Credentials worksheet contains no client rows. Existing SQL data was not changed.");
         return rows;
     }
+
+    internal static bool IsExpectedHeader(int index, string? actual)
+    {
+        if (index < 0 || index >= ExpectedHeaders.Length) return false;
+        var normalized = NormalizeHeader(actual);
+        if (normalized.Equals(NormalizeHeader(ExpectedHeaders[index]), StringComparison.OrdinalIgnoreCase)) return true;
+        return HeaderAliases.TryGetValue(index, out var aliases)
+            && aliases.Any(alias => normalized.Equals(NormalizeHeader(alias), StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string NormalizeHeader(string? value) =>
+        string.Join(' ', (value ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
     private static string? CellText(object? value) => value switch
     {
