@@ -23173,7 +23173,9 @@ BEGIN
         (N'tb_service.ClaimSageSyncWork'),
         (N'tb_service.RenewSageSyncLease'),
         (N'tb_service.ApplySageCustomerSnapshot'),
-        (N'tb_service.CompleteSageSyncWork');
+        (N'tb_service.CompleteSageSyncWork'),
+        (N'tb_service.GetAutomaticClientMatchCandidates'),
+        (N'tb_service.ApplyAutomaticClientMatch');
 END;
 
 IF EXISTS

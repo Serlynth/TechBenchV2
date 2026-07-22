@@ -254,6 +254,34 @@ public sealed partial class SqlServer2016SyntaxTests
     }
 
     [Fact]
+    public void V0006VerifierForwardAllowsSchemaV7AutomaticMatchingProcedures()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindSqlDirectory(),
+            "95-V0006-WhdServerSyncVerify.sql"));
+        var schemaV7Start = source.IndexOf(
+            "IF @InstalledSchemaVersion >= 7",
+            StringComparison.OrdinalIgnoreCase);
+        Assert.True(schemaV7Start >= 0);
+
+        var requiredGrantCheck = source.IndexOf(
+            "IF EXISTS",
+            schemaV7Start,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.True(requiredGrantCheck > schemaV7Start);
+        var schemaV7AllowList = source[schemaV7Start..requiredGrantCheck];
+
+        Assert.Contains(
+            "(N'tb_service.GetAutomaticClientMatchCandidates')",
+            schemaV7AllowList,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "(N'tb_service.ApplyAutomaticClientMatch')",
+            schemaV7AllowList,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void NormalTicketReadsNeverUseTheAdminOrganizationWideBypass()
     {
         var source = File.ReadAllText(Path.Combine(
