@@ -3378,22 +3378,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private WhdConnectionSettings BuildWhdConnectionSettings()
     {
-        return new WhdConnectionSettings
-        {
-            BaseUrl = WhdBaseUrl.Trim(),
-            Username = WhdUsername.Trim(),
-            Secret = WhdApiToken,
-            AuthenticationMode = ParseWhdAuthenticationMode(SelectedWhdAuthenticationMode)
-        };
+        return WhdRestPoster.BuildPersonalWhdConnectionSettings(
+            WhdBaseUrl,
+            WhdUsername,
+            WhdApiToken);
     }
 
     private bool HasWhdConnectionFields()
     {
-        var authenticationMode = ParseWhdAuthenticationMode(SelectedWhdAuthenticationMode);
         return !string.IsNullOrWhiteSpace(WhdBaseUrl)
             && !string.IsNullOrWhiteSpace(WhdApiToken)
-            && (authenticationMode == WhdAuthenticationMode.TechnicianApiKey
-                || !string.IsNullOrWhiteSpace(WhdUsername));
+            && !string.IsNullOrWhiteSpace(WhdUsername);
     }
 
     private void SaveWhdConnectionSettings()
@@ -3541,7 +3536,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             ["Whd.BaseUrl"] = WhdBaseUrl.Trim(),
             ["Whd.Username"] = WhdUsername.Trim(),
             ["Whd.ApiToken"] = WhdApiToken,
-            ["Whd.AuthenticationMode"] = ParseWhdAuthenticationMode(SelectedWhdAuthenticationMode).ToString(),
+            ["Whd.AuthenticationMode"] = WhdAuthenticationMode.Auto.ToString(),
             ["Sage.Password"] = SagePassword,
             ["Sage.Dsn"] = SageDsn.Trim(),
             ["Sage.CompanyPath"] = SageCompanyPath.Trim(),

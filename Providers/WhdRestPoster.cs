@@ -38,18 +38,7 @@ public sealed class WhdRestPoster : IWorkEntryPoster
             return Task.FromResult(PostingResult.Failed("Enter a positive duration before posting to Web Help Desk."));
         }
 
-        var whdSettings = new WhdConnectionSettings
-        {
-            BaseUrl = settings.GetValueOrDefault("Whd.BaseUrl", string.Empty),
-            Username = settings.GetValueOrDefault("Whd.Username", string.Empty),
-            Secret = settings.GetValueOrDefault("Whd.ApiToken", string.Empty),
-            AuthenticationMode = Enum.TryParse<WhdAuthenticationMode>(
-                settings.GetValueOrDefault("Whd.AuthenticationMode", string.Empty),
-                ignoreCase: true,
-                out var authenticationMode)
-                ? authenticationMode
-                : WhdAuthenticationMode.Auto
-        };
+        var whdSettings = BuildPersonalWhdConnectionSettings(settings);
 
         return _whdRestClient.PostTicketNoteAsync(
             whdSettings,
@@ -58,6 +47,27 @@ public sealed class WhdRestPoster : IWorkEntryPoster
             entry.DurationMinutes,
             cancellationToken);
     }
+
+    internal static WhdConnectionSettings BuildPersonalWhdConnectionSettings(
+        IReadOnlyDictionary<string, string> settings) =>
+        BuildPersonalWhdConnectionSettings(
+            settings.GetValueOrDefault("Whd.BaseUrl", string.Empty),
+            settings.GetValueOrDefault("Whd.Username", string.Empty),
+            settings.GetValueOrDefault("Whd.ApiToken", string.Empty));
+
+    internal static WhdConnectionSettings BuildPersonalWhdConnectionSettings(
+        string baseUrl,
+        string username,
+        string secret) => new()
+        {
+            BaseUrl = baseUrl.Trim(),
+            Username = username.Trim(),
+            Secret = secret,
+            // The organization-wide mode belongs to the server sync identity.
+            // Workstation reads and writes must detect the signed-in user's
+            // independently stored password or API token instead.
+            AuthenticationMode = WhdAuthenticationMode.Auto
+        };
 
     private static bool TryResolveWhdTicketId(Ticket ticket, out int whdTicketId)
     {

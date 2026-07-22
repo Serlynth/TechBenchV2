@@ -16,7 +16,7 @@ public sealed class DatabaseConnectionUpdateRecoveryTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("The TechBench database could not be opened.")]
-    [InlineData("TechBench 0.5.17 is up to date.")]
+    [InlineData("TechBench 0.5.18 is up to date.")]
     public void OtherConnectionStatuses_DoNotTriggerAutomaticUpdateRecovery(string? status)
     {
         Assert.False(DatabaseConnectionWindow.IsSchemaVersionMismatch(status));
