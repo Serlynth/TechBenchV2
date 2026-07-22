@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -78,12 +79,9 @@ public sealed class FireDrillSyncEngine
         {
             rowNumber++;
             var client = CellText(reader.GetValue(0))?.Trim();
-            if (string.IsNullOrWhiteSpace(client))
-            {
-                if (Enumerable.Range(1, ExpectedHeaders.Length - 1).Any(index => !string.IsNullOrEmpty(CellText(reader.GetValue(index)))))
-                    throw new InvalidDataException($"Credentials row {rowNumber} contains data but has no Client value. No data was changed.");
-                continue;
-            }
+            // A row without a client cannot be associated with a TechBench record. Ignore it
+            // even when the workbook has notes, formulas, or stale values in other columns.
+            if (ShouldSkipRow(client)) continue;
             if (client.Length > 240) throw new InvalidDataException($"Credentials row {rowNumber} has a Client value longer than 240 characters.");
             if (!clients.Add(client)) throw new InvalidDataException($"Credentials contains more than one row for client '{client}'. No data was changed.");
 
@@ -104,6 +102,8 @@ public sealed class FireDrillSyncEngine
         if (rows.Count == 0) throw new InvalidDataException("The Credentials worksheet contains no client rows. Existing SQL data was not changed.");
         return rows;
     }
+
+    internal static bool ShouldSkipRow([NotNullWhen(false)] string? client) => string.IsNullOrWhiteSpace(client);
 
     internal static bool IsExpectedHeader(int index, string? actual)
     {

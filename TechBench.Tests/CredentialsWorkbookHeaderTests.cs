@@ -32,4 +32,19 @@ public sealed class CredentialsWorkbookHeaderTests
     {
         Assert.False(FireDrillSyncEngine.IsExpectedHeader(5, "Firebox database password"));
     }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void RowWithoutClientIsSkippedEvenWhenOtherCellsContainData(string? client)
+    {
+        Assert.True(FireDrillSyncEngine.ShouldSkipRow(client));
+    }
+
+    [Fact]
+    public void RowWithClientIsImported()
+    {
+        Assert.False(FireDrillSyncEngine.ShouldSkipRow("Example Client"));
+    }
 }
