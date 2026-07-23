@@ -12,6 +12,8 @@ public sealed partial class MainWindowViewModel
     {
         Interval = TimeSpan.FromSeconds(15)
     };
+    private readonly List<ClientSessionInfo> _selectedActiveClientSessions = [];
+    private readonly List<AdminCommandTrackingBatch> _activeAdminCommandTrackingBatches = [];
     private ClientSessionInfo? _selectedActiveClientSession;
     private WhdSyncServiceStatus _adminWhdSyncStatus = new();
     private SageSyncServiceStatus _adminSageSyncStatus = new();
@@ -20,12 +22,20 @@ public sealed partial class MainWindowViewModel
         "A TechBench update is ready. Please save your work and close TechBench.";
     private string _adminCenterActionStatus = "Ready";
     private bool _isAdminCenterBusy;
+    private bool _isAdminCommandTrackingRefreshRunning;
     private bool _isClientSessionHeartbeatRunning;
     private bool _clientSessionWasRegistered;
 
     public ObservableCollection<ClientSessionInfo> ActiveClientSessions { get; } = new();
 
     public ObservableCollection<ClientSessionCommandResponse> RecentClientResponses { get; } = new();
+
+    public IReadOnlyList<ClientSessionInfo> SelectedActiveClientSessions =>
+        _selectedActiveClientSessions;
+
+    public event EventHandler? ActiveClientSessionSelectionRestoreRequested;
+
+    public event EventHandler<AdminCommandTrackingBatch>? AdminCommandTrackingStarted;
 
     public AsyncRelayCommand RequestAdminWhdSyncCommand { get; private set; } = null!;
 
@@ -54,6 +64,31 @@ public sealed partial class MainWindowViewModel
     }
 
     public bool HasSelectedActiveClientSession => SelectedActiveClientSession is not null;
+
+    public string SelectedActiveClientSummary => _selectedActiveClientSessions.Count switch
+    {
+        0 => "No clients selected",
+        1 => _selectedActiveClientSessions[0].UserLabel,
+        _ => $"{_selectedActiveClientSessions.Count} clients selected"
+    };
+
+    public string SelectedActiveClientDetails => _selectedActiveClientSessions.Count switch
+    {
+        0 => "Select one or more clients from the list.",
+        1 => $"{_selectedActiveClientSessions[0].MachineName} | "
+            + $"{_selectedActiveClientSessions[0].CurrentSection} | "
+            + _selectedActiveClientSessions[0].ActivityLabel,
+        _ => string.Join(
+            ", ",
+            _selectedActiveClientSessions.Select(static session =>
+                $"{session.UserLabel} ({session.MachineName})"))
+    };
+
+    public string NotifySelectedClientsLabel =>
+        $"Notify selected ({_selectedActiveClientSessions.Count})";
+
+    public string SignOutSelectedClientsLabel =>
+        $"Require selected sign-out ({_selectedActiveClientSessions.Count})";
 
     public string AdminSessionMessage
     {
@@ -269,13 +304,18 @@ public sealed partial class MainWindowViewModel
             return;
         }
 
+        _notificationService.ShowAdminMessage("TechBench sign-out required", command.Message);
+        _dialogService.Info(
+            "TechBench sign-out required",
+            $"{command.RequestedBy} requested that TechBench close:\n\n{command.Message}"
+            + "\n\nYour current TechBench work was saved locally as a recovery draft and was not "
+            + "posted to WHD or Sage. TechBench will close after you select OK.");
         await Task.Run(() => _repository.AcknowledgeClientSessionCommand(
             _clientSessionId,
             command.CommandId,
             "SignedOut",
             saveResult));
         _pendingClientSessionCommand = null;
-        _notificationService.ShowAdminMessage("TechBench is signing out", command.Message);
         _shutdownApplication();
     }
 
@@ -305,20 +345,19 @@ public sealed partial class MainWindowViewModel
                 _repository.GetRecentClientSessionResponses()));
             _adminWhdSyncStatus = snapshot.WhdStatus;
             _adminSageSyncStatus = snapshot.SageStatus;
-            var selectedSessionId = SelectedActiveClientSession?.SessionId;
+            var selectedSessionIds = _selectedActiveClientSessions
+                .Select(static session => session.SessionId)
+                .ToHashSet();
             ActiveClientSessions.Clear();
             foreach (var session in snapshot.Sessions)
             {
                 ActiveClientSessions.Add(session);
             }
 
-            SelectedActiveClientSession = ActiveClientSessions.FirstOrDefault(
-                session => session.SessionId == selectedSessionId);
-            RecentClientResponses.Clear();
-            foreach (var response in snapshot.Responses)
-            {
-                RecentClientResponses.Add(response);
-            }
+            SetSelectedActiveClientSessions(ActiveClientSessions.Where(
+                session => selectedSessionIds.Contains(session.SessionId)));
+            ActiveClientSessionSelectionRestoreRequested?.Invoke(this, EventArgs.Empty);
+            ApplyRecentClientResponses(snapshot.Responses);
 
             RaiseAdminSyncProperties();
             AdminCenterActionStatus =
@@ -394,13 +433,17 @@ public sealed partial class MainWindowViewModel
     private bool CanQueueSelectedClientCommand() =>
         CanAccessAdminCenter
         && !IsAdminCenterBusy
-        && SelectedActiveClientSession is { IsCurrentSession: false }
+        && _selectedActiveClientSessions.Any(static session => !session.IsCurrentSession)
         && !string.IsNullOrWhiteSpace(AdminSessionMessage);
 
     private async Task QueueClientCommandAsync(string commandType)
     {
-        var target = SelectedActiveClientSession;
-        if (target is null || target.IsCurrentSession)
+        var targets = _selectedActiveClientSessions
+            .Where(static session => !session.IsCurrentSession)
+            .GroupBy(static session => session.SessionId)
+            .Select(static group => group.First())
+            .ToArray();
+        if (targets.Length == 0)
         {
             return;
         }
@@ -408,8 +451,8 @@ public sealed partial class MainWindowViewModel
         if (commandType.Equals(ClientSessionCommandTypes.SignOut, StringComparison.Ordinal)
             && !_dialogService.Confirm(
                 "Require TechBench sign-out",
-                $"Ask {target.UserLabel} on {target.MachineName} to close TechBench? "
-                + "TechBench will preserve a recovery draft and wait for any current posting operation.",
+                $"Ask {targets.Length} selected TechBench client(s) to close? "
+                + "Each client will preserve a recovery draft and wait for any current posting operation.",
                 "Require sign-out",
                 "Cancel"))
         {
@@ -420,20 +463,106 @@ public sealed partial class MainWindowViewModel
         try
         {
             await RunClientSessionHeartbeatAsync();
-            _ = await Task.Run(() => _repository.QueueClientSessionCommand(
-                _clientSessionId,
-                target.SessionId,
-                commandType,
-                AdminSessionMessage.Trim()));
-            AdminCenterActionStatus = commandType.Equals(
+            var message = AdminSessionMessage.Trim();
+            var queuedCommands = new List<(ClientSessionInfo Session, ClientSessionCommand Command)>();
+            var errors = new List<string>();
+            foreach (var target in targets)
+            {
+                try
+                {
+                    var command = await Task.Run(() => _repository.QueueClientSessionCommand(
+                        _clientSessionId,
+                        target.SessionId,
+                        commandType,
+                        message));
+                    queuedCommands.Add((target, command));
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"{target.UserLabel} on {target.MachineName}: {ex.Message}");
+                }
+            }
+
+            if (queuedCommands.Count > 0)
+            {
+                var trackingBatch = new AdminCommandTrackingBatch(
+                    commandType,
+                    message,
+                    queuedCommands);
+                _activeAdminCommandTrackingBatches.Add(trackingBatch);
+                AdminCommandTrackingStarted?.Invoke(this, trackingBatch);
+            }
+
+            var action = commandType.Equals(
                 ClientSessionCommandTypes.SignOut,
                 StringComparison.Ordinal)
-                ? $"Sign-out request sent to {target.UserLabel} on {target.MachineName}."
-                : $"Update notice sent to {target.UserLabel} on {target.MachineName}.";
+                ? "Sign-out request"
+                : "Update notice";
+            AdminCenterActionStatus =
+                $"{action} sent to {queuedCommands.Count} selected client(s).";
+            if (errors.Count > 0)
+            {
+                AdminCenterActionStatus +=
+                    $" {errors.Count} could not be queued: {string.Join(" | ", errors)}";
+            }
         }
         finally
         {
             IsAdminCenterBusy = false;
+        }
+    }
+
+    public void SetSelectedActiveClientSessions(IEnumerable<ClientSessionInfo> sessions)
+    {
+        _selectedActiveClientSessions.Clear();
+        _selectedActiveClientSessions.AddRange(
+            sessions.Where(static session => !session.IsCurrentSession));
+        SelectedActiveClientSession = _selectedActiveClientSessions.FirstOrDefault();
+        OnPropertyChanged(nameof(SelectedActiveClientSessions));
+        OnPropertyChanged(nameof(HasSelectedActiveClientSession));
+        OnPropertyChanged(nameof(SelectedActiveClientSummary));
+        OnPropertyChanged(nameof(SelectedActiveClientDetails));
+        OnPropertyChanged(nameof(NotifySelectedClientsLabel));
+        OnPropertyChanged(nameof(SignOutSelectedClientsLabel));
+        NotifyClientForUpdateCommand?.RaiseCanExecuteChanged();
+        RequireClientSignOutCommand?.RaiseCanExecuteChanged();
+    }
+
+    public async Task RefreshAdminCommandTrackingAsync()
+    {
+        if (!CanAccessAdminCenter || _isAdminCommandTrackingRefreshRunning)
+        {
+            return;
+        }
+
+        _isAdminCommandTrackingRefreshRunning = true;
+        try
+        {
+            var responses = await Task.Run(_repository.GetRecentClientSessionResponses);
+            ApplyRecentClientResponses(responses);
+        }
+        catch (Exception ex)
+        {
+            AdminCenterActionStatus = $"Response tracking will retry: {ex.Message}";
+        }
+        finally
+        {
+            _isAdminCommandTrackingRefreshRunning = false;
+        }
+    }
+
+    private void ApplyRecentClientResponses(
+        IReadOnlyList<ClientSessionCommandResponse> responses)
+    {
+        RecentClientResponses.Clear();
+        foreach (var response in responses)
+        {
+            RecentClientResponses.Add(response);
+        }
+
+        foreach (var batch in _activeAdminCommandTrackingBatches)
+        {
+            batch.ApplyResponses(responses);
         }
     }
 

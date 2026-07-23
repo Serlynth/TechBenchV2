@@ -3006,7 +3006,7 @@
                                     </Grid.ColumnDefinitions>
                                     <StackPanel>
                                         <TextBlock Text="Active TechBench clients" Style="{StaticResource SectionHeadingStyle}" />
-                                        <TextBlock Text="Clients are considered active while their 15-second heartbeat was seen within the last 90 seconds."
+                                        <TextBlock Text="Clients are considered active while their 15-second heartbeat was seen within the last 90 seconds. Click each client to select or clear multiple recipients."
                                                    Style="{StaticResource MutedTextStyle}"
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
@@ -3031,13 +3031,27 @@
                                         <ColumnDefinition Width="1*" />
                                     </Grid.ColumnDefinitions>
 
-                                    <ListBox Grid.Column="0"
+                                    <ListBox x:Name="ActiveClientSessionsListBox"
+                                             Grid.Column="0"
                                              ItemsSource="{Binding ActiveClientSessions}"
                                              SelectedItem="{Binding SelectedActiveClientSession}"
-                                             ItemContainerStyle="{StaticResource ListBoxItemCardStyle}"
+                                             SelectionMode="Multiple"
+                                             SelectionChanged="ActiveClientSessionsListBox_SelectionChanged"
                                              Background="Transparent"
                                              BorderThickness="0"
                                              ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                        <ListBox.ItemContainerStyle>
+                                            <Style TargetType="{x:Type ListBoxItem}"
+                                                   BasedOn="{StaticResource ListBoxItemCardStyle}">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsCurrentSession}" Value="True">
+                                                        <Setter Property="IsEnabled" Value="False" />
+                                                        <Setter Property="Opacity" Value="0.55" />
+                                                        <Setter Property="ToolTip" Value="This is the Admin Center session." />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </ListBox.ItemContainerStyle>
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
                                                 <Border Style="{StaticResource SelectableEntryCardStyle}">
@@ -3088,21 +3102,16 @@
                                             CornerRadius="8"
                                             Padding="18">
                                         <StackPanel>
-                                            <TextBlock Text="Selected client" Style="{StaticResource SectionHeadingStyle}" />
-                                            <TextBlock Text="{Binding SelectedActiveClientSession.UserLabel, Mode=OneWay}"
+                                            <TextBlock Text="Selected clients" Style="{StaticResource SectionHeadingStyle}" />
+                                            <TextBlock Text="{Binding SelectedActiveClientSummary, Mode=OneWay}"
                                                        Foreground="{DynamicResource PrimaryTextBrush}"
                                                        FontSize="18"
                                                        FontWeight="SemiBold"
                                                        Margin="0,4,0,4" />
-                                            <TextBlock Foreground="{DynamicResource SecondaryTextBrush}"
+                                            <TextBlock Text="{Binding SelectedActiveClientDetails, Mode=OneWay}"
+                                                       Foreground="{DynamicResource SecondaryTextBrush}"
                                                        TextWrapping="Wrap"
-                                                       Margin="0,0,0,14">
-                                                <Run Text="{Binding SelectedActiveClientSession.MachineName}" />
-                                                <Run Text=" | " />
-                                                <Run Text="{Binding SelectedActiveClientSession.CurrentSection}" />
-                                                <Run Text=" | " />
-                                                <Run Text="{Binding SelectedActiveClientSession.ActivityLabel, Mode=OneWay}" />
-                                            </TextBlock>
+                                                       Margin="0,0,0,14" />
                                             <TextBlock Text="Message" Style="{StaticResource FieldLabelStyle}" />
                                             <TextBox Text="{Binding AdminSessionMessage, UpdateSourceTrigger=PropertyChanged}"
                                                      AcceptsReturn="True"
@@ -3111,11 +3120,11 @@
                                                      MaxLength="500"
                                                      VerticalScrollBarVisibility="Auto"
                                                      Margin="0,0,0,12" />
-                                            <Button Content="Notify for update"
+                                            <Button Content="{Binding NotifySelectedClientsLabel, Mode=OneWay}"
                                                     Command="{Binding NotifyClientForUpdateCommand}"
                                                     Style="{StaticResource PrimaryButtonStyle}"
                                                     Margin="0,0,0,10" />
-                                            <Button Content="Require TechBench sign-out"
+                                            <Button Content="{Binding SignOutSelectedClientsLabel, Mode=OneWay}"
                                                     Command="{Binding RequireClientSignOutCommand}"
                                                     Style="{StaticResource SecondaryButtonStyle}" />
                                             <TextBlock Text="Sign-out closes only TechBench. It waits for the current posting operation and preserves unsaved entry work as a recovery draft."

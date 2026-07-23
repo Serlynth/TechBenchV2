@@ -57,6 +57,9 @@ public partial class MainWindow : Window
             new V2AppUpdateService(),
             () => System.Windows.Application.Current.Shutdown());
 
+        viewModel.ActiveClientSessionSelectionRestoreRequested +=
+            ViewModel_ActiveClientSessionSelectionRestoreRequested;
+        viewModel.AdminCommandTrackingStarted += ViewModel_AdminCommandTrackingStarted;
         DataContext = viewModel;
         if (currentUser.IsReadOnlyPreview)
         {
@@ -93,6 +96,59 @@ public partial class MainWindow : Window
 
         _notificationService.Dispose();
         base.OnClosed(e);
+    }
+
+    private void ActiveClientSessionsListBox_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.SetSelectedActiveClientSessions(
+                ActiveClientSessionsListBox.SelectedItems.Cast<ClientSessionInfo>());
+        }
+    }
+
+    private void ViewModel_ActiveClientSessionSelectionRestoreRequested(
+        object? sender,
+        EventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var selectedSessionIds = viewModel.SelectedActiveClientSessions
+            .Select(static session => session.SessionId)
+            .ToHashSet();
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            ActiveClientSessionsListBox.UnselectAll();
+            foreach (var session in ActiveClientSessionsListBox.Items.OfType<ClientSessionInfo>())
+            {
+                if (selectedSessionIds.Contains(session.SessionId))
+                {
+                    ActiveClientSessionsListBox.SelectedItems.Add(session);
+                }
+            }
+        });
+    }
+
+    private void ViewModel_AdminCommandTrackingStarted(
+        object? sender,
+        AdminCommandTrackingBatch batch)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var window = new AdminCommandResponseWindow(viewModel, batch)
+        {
+            Owner = this
+        };
+        window.Show();
+        window.Activate();
     }
 
     internal static TimeSpan ResolvePreviewTimeRemaining(CurrentUserContext currentUser)

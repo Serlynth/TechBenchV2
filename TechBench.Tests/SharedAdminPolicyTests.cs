@@ -184,6 +184,19 @@ public sealed class SharedAdminPolicyTests
         Assert.Contains("TrySaveEditorRecoveryDraftForForcedSignOut", adminSource, StringComparison.Ordinal);
         Assert.Contains("\"SaveFailed\"", adminSource, StringComparison.Ordinal);
         Assert.Contains("_dialogService.Prompt(", adminSource, StringComparison.Ordinal);
+        Assert.Contains("_dialogService.Info(", adminSource, StringComparison.Ordinal);
+        Assert.Contains(
+            "SetSelectedActiveClientSessions",
+            adminSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "AdminCommandTrackingStarted",
+            adminSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "RefreshAdminCommandTrackingAsync",
+            adminSource,
+            StringComparison.Ordinal);
         Assert.Contains("RecentClientResponses", adminSource, StringComparison.Ordinal);
         Assert.Contains("IsEntryOperationRunning", adminSource, StringComparison.Ordinal);
         Assert.Contains("_shutdownApplication();", adminSource, StringComparison.Ordinal);
@@ -208,11 +221,33 @@ public sealed class SharedAdminPolicyTests
 
         var xaml = File.ReadAllText(FindRepositoryFile("MainWindow.xaml"));
         Assert.Contains("Recent client responses", xaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Refresh all\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("SelectionMode=\"Multiple\"", xaml, StringComparison.Ordinal);
         Assert.Contains(
-            "SelectedActiveClientSession.ActivityLabel, Mode=OneWay",
+            "SelectionChanged=\"ActiveClientSessionsListBox_SelectionChanged\"",
             xaml,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "NotifySelectedClientsLabel",
+            xaml,
+            StringComparison.Ordinal);
+
+        var trackerXaml = File.ReadAllText(FindRepositoryFile(
+            "AdminCommandResponseWindow.xaml"));
+        Assert.Contains(
+            "ItemsSource=\"{Binding Recipients}\"",
+            trackerXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Listening for responses",
+            trackerXaml,
+            StringComparison.Ordinal);
+
+        var notificationSource = File.ReadAllText(FindRepositoryFile(
+            "Services",
+            "WindowsNotificationService.cs"));
+        Assert.Contains("ShowBalloon(title, message)", notificationSource, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Refresh all\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("SelectedActiveClientDetails", xaml, StringComparison.Ordinal);
         Assert.Contains(
             "Text=\"{Binding UserLabel, Mode=OneWay}\"",
             xaml,
