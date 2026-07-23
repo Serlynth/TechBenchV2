@@ -213,6 +213,22 @@ public sealed class SharedAdminPolicyTests
             "SelectedActiveClientSession.ActivityLabel, Mode=OneWay",
             xaml,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "<Run Text=\"{Binding UserLabel, Mode=OneWay}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Text=\"{Binding ResponseLabel, Mode=OneWay}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Text=\"{Binding AcknowledgedAtLabel, Mode=OneWay}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "<Run Text=\"{Binding UserLabel}\"",
+            xaml,
+            StringComparison.Ordinal);
         Assert.Contains("Last attempt:", adminSource, StringComparison.Ordinal);
     }
 

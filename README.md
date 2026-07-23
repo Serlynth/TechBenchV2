@@ -4,7 +4,7 @@ TechBench V2 is the multi-user successor to TechBench 1.x. It keeps the existing
 
 The original TechBench workspace is not modified. V1 and V2 have separate product identities, executables, mutex names, settings, credential namespaces, packages, and update feeds.
 
-Current milestone: `0.5.26` - TechBench V2 uses the `0.5.x` development release line; "V2" remains the product generation and is assumed. WHD TechNote posting and later note synchronization use the entry's Work Date and start time as the WHD note date override.
+Current milestone: `0.5.27` - TechBench V2 uses the `0.5.x` development release line; "V2" remains the product generation and is assumed. Admin Center safely renders client acknowledgments and written replies, including during the Admin's next startup.
 
 ## What V2 stores where
 
@@ -134,17 +134,17 @@ Application Name=TechBench V2;
 
 No SQL username, `sa` password, or other credential belongs in the client connection configuration.
 
-The desktop application and Server Manager check schema compatibility and refuse an incompatible deployment. Version `0.5.26` requires database schema version `11`. If the database is newer than the client, the connection screen checks the public release channel and offers to install a compatible client before any workspace connection is attempted.
+The desktop application and Server Manager check schema compatibility and refuse an incompatible deployment. Version `0.5.27` requires database schema version `11`. If the database is newer than the client, the connection screen checks the public release channel and offers to install a compatible client before any workspace connection is attempted.
 
-### Coordinated 0.5.26 upgrade
+### Coordinated 0.5.27 upgrade
 
 The database and client must be upgraded as one planned cutover:
 
 1. Back up the `TechBench` database.
 2. Stop the existing V2 clients and sync service, run the complete schema-version-11 standalone deployment, and confirm all verification output passes. If the Results grid reports a newly generated database-master-key recovery password, store it in the protected administrative password vault before closing SSMS.
-3. Run the 0.5.26 `TechBenchServerSetup.exe` as Administrator. It installs or repairs the x64 TechBench Sync Service under `CSRI\TechBench_Sync`, preserves existing machine-protected secrets, restores the required service and Manager read-and-execute ACLs, and installs the compiled Manager and direct EXE Start Menu shortcut.
+3. Run the 0.5.27 `TechBenchServerSetup.exe` as Administrator. It installs or repairs the x64 TechBench Sync Service under `CSRI\TechBench_Sync`, preserves existing machine-protected secrets, restores the required service and Manager read-and-execute ACLs, and installs the compiled Manager and direct EXE Start Menu shortcut.
 4. On the service host, create the 32-bit Sage **System DSN**, grant the service identity the required Sage read access, and provision the separate machine-protected Sage password.
-5. Grant `CSRI\TechBench_Sync` read access to both the Credentials share and workbook. In Server Manager, open **Credentials**, enter the UNC path and confirm the 4:00 AM schedule, select **Save settings**, enter the workbook open password under **Workbook open password**, select **Save / Rotate**, then select **Sync now**. Install the 0.5.26 client on workstations.
+5. Grant `CSRI\TechBench_Sync` read access to both the Credentials share and workbook. In Server Manager, open **Credentials**, enter the UNC path and confirm the 4:00 AM schedule, select **Save settings**, enter the workbook open password under **Workbook open password**, select **Save / Rotate**, then select **Sync now**. Install the 0.5.27 client on workstations.
 6. Test with at least one ordinary domain user and one TechBench administrator. Confirm the initial WHD full sync, a later automatic delta, a manually requested Sage customer sync, malformed/empty snapshot rejection, the explicit large-removal confirmation path, service health, and direct/group ticket visibility.
 7. Verify ordinary users cannot see the Admin Center, queue either server job, view active sessions, or change shared configuration. Verify an Admin can queue WHD/Sage work, view active TechBench clients, send a notice and receive a response, and request safe sign-out. With an unsaved entry open, verify forced sign-out restores the entry on the next launch without posting it; simulate a draft-save failure and verify the client remains open. Verify an Admin preview remains read-only and cannot see another user's Personal Note or editor draft.
 8. Verify shared clients, tickets, canonical customer matching, aliases, tags, templates, Common Links, work entries, Personal Note privacy, drafts, posting coordination, automatic refresh, and optimistic-concurrency conflicts.
@@ -152,7 +152,7 @@ The database and client must be upgraded as one planned cutover:
 
 To replace or repair any earlier V2 server installation, download and run `TechBenchServerSetup.exe` as Administrator. The setup EXE contains and verifies the matching server payload, closes the old Manager, preserves the installed service identity, configuration, and protected secrets, replaces both programs, restarts the service, repairs the Start Menu shortcut, and opens the Manager. No ZIP extraction or command-line bootstrap is required.
 
-The 0.5.26 client and service require the schema-version-11 procedure set. No database change is required when upgrading from 0.5.24 or 0.5.25.
+The 0.5.27 client and service require the schema-version-11 procedure set. No database change is required when upgrading from 0.5.24, 0.5.25, or 0.5.26.
 
 Users newly added to an AD group should sign out of Windows and sign back in before testing so their Windows security token includes the new membership.
 
@@ -162,8 +162,8 @@ Users newly added to an AD group should sign out of Windows and sign back in bef
 dotnet restore TechBenchV2.sln
 dotnet build TechBenchV2.sln -c Release
 dotnet test TechBench.Tests\TechBench.Tests.csproj -c Release
-.\scripts\Publish-TechBenchRelease.ps1 -Version 0.5.26
-.\scripts\Publish-TechBenchServer.ps1 -Version 0.5.26
+.\scripts\Publish-TechBenchRelease.ps1 -Version 0.5.27
+.\scripts\Publish-TechBenchServer.ps1 -Version 0.5.27
 ~~~
 
 Inspect and smoke-test both local packages before publishing. For an approved
@@ -188,6 +188,6 @@ Unit and contract tests do not replace the required integration run against the 
 - Verify counts, relationships, ownership, posting state, and sample note content before cutover.
 - Do not run V1 and V2 as dual writable production systems.
 
-V1 remains untouched and available for rollback or historical reference. Its data is not automatically migrated merely by installing 0.5.26; each user uses **Settings > Import V1 Database...**, reviews the preview, and explicitly starts their own import. Work history, Personal Notes, entry tags, follow-up state, posting state/history, and note links move to that user's SQL-owned records. Equivalent legacy link rows may share one canonical SQL relationship. A resumed batch counts mappings first accepted by that same batch as imported, while a later batch skips unchanged mappings. Dependent links and posting logs attach only through work-entry mappings accepted by the current batch, and a successful completion must account for every read item with zero errors. A user may abandon their own stale active V1 batch before restarting. Shared configuration, credentials, editor drafts, active posting attempts, and local caches are intentionally excluded.
+V1 remains untouched and available for rollback or historical reference. Its data is not automatically migrated merely by installing 0.5.27; each user uses **Settings > Import V1 Database...**, reviews the preview, and explicitly starts their own import. Work history, Personal Notes, entry tags, follow-up state, posting state/history, and note links move to that user's SQL-owned records. Equivalent legacy link rows may share one canonical SQL relationship. A resumed batch counts mappings first accepted by that same batch as imported, while a later batch skips unchanged mappings. Dependent links and posting logs attach only through work-entry mappings accepted by the current batch, and a successful completion must account for every read item with zero errors. A user may abandon their own stale active V1 batch before restarting. Shared configuration, credentials, editor drafts, active posting attempts, and local caches are intentionally excluded.
 
 For implementation details, see [docs/V2-ARCHITECTURE.md](docs/V2-ARCHITECTURE.md). For deployment, see the [database runbook](database/sqlserver2016/README-Deploy.md) and [sync-service runbook](docs/WHD-SYNC-SERVICE.md).

@@ -3047,7 +3047,7 @@
                                                             <ColumnDefinition Width="Auto" />
                                                         </Grid.ColumnDefinitions>
                                                         <StackPanel>
-                                                            <TextBlock Text="{Binding UserLabel}"
+                                                            <TextBlock Text="{Binding UserLabel, Mode=OneWay}"
                                                                        Foreground="{DynamicResource PrimaryTextBrush}"
                                                                        FontWeight="SemiBold"
                                                                        FontSize="15" />
@@ -3070,7 +3070,7 @@
                                                                        Foreground="{DynamicResource WarningBrush}"
                                                                        FontWeight="SemiBold"
                                                                        HorizontalAlignment="Right" />
-                                                            <TextBlock Text="{Binding LastSeenLabel}"
+                                                            <TextBlock Text="{Binding LastSeenLabel, Mode=OneWay}"
                                                                        Foreground="{DynamicResource MutedTextBrush}"
                                                                        HorizontalAlignment="Right"
                                                                        Margin="0,5,0,0" />
@@ -3089,7 +3089,7 @@
                                             Padding="18">
                                         <StackPanel>
                                             <TextBlock Text="Selected client" Style="{StaticResource SectionHeadingStyle}" />
-                                            <TextBlock Text="{Binding SelectedActiveClientSession.UserLabel}"
+                                            <TextBlock Text="{Binding SelectedActiveClientSession.UserLabel, Mode=OneWay}"
                                                        Foreground="{DynamicResource PrimaryTextBrush}"
                                                        FontSize="18"
                                                        FontWeight="SemiBold"
@@ -3153,11 +3153,11 @@
                                                     <StackPanel>
                                                         <TextBlock Foreground="{DynamicResource PrimaryTextBrush}"
                                                                    FontWeight="SemiBold">
-                                                            <Run Text="{Binding UserLabel}" />
+                                                            <Run Text="{Binding UserLabel, Mode=OneWay}" />
                                                             <Run Text=" on " />
                                                             <Run Text="{Binding MachineName}" />
                                                         </TextBlock>
-                                                        <TextBlock Text="{Binding ResponseLabel}"
+                                                        <TextBlock Text="{Binding ResponseLabel, Mode=OneWay}"
                                                                    Foreground="{DynamicResource SecondaryTextBrush}"
                                                                    TextWrapping="Wrap"
                                                                    Margin="0,5,18,0" />
@@ -3173,7 +3173,7 @@
                                                                    Foreground="{DynamicResource AccentBrush}"
                                                                    FontWeight="SemiBold"
                                                                    HorizontalAlignment="Right" />
-                                                        <TextBlock Text="{Binding AcknowledgedAtLabel}"
+                                                        <TextBlock Text="{Binding AcknowledgedAtLabel, Mode=OneWay}"
                                                                    Foreground="{DynamicResource MutedTextBrush}"
                                                                    HorizontalAlignment="Right"
                                                                    Margin="0,5,0,0" />
