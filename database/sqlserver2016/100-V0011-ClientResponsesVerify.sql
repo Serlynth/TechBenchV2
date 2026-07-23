@@ -21,9 +21,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) <> 11
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (11, 12)
 BEGIN
-    PRINT N'FAIL: installed schema version is not 11.';
+    PRINT N'FAIL: installed schema version is not 11 or 12.';
     SET @FailureCount += 1;
 END;
 

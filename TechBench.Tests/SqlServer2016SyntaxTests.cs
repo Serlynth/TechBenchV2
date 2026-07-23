@@ -735,12 +735,17 @@ public sealed partial class SqlServer2016SyntaxTests
         var grantSource = File.ReadAllText(Path.Combine(
             sqlDirectory,
             "58-V0011-ClientResponsesGrants.sql"));
+        var verifySource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "100-V0011-ClientResponsesVerify.sql"));
 
         Assert.Contains("[ResponseMessage] nvarchar(500)", schemaSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("N'SaveFailed'", schemaSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("@ResponseMessage nvarchar(500) = NULL", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("[AdminGetRecentClientSessionResponses]", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetRecentClientSessionResponses]", grantSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("NOT IN (11, 12)", verifySource, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) <> 11", verifySource, StringComparison.OrdinalIgnoreCase);
 
         var root = Directory.GetParent(sqlDirectory)!.Parent!.FullName;
         var builder = File.ReadAllText(Path.Combine(
