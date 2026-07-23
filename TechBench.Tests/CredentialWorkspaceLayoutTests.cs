@@ -1,3 +1,6 @@
+using TechBench.Models;
+using TechBench.Services;
+
 namespace TechBench.Tests;
 
 public sealed class CredentialWorkspaceLayoutTests
@@ -39,9 +42,11 @@ public sealed class CredentialWorkspaceLayoutTests
         var viewModel = ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.FireDrill.cs"));
         var clipboard = ReadRepositoryFile(Path.Combine("Services", "ClipboardService.cs"));
 
-        Assert.Contains("ItemsSource=\"{Binding FireDrillCredentialFields}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding FireDrillCredentialGroups}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding Fields}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding Name}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Visibility=\"{Binding HasSelectedFireDrillCredential", xaml, StringComparison.Ordinal);
-        Assert.Contains("SelectedFireDrillCredential.Fields", viewModel, StringComparison.Ordinal);
+        Assert.Contains("SelectedFireDrillCredential?.Fields", viewModel, StringComparison.Ordinal);
         Assert.Contains("field with { Value = \"***\" }", viewModel, StringComparison.Ordinal);
         Assert.Contains("PopulateRevealedFireDrillFields", viewModel, StringComparison.Ordinal);
         Assert.Contains("await ClipboardService.TrySetTextAsync(value)", viewModel, StringComparison.Ordinal);
@@ -55,7 +60,52 @@ public sealed class CredentialWorkspaceLayoutTests
         Assert.DoesNotContain("copy: true", clipboard, StringComparison.Ordinal);
         Assert.DoesNotContain("AddFireDrillFields", viewModel, StringComparison.Ordinal);
         Assert.Contains("credential.Fields", viewModel, StringComparison.Ordinal);
+        Assert.Contains("CredentialFieldGrouper.Group", viewModel, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void CredentialFieldsAreGroupedByProviderWithFallback()
+    {
+        FireDrillCredentialField[] fields =
+        [
+            Field("Firebox IP", 0),
+            Field("Status", 1),
+            Field("Admin", 2),
+            Field("csriadmin", 3),
+            Field("*if enabled -Firebox-DB\\csri", 4),
+            Field("Authpoint User", 5),
+            Field("sslvpnpassword", 6),
+            Field("Microsoft 365 Username", 7),
+            Field("365 Password", 8),
+            Field("ESET User", 9),
+            Field("ESET Password", 10),
+            Field("Barracuda Login", 11),
+            Field("Barracuda Password", 12),
+            Field("SonicWall Username", 13),
+            Field("SonicWall Password", 14),
+            Field("Unclassified note", 15)
+        ];
+
+        var groups = CredentialFieldGrouper.Group(fields);
+
+        Assert.Equal(
+            ["WatchGuard", "Microsoft 365", "ESET", "Barracuda", "SonicWall", "Other"],
+            groups.Select(group => group.Name));
+        Assert.Equal(7, groups.Single(group => group.Name == "WatchGuard").Fields.Count);
+        Assert.Equal(2, groups.Single(group => group.Name == "SonicWall").Fields.Count);
+        Assert.Equal(
+            "Unclassified note",
+            groups.Single(group => group.Name == "Other").Fields.Single().Label);
+    }
+
+    private static FireDrillCredentialField Field(string label, int order) =>
+        new()
+        {
+            Label = label,
+            FieldName = label.ToLowerInvariant(),
+            SortOrder = order,
+            Value = "***"
+        };
 
     private static string ReadRepositoryFile(string relativePath)
     {

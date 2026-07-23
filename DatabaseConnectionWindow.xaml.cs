@@ -10,7 +10,6 @@ namespace TechBench;
 
 public partial class DatabaseConnectionWindow : Window
 {
-    private readonly Guid _clientInstanceId = Guid.NewGuid();
     private readonly IAppUpdateService _updateService;
     private readonly CancellationTokenSource _updateCancellation = new();
     private AppUpdateRelease? _availableUpdate;
@@ -28,8 +27,6 @@ public partial class DatabaseConnectionWindow : Window
             initialOptions?.Server ?? SqlServerConnectionOptions.DefaultServerName;
         DatabaseTextBox.Text =
             initialOptions?.Database ?? SqlServerConnectionOptions.DefaultDatabaseName;
-        TrustServerCertificateCheckBox.IsChecked =
-            initialOptions?.TrustServerCertificate ?? false;
         WindowsIdentityTextBlock.Text =
             WindowsIdentity.GetCurrent().Name ?? Environment.UserName;
         StatusTextBlock.Text = initialStatus ?? string.Empty;
@@ -105,52 +102,20 @@ public partial class DatabaseConnectionWindow : Window
         ConnectButton.IsEnabled = false;
         StatusTextBlock.Text =
             $"Connecting as {WindowsIdentityTextBlock.Text}...";
-        SqlServerConnectionFactory? previewFactory = null;
         try
         {
             var options = new SqlServerConnectionOptions(
                 ServerTextBox.Text,
                 DatabaseTextBox.Text,
-                TrustServerCertificateCheckBox.IsChecked == true)
+                TrustServerCertificate: true)
                 .NormalizeAndValidate();
             var connectionFactory = new SqlServerConnectionFactory(options);
             var authenticatedUser = await connectionFactory.GetCurrentUserContextAsync();
-            var currentUser = authenticatedUser;
-
-            if (PreviewAnotherUserCheckBox.IsChecked == true)
-            {
-                if (!authenticatedUser.IsAdmin)
-                {
-                    throw new UnauthorizedAccessException(
-                        "Only a TechBench Admin may preview another user.");
-                }
-
-                var targetLoginName = SqlServerConnectionFactory.NormalizePreviewLoginName(
-                    PreviewUsernameTextBox.Text,
-                    authenticatedUser.LoginName);
-
-                StatusTextBlock.Text =
-                    $"Opening a read-only preview of {targetLoginName}...";
-                var previewSession = await connectionFactory.BeginUserPreviewAsync(
-                    targetLoginName,
-                    _clientInstanceId);
-                previewFactory = connectionFactory.CreateReadOnlyPreviewFactory(
-                    previewSession,
-                    authenticatedUser);
-                currentUser = await previewFactory.GetCurrentUserContextAsync();
-                if (!currentUser.IsReadOnlyPreview)
-                {
-                    throw new UnauthorizedAccessException(
-                        "SQL Server did not place the connection in read-only preview mode.");
-                }
-
-                connectionFactory = previewFactory;
-            }
 
             SqlServerConnectionConfig.Save(options);
 
             ConnectionFactory = connectionFactory;
-            CurrentUser = currentUser;
+            CurrentUser = authenticatedUser;
             AuthenticatedUser = authenticatedUser;
             DialogResult = true;
         }
@@ -177,19 +142,6 @@ public partial class DatabaseConnectionWindow : Window
         }
         finally
         {
-            if (DialogResult != true && previewFactory is not null)
-            {
-                try
-                {
-                    await previewFactory.EndUserPreviewAsync();
-                }
-                catch
-                {
-                    // The server session expires automatically. Preserve the
-                    // original connection error if best-effort cleanup fails.
-                }
-            }
-
             UpdateConnectButtonState();
         }
     }

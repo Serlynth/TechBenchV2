@@ -28,3 +28,8 @@ public sealed record FireDrillCredentialField
     public int SortOrder { get; init; }
     public string Value { get; init; } = string.Empty;
 }
+
+public sealed record FireDrillCredentialFieldGroup(
+    string Name,
+    int SortOrder,
+    IReadOnlyList<FireDrillCredentialField> Fields);

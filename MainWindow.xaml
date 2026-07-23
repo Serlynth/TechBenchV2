@@ -2180,27 +2180,68 @@
                                            Visibility="{Binding HasSelectedFireDrillCredential, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
                                 <ScrollViewer VerticalScrollBarVisibility="Auto"
                                               Visibility="{Binding HasSelectedFireDrillCredential, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                    <ItemsControl ItemsSource="{Binding FireDrillCredentialFields}">
+                                    <ItemsControl ItemsSource="{Binding FireDrillCredentialGroups}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
-                                                <Border Background="{DynamicResource PanelAltBackgroundBrush}"
-                                                        BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
-                                                        CornerRadius="6" Padding="12" Margin="0,0,0,9">
-                                                    <Grid>
+                                                <StackPanel Margin="0,0,0,22">
+                                                    <Grid Margin="2,0,2,9">
                                                         <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="150" />
-                                                            <ColumnDefinition Width="*" />
                                                             <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="*" />
                                                         </Grid.ColumnDefinitions>
-                                                        <TextBlock Grid.Column="0" Text="{Binding Label}" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" />
-                                                        <TextBox Grid.Column="1" Text="{Binding Value}" IsReadOnly="True" Margin="8,0"
-                                                                 FontFamily="Consolas" VerticalContentAlignment="Center" />
-                                                        <Button Grid.Column="2" Content="Copy"
-                                                                Command="{Binding DataContext.CopyFireDrillFieldCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                CommandParameter="{Binding FieldName}" Padding="12,6"
-                                                                Visibility="{Binding DataContext.IsFireDrillCredentialRevealed, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                        <TextBlock Grid.Column="0"
+                                                                   Text="{Binding Name}"
+                                                                   FontSize="17"
+                                                                   FontWeight="SemiBold"
+                                                                   Foreground="{DynamicResource PrimaryTextBrush}" />
+                                                        <Border Grid.Column="1"
+                                                                Height="1"
+                                                                Margin="12,0,0,0"
+                                                                VerticalAlignment="Center"
+                                                                Background="{DynamicResource BorderBrush}" />
                                                     </Grid>
-                                                </Border>
+
+                                                    <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                            BorderBrush="{DynamicResource BorderBrush}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="10"
+                                                            Padding="4">
+                                                        <ItemsControl ItemsSource="{Binding Fields}">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <Border Padding="10,9"
+                                                                            BorderBrush="{DynamicResource BorderBrush}"
+                                                                            BorderThickness="0,0,0,1">
+                                                                        <Grid>
+                                                                            <Grid.ColumnDefinitions>
+                                                                                <ColumnDefinition Width="150" />
+                                                                                <ColumnDefinition Width="*" />
+                                                                                <ColumnDefinition Width="Auto" />
+                                                                            </Grid.ColumnDefinitions>
+                                                                            <TextBlock Grid.Column="0"
+                                                                                       Text="{Binding Label}"
+                                                                                       Style="{StaticResource FieldLabelStyle}"
+                                                                                       Margin="0"
+                                                                                       VerticalAlignment="Center" />
+                                                                            <TextBox Grid.Column="1"
+                                                                                     Text="{Binding Value}"
+                                                                                     IsReadOnly="True"
+                                                                                     Margin="8,0"
+                                                                                     FontFamily="Consolas"
+                                                                                     VerticalContentAlignment="Center" />
+                                                                            <Button Grid.Column="2"
+                                                                                    Content="Copy"
+                                                                                    Command="{Binding DataContext.CopyFireDrillFieldCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                    CommandParameter="{Binding FieldName}"
+                                                                                    Padding="12,6"
+                                                                                    Visibility="{Binding DataContext.IsFireDrillCredentialRevealed, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                                        </Grid>
+                                                                    </Border>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </Border>
+                                                </StackPanel>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>

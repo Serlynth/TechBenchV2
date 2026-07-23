@@ -13,6 +13,7 @@ public sealed partial class MainWindowViewModel
 
     public ObservableCollection<FireDrillCredentialSummary> FireDrillCredentials { get; } = new();
     public ObservableCollection<FireDrillCredentialField> FireDrillCredentialFields { get; } = new();
+    public ObservableCollection<FireDrillCredentialFieldGroup> FireDrillCredentialGroups { get; } = new();
     public RelayCommand SearchFireDrillCommand { get; private set; } = null!;
     public RelayCommand RevealFireDrillCommand { get; private set; } = null!;
     public RelayCommand CopyFireDrillFieldCommand { get; private set; } = null!;
@@ -93,17 +94,28 @@ public sealed partial class MainWindowViewModel
 
     private void PopulateMaskedFireDrillFields()
     {
-        FireDrillCredentialFields.Clear();
-        if (SelectedFireDrillCredential is null) return;
-        foreach (var field in SelectedFireDrillCredential.Fields)
-            FireDrillCredentialFields.Add(field with { Value = "***" });
+        PopulateFireDrillFields(
+            SelectedFireDrillCredential?.Fields.Select(field =>
+                field with { Value = "***" })
+            ?? []);
     }
 
     private void PopulateRevealedFireDrillFields(FireDrillCredential credential)
     {
+        PopulateFireDrillFields(credential.Fields);
+    }
+
+    private void PopulateFireDrillFields(
+        IEnumerable<FireDrillCredentialField> fields)
+    {
         FireDrillCredentialFields.Clear();
-        foreach (var field in credential.Fields)
+        FireDrillCredentialGroups.Clear();
+
+        foreach (var field in fields)
             FireDrillCredentialFields.Add(field);
+
+        foreach (var group in CredentialFieldGrouper.Group(FireDrillCredentialFields))
+            FireDrillCredentialGroups.Add(group);
     }
 
     private async void CopyFireDrillField(object? parameter)
@@ -155,6 +167,7 @@ public sealed partial class MainWindowViewModel
     private void ClearRevealedFireDrillCredential()
     {
         FireDrillCredentialFields.Clear();
+        FireDrillCredentialGroups.Clear();
         RevealedFireDrillCredential = null;
     }
 

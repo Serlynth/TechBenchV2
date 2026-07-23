@@ -41,6 +41,24 @@ public sealed class DatabaseConnectionUpdateRecoveryTests
         Assert.Contains("System.Windows.Application.Current.Shutdown()", codeBehind, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ConnectionWindow_UsesSimplifiedWindowsAuthentication()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "DatabaseConnectionWindow.xaml"));
+        var codeBehind = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "DatabaseConnectionWindow.xaml.cs"));
+
+        Assert.Contains("Source=\"Assets/csri-techbench-logo.png\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Connect\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("PreviewAnotherUser", xaml + codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("TrustServerCertificateCheckBox", xaml + codeBehind, StringComparison.Ordinal);
+        Assert.Contains("TrustServerCertificate: true", codeBehind, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
