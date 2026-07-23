@@ -118,18 +118,7 @@ public sealed class WhdServerSyncRestClientTests
     [Fact]
     public async Task TechnicianSyncParsesMappingIdentityAndInactiveState()
     {
-        var handler = new RecordingHandler(request =>
-            request.RequestUri?.AbsolutePath.EndsWith("/Techs/currentTech", StringComparison.Ordinal) == true
-                ? Json(HttpStatusCode.OK, """
-                    {
-                      "id": 7,
-                      "displayName": "Ada Admin",
-                      "username": "aadmin",
-                      "email": "ada@example.test",
-                      "isInactive": false
-                    }
-                    """)
-                : Json(HttpStatusCode.OK, """
+        var handler = new RecordingHandler(_ => Json(HttpStatusCode.OK, """
             [
               {
                 "id": 7,
@@ -151,7 +140,7 @@ public sealed class WhdServerSyncRestClientTests
         using var httpClient = new HttpClient(handler);
         var client = new WhdRestClient(httpClient);
 
-        var result = await client.GetTechniciansAsync(ExplicitSettings());
+        var result = await client.GetTechniciansAsync(ExplicitSettings("aadmin"));
 
         Assert.True(result.Success, result.Message);
         Assert.True(result.IsComplete);
@@ -166,28 +155,39 @@ public sealed class WhdServerSyncRestClientTests
         Assert.Equal("ghopper", inactive.Username);
         Assert.Equal("grace@example.test", inactive.Email);
         Assert.False(inactive.IsActive);
-        Assert.Collection(
-            handler.Requests,
-            currentRequest =>
-            {
-                Assert.EndsWith("/Techs/currentTech", currentRequest.Uri?.AbsolutePath);
-                Assert.Equal("long", ReadQueryParameter(currentRequest.Uri, "style"));
-            },
-            listRequest =>
-            {
-                Assert.EndsWith("/Techs", listRequest.Uri?.AbsolutePath);
-                Assert.Equal("long", ReadQueryParameter(listRequest.Uri, "style"));
-                Assert.Equal("100", ReadQueryParameter(listRequest.Uri, "limit"));
-                Assert.Equal("1", ReadQueryParameter(listRequest.Uri, "page"));
-            });
+        var request = Assert.Single(handler.Requests);
+        Assert.EndsWith("/Techs", request.Uri?.AbsolutePath);
+        Assert.Equal("long", ReadQueryParameter(request.Uri, "style"));
+        Assert.Equal("100", ReadQueryParameter(request.Uri, "limit"));
+        Assert.Equal("1", ReadQueryParameter(request.Uri, "page"));
     }
 
     [Fact]
-    public async Task TechnicianSyncIncludesCurrentAdministratorWhenTechListOmitsIt()
+    public async Task TechnicianSyncUsesTemporarySessionToIncludeAdministratorOmittedByTechList()
     {
         var handler = new RecordingHandler(request =>
-            request.RequestUri?.AbsolutePath.EndsWith("/Techs/currentTech", StringComparison.Ordinal) == true
-                ? Json(HttpStatusCode.OK, """
+        {
+            if (request.Method == HttpMethod.Delete
+                && request.RequestUri?.AbsolutePath.EndsWith("/Session", StringComparison.Ordinal) == true)
+            {
+                return Json(HttpStatusCode.OK, "{}");
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/Session", StringComparison.Ordinal) == true)
+            {
+                return Json(HttpStatusCode.OK, """
+                    {
+                      "type": "Session",
+                      "sessionKey": "temporary-session",
+                      "currentTechId": 99,
+                      "instanceId": -1
+                    }
+                    """);
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/Techs/99", StringComparison.Ordinal) == true)
+            {
+                return Json(HttpStatusCode.OK, """
                     {
                       "id": 99,
                       "firstName": "Helpdesk",
@@ -196,21 +196,24 @@ public sealed class WhdServerSyncRestClientTests
                       "email": "whdmgr@example.test",
                       "activeAccount": true
                     }
-                    """)
-                : Json(HttpStatusCode.OK, """
-                    [
-                      {
-                        "id": 7,
-                        "displayName": "Ada Admin",
-                        "username": "aadmin",
-                        "isInactive": false
-                      }
-                    ]
-                    """));
+                    """);
+            }
+
+            return Json(HttpStatusCode.OK, """
+                [
+                  {
+                    "id": 7,
+                    "displayName": "Ada Admin",
+                    "username": "aadmin",
+                    "isInactive": false
+                  }
+                ]
+                """);
+        });
         using var httpClient = new HttpClient(handler);
         var client = new WhdRestClient(httpClient);
 
-        var result = await client.GetTechniciansAsync(ExplicitSettings());
+        var result = await client.GetTechniciansAsync(ExplicitSettings("WHDmgr"));
 
         Assert.True(result.Success, result.Message);
         Assert.True(result.IsComplete);
@@ -221,6 +224,26 @@ public sealed class WhdServerSyncRestClientTests
         Assert.Equal("Helpdesk Manager", manager.DisplayName);
         Assert.Equal("WHDmgr", manager.Username);
         Assert.True(manager.IsActive);
+        Assert.Collection(
+            handler.Requests,
+            listRequest => Assert.EndsWith("/Techs", listRequest.Uri?.AbsolutePath),
+            sessionRequest =>
+            {
+                Assert.EndsWith("/Session", sessionRequest.Uri?.AbsolutePath);
+                Assert.Equal("WHDmgr", ReadQueryParameter(sessionRequest.Uri, "username"));
+                Assert.Equal("test-secret", ReadQueryParameter(sessionRequest.Uri, "apiKey"));
+            },
+            technicianRequest =>
+            {
+                Assert.EndsWith("/Techs/99", technicianRequest.Uri?.AbsolutePath);
+                Assert.Equal("temporary-session", ReadQueryParameter(technicianRequest.Uri, "sessionKey"));
+            },
+            deleteRequest =>
+            {
+                Assert.Equal(HttpMethod.Delete, deleteRequest.Method);
+                Assert.EndsWith("/Session", deleteRequest.Uri?.AbsolutePath);
+                Assert.Equal("temporary-session", ReadQueryParameter(deleteRequest.Uri, "sessionKey"));
+            });
     }
 
     [Fact]
@@ -271,10 +294,10 @@ public sealed class WhdServerSyncRestClientTests
             request => Assert.EndsWith("/Techs", request.Uri?.AbsolutePath));
     }
 
-    private static WhdConnectionSettings ExplicitSettings() => new()
+    private static WhdConnectionSettings ExplicitSettings(string username = "service-technician") => new()
     {
         BaseUrl = "https://whd.example.test",
-        Username = "service-technician",
+        Username = username,
         Secret = "test-secret",
         AuthenticationMode = WhdAuthenticationMode.ApplicationApiKey
     };
@@ -314,10 +337,10 @@ public sealed class WhdServerSyncRestClientTests
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            Requests.Add(new RecordedRequest(request.RequestUri));
+            Requests.Add(new RecordedRequest(request.Method, request.RequestUri));
             return Task.FromResult(responseFactory(request));
         }
     }
 
-    private sealed record RecordedRequest(Uri? Uri);
+    private sealed record RecordedRequest(HttpMethod Method, Uri? Uri);
 }

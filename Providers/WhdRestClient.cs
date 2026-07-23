@@ -303,19 +303,6 @@ public sealed class WhdRestClient
             var signatures = new HashSet<string>(StringComparer.Ordinal);
             var isComplete = false;
 
-            // WHD can omit the authenticated administrator from the Techs
-            // collection even though that account is active and assignable.
-            // Merge the dedicated currentTech resource so the organization
-            // account remains available for AD-to-WHD mapping.
-            var currentTechnician = await TryGetCurrentTechnicianAsync(
-                settings,
-                auth,
-                cancellationToken).ConfigureAwait(false);
-            if (currentTechnician is not null && seen.Add(currentTechnician.ExternalId))
-            {
-                technicians.Add(currentTechnician);
-            }
-
             for (var page = 1; page <= MaximumPageCount; page++)
             {
                 var batch = await GetTechniciansPageAsync(settings, auth, page, PageSize, cancellationToken);
@@ -343,6 +330,27 @@ public sealed class WhdRestClient
                 {
                     isComplete = true;
                     break;
+                }
+            }
+
+            // WHD 12.x can omit the authenticated administrator from the
+            // Techs collection. The documented currentTech resource requires
+            // a temporary session key, even when the other API calls use an
+            // application API key. Create that short-lived session only when
+            // the configured organization account is absent from the list.
+            if (!technicians.Any(technician =>
+                    string.Equals(
+                        technician.Username,
+                        settings.Username,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                var currentTechnician = await TryGetAuthenticatedTechnicianAsync(
+                    settings,
+                    auth,
+                    cancellationToken).ConfigureAwait(false);
+                if (currentTechnician is not null && seen.Add(currentTechnician.ExternalId))
+                {
+                    technicians.Add(currentTechnician);
                 }
             }
 
@@ -978,16 +986,84 @@ public sealed class WhdRestClient
         return ParseTechnicians(document.RootElement);
     }
 
-    private async Task<WhdSyncedTechnician?> TryGetCurrentTechnicianAsync(
+    private async Task<WhdSyncedTechnician?> TryGetAuthenticatedTechnicianAsync(
         WhdConnectionSettings settings,
         WhdAuthParameters auth,
         CancellationToken cancellationToken)
     {
-        var requestUri = BuildRequestUri(settings.BaseUrl, "Techs/currentTech", auth, new Dictionary<string, string>
+        string? sessionKey = null;
+        try
+        {
+            var sessionUri = BuildRequestUri(
+                settings.BaseUrl,
+                "Session",
+                auth,
+                new Dictionary<string, string>());
+            using var sessionResponse = await _httpClient.GetAsync(sessionUri, cancellationToken);
+            if (!sessionResponse.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            var sessionContent = await sessionResponse.Content.ReadAsStringAsync(cancellationToken);
+            using var sessionDocument = JsonDocument.Parse(sessionContent);
+            sessionKey = ReadString(sessionDocument.RootElement, "sessionKey");
+            if (string.IsNullOrWhiteSpace(sessionKey))
+            {
+                return null;
+            }
+
+            var sessionAuthentication = WhdAuthParameters.SessionKey(sessionKey);
+            var currentTechnicianId = ReadStringAny(
+                sessionDocument.RootElement,
+                "currentTechId",
+                "techId",
+                "technicianId");
+            if (!string.IsNullOrWhiteSpace(currentTechnicianId))
+            {
+                var byId = await TryGetTechnicianAsync(
+                    settings,
+                    sessionAuthentication,
+                    $"Techs/{currentTechnicianId.Trim()}",
+                    cancellationToken).ConfigureAwait(false);
+                if (byId is not null)
+                {
+                    return byId;
+                }
+            }
+
+            return await TryGetTechnicianAsync(
+                settings,
+                sessionAuthentication,
+                "Techs/currentTech",
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(sessionKey))
+            {
+                await TryTerminateProbeSessionAsync(
+                    settings,
+                    sessionKey,
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private async Task<WhdSyncedTechnician?> TryGetTechnicianAsync(
+        WhdConnectionSettings settings,
+        WhdAuthParameters auth,
+        string resource,
+        CancellationToken cancellationToken)
+    {
+        var requestUri = BuildRequestUri(settings.BaseUrl, resource, auth, new Dictionary<string, string>
         {
             ["style"] = "long"
         });
-
         using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
