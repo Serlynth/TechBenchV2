@@ -208,6 +208,12 @@ public sealed class SharedAdminPolicyTests
 
         var xaml = File.ReadAllText(FindRepositoryFile("MainWindow.xaml"));
         Assert.Contains("Recent client responses", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Refresh all\"", xaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "SelectedActiveClientSession.ActivityLabel, Mode=OneWay",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains("Last attempt:", adminSource, StringComparison.Ordinal);
     }
 
     [Fact]

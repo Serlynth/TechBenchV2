@@ -3011,8 +3011,9 @@
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
                                     <Button Grid.Column="1"
-                                            Content="Refresh"
+                                            Content="Refresh all"
                                             Command="{Binding RefreshAdminCenterCommand}"
+                                            ToolTip="Refresh WHD and Sage synchronization status, active clients, and recent responses."
                                             Style="{StaticResource SecondaryButtonStyle}"
                                             VerticalAlignment="Top" />
                                 </Grid>
@@ -3065,7 +3066,7 @@
                                                             </TextBlock>
                                                         </StackPanel>
                                                         <StackPanel Grid.Column="1" HorizontalAlignment="Right">
-                                                            <TextBlock Text="{Binding ActivityLabel}"
+                                                            <TextBlock Text="{Binding ActivityLabel, Mode=OneWay}"
                                                                        Foreground="{DynamicResource WarningBrush}"
                                                                        FontWeight="SemiBold"
                                                                        HorizontalAlignment="Right" />
@@ -3100,7 +3101,7 @@
                                                 <Run Text=" | " />
                                                 <Run Text="{Binding SelectedActiveClientSession.CurrentSection}" />
                                                 <Run Text=" | " />
-                                                <Run Text="{Binding SelectedActiveClientSession.ActivityLabel}" />
+                                                <Run Text="{Binding SelectedActiveClientSession.ActivityLabel, Mode=OneWay}" />
                                             </TextBlock>
                                             <TextBlock Text="Message" Style="{StaticResource FieldLabelStyle}" />
                                             <TextBox Text="{Binding AdminSessionMessage, UpdateSourceTrigger=PropertyChanged}"

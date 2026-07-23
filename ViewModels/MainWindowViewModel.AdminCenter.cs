@@ -94,13 +94,17 @@ public sealed partial class MainWindowViewModel
     public string AdminWhdSyncSummary => _adminWhdSyncStatus.Summary;
 
     public string AdminWhdSyncDetails =>
-        $"Queue: {_adminWhdSyncStatus.QueueDepth} | Last success: "
+        $"Queue: {_adminWhdSyncStatus.QueueDepth} | Last attempt: "
+        + FormatAdminTimestamp(_adminWhdSyncStatus.LastRunAt)
+        + " | Last success: "
         + FormatAdminTimestamp(_adminWhdSyncStatus.LastSuccessfulRunAt);
 
     public string AdminSageSyncSummary => _adminSageSyncStatus.Summary;
 
     public string AdminSageSyncDetails =>
-        $"Queue: {_adminSageSyncStatus.QueueDepth} | Last success: "
+        $"Queue: {_adminSageSyncStatus.QueueDepth} | Last attempt: "
+        + FormatAdminTimestamp(_adminSageSyncStatus.LastRunAt)
+        + " | Last success: "
         + FormatAdminTimestamp(_adminSageSyncStatus.LastSuccessfulRunAt);
 
     public bool AdminSageRequiresConfirmation =>
