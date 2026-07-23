@@ -24,9 +24,24 @@ public partial class App : System.Windows.Application
     [STAThread]
     public static void Main(string[] args)
     {
+        AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
+            CrashLog.Record(
+                "AppDomain.CurrentDomain.UnhandledException",
+                eventArgs.ExceptionObject as Exception
+                    ?? new InvalidOperationException(
+                        $"Unhandled non-Exception object: {eventArgs.ExceptionObject}"));
+        TaskScheduler.UnobservedTaskException += (_, eventArgs) =>
+            CrashLog.Record(
+                "TaskScheduler.UnobservedTaskException",
+                eventArgs.Exception);
+
         VelopackApp.Build().Run();
 
         var app = new App();
+        app.DispatcherUnhandledException += (_, eventArgs) =>
+            CrashLog.Record(
+                "Application.DispatcherUnhandledException",
+                eventArgs.Exception);
         app.InitializeComponent();
         app.Run();
     }
@@ -94,9 +109,11 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
+            CrashLog.Record("MainWindow construction", ex);
             AppDialogWindow.Error(
                 "TechBench V2",
-                $"TechBench V2 connected to SQL Server, but the workspace could not be opened:\n\n{ex.Message}");
+                $"TechBench V2 connected to SQL Server, but the workspace could not be opened:\n\n{ex.Message}"
+                + $"\n\nDiagnostic details were saved to:\n{CrashLog.FilePath}");
             Shutdown();
             return;
         }

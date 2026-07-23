@@ -214,7 +214,7 @@ public sealed class SharedAdminPolicyTests
             xaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "<Run Text=\"{Binding UserLabel, Mode=OneWay}\"",
+            "Text=\"{Binding UserLabel, Mode=OneWay}\"",
             xaml,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -229,6 +229,30 @@ public sealed class SharedAdminPolicyTests
             "<Run Text=\"{Binding UserLabel}\"",
             xaml,
             StringComparison.Ordinal);
+        var responseSectionStart = xaml.IndexOf(
+            "Recent client responses",
+            StringComparison.Ordinal);
+        var responseSectionEnd = xaml.IndexOf(
+            "Updates.CurrentVersionLabel",
+            responseSectionStart,
+            StringComparison.Ordinal);
+        Assert.True(responseSectionStart >= 0);
+        Assert.True(responseSectionEnd > responseSectionStart);
+        var responseSection = xaml[responseSectionStart..responseSectionEnd];
+        Assert.DoesNotContain(
+            "<Run Text=\"{Binding",
+            responseSection,
+            StringComparison.Ordinal);
+        var appSource = File.ReadAllText(FindRepositoryFile("App.xaml.cs"));
+        Assert.Contains(
+            "DispatcherUnhandledException",
+            appSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CrashLog.Record",
+            appSource,
+            StringComparison.Ordinal);
+        Assert.True(File.Exists(FindRepositoryFile("Services", "CrashLog.cs")));
         Assert.Contains("Last attempt:", adminSource, StringComparison.Ordinal);
     }
 

@@ -3151,22 +3151,43 @@
                                                         <ColumnDefinition Width="Auto" />
                                                     </Grid.ColumnDefinitions>
                                                     <StackPanel>
-                                                        <TextBlock Foreground="{DynamicResource PrimaryTextBrush}"
-                                                                   FontWeight="SemiBold">
-                                                            <Run Text="{Binding UserLabel, Mode=OneWay}" />
-                                                            <Run Text=" on " />
-                                                            <Run Text="{Binding MachineName}" />
-                                                        </TextBlock>
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="*" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Grid.Column="0"
+                                                                       Text="{Binding UserLabel, Mode=OneWay}"
+                                                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                                                       FontWeight="SemiBold" />
+                                                            <TextBlock Grid.Column="1"
+                                                                       Text=" on "
+                                                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                                                       FontWeight="SemiBold" />
+                                                            <TextBlock Grid.Column="2"
+                                                                       Text="{Binding MachineName, Mode=OneWay}"
+                                                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                                                       FontWeight="SemiBold"
+                                                                       TextTrimming="CharacterEllipsis" />
+                                                        </Grid>
                                                         <TextBlock Text="{Binding ResponseLabel, Mode=OneWay}"
                                                                    Foreground="{DynamicResource SecondaryTextBrush}"
                                                                    TextWrapping="Wrap"
                                                                    Margin="0,5,18,0" />
-                                                        <TextBlock Foreground="{DynamicResource MutedTextBrush}"
-                                                                   TextWrapping="Wrap"
-                                                                   Margin="0,5,18,0">
-                                                            <Run Text="Admin message: " />
-                                                            <Run Text="{Binding OriginalMessage}" />
-                                                        </TextBlock>
+                                                        <Grid Margin="0,5,18,0">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="*" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Grid.Column="0"
+                                                                       Text="Admin message: "
+                                                                       Foreground="{DynamicResource MutedTextBrush}" />
+                                                            <TextBlock Grid.Column="1"
+                                                                       Text="{Binding OriginalMessage, Mode=OneWay}"
+                                                                       Foreground="{DynamicResource MutedTextBrush}"
+                                                                       TextWrapping="Wrap" />
+                                                        </Grid>
                                                     </StackPanel>
                                                     <StackPanel Grid.Column="1" HorizontalAlignment="Right">
                                                         <TextBlock Text="{Binding AcknowledgementResult}"
