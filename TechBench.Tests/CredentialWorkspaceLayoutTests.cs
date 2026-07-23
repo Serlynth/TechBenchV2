@@ -37,17 +37,22 @@ public sealed class CredentialWorkspaceLayoutTests
     {
         var xaml = ReadRepositoryFile("MainWindow.xaml");
         var viewModel = ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.FireDrill.cs"));
+        var clipboard = ReadRepositoryFile(Path.Combine("Services", "ClipboardService.cs"));
 
         Assert.Contains("ItemsSource=\"{Binding FireDrillCredentialFields}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Visibility=\"{Binding HasSelectedFireDrillCredential", xaml, StringComparison.Ordinal);
         Assert.Contains("SelectedFireDrillCredential.Fields", viewModel, StringComparison.Ordinal);
         Assert.Contains("field with { Value = \"***\" }", viewModel, StringComparison.Ordinal);
         Assert.Contains("PopulateRevealedFireDrillFields", viewModel, StringComparison.Ordinal);
-        Assert.Contains("TrySetClipboardText(value)", viewModel, StringComparison.Ordinal);
-        Assert.Contains("catch (ExternalException)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("await ClipboardService.TrySetTextAsync(value)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("_isCopyingFireDrillCredential", viewModel, StringComparison.Ordinal);
         Assert.Contains("string.Equals(candidate.FieldName, field", viewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("selected credential field is invalid", viewModel, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Clipboard.SetText", viewModel, StringComparison.Ordinal);
+        Assert.Contains("thread.SetApartmentState(ApartmentState.STA)", clipboard, StringComparison.Ordinal);
+        Assert.Contains("Dispatcher.Run()", clipboard, StringComparison.Ordinal);
+        Assert.Contains("Clipboard.SetDataObject(value, copy: false)", clipboard, StringComparison.Ordinal);
+        Assert.DoesNotContain("copy: true", clipboard, StringComparison.Ordinal);
         Assert.DoesNotContain("AddFireDrillFields", viewModel, StringComparison.Ordinal);
         Assert.Contains("credential.Fields", viewModel, StringComparison.Ordinal);
     }

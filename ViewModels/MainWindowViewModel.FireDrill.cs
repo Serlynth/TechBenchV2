@@ -1,6 +1,6 @@
 using System.Collections.ObjectModel;
-using System.Runtime.InteropServices;
 using TechBench.Models;
+using TechBench.Services;
 
 namespace TechBench.ViewModels;
 
@@ -9,6 +9,7 @@ public sealed partial class MainWindowViewModel
     private string _fireDrillSearchText = string.Empty;
     private FireDrillCredentialSummary? _selectedFireDrillCredential;
     private FireDrillCredential? _revealedFireDrillCredential;
+    private bool _isCopyingFireDrillCredential;
 
     public ObservableCollection<FireDrillCredentialSummary> FireDrillCredentials { get; } = new();
     public ObservableCollection<FireDrillCredentialField> FireDrillCredentialFields { get; } = new();
@@ -61,7 +62,9 @@ public sealed partial class MainWindowViewModel
     {
         SearchFireDrillCommand = new RelayCommand(_ => RefreshFireDrillCredentials());
         RevealFireDrillCommand = new RelayCommand(_ => RevealFireDrillCredential(), _ => SelectedFireDrillCredential is not null && CanAccessFireDrill);
-        CopyFireDrillFieldCommand = new RelayCommand(CopyFireDrillField, _ => RevealedFireDrillCredential is not null);
+        CopyFireDrillFieldCommand = new RelayCommand(
+            CopyFireDrillField,
+            _ => RevealedFireDrillCredential is not null && !_isCopyingFireDrillCredential);
         HideFireDrillCommand = new RelayCommand(_ => HideFireDrillCredential(), _ => RevealedFireDrillCredential is not null);
     }
 
@@ -103,7 +106,7 @@ public sealed partial class MainWindowViewModel
             FireDrillCredentialFields.Add(field);
     }
 
-    private void CopyFireDrillField(object? parameter)
+    private async void CopyFireDrillField(object? parameter)
     {
         if (RevealedFireDrillCredential is null ||
             parameter is not string field ||
@@ -125,37 +128,28 @@ public sealed partial class MainWindowViewModel
             StatusMessage = "That credential field is blank.";
             return;
         }
-        if (!TrySetClipboardText(value))
+        var clientName = RevealedFireDrillCredential.ClientName;
+        _isCopyingFireDrillCredential = true;
+        CopyFireDrillFieldCommand.RaiseCanExecuteChanged();
+        StatusMessage = $"Copying {selectedField.Label}...";
+        try
         {
-            StatusMessage = "Windows could not access the clipboard. Close any clipboard manager and try Copy again.";
-            return;
+            if (!await ClipboardService.TrySetTextAsync(value))
+            {
+                StatusMessage = "Windows could not access the clipboard. Close any clipboard manager and try Copy again.";
+                return;
+            }
+            StatusMessage = $"Copied {selectedField.Label} for {clientName}.";
         }
-        StatusMessage = $"Copied {selectedField.Label} for {RevealedFireDrillCredential.ClientName}.";
-    }
-
-    internal static bool TrySetClipboardText(string value)
-    {
-        for (var attempt = 1; attempt <= 5; attempt++)
+        catch (Exception)
         {
-            try
-            {
-                System.Windows.Clipboard.SetDataObject(value, copy: true);
-                return true;
-            }
-            catch (ExternalException) when (attempt < 5)
-            {
-                Thread.Sleep(40);
-            }
-            catch (ExternalException)
-            {
-                return false;
-            }
-            catch (Exception)
-            {
-                return false;
-            }
+            StatusMessage = "Windows could not access the clipboard. Try Copy again.";
         }
-        return false;
+        finally
+        {
+            _isCopyingFireDrillCredential = false;
+            CopyFireDrillFieldCommand.RaiseCanExecuteChanged();
+        }
     }
 
     private void ClearRevealedFireDrillCredential()
