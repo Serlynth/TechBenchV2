@@ -72,13 +72,18 @@ public sealed class WhdRestClientTests
             },
             101,
             "Investigated the issue.",
-            15);
+            15,
+            new DateTime(2026, 7, 20, 13, 30, 0, DateTimeKind.Utc));
 
         Assert.True(result.Success, result.Message);
         Assert.Contains(handler.Requests, request => request.Method == HttpMethod.Post);
         Assert.DoesNotContain(handler.Requests, request =>
             request.Uri?.AbsolutePath.Contains("/Tickets", StringComparison.OrdinalIgnoreCase) == true);
         Assert.Equal(2, handler.Requests.Count(request => request.Method == HttpMethod.Get));
+
+        var postedRequest = Assert.Single(handler.Requests, request => request.Method == HttpMethod.Post);
+        using var payload = JsonDocument.Parse(postedRequest.Body);
+        Assert.Equal("2026-07-20T13:30:00Z", payload.RootElement.GetProperty("date").GetString());
     }
 
     [Fact]
@@ -205,7 +210,8 @@ public sealed class WhdRestClientTests
             ExplicitSettings(),
             101,
             "Investigated the issue.",
-            15);
+            15,
+            new DateTime(2026, 7, 20, 13, 30, 0, DateTimeKind.Utc));
 
         Assert.True(result.Success);
         Assert.True(result.MarkPosted);
@@ -234,7 +240,8 @@ public sealed class WhdRestClientTests
             ExplicitSettings(),
             101,
             "Investigated the timeout.",
-            15);
+            15,
+            new DateTime(2026, 7, 20, 13, 30, 0, DateTimeKind.Utc));
 
         Assert.True(result.Success, result.Message);
         Assert.True(result.MarkPosted);
@@ -263,7 +270,8 @@ public sealed class WhdRestClientTests
             ExplicitSettings(),
             101,
             "Investigated the timeout.",
-            15);
+            15,
+            new DateTime(2026, 7, 20, 13, 30, 0, DateTimeKind.Utc));
 
         Assert.False(result.Success);
         Assert.False(result.MarkPosted);
@@ -286,7 +294,8 @@ public sealed class WhdRestClientTests
             ExplicitSettings(),
             101,
             "Investigated the issue.",
-            15);
+            15,
+            new DateTime(2026, 7, 20, 13, 30, 0, DateTimeKind.Utc));
 
         Assert.False(result.Success);
         Assert.False(result.MarkPosted);
@@ -331,7 +340,8 @@ public sealed class WhdRestClientTests
             ExplicitSettings(),
             101,
             987,
-            "Updated work note.");
+            "Updated work note.",
+            new DateTime(2026, 7, 20, 13, 30, 0, DateTimeKind.Utc));
 
         Assert.True(result.Success, result.Message);
         Assert.Equal("WHD-TECHNOTE-987", result.ExternalReference);
@@ -341,8 +351,8 @@ public sealed class WhdRestClientTests
         Assert.Equal(HttpMethod.Get, handler.Requests[1].Method);
 
         using var payload = JsonDocument.Parse(handler.Requests[0].Body);
-        Assert.Single(payload.RootElement.EnumerateObject());
         Assert.Equal("Updated work note.", payload.RootElement.GetProperty("noteText").GetString());
+        Assert.Equal("2026-07-20T13:30:00Z", payload.RootElement.GetProperty("date").GetString());
         Assert.False(payload.RootElement.TryGetProperty("jobticket", out _));
         Assert.False(payload.RootElement.TryGetProperty("workTime", out _));
     }

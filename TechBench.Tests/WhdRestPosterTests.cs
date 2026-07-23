@@ -6,6 +6,23 @@ namespace TechBench.Tests;
 public sealed class WhdRestPosterTests
 {
     [Fact]
+    public void WhdNoteTimestampUsesTheEntryWorkDateAndStartTime()
+    {
+        var entry = new WorkEntry
+        {
+            WorkDate = new DateTime(2026, 7, 20),
+            HasTimeRange = true,
+            StartTime = new TimeSpan(9, 30, 0)
+        };
+
+        var timestampUtc = WhdRestPoster.GetWhdNoteTimestampUtc(entry);
+        var localTimestamp = timestampUtc.ToLocalTime();
+
+        Assert.Equal(entry.WorkDate.Date, localTimestamp.Date);
+        Assert.Equal(entry.StartTime, localTimestamp.TimeOfDay);
+    }
+
+    [Fact]
     public void PersonalPostingUsesUserCredentialsAndIgnoresServerAuthenticationMode()
     {
         var settings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)

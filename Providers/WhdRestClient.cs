@@ -7,6 +7,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using TechBench.Models;
 
 namespace TechBench.Providers;
@@ -389,6 +390,7 @@ public sealed class WhdRestClient
         int ticketId,
         string noteText,
         int durationMinutes,
+        DateTime noteDateUtc,
         CancellationToken cancellationToken = default)
     {
         var validationError = Validate(settings);
@@ -412,7 +414,7 @@ public sealed class WhdRestClient
             return PostingResult.Failed("Enter a positive duration before posting to Web Help Desk.");
         }
 
-        var payload = BuildTicketNotePayload(ticketId, noteText, durationMinutes);
+        var payload = BuildTicketNotePayload(ticketId, noteText, durationMinutes, noteDateUtc);
 
         var postStarted = false;
         WhdAuthParameters? auth = null;
@@ -579,6 +581,7 @@ public sealed class WhdRestClient
         int ticketId,
         int techNoteId,
         string noteText,
+        DateTime? noteDateUtc = null,
         CancellationToken cancellationToken = default)
     {
         var validationError = Validate(settings);
@@ -598,8 +601,18 @@ public sealed class WhdRestClient
         }
 
         var payload = JsonSerializer.Serialize(
-            new { noteText = noteText.Trim() },
-            new JsonSerializerOptions { WriteIndented = true });
+            new
+            {
+                noteText = noteText.Trim(),
+                date = noteDateUtc.HasValue
+                    ? FormatWhdDate(noteDateUtc.Value)
+                    : null
+            },
+            new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+            });
         var updateStarted = false;
 
         try
@@ -1233,11 +1246,16 @@ public sealed class WhdRestClient
     private static string NormalizeNote(string? value) =>
         (value ?? string.Empty).ReplaceLineEndings("\n").Trim();
 
-    private static string BuildTicketNotePayload(int ticketId, string noteText, int durationMinutes)
+    private static string BuildTicketNotePayload(
+        int ticketId,
+        string noteText,
+        int durationMinutes,
+        DateTime noteDateUtc)
     {
         var payload = new
         {
             noteText = noteText.Trim(),
+            date = FormatWhdDate(noteDateUtc),
             jobticket = new
             {
                 type = "JobTicket",
@@ -1253,6 +1271,11 @@ public sealed class WhdRestClient
 
         return JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
     }
+
+    private static string FormatWhdDate(DateTime noteDateUtc) =>
+        noteDateUtc
+            .ToUniversalTime()
+            .ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
 
     private static string BuildTicketStatusPayload(int statusTypeId)
     {

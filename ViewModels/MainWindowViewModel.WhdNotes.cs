@@ -207,7 +207,8 @@ public sealed partial class MainWindowViewModel
             BuildWhdConnectionSettings(),
             whdTicketId,
             techNoteId,
-            WhdNoteTextFormatter.BuildWhdNoteText(entry));
+            WhdNoteTextFormatter.BuildWhdNoteText(entry),
+            WhdRestPoster.GetWhdNoteTimestampUtc(entry));
         if (!update.Success)
         {
             RecordWhdSyncFailure(entry, update.Message, trackingLog.ExternalReference, refreshAfter, update.Payload);

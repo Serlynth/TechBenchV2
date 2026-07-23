@@ -45,7 +45,18 @@ public sealed class WhdRestPoster : IWorkEntryPoster
             whdTicketId,
             WhdNoteTextFormatter.BuildWhdNoteText(entry),
             entry.DurationMinutes,
+            GetWhdNoteTimestampUtc(entry),
             cancellationToken);
+    }
+
+    internal static DateTime GetWhdNoteTimestampUtc(WorkEntry entry)
+    {
+        var localTimestamp = DateTime.SpecifyKind(
+            entry.WorkDate.Date
+            + (entry.HasTimeRange ? entry.StartTime : TimeSpan.FromHours(12)),
+            DateTimeKind.Unspecified);
+        var offset = TimeZoneInfo.Local.GetUtcOffset(localTimestamp);
+        return new DateTimeOffset(localTimestamp, offset).UtcDateTime;
     }
 
     internal static WhdConnectionSettings BuildPersonalWhdConnectionSettings(
