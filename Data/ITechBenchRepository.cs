@@ -161,17 +161,20 @@ public interface ITechBenchRepository
     IReadOnlyList<ClientSessionInfo> GetActiveClientSessions(
         Guid currentSessionId) => [];
 
+    IReadOnlyList<ClientSessionCommandResponse> GetRecentClientSessionResponses() => [];
+
     ClientSessionCommand QueueClientSessionCommand(
         Guid requesterSessionId,
         Guid targetSessionId,
         string commandType,
         string message) =>
-        throw new NotSupportedException("Client session administration requires SQL Server schema 10.");
+        throw new NotSupportedException("Client session administration requires SQL Server schema 11.");
 
     void AcknowledgeClientSessionCommand(
         Guid sessionId,
         long commandId,
-        string result)
+        string result,
+        string? responseMessage = null)
     {
     }
 

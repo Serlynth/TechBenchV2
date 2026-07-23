@@ -25,6 +25,8 @@ public sealed partial class MainWindowViewModel
 
     public ObservableCollection<ClientSessionInfo> ActiveClientSessions { get; } = new();
 
+    public ObservableCollection<ClientSessionCommandResponse> RecentClientResponses { get; } = new();
+
     public AsyncRelayCommand RequestAdminWhdSyncCommand { get; private set; } = null!;
 
     public AsyncRelayCommand RequestAdminSageSyncCommand { get; private set; } = null!;
@@ -206,15 +208,24 @@ public sealed partial class MainWindowViewModel
     {
         if (command.CommandType.Equals(ClientSessionCommandTypes.UpdateNotice, StringComparison.Ordinal))
         {
+            _notificationService.ShowAdminMessage("TechBench update requested", command.Message);
+            var response = _dialogService.Prompt(
+                "TechBench update requested",
+                $"{command.RequestedBy} sent this message:\n\n{command.Message}"
+                + "\n\nSend a response so the Admin knows you saw it.",
+                "I saw this message.",
+                "Send response",
+                "Seen - no reply");
+            var acknowledgementResult = response is null ? "Dismissed" : "Acknowledged";
+            var responseMessage = string.IsNullOrWhiteSpace(response)
+                ? "Message seen; no written response was sent."
+                : response.Trim();
             await Task.Run(() => _repository.AcknowledgeClientSessionCommand(
                 _clientSessionId,
                 command.CommandId,
-                "Displayed"));
+                acknowledgementResult,
+                responseMessage));
             _pendingClientSessionCommand = null;
-            _notificationService.ShowAdminMessage("TechBench update requested", command.Message);
-            _dialogService.Info(
-                "TechBench update requested",
-                $"{command.RequestedBy} sent this message:\n\n{command.Message}");
             return;
         }
 
@@ -223,7 +234,8 @@ public sealed partial class MainWindowViewModel
             await Task.Run(() => _repository.AcknowledgeClientSessionCommand(
                 _clientSessionId,
                 command.CommandId,
-                "Ignored"));
+                "Ignored",
+                "The installed client did not recognize this command."));
             _pendingClientSessionCommand = null;
             return;
         }
@@ -235,11 +247,29 @@ public sealed partial class MainWindowViewModel
             return;
         }
 
-        PersistEditorDraftBeforeExit();
+        if (!TrySaveEditorRecoveryDraftForForcedSignOut(out var saveResult))
+        {
+            await Task.Run(() => _repository.AcknowledgeClientSessionCommand(
+                _clientSessionId,
+                command.CommandId,
+                "SaveFailed",
+                saveResult));
+            _pendingClientSessionCommand = null;
+            StatusMessage = saveResult;
+            _notificationService.ShowAdminMessage(
+                "TechBench sign-out was stopped",
+                saveResult);
+            _dialogService.Error(
+                "TechBench sign-out was stopped",
+                $"{saveResult}\n\nTechBench remains open. Your work was not posted.");
+            return;
+        }
+
         await Task.Run(() => _repository.AcknowledgeClientSessionCommand(
             _clientSessionId,
             command.CommandId,
-            "SignedOut"));
+            "SignedOut",
+            saveResult));
         _pendingClientSessionCommand = null;
         _notificationService.ShowAdminMessage("TechBench is signing out", command.Message);
         _shutdownApplication();
@@ -267,7 +297,8 @@ public sealed partial class MainWindowViewModel
             var snapshot = await Task.Run(() => new AdminCenterSnapshot(
                 _repository.GetWhdSyncStatus(),
                 _repository.GetSageSyncStatus(),
-                _repository.GetActiveClientSessions(_clientSessionId)));
+                _repository.GetActiveClientSessions(_clientSessionId),
+                _repository.GetRecentClientSessionResponses()));
             _adminWhdSyncStatus = snapshot.WhdStatus;
             _adminSageSyncStatus = snapshot.SageStatus;
             var selectedSessionId = SelectedActiveClientSession?.SessionId;
@@ -279,6 +310,12 @@ public sealed partial class MainWindowViewModel
 
             SelectedActiveClientSession = ActiveClientSessions.FirstOrDefault(
                 session => session.SessionId == selectedSessionId);
+            RecentClientResponses.Clear();
+            foreach (var response in snapshot.Responses)
+            {
+                RecentClientResponses.Add(response);
+            }
+
             RaiseAdminSyncProperties();
             AdminCenterActionStatus =
                 $"Refreshed {ActiveClientSessions.Count} active TechBench session(s) at {DateTime.Now:t}.";
@@ -429,5 +466,6 @@ public sealed partial class MainWindowViewModel
     private sealed record AdminCenterSnapshot(
         WhdSyncServiceStatus WhdStatus,
         SageSyncServiceStatus SageStatus,
-        IReadOnlyList<ClientSessionInfo> Sessions);
+        IReadOnlyList<ClientSessionInfo> Sessions,
+        IReadOnlyList<ClientSessionCommandResponse> Responses);
 }

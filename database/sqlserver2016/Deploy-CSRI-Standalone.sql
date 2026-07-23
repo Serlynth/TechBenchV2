@@ -3030,6 +3030,84 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 30-V0011-ClientResponsesSchema.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.ClientPresence.0010'
+      AND [SchemaVersion] = 10
+)
+BEGIN
+    RAISERROR(N'V0010 must be installed before client response schema version 11.', 16, 1);
+    RETURN;
+END;
+
+IF COL_LENGTH(N'tb_security.ClientSessionCommands', N'ResponseMessage') IS NULL
+BEGIN
+    ALTER TABLE [tb_security].[ClientSessionCommands]
+        ADD [ResponseMessage] nvarchar(500) NULL;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.check_constraints
+    WHERE [parent_object_id] =
+        OBJECT_ID(N'tb_security.ClientSessionCommands', N'U')
+      AND [name] = N'CK_ClientSessionCommands_AcknowledgementResult'
+)
+BEGIN
+    ALTER TABLE [tb_security].[ClientSessionCommands]
+        DROP CONSTRAINT [CK_ClientSessionCommands_AcknowledgementResult];
+END;
+
+ALTER TABLE [tb_security].[ClientSessionCommands] WITH CHECK
+    ADD CONSTRAINT [CK_ClientSessionCommands_AcknowledgementResult]
+        CHECK
+        (
+            [AcknowledgementResult] IS NULL
+            OR [AcknowledgementResult] IN
+                (
+                    N'Displayed', N'Acknowledged', N'Dismissed',
+                    N'SignedOut', N'Ignored', N'Failed', N'SaveFailed'
+                )
+        );
+
+ALTER TABLE [tb_security].[ClientSessionCommands]
+    CHECK CONSTRAINT [CK_ClientSessionCommands_AcknowledgementResult];
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.ClientResponses.0011'
+)
+BEGIN
+    INSERT INTO [tb_deploy].[SchemaMigrations]
+        ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+    VALUES
+        (N'SqlServer2016.ClientResponses.0011', 11, N'0.5.24', NULL);
+END;
+
+PRINT N'SqlServer2016.ClientResponses.0011 installed.';
+GO
+
+-- ============================================================================
+-- END 30-V0011-ClientResponsesSchema.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 30-Security.sql
 -- ============================================================================
 
@@ -19256,7 +19334,7 @@ BEGIN
     EXEC [tb_security].[GetCurrentAccess]
         @UserSid=@UserSid OUTPUT, @IsManager=@IsManager OUTPUT,
         @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
-    SELECT CONVERT(int, 10) AS [SchemaVersion], CONVERT(bit, 0) AS [FullTextSearchAvailable],
+    SELECT CONVERT(int, 11) AS [SchemaVersion], CONVERT(bit, 0) AS [FullTextSearchAvailable],
         CONVERT(bit, 1) AS [SupportsTickets], CONVERT(bit, 1) AS [SupportsWorkEntries],
         CONVERT(bit, 1) AS [SupportsPrivateNotes], CONVERT(bit, 1) AS [SupportsPostingLeases],
         CONVERT(bit, 1) AS [SupportsSyncLeases], CONVERT(bit, 1) AS [SupportsImports],
@@ -19992,6 +20070,114 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 52-V0011-ClientResponsesProcedures.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+GO
+
+ALTER PROCEDURE [tb_app].[AcknowledgeClientSessionCommand]
+    @SessionId uniqueidentifier,
+    @CommandId bigint,
+    @Result nvarchar(40),
+    @ResponseMessage nvarchar(500) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@UserSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    SET @Result = NULLIF(LTRIM(RTRIM(@Result)), N'');
+    SET @ResponseMessage = NULLIF(LTRIM(RTRIM(@ResponseMessage)), N'');
+    IF @Result NOT IN
+        (
+            N'Displayed', N'Acknowledged', N'Dismissed',
+            N'SignedOut', N'Ignored', N'Failed', N'SaveFailed'
+        )
+        THROW 52108, N'The client command acknowledgement result is invalid.', 1;
+    IF @Result IN (N'Acknowledged', N'Dismissed', N'SignedOut', N'SaveFailed')
+       AND @ResponseMessage IS NULL
+        THROW 52110, N'This client command response requires a response message.', 1;
+
+    UPDATE command
+    SET
+        [DeliveredAtUtc] = COALESCE(command.[DeliveredAtUtc], SYSUTCDATETIME()),
+        [AcknowledgedAtUtc] = SYSUTCDATETIME(),
+        [AcknowledgementResult] = @Result,
+        [ResponseMessage] = @ResponseMessage
+    FROM [tb_security].[ClientSessionCommands] AS command
+    INNER JOIN [tb_security].[ClientSessions] AS session
+        ON session.[SessionId] = command.[SessionId]
+    WHERE command.[CommandId] = @CommandId
+      AND command.[SessionId] = @SessionId
+      AND session.[WindowsSid] = @UserSid;
+
+    IF @@ROWCOUNT = 0
+        THROW 52109, N'The client command was not found for the current user session.', 1;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminGetRecentClientSessionResponses', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminGetRecentClientSessionResponses];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminGetRecentClientSessionResponses]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 52111, N'Only a TechBench Admin may view client responses.', 1;
+
+    SELECT TOP (100)
+        command.[CommandId],
+        command.[SessionId],
+        target_user.[LoginName],
+        target_user.[DisplayName],
+        session.[MachineName],
+        command.[CommandType],
+        command.[Message] AS [OriginalMessage],
+        command.[AcknowledgementResult],
+        COALESCE(command.[ResponseMessage], N'') AS [ResponseMessage],
+        requester.[DisplayName] AS [RequestedBy],
+        command.[RequestedAtUtc],
+        command.[AcknowledgedAtUtc]
+    FROM [tb_security].[ClientSessionCommands] AS command
+    INNER JOIN [tb_security].[ClientSessions] AS session
+        ON session.[SessionId] = command.[SessionId]
+    INNER JOIN [tb_security].[Users] AS target_user
+        ON target_user.[WindowsSid] = session.[WindowsSid]
+    INNER JOIN [tb_security].[Users] AS requester
+        ON requester.[WindowsSid] = command.[RequestedByWindowsSid]
+    WHERE command.[AcknowledgedAtUtc] IS NOT NULL
+      AND command.[AcknowledgedAtUtc] >= DATEADD(DAY, -7, SYSUTCDATETIME())
+    ORDER BY command.[AcknowledgedAtUtc] DESC, command.[CommandId] DESC;
+END;
+GO
+
+PRINT N'TechBench V0011 client response procedures created.';
+GO
+
+-- ============================================================================
+-- END 52-V0011-ClientResponsesProcedures.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 50-Grants.sql
 -- ============================================================================
 
@@ -20715,6 +20901,31 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 58-V0011-ClientResponsesGrants.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetRecentClientSessionResponses]
+    TO [tb_role_admin];
+
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetRecentClientSessionResponses]
+    FROM [tb_preview_reader];
+
+PRINT N'TechBench V0011 client response grants applied.';
+GO
+
+-- ============================================================================
+-- END 58-V0011-ClientResponsesGrants.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 90-Verify.sql
 -- ============================================================================
 
@@ -21144,7 +21355,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10)
+IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
 BEGIN
     PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -21900,7 +22111,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10)
+IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10, 11)
 BEGIN
     PRINT N'FAIL: V0003 verification supports installed schema version 3, 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -22384,7 +22595,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10)
+IF @InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10, 11)
 BEGIN
     PRINT N'FAIL: V0004 verification supports installed schema version 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -23102,7 +23313,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10)
+IF @InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10, 11)
 BEGIN
     PRINT N'FAIL: V0005 verification supports installed schema version 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -24309,7 +24520,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (6, 7, 8, 9, 10)
+IF @InstalledSchemaVersion NOT IN (6, 7, 8, 9, 10, 11)
 BEGIN
     PRINT N'FAIL: V0006 verification supports installed schema version 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -24864,7 +25075,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (7, 8, 9, 10)
+IF @InstalledSchemaVersion NOT IN (7, 8, 9, 10, 11)
 BEGIN
     PRINT N'FAIL: V0007 verification supports installed schema version 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -25526,7 +25737,7 @@ IF NOT EXISTS
 )
 BEGIN PRINT N'FAIL: V0008 migration marker is missing or invalid.'; SET @FailureCount+=1; END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (8, 9, 10)
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (8, 9, 10, 11)
 BEGIN PRINT N'FAIL: installed schema version is not 8 or 9.'; SET @FailureCount+=1; END;
 
 DECLARE @Objects TABLE([Name] nvarchar(300) PRIMARY KEY,[Type] char(2));
@@ -25635,7 +25846,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (9, 10)
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (9, 10, 11)
 BEGIN
     PRINT N'FAIL: installed schema version is not 9.';
     SET @FailureCount += 1;
@@ -25666,7 +25877,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF CHARINDEX(N'CONVERT(int, 10) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+IF CHARINDEX(N'CONVERT(int, 11) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
 BEGIN
     PRINT N'FAIL: GetRepositoryCapabilities does not report the final schema version.';
     SET @FailureCount += 1;
@@ -25712,9 +25923,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) <> 10
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (10, 11)
 BEGIN
-    PRINT N'FAIL: installed schema version is not 10.';
+    PRINT N'FAIL: installed schema version is not 10 or 11.';
     SET @FailureCount += 1;
 END;
 
@@ -25818,10 +26029,10 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF CHARINDEX(N'CONVERT(int, 10) AS [SchemaVersion]',
+IF CHARINDEX(N'CONVERT(int, 11) AS [SchemaVersion]',
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
 BEGIN
-    PRINT N'FAIL: GetRepositoryCapabilities does not report schema version 10.';
+    PRINT N'FAIL: GetRepositoryCapabilities does not report schema version 11.';
     SET @FailureCount += 1;
 END;
 
@@ -25836,6 +26047,121 @@ GO
 
 -- ============================================================================
 -- END 99-V0010-ClientPresenceVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 100-V0011-ClientResponsesVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @FailureCount int = 0;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.ClientResponses.0011'
+      AND [SchemaVersion] = 11
+      AND [ReleaseVersion] = N'0.5.24'
+)
+BEGIN
+    PRINT N'FAIL: V0011 client response migration marker is missing or invalid.';
+    SET @FailureCount += 1;
+END;
+
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) <> 11
+BEGIN
+    PRINT N'FAIL: installed schema version is not 11.';
+    SET @FailureCount += 1;
+END;
+
+IF COL_LENGTH(N'tb_security.ClientSessionCommands', N'ResponseMessage') IS NULL
+BEGIN
+    PRINT N'FAIL: ClientSessionCommands.ResponseMessage is missing.';
+    SET @FailureCount += 1;
+END;
+
+IF OBJECT_ID(N'tb_app.AdminGetRecentClientSessionResponses', N'P') IS NULL
+BEGIN
+    PRINT N'FAIL: the Admin client-response procedure is missing.';
+    SET @FailureCount += 1;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions AS permission
+    INNER JOIN sys.database_principals AS principal
+        ON principal.[principal_id] = permission.[grantee_principal_id]
+    WHERE principal.[name] = N'tb_role_admin'
+      AND permission.[class] = 1
+      AND permission.[major_id] =
+          OBJECT_ID(N'tb_app.AdminGetRecentClientSessionResponses', N'P')
+      AND permission.[permission_name] = N'EXECUTE'
+      AND permission.[state] IN (N'G', N'W')
+)
+BEGIN
+    PRINT N'FAIL: the Admin role cannot read recent client responses.';
+    SET @FailureCount += 1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions AS permission
+    INNER JOIN sys.database_principals AS principal
+        ON principal.[principal_id] = permission.[grantee_principal_id]
+    WHERE principal.[name] IN (N'tb_role_user', N'tb_role_admin')
+      AND permission.[state] IN (N'G', N'W')
+      AND permission.[major_id] =
+          OBJECT_ID(N'tb_security.ClientSessionCommands', N'U')
+      AND permission.[permission_name] IN
+          (N'SELECT', N'INSERT', N'UPDATE', N'DELETE', N'CONTROL', N'ALTER')
+)
+BEGIN
+    PRINT N'FAIL: a human role has direct client-command table permission.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @AcknowledgeDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AcknowledgeClientSessionCommand', N'P'));
+DECLARE @AdminResponseDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminGetRecentClientSessionResponses', N'P'));
+IF CHARINDEX(N'@ResponseMessage nvarchar(500)', @AcknowledgeDefinition) = 0
+   OR CHARINDEX(N'[ResponseMessage] = @ResponseMessage', @AcknowledgeDefinition) = 0
+   OR CHARINDEX(N'@IsAdmin <> 1', @AdminResponseDefinition) = 0
+   OR CHARINDEX(N'DATEADD(DAY, -7', @AdminResponseDefinition) = 0
+BEGIN
+    PRINT N'FAIL: client response validation, ownership, or retention boundaries are missing.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'CONVERT(int, 11) AS [SchemaVersion]',
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+BEGIN
+    PRINT N'FAIL: GetRepositoryCapabilities does not report schema version 11.';
+    SET @FailureCount += 1;
+END;
+
+IF @FailureCount > 0
+BEGIN
+    RAISERROR(N'TechBench V0011 client response verification failed with %d issue(s).',
+        16, 1, @FailureCount);
+    RETURN;
+END;
+
+PRINT N'TechBench V0011 client response verification passed.';
+GO
+
+-- ============================================================================
+-- END 100-V0011-ClientResponsesVerify.sql
 -- ============================================================================
 
 PRINT N'TechBench deployment completed successfully on CSRI-SQL.';

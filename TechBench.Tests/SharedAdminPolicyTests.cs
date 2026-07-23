@@ -169,6 +169,8 @@ public sealed class SharedAdminPolicyTests
         Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
             nameof(ITechBenchRepository.GetActiveClientSessions)));
         Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
+            nameof(ITechBenchRepository.GetRecentClientSessionResponses)));
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
             nameof(ITechBenchRepository.QueueClientSessionCommand)));
         Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
             nameof(ITechBenchRepository.AcknowledgeClientSessionCommand)));
@@ -179,11 +181,33 @@ public sealed class SharedAdminPolicyTests
             "ViewModels",
             "MainWindowViewModel.AdminCenter.cs"));
         Assert.Contains("TimeSpan.FromSeconds(15)", adminSource, StringComparison.Ordinal);
-        Assert.Contains("PersistEditorDraftBeforeExit();", adminSource, StringComparison.Ordinal);
+        Assert.Contains("TrySaveEditorRecoveryDraftForForcedSignOut", adminSource, StringComparison.Ordinal);
+        Assert.Contains("\"SaveFailed\"", adminSource, StringComparison.Ordinal);
+        Assert.Contains("_dialogService.Prompt(", adminSource, StringComparison.Ordinal);
+        Assert.Contains("RecentClientResponses", adminSource, StringComparison.Ordinal);
         Assert.Contains("IsEntryOperationRunning", adminSource, StringComparison.Ordinal);
         Assert.Contains("_shutdownApplication();", adminSource, StringComparison.Ordinal);
         Assert.DoesNotContain("Process.Kill", adminSource, StringComparison.Ordinal);
         Assert.DoesNotContain("KILL ", adminSource, StringComparison.OrdinalIgnoreCase);
+
+        var notesSource = File.ReadAllText(FindRepositoryFile(
+            "ViewModels",
+            "MainWindowViewModel.Notes.cs"));
+        Assert.Contains(
+            "_repository.SaveEditorDraft(draft);",
+            notesSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "It was not posted to WHD or Sage.",
+            notesSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "forced sign-out was canceled",
+            notesSource,
+            StringComparison.Ordinal);
+
+        var xaml = File.ReadAllText(FindRepositoryFile("MainWindow.xaml"));
+        Assert.Contains("Recent client responses", xaml, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -77,6 +77,21 @@ public sealed partial class SqlServerTechBenchRepository
             (reader, token) => ReadListAsync(reader, token, ReadClientSessionInfo),
             cancellationToken);
 
+    public IReadOnlyList<ClientSessionCommandResponse> GetRecentClientSessionResponses() =>
+        GetRecentClientSessionResponsesAsync().GetAwaiter().GetResult();
+
+    public Task<IReadOnlyList<ClientSessionCommandResponse>>
+        GetRecentClientSessionResponsesAsync(
+            CancellationToken cancellationToken = default) =>
+        QueryAsync(
+            Procedures.GetRecentClientSessionResponses,
+            configure: null,
+            (reader, token) => ReadListAsync(
+                reader,
+                token,
+                ReadClientSessionCommandResponse),
+            cancellationToken);
+
     public ClientSessionCommand QueueClientSessionCommand(
         Guid requesterSessionId,
         Guid targetSessionId,
@@ -121,8 +136,13 @@ public sealed partial class SqlServerTechBenchRepository
     public void AcknowledgeClientSessionCommand(
         Guid sessionId,
         long commandId,
-        string result) =>
-        AcknowledgeClientSessionCommandAsync(sessionId, commandId, result)
+        string result,
+        string? responseMessage = null) =>
+        AcknowledgeClientSessionCommandAsync(
+                sessionId,
+                commandId,
+                result,
+                responseMessage)
             .GetAwaiter()
             .GetResult();
 
@@ -130,6 +150,7 @@ public sealed partial class SqlServerTechBenchRepository
         Guid sessionId,
         long commandId,
         string result,
+        string? responseMessage = null,
         CancellationToken cancellationToken = default)
     {
         _ = await ExecuteNonQueryAsync(
@@ -139,6 +160,7 @@ public sealed partial class SqlServerTechBenchRepository
                     AddGuid(command, "@SessionId", sessionId);
                     AddBigInt(command, "@CommandId", commandId);
                     AddRequiredText(command, "@Result", 40, result);
+                    AddText(command, "@ResponseMessage", 500, responseMessage);
                 },
                 cancellationToken)
             .ConfigureAwait(false);
@@ -182,5 +204,22 @@ public sealed partial class SqlServerTechBenchRepository
         Message = GetString(reader, "Message"),
         RequestedBy = GetString(reader, "RequestedBy"),
         RequestedAt = GetDateTime(reader, "RequestedAtUtc")
+    };
+
+    private static ClientSessionCommandResponse ReadClientSessionCommandResponse(
+        SqlDataReader reader) => new()
+    {
+        CommandId = GetInt64(reader, "CommandId"),
+        SessionId = GetNullableGuid(reader, "SessionId") ?? Guid.Empty,
+        LoginName = GetString(reader, "LoginName"),
+        DisplayName = GetString(reader, "DisplayName"),
+        MachineName = GetString(reader, "MachineName"),
+        CommandType = GetString(reader, "CommandType"),
+        OriginalMessage = GetString(reader, "OriginalMessage"),
+        AcknowledgementResult = GetString(reader, "AcknowledgementResult"),
+        ResponseMessage = GetString(reader, "ResponseMessage"),
+        RequestedBy = GetString(reader, "RequestedBy"),
+        RequestedAt = GetDateTime(reader, "RequestedAtUtc"),
+        AcknowledgedAt = GetDateTime(reader, "AcknowledgedAtUtc")
     };
 }

@@ -110,6 +110,8 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         public const string RequestSageSync = "[tb_app].[AdminRequestSageSync]";
         public const string HeartbeatClientSession = "[tb_app].[HeartbeatClientSession]";
         public const string GetActiveClientSessions = "[tb_app].[AdminGetActiveClientSessions]";
+        public const string GetRecentClientSessionResponses =
+            "[tb_app].[AdminGetRecentClientSessionResponses]";
         public const string QueueClientSessionCommand = "[tb_app].[AdminQueueClientSessionCommand]";
         public const string AcknowledgeClientSessionCommand =
             "[tb_app].[AcknowledgeClientSessionCommand]";

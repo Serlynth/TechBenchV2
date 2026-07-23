@@ -401,6 +401,46 @@ public sealed partial class MainWindowViewModel
         }
     }
 
+    private bool TrySaveEditorRecoveryDraftForForcedSignOut(out string result)
+    {
+        _editorDraftTimer.Stop();
+        if (!CanWrite)
+        {
+            result = "TechBench could not save a recovery draft because this session is read-only.";
+            return false;
+        }
+
+        if (!Editor.IsDirty)
+        {
+            result = "TechBench closed safely; there were no unsaved entry changes.";
+            return true;
+        }
+
+        try
+        {
+            var draft = BuildEditorRecoveryDraft();
+            _repository.SaveEditorDraft(draft);
+            _lastEditorSaveAt = draft.UpdatedAt;
+            EditorSaveStatus = $"Unsaved - recovery copy {_lastEditorSaveAt.Value:h:mm tt}";
+            result =
+                "Unsaved entry work was saved as a server recovery draft before TechBench closed. "
+                + "It was not posted to WHD or Sage.";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            EditorSaveStatus = "Unsaved - recovery failed";
+            result =
+                "TechBench could not save the current entry recovery draft, so forced sign-out was canceled: "
+                + ex.Message;
+            return false;
+        }
+        finally
+        {
+            OnPropertyChanged(nameof(WorkspaceStateLabel));
+        }
+    }
+
     private EditorDraft BuildEditorRecoveryDraft()
     {
         var draft = Editor.BuildDraft();
