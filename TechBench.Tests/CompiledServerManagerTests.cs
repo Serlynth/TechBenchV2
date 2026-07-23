@@ -69,6 +69,8 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("PackageManifest.LoadAndVerify", updater, StringComparison.Ordinal);
         Assert.Contains("VerifyChecksum", updater, StringComparison.Ordinal);
         Assert.Contains("TryRollbackDirectory(paths.ServiceDirectory, serviceBackup", installer, StringComparison.Ordinal);
+        Assert.Contains("UpdateCacheCleanup.CleanupFailedOperation", updater, StringComparison.Ordinal);
+        Assert.Contains("CleanupUpdateCacheAsync", form, StringComparison.Ordinal);
         Assert.Contains("ShortcutManager.Create(paths)", installer, StringComparison.Ordinal);
         Assert.DoesNotContain("powershell", form, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("powershell", updater, StringComparison.OrdinalIgnoreCase);
@@ -150,6 +152,42 @@ public sealed class CompiledServerManagerTests
             PackageInstaller.WaitForManagerExit(Environment.ProcessId, TimeSpan.Zero));
 
         Assert.Contains("no installed files were changed", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CompletedServerDownloadsAreRemovedWithoutDeletingRecoveryArtifacts()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "TechBench-Update-Cleanup-Test-" + Guid.NewGuid().ToString("N"));
+        var paths = TestPaths(root);
+        var updateOperation = Path.Combine(paths.ManagerDataDirectory, "updates", "download-1");
+        var setupOperation = Path.Combine(paths.ManagerDataDirectory, "setup", "extract-1");
+        var recoveryOperation = Path.Combine(paths.ManagerDataDirectory, "install-recovery");
+        try
+        {
+            Directory.CreateDirectory(updateOperation);
+            Directory.CreateDirectory(setupOperation);
+            Directory.CreateDirectory(recoveryOperation);
+            File.WriteAllBytes(Path.Combine(updateOperation, "package.zip"), new byte[4096]);
+            File.WriteAllBytes(Path.Combine(setupOperation, "payload.bin"), new byte[2048]);
+            File.WriteAllText(Path.Combine(recoveryOperation, "keep.txt"), "rollback");
+
+            var result = UpdateCacheCleanup.CleanupNow(paths);
+
+            Assert.Equal(2, result.RemovedOperations);
+            Assert.Equal(6144, result.ReclaimedBytes);
+            Assert.False(Directory.Exists(updateOperation));
+            Assert.False(Directory.Exists(setupOperation));
+            Assert.True(File.Exists(Path.Combine(recoveryOperation, "keep.txt")));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
     }
 
     [Fact]

@@ -37,6 +37,7 @@ public sealed class DatabaseConnectionUpdateRecoveryTests
         Assert.Contains("Content=\"Check for updates\"", xaml, StringComparison.Ordinal);
         Assert.Contains("CheckForUpdatesAsync(automaticRecovery: true)", codeBehind, StringComparison.Ordinal);
         Assert.Contains("DownloadAndInstallUpdateAsync", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("CleanupDownloadedUpdatesAsync", codeBehind, StringComparison.Ordinal);
         Assert.Contains("System.Windows.Application.Current.Shutdown()", codeBehind, StringComparison.Ordinal);
     }
 

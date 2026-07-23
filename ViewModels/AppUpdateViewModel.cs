@@ -105,6 +105,8 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
 
     public void StartAutomaticChecks()
     {
+        _ = CleanupDownloadedUpdatesSilentlyAsync();
+
         if (!IsInstalled || _automaticCheckTimer.IsEnabled)
         {
             return;
@@ -222,6 +224,7 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             StatusText = $"Update failed: {ex.Message}";
+            await CleanupDownloadedUpdatesSilentlyAsync();
         }
         finally
         {
@@ -257,6 +260,19 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         catch
         {
             // Update checks must remain usable if local preference persistence fails.
+        }
+    }
+
+    private async Task CleanupDownloadedUpdatesSilentlyAsync()
+    {
+        try
+        {
+            await _updateService.CleanupDownloadedUpdatesAsync();
+        }
+        catch
+        {
+            // Update-cache cleanup is best effort. It must never prevent startup,
+            // update checks, or recovery from a failed download.
         }
     }
 

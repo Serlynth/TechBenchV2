@@ -13,5 +13,8 @@ public interface IAppUpdateService
         IProgress<int> progress,
         CancellationToken cancellationToken = default);
 
+    Task CleanupDownloadedUpdatesAsync(
+        CancellationToken cancellationToken = default);
+
     void BeginApplyAndRestart();
 }

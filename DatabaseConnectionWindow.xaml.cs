@@ -1,3 +1,4 @@
+using System.IO;
 using System.Security.Principal;
 using System.Windows;
 using Microsoft.Data.SqlClient;
@@ -58,6 +59,19 @@ public partial class DatabaseConnectionWindow : Window
     private async void DatabaseConnectionWindow_Loaded(object sender, RoutedEventArgs e)
     {
         FitToWorkingArea();
+        try
+        {
+            await _updateService.CleanupDownloadedUpdatesAsync(
+                _updateCancellation.Token);
+        }
+        catch (Exception ex) when (
+            ex is IOException
+                or UnauthorizedAccessException
+                or OperationCanceledException)
+        {
+            // Installer-cache cleanup is best effort and must not prevent login
+            // or schema-mismatch update recovery.
+        }
 
         if (_schemaVersionMismatch)
         {

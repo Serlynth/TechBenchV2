@@ -114,6 +114,7 @@ internal sealed class ServerManagerForm : Form
         LoadLocalSqlConfiguration();
         await RefreshEverythingAsync(showErrors: false);
         TryRepairShortcut();
+        _ = CleanupUpdateCacheAsync();
     }
 
     protected override void OnResize(EventArgs e)
@@ -852,6 +853,27 @@ internal sealed class ServerManagerForm : Form
         catch (Exception ex) { AddLog("WARNING: Start Menu shortcut could not be repaired: " + ex.Message); }
     }
 
+    private async Task CleanupUpdateCacheAsync()
+    {
+        try
+        {
+            var result = await UpdateCacheCleanup.CleanupAfterStartupAsync(_paths);
+            if (result.RemovedOperations > 0)
+            {
+                AddLog(
+                    $"Removed {result.RemovedOperations} completed update download(s) "
+                    + $"and reclaimed {FormatBytes(result.ReclaimedBytes)}.");
+            }
+        }
+        catch (Exception ex) when (
+            ex is IOException
+                or UnauthorizedAccessException
+                or OperationCanceledException)
+        {
+            AddLog("WARNING: Completed update downloads could not be fully cleaned: " + ex.Message);
+        }
+    }
+
     private void RestoreFromTray()
     {
         Show(); WindowState = FormWindowState.Normal; Activate(); BringToFront();
@@ -885,6 +907,21 @@ internal sealed class ServerManagerForm : Form
         if (text.Contains("certificate chain", StringComparison.OrdinalIgnoreCase))
             return text + " Set TechBenchSync.TrustServerCertificate to true in the installed service appsettings.json, or install a certificate trusted by this server.";
         return text;
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes >= 1024L * 1024 * 1024)
+        {
+            return $"{bytes / (1024d * 1024 * 1024):0.0} GB";
+        }
+
+        if (bytes >= 1024L * 1024)
+        {
+            return $"{bytes / (1024d * 1024):0.0} MB";
+        }
+
+        return $"{Math.Max(0, bytes) / 1024d:0.0} KB";
     }
     private static string FormatStatus(SyncStatus status, bool sage)
     {

@@ -55,23 +55,31 @@ internal sealed class ReleaseUpdater(AppPaths paths)
         SecureDirectory.EnsureAdministratorsOnly(paths.ManagerDataDirectory);
         var operationRoot = Path.Combine(paths.ManagerDataDirectory, "updates", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(operationRoot);
-        var zipPath = Path.Combine(operationRoot, package.ZipName);
-        var checksumPath = Path.Combine(operationRoot, package.ChecksumName);
-        progress.Report($"Downloading {package.Version}...");
-        await DownloadBoundedAsync(package.ZipUrl, zipPath, MaximumPackageBytes, cancellationToken);
-        await DownloadBoundedAsync(package.ChecksumUrl, checksumPath, 16384, cancellationToken);
-        VerifyChecksum(zipPath, checksumPath, package.ZipName);
+        try
+        {
+            var zipPath = Path.Combine(operationRoot, package.ZipName);
+            var checksumPath = Path.Combine(operationRoot, package.ChecksumName);
+            progress.Report($"Downloading {package.Version}...");
+            await DownloadBoundedAsync(package.ZipUrl, zipPath, MaximumPackageBytes, cancellationToken);
+            await DownloadBoundedAsync(package.ChecksumUrl, checksumPath, 16384, cancellationToken);
+            VerifyChecksum(zipPath, checksumPath, package.ZipName);
 
-        var packageDirectory = Path.Combine(operationRoot, "package");
-        progress.Report("Verifying package contents...");
-        ExtractSafe(zipPath, packageDirectory);
-        var manifest = PackageManifest.LoadAndVerify(packageDirectory, package.Version);
-        if (!PackageInstaller.InstalledPackageDeclaresRequiredSchema(paths, manifest.RequiredDatabaseSchemaVersion))
-            new SqlAdminRepository(paths).VerifyRequiredSchema(manifest.RequiredDatabaseSchemaVersion);
+            var packageDirectory = Path.Combine(operationRoot, "package");
+            progress.Report("Verifying package contents...");
+            ExtractSafe(zipPath, packageDirectory);
+            var manifest = PackageManifest.LoadAndVerify(packageDirectory, package.Version);
+            if (!PackageInstaller.InstalledPackageDeclaresRequiredSchema(paths, manifest.RequiredDatabaseSchemaVersion))
+                new SqlAdminRepository(paths).VerifyRequiredSchema(manifest.RequiredDatabaseSchemaVersion);
 
-        var helper = Path.Combine(packageDirectory, "server-manager", "TechBench.ServerManager.exe");
-        if (!File.Exists(helper)) throw new InvalidDataException("The package does not contain the compiled Server Manager.");
-        return packageDirectory;
+            var helper = Path.Combine(packageDirectory, "server-manager", "TechBench.ServerManager.exe");
+            if (!File.Exists(helper)) throw new InvalidDataException("The package does not contain the compiled Server Manager.");
+            return packageDirectory;
+        }
+        catch
+        {
+            UpdateCacheCleanup.CleanupFailedOperation(paths, operationRoot);
+            throw;
+        }
     }
 
     public static void LaunchInstaller(string packageDirectory, int managerProcessId)
