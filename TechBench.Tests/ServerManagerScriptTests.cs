@@ -13,6 +13,9 @@ public sealed class ServerManagerScriptTests
         Assert.Contains("'Start', 'Stop', 'Restart'", source, StringComparison.Ordinal);
         Assert.Contains("Install / Apply password", source, StringComparison.Ordinal);
         Assert.Contains("Show service password", source, StringComparison.Ordinal);
+        Assert.Contains("$schemaVersion -ne 12", source, StringComparison.Ordinal);
+        Assert.Contains("database schema 12", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("database schema 8", source, StringComparison.Ordinal);
         Assert.Contains("ShowWhdSecretCheckBox", source, StringComparison.Ordinal);
         Assert.Contains("ShowSageSecretCheckBox", source, StringComparison.Ordinal);
         Assert.Contains("requires the complete extracted TechBench service release package", source, StringComparison.Ordinal);
