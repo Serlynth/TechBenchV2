@@ -303,6 +303,19 @@ public sealed class WhdRestClient
             var signatures = new HashSet<string>(StringComparer.Ordinal);
             var isComplete = false;
 
+            // WHD can omit the authenticated administrator from the Techs
+            // collection even though that account is active and assignable.
+            // Merge the dedicated currentTech resource so the organization
+            // account remains available for AD-to-WHD mapping.
+            var currentTechnician = await TryGetCurrentTechnicianAsync(
+                settings,
+                auth,
+                cancellationToken).ConfigureAwait(false);
+            if (currentTechnician is not null && seen.Add(currentTechnician.ExternalId))
+            {
+                technicians.Add(currentTechnician);
+            }
+
             for (var page = 1; page <= MaximumPageCount; page++)
             {
                 var batch = await GetTechniciansPageAsync(settings, auth, page, PageSize, cancellationToken);
@@ -963,6 +976,27 @@ public sealed class WhdRestClient
 
         using var document = JsonDocument.Parse(content);
         return ParseTechnicians(document.RootElement);
+    }
+
+    private async Task<WhdSyncedTechnician?> TryGetCurrentTechnicianAsync(
+        WhdConnectionSettings settings,
+        WhdAuthParameters auth,
+        CancellationToken cancellationToken)
+    {
+        var requestUri = BuildRequestUri(settings.BaseUrl, "Techs/currentTech", auth, new Dictionary<string, string>
+        {
+            ["style"] = "long"
+        });
+
+        using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        using var document = JsonDocument.Parse(content);
+        return ParseTechnicians(document.RootElement).FirstOrDefault();
     }
 
     private async Task<IReadOnlyList<WhdSyncedTechnicianGroup>> GetTechnicianGroupsPageAsync(

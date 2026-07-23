@@ -118,7 +118,18 @@ public sealed class WhdServerSyncRestClientTests
     [Fact]
     public async Task TechnicianSyncParsesMappingIdentityAndInactiveState()
     {
-        var handler = new RecordingHandler(_ => Json(HttpStatusCode.OK, """
+        var handler = new RecordingHandler(request =>
+            request.RequestUri?.AbsolutePath.EndsWith("/Techs/currentTech", StringComparison.Ordinal) == true
+                ? Json(HttpStatusCode.OK, """
+                    {
+                      "id": 7,
+                      "displayName": "Ada Admin",
+                      "username": "aadmin",
+                      "email": "ada@example.test",
+                      "isInactive": false
+                    }
+                    """)
+                : Json(HttpStatusCode.OK, """
             [
               {
                 "id": 7,
@@ -155,11 +166,61 @@ public sealed class WhdServerSyncRestClientTests
         Assert.Equal("ghopper", inactive.Username);
         Assert.Equal("grace@example.test", inactive.Email);
         Assert.False(inactive.IsActive);
-        var request = Assert.Single(handler.Requests);
-        Assert.EndsWith("/Techs", request.Uri?.AbsolutePath);
-        Assert.Equal("long", ReadQueryParameter(request.Uri, "style"));
-        Assert.Equal("100", ReadQueryParameter(request.Uri, "limit"));
-        Assert.Equal("1", ReadQueryParameter(request.Uri, "page"));
+        Assert.Collection(
+            handler.Requests,
+            currentRequest =>
+            {
+                Assert.EndsWith("/Techs/currentTech", currentRequest.Uri?.AbsolutePath);
+                Assert.Equal("long", ReadQueryParameter(currentRequest.Uri, "style"));
+            },
+            listRequest =>
+            {
+                Assert.EndsWith("/Techs", listRequest.Uri?.AbsolutePath);
+                Assert.Equal("long", ReadQueryParameter(listRequest.Uri, "style"));
+                Assert.Equal("100", ReadQueryParameter(listRequest.Uri, "limit"));
+                Assert.Equal("1", ReadQueryParameter(listRequest.Uri, "page"));
+            });
+    }
+
+    [Fact]
+    public async Task TechnicianSyncIncludesCurrentAdministratorWhenTechListOmitsIt()
+    {
+        var handler = new RecordingHandler(request =>
+            request.RequestUri?.AbsolutePath.EndsWith("/Techs/currentTech", StringComparison.Ordinal) == true
+                ? Json(HttpStatusCode.OK, """
+                    {
+                      "id": 99,
+                      "firstName": "Helpdesk",
+                      "lastName": "Manager",
+                      "username": "WHDmgr",
+                      "email": "whdmgr@example.test",
+                      "activeAccount": true
+                    }
+                    """)
+                : Json(HttpStatusCode.OK, """
+                    [
+                      {
+                        "id": 7,
+                        "displayName": "Ada Admin",
+                        "username": "aadmin",
+                        "isInactive": false
+                      }
+                    ]
+                    """));
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetTechniciansAsync(ExplicitSettings());
+
+        Assert.True(result.Success, result.Message);
+        Assert.True(result.IsComplete);
+        Assert.Equal(2, result.Technicians.Count);
+        var manager = Assert.Single(
+            result.Technicians,
+            technician => technician.ExternalId == "WHD-TECH-99");
+        Assert.Equal("Helpdesk Manager", manager.DisplayName);
+        Assert.Equal("WHDmgr", manager.Username);
+        Assert.True(manager.IsActive);
     }
 
     [Fact]
