@@ -314,7 +314,7 @@ internal sealed class ServerManagerForm : Form
         interval.Controls.Add(_whdMinutes); interval.Controls.Add(new Label { Text = "minutes (1-120)", AutoSize = true, Padding = new Padding(0, 7, 0, 0) });
         layout.Controls.Add(Label("Every"), 0, 4); layout.Controls.Add(interval, 1, 4);
         var save = Button("Save settings + mappings"); save.Click += async (_, _) => await SaveWhdAsync(false);
-        var sync = Button("Sync now"); sync.Click += async (_, _) => await SaveWhdAsync(true);
+        var sync = Button("Sync all WHD data now"); sync.Click += async (_, _) => await SaveWhdAsync(true);
         var refresh = Button("Refresh"); refresh.Click += async (_, _) => await RefreshConfigurationAsync(true);
         layout.Controls.Add(ButtonRow(save, sync, refresh), 1, 5);
         layout.Controls.Add(_whdSyncStatus, 0, 6); layout.SetColumnSpan(_whdSyncStatus, 2);

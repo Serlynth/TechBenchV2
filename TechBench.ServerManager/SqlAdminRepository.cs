@@ -57,7 +57,9 @@ internal sealed class SqlAdminRepository(AppPaths paths)
     {
         using var connection = OpenAdminConnection();
         using var command = StoredProcedure(connection, "tb_app.AdminRequestWhdSync");
-        command.Parameters.Add("@RequestType", SqlDbType.NVarChar, 40).Value = "Incremental";
+        // An Admin-initiated run refreshes the complete WHD snapshot,
+        // including the technician roster used by User Mappings.
+        command.Parameters.Add("@RequestType", SqlDbType.NVarChar, 40).Value = "Full";
         command.Parameters.Add("@RequestId", SqlDbType.UniqueIdentifier).Value = Guid.NewGuid();
         using var reader = command.ExecuteReader();
         return reader.Read() ? ReadString(reader, "Status", "Queued") : "Queued";

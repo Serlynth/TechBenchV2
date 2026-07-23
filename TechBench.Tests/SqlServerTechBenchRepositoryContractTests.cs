@@ -143,6 +143,14 @@ public sealed class SqlServerTechBenchRepositoryContractTests
         Assert.Equal("[tb_app].[AdminGetWhdUserMappings]", SqlServerTechBenchRepository.Procedures.GetWhdUserMappings);
         Assert.Equal("[tb_app].[AdminSaveWhdUserMapping]", SqlServerTechBenchRepository.Procedures.SaveWhdUserMapping);
         Assert.Equal("[tb_app].[AdminGetWhdTechnicians]", SqlServerTechBenchRepository.Procedures.GetWhdTechnicians);
+
+        var source = File.ReadAllText(FindRepositoryFile(
+            "Data",
+            "SqlServerTechBenchRepository.WhdSync.cs"));
+        Assert.Contains(
+            "AddRequiredText(command, \"@RequestType\", 40, \"Full\")",
+            source,
+            StringComparison.Ordinal);
     }
 
     [Fact]

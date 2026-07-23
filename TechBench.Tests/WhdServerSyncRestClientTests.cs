@@ -247,6 +247,62 @@ public sealed class WhdServerSyncRestClientTests
     }
 
     [Fact]
+    public async Task TechnicianSyncRetainsSessionTechnicianIdWhenDetailRoutesAreUnavailable()
+    {
+        var handler = new RecordingHandler(request =>
+        {
+            if (request.Method == HttpMethod.Delete)
+            {
+                return Json(HttpStatusCode.OK, "{}");
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/Session", StringComparison.Ordinal) == true)
+            {
+                return Json(HttpStatusCode.OK, """
+                    {
+                      "type": "Session",
+                      "sessionKey": "temporary-session",
+                      "currentTechId": 99,
+                      "instanceId": -1
+                    }
+                    """);
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/Techs/99", StringComparison.Ordinal) == true
+                || request.RequestUri?.AbsolutePath.EndsWith("/Techs/currentTech", StringComparison.Ordinal) == true)
+            {
+                return Json(HttpStatusCode.Forbidden, """{"message":"Not permitted"}""");
+            }
+
+            return Json(HttpStatusCode.OK, """
+                [
+                  {
+                    "id": 7,
+                    "displayName": "Ada Admin",
+                    "username": "aadmin",
+                    "isInactive": false
+                  }
+                ]
+                """);
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetTechniciansAsync(ExplicitSettings("WHDmgr"));
+
+        Assert.True(result.Success, result.Message);
+        var manager = Assert.Single(
+            result.Technicians,
+            technician => technician.ExternalId == "WHD-TECH-99");
+        Assert.Equal("WHDmgr", manager.DisplayName);
+        Assert.Equal("WHDmgr", manager.Username);
+        Assert.True(manager.IsActive);
+        Assert.Contains(
+            handler.Requests,
+            request => request.Uri?.AbsolutePath.EndsWith("/Techs/currentTech", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
     public async Task TechnicianGroupSyncFallsBackToTechnicianMembershipData()
     {
         var handler = new RecordingHandler(request =>

@@ -2952,11 +2952,11 @@
                                     <TextBlock Text="{Binding AdminWhdSyncDetails}"
                                                Style="{StaticResource MutedTextStyle}"
                                                Margin="0,0,0,14" />
-                                    <Button Content="Sync WHD tickets now"
+                                    <Button Content="Sync all WHD data now"
                                             Command="{Binding RequestAdminWhdSyncCommand}"
                                             Style="{StaticResource PrimaryButtonStyle}"
                                             HorizontalAlignment="Left" />
-                                    <TextBlock Text="The server Sync Service performs the organization-wide synchronization."
+                                    <TextBlock Text="The server Sync Service refreshes clients, statuses, technicians, groups, and tickets."
                                                Style="{StaticResource MutedTextStyle}"
                                                TextWrapping="Wrap"
                                                Margin="0,12,0,0" />

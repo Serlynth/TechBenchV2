@@ -157,7 +157,7 @@ public sealed class SharedAdminPolicyTests
         var xaml = File.ReadAllText(FindRepositoryFile("MainWindow.xaml"));
         Assert.Contains("Content=\"Admin Center\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Visibility=\"{Binding CanAccessAdminCenter", xaml, StringComparison.Ordinal);
-        Assert.Contains("Sync WHD tickets now", xaml, StringComparison.Ordinal);
+        Assert.Contains("Sync all WHD data now", xaml, StringComparison.Ordinal);
         Assert.Contains("Sync Sage customers now", xaml, StringComparison.Ordinal);
     }
 

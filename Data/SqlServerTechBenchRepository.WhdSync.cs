@@ -55,7 +55,11 @@ public sealed partial class SqlServerTechBenchRepository
         CancellationToken cancellationToken = default) =>
         QueryAsync(
             Procedures.RequestWhdSync,
-            command => AddGuid(command, "@RequestId", Guid.NewGuid()),
+            command =>
+            {
+                AddRequiredText(command, "@RequestType", 40, "Full");
+                AddGuid(command, "@RequestId", Guid.NewGuid());
+            },
             async (reader, token) =>
             {
                 if (!await reader.ReadAsync(token).ConfigureAwait(false))

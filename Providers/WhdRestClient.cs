@@ -1019,24 +1019,45 @@ public sealed class WhdRestClient
                 "currentTechId",
                 "techId",
                 "technicianId");
+            WhdSyncedTechnician? currentTechnician = null;
             if (!string.IsNullOrWhiteSpace(currentTechnicianId))
             {
-                var byId = await TryGetTechnicianAsync(
+                currentTechnician = await TryGetTechnicianAsync(
                     settings,
                     sessionAuthentication,
                     $"Techs/{currentTechnicianId.Trim()}",
                     cancellationToken).ConfigureAwait(false);
-                if (byId is not null)
+                if (currentTechnician is not null)
                 {
-                    return byId;
+                    return currentTechnician;
                 }
             }
 
-            return await TryGetTechnicianAsync(
+            currentTechnician = await TryGetTechnicianAsync(
                 settings,
                 sessionAuthentication,
                 "Techs/currentTech",
                 cancellationToken).ConfigureAwait(false);
+            if (currentTechnician is not null)
+            {
+                return currentTechnician;
+            }
+
+            // Some WHD builds return currentTechId in the authenticated
+            // Session but deny both technician-detail routes for an Admin
+            // account. The session ID is still the authoritative technician
+            // identity used by ticket assignments, so retain it with the
+            // configured organization username instead of silently dropping
+            // the active account from the mapping roster.
+            return string.IsNullOrWhiteSpace(currentTechnicianId)
+                ? null
+                : new WhdSyncedTechnician
+                {
+                    ExternalId = FormatWhdTechnicianId(currentTechnicianId),
+                    DisplayName = settings.Username.Trim(),
+                    Username = settings.Username.Trim(),
+                    IsActive = true
+                };
         }
         catch (JsonException)
         {

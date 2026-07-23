@@ -55,6 +55,10 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("TechBench_Admins", directory, StringComparison.Ordinal);
         Assert.Contains("GetMembers(recursive: true)", directory, StringComparison.Ordinal);
         Assert.Contains("SaveMappings", sql, StringComparison.Ordinal);
+        Assert.Contains(
+            "command.Parameters.Add(\"@RequestType\", SqlDbType.NVarChar, 40).Value = \"Full\"",
+            sql,
+            StringComparison.Ordinal);
         Assert.DoesNotContain("Sage.ActivityItemId", form + sql, StringComparison.Ordinal);
         Assert.DoesNotContain("Activity Item ID", form, StringComparison.Ordinal);
         Assert.Contains("tb_app.AdminSaveOrganizationSetting", sql, StringComparison.Ordinal);
