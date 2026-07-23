@@ -108,6 +108,12 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         public const string RequestWhdSync = "[tb_app].[AdminRequestWhdSync]";
         public const string GetSageSyncStatus = "[tb_app].[GetSageSyncStatus]";
         public const string RequestSageSync = "[tb_app].[AdminRequestSageSync]";
+        public const string HeartbeatClientSession = "[tb_app].[HeartbeatClientSession]";
+        public const string GetActiveClientSessions = "[tb_app].[AdminGetActiveClientSessions]";
+        public const string QueueClientSessionCommand = "[tb_app].[AdminQueueClientSessionCommand]";
+        public const string AcknowledgeClientSessionCommand =
+            "[tb_app].[AcknowledgeClientSessionCommand]";
+        public const string CloseClientSession = "[tb_app].[CloseClientSession]";
         public const string GetWhdUserMappings = "[tb_app].[AdminGetWhdUserMappings]";
         public const string GetWhdTechnicians = "[tb_app].[AdminGetWhdTechnicians]";
         public const string SaveWhdUserMapping = "[tb_app].[AdminSaveWhdUserMapping]";

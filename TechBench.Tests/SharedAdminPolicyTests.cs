@@ -124,13 +124,16 @@ public sealed class SharedAdminPolicyTests
     }
 
     [Fact]
-    public void WorkstationDoesNotExposeOrganizationWhdSyncCommandsOrTimer()
+    public void AdminCenterQueuesServerOwnedSyncWithoutRunningOrganizationSyncInClient()
     {
         Assert.Null(typeof(MainWindowViewModel).GetProperty("SyncWhdTicketsCommand"));
         Assert.Null(typeof(MainWindowViewModel).GetProperty("SyncWhdClientsCommand"));
         Assert.Null(typeof(MainWindowViewModel).GetProperty("SyncWhdStatusesCommand"));
         Assert.Null(typeof(MainWindowViewModel).GetProperty("RequestWhdServerSyncCommand"));
         Assert.Null(typeof(MainWindowViewModel).GetProperty("RefreshWhdAdministrationCommand"));
+        Assert.NotNull(typeof(MainWindowViewModel).GetProperty("RequestAdminWhdSyncCommand"));
+        Assert.NotNull(typeof(MainWindowViewModel).GetProperty("RequestAdminSageSyncCommand"));
+        Assert.NotNull(typeof(MainWindowViewModel).GetProperty("CanAccessAdminCenter"));
         Assert.DoesNotContain(
             typeof(MainWindowViewModel).GetFields(
                 System.Reflection.BindingFlags.Instance
@@ -143,6 +146,44 @@ public sealed class SharedAdminPolicyTests
         Assert.DoesNotContain("_whdRestClient.GetTicketAsync", source, StringComparison.Ordinal);
         Assert.DoesNotContain("_whdRestClient.GetOrganizationTickets", source, StringComparison.Ordinal);
         Assert.Contains("server-synchronized ticket inventory", source, StringComparison.Ordinal);
+
+        var adminSource = File.ReadAllText(FindRepositoryFile(
+            "ViewModels",
+            "MainWindowViewModel.AdminCenter.cs"));
+        Assert.Contains("_repository.RequestWhdSync", adminSource, StringComparison.Ordinal);
+        Assert.Contains("_repository.RequestSageSync", adminSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("_whdRestClient", adminSource, StringComparison.Ordinal);
+
+        var xaml = File.ReadAllText(FindRepositoryFile("MainWindow.xaml"));
+        Assert.Contains("Content=\"Admin Center\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Visibility=\"{Binding CanAccessAdminCenter", xaml, StringComparison.Ordinal);
+        Assert.Contains("Sync WHD tickets now", xaml, StringComparison.Ordinal);
+        Assert.Contains("Sync Sage customers now", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AdminCenterUsesCooperativeClientPresenceAndSafeSignOutContracts()
+    {
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
+            nameof(ITechBenchRepository.HeartbeatClientSession)));
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
+            nameof(ITechBenchRepository.GetActiveClientSessions)));
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
+            nameof(ITechBenchRepository.QueueClientSessionCommand)));
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
+            nameof(ITechBenchRepository.AcknowledgeClientSessionCommand)));
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
+            nameof(ITechBenchRepository.CloseClientSession)));
+
+        var adminSource = File.ReadAllText(FindRepositoryFile(
+            "ViewModels",
+            "MainWindowViewModel.AdminCenter.cs"));
+        Assert.Contains("TimeSpan.FromSeconds(15)", adminSource, StringComparison.Ordinal);
+        Assert.Contains("PersistEditorDraftBeforeExit();", adminSource, StringComparison.Ordinal);
+        Assert.Contains("IsEntryOperationRunning", adminSource, StringComparison.Ordinal);
+        Assert.Contains("_shutdownApplication();", adminSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("Process.Kill", adminSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("KILL ", adminSource, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

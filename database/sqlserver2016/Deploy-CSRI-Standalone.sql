@@ -2905,6 +2905,131 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 29-V0010-ClientPresenceSchema.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.WhdMissingNoteRecovery.0009'
+      AND [SchemaVersion] = 9
+)
+BEGIN
+    RAISERROR(N'V0009 must be installed before client presence schema version 10.', 16, 1);
+    RETURN;
+END;
+
+IF OBJECT_ID(N'tb_security.ClientSessions', N'U') IS NULL
+BEGIN
+    CREATE TABLE [tb_security].[ClientSessions]
+    (
+        [SessionId] uniqueidentifier NOT NULL,
+        [WindowsSid] varbinary(85) NOT NULL,
+        [DeviceId] uniqueidentifier NOT NULL,
+        [MachineName] nvarchar(128) NOT NULL,
+        [ClientVersion] nvarchar(40) NOT NULL,
+        [CurrentSection] nvarchar(80) NULL,
+        [HasUnsavedChanges] bit NOT NULL
+            CONSTRAINT [DF_ClientSessions_HasUnsavedChanges] DEFAULT (0),
+        [IsBusy] bit NOT NULL
+            CONSTRAINT [DF_ClientSessions_IsBusy] DEFAULT (0),
+        [StartedAtUtc] datetime2(3) NOT NULL
+            CONSTRAINT [DF_ClientSessions_StartedAtUtc] DEFAULT (SYSUTCDATETIME()),
+        [LastSeenAtUtc] datetime2(3) NOT NULL
+            CONSTRAINT [DF_ClientSessions_LastSeenAtUtc] DEFAULT (SYSUTCDATETIME()),
+        [ClosedAtUtc] datetime2(3) NULL,
+        CONSTRAINT [PK_ClientSessions] PRIMARY KEY CLUSTERED ([SessionId]),
+        CONSTRAINT [FK_ClientSessions_User]
+            FOREIGN KEY ([WindowsSid])
+            REFERENCES [tb_security].[Users]([WindowsSid]),
+        CONSTRAINT [CK_ClientSessions_MachineName]
+            CHECK (LEN(LTRIM(RTRIM([MachineName]))) BETWEEN 1 AND 128),
+        CONSTRAINT [CK_ClientSessions_ClientVersion]
+            CHECK (LEN(LTRIM(RTRIM([ClientVersion]))) BETWEEN 1 AND 40)
+    );
+
+    CREATE INDEX [IX_ClientSessions_Active]
+        ON [tb_security].[ClientSessions]([ClosedAtUtc], [LastSeenAtUtc])
+        INCLUDE
+        (
+            [WindowsSid], [MachineName], [ClientVersion], [CurrentSection],
+            [HasUnsavedChanges], [IsBusy], [StartedAtUtc]
+        );
+END;
+
+IF OBJECT_ID(N'tb_security.ClientSessionCommands', N'U') IS NULL
+BEGIN
+    CREATE TABLE [tb_security].[ClientSessionCommands]
+    (
+        [CommandId] bigint IDENTITY(1,1) NOT NULL,
+        [SessionId] uniqueidentifier NOT NULL,
+        [CommandType] nvarchar(30) NOT NULL,
+        [Message] nvarchar(500) NOT NULL,
+        [RequestedByWindowsSid] varbinary(85) NOT NULL,
+        [RequestId] uniqueidentifier NOT NULL,
+        [RequestedAtUtc] datetime2(3) NOT NULL
+            CONSTRAINT [DF_ClientSessionCommands_RequestedAtUtc] DEFAULT (SYSUTCDATETIME()),
+        [DeliveredAtUtc] datetime2(3) NULL,
+        [AcknowledgedAtUtc] datetime2(3) NULL,
+        [AcknowledgementResult] nvarchar(40) NULL,
+        CONSTRAINT [PK_ClientSessionCommands] PRIMARY KEY CLUSTERED ([CommandId]),
+        CONSTRAINT [FK_ClientSessionCommands_Session]
+            FOREIGN KEY ([SessionId])
+            REFERENCES [tb_security].[ClientSessions]([SessionId]),
+        CONSTRAINT [FK_ClientSessionCommands_RequestedBy]
+            FOREIGN KEY ([RequestedByWindowsSid])
+            REFERENCES [tb_security].[Users]([WindowsSid]),
+        CONSTRAINT [UX_ClientSessionCommands_RequestId] UNIQUE ([RequestId]),
+        CONSTRAINT [CK_ClientSessionCommands_CommandType]
+            CHECK ([CommandType] IN (N'UpdateNotice', N'SignOut')),
+        CONSTRAINT [CK_ClientSessionCommands_Message]
+            CHECK (LEN(LTRIM(RTRIM([Message]))) BETWEEN 1 AND 500),
+        CONSTRAINT [CK_ClientSessionCommands_AcknowledgementResult]
+            CHECK
+            (
+                [AcknowledgementResult] IS NULL
+                OR [AcknowledgementResult] IN
+                    (N'Displayed', N'SignedOut', N'Ignored', N'Failed')
+            )
+    );
+
+    CREATE INDEX [IX_ClientSessionCommands_Pending]
+        ON [tb_security].[ClientSessionCommands]
+            ([SessionId], [AcknowledgedAtUtc], [CommandId])
+        INCLUDE
+            ([CommandType], [Message], [RequestedByWindowsSid], [RequestedAtUtc], [DeliveredAtUtc]);
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.ClientPresence.0010'
+)
+BEGIN
+    INSERT INTO [tb_deploy].[SchemaMigrations]
+        ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+    VALUES
+        (N'SqlServer2016.ClientPresence.0010', 10, N'0.5.23', NULL);
+END;
+
+PRINT N'SqlServer2016.ClientPresence.0010 installed.';
+GO
+
+-- ============================================================================
+-- END 29-V0010-ClientPresenceSchema.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 30-Security.sql
 -- ============================================================================
 
@@ -19131,7 +19256,7 @@ BEGIN
     EXEC [tb_security].[GetCurrentAccess]
         @UserSid=@UserSid OUTPUT, @IsManager=@IsManager OUTPUT,
         @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
-    SELECT CONVERT(int, 9) AS [SchemaVersion], CONVERT(bit, 0) AS [FullTextSearchAvailable],
+    SELECT CONVERT(int, 10) AS [SchemaVersion], CONVERT(bit, 0) AS [FullTextSearchAvailable],
         CONVERT(bit, 1) AS [SupportsTickets], CONVERT(bit, 1) AS [SupportsWorkEntries],
         CONVERT(bit, 1) AS [SupportsPrivateNotes], CONVERT(bit, 1) AS [SupportsPostingLeases],
         CONVERT(bit, 1) AS [SupportsSyncLeases], CONVERT(bit, 1) AS [SupportsImports],
@@ -19548,6 +19673,322 @@ GO
 
 -- ============================================================================
 -- END 50-V0008-FireDrillCredentialsProcedures.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 51-V0010-ClientPresenceProcedures.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF OBJECT_ID(N'tb_app.HeartbeatClientSession', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[HeartbeatClientSession];
+GO
+
+CREATE PROCEDURE [tb_app].[HeartbeatClientSession]
+    @SessionId uniqueidentifier,
+    @DeviceId uniqueidentifier,
+    @MachineName nvarchar(128),
+    @ClientVersion nvarchar(40),
+    @CurrentSection nvarchar(80) = NULL,
+    @HasUnsavedChanges bit = 0,
+    @IsBusy bit = 0
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@UserSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    SET @MachineName = NULLIF(LTRIM(RTRIM(@MachineName)), N'');
+    SET @ClientVersion = NULLIF(LTRIM(RTRIM(@ClientVersion)), N'');
+    SET @CurrentSection = NULLIF(LTRIM(RTRIM(@CurrentSection)), N'');
+    IF @SessionId IS NULL OR @DeviceId IS NULL
+       OR @MachineName IS NULL OR @ClientVersion IS NULL
+        THROW 52100, N'Session, device, machine, and client version are required.', 1;
+
+    DECLARE @NowUtc datetime2(3) = SYSUTCDATETIME();
+
+    UPDATE [tb_security].[ClientSessions]
+    SET
+        [DeviceId] = @DeviceId,
+        [MachineName] = @MachineName,
+        [ClientVersion] = @ClientVersion,
+        [CurrentSection] = @CurrentSection,
+        [HasUnsavedChanges] = @HasUnsavedChanges,
+        [IsBusy] = @IsBusy,
+        [LastSeenAtUtc] = @NowUtc,
+        [ClosedAtUtc] = NULL
+    WHERE [SessionId] = @SessionId
+      AND [WindowsSid] = @UserSid;
+
+    IF @@ROWCOUNT = 0
+    BEGIN
+        IF EXISTS
+        (
+            SELECT 1
+            FROM [tb_security].[ClientSessions]
+            WHERE [SessionId] = @SessionId
+              AND [WindowsSid] <> @UserSid
+        )
+            THROW 52101, N'This TechBench client session belongs to another user.', 1;
+
+        INSERT INTO [tb_security].[ClientSessions]
+        (
+            [SessionId], [WindowsSid], [DeviceId], [MachineName],
+            [ClientVersion], [CurrentSection], [HasUnsavedChanges],
+            [IsBusy], [StartedAtUtc], [LastSeenAtUtc], [ClosedAtUtc]
+        )
+        VALUES
+        (
+            @SessionId, @UserSid, @DeviceId, @MachineName,
+            @ClientVersion, @CurrentSection, @HasUnsavedChanges,
+            @IsBusy, @NowUtc, @NowUtc, NULL
+        );
+    END;
+
+    DECLARE
+        @CommandId bigint,
+        @CommandType nvarchar(30),
+        @Message nvarchar(500),
+        @RequestedBy nvarchar(256),
+        @RequestedAtUtc datetime2(3);
+
+    SELECT TOP (1)
+        @CommandId = command.[CommandId],
+        @CommandType = command.[CommandType],
+        @Message = command.[Message],
+        @RequestedBy = requester.[DisplayName],
+        @RequestedAtUtc = command.[RequestedAtUtc]
+    FROM [tb_security].[ClientSessionCommands] AS command
+    INNER JOIN [tb_security].[Users] AS requester
+        ON requester.[WindowsSid] = command.[RequestedByWindowsSid]
+    WHERE command.[SessionId] = @SessionId
+      AND command.[AcknowledgedAtUtc] IS NULL
+    ORDER BY command.[CommandId];
+
+    IF @CommandId IS NOT NULL
+    BEGIN
+        UPDATE [tb_security].[ClientSessionCommands]
+        SET [DeliveredAtUtc] = COALESCE([DeliveredAtUtc], @NowUtc)
+        WHERE [CommandId] = @CommandId;
+    END;
+
+    SELECT
+        @NowUtc AS [ServerUtc],
+        @CommandId AS [CommandId],
+        @SessionId AS [SessionId],
+        @CommandType AS [CommandType],
+        @Message AS [Message],
+        @RequestedBy AS [RequestedBy],
+        @RequestedAtUtc AS [RequestedAtUtc];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminGetActiveClientSessions', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminGetActiveClientSessions];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminGetActiveClientSessions]
+    @CurrentSessionId uniqueidentifier
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 52102, N'Only a TechBench Admin may view active client sessions.', 1;
+
+    DECLARE @NowUtc datetime2(3) = SYSUTCDATETIME();
+    SELECT
+        session.[SessionId],
+        user_row.[LoginName],
+        user_row.[DisplayName],
+        user_row.[IsAdmin],
+        session.[MachineName],
+        session.[ClientVersion],
+        COALESCE(session.[CurrentSection], N'') AS [CurrentSection],
+        session.[HasUnsavedChanges],
+        session.[IsBusy],
+        session.[StartedAtUtc],
+        session.[LastSeenAtUtc],
+        CONVERT(bit, CASE WHEN session.[SessionId] = @CurrentSessionId THEN 1 ELSE 0 END)
+            AS [IsCurrentSession]
+    FROM [tb_security].[ClientSessions] AS session
+    INNER JOIN [tb_security].[Users] AS user_row
+        ON user_row.[WindowsSid] = session.[WindowsSid]
+    WHERE session.[ClosedAtUtc] IS NULL
+      AND session.[LastSeenAtUtc] >= DATEADD(SECOND, -90, @NowUtc)
+    ORDER BY user_row.[DisplayName], session.[MachineName], session.[StartedAtUtc];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminQueueClientSessionCommand', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminQueueClientSessionCommand];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminQueueClientSessionCommand]
+    @RequesterSessionId uniqueidentifier,
+    @TargetSessionId uniqueidentifier,
+    @CommandType nvarchar(30),
+    @Message nvarchar(500),
+    @RequestId uniqueidentifier
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 52103, N'Only a TechBench Admin may send client session commands.', 1;
+
+    SET @CommandType = NULLIF(LTRIM(RTRIM(@CommandType)), N'');
+    SET @Message = NULLIF(LTRIM(RTRIM(@Message)), N'');
+    IF @RequesterSessionId IS NULL OR @TargetSessionId IS NULL OR @RequestId IS NULL
+       OR @CommandType NOT IN (N'UpdateNotice', N'SignOut')
+       OR @Message IS NULL
+        THROW 52104, N'A valid requester, target, command type, message, and request ID are required.', 1;
+    IF @RequesterSessionId = @TargetSessionId
+        THROW 52105, N'Use the normal Exit command to close your own TechBench session.', 1;
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_security].[ClientSessions]
+        WHERE [SessionId] = @RequesterSessionId
+          AND [WindowsSid] = @ActorSid
+          AND [ClosedAtUtc] IS NULL
+          AND [LastSeenAtUtc] >= DATEADD(SECOND, -90, SYSUTCDATETIME())
+    )
+        THROW 52106, N'The requesting Admin client session is no longer active.', 1;
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_security].[ClientSessions]
+        WHERE [SessionId] = @TargetSessionId
+          AND [ClosedAtUtc] IS NULL
+          AND [LastSeenAtUtc] >= DATEADD(SECOND, -90, SYSUTCDATETIME())
+    )
+        THROW 52107, N'The selected TechBench client is no longer active.', 1;
+
+    DECLARE @CommandId bigint;
+    SELECT @CommandId = [CommandId]
+    FROM [tb_security].[ClientSessionCommands]
+    WHERE [RequestId] = @RequestId;
+
+    IF @CommandId IS NULL
+    BEGIN
+        INSERT INTO [tb_security].[ClientSessionCommands]
+        (
+            [SessionId], [CommandType], [Message],
+            [RequestedByWindowsSid], [RequestId]
+        )
+        VALUES
+        (
+            @TargetSessionId, @CommandType, @Message,
+            @ActorSid, @RequestId
+        );
+        SET @CommandId = SCOPE_IDENTITY();
+    END;
+
+    SELECT
+        command.[CommandId],
+        command.[SessionId],
+        command.[CommandType],
+        command.[Message],
+        requester.[DisplayName] AS [RequestedBy],
+        command.[RequestedAtUtc]
+    FROM [tb_security].[ClientSessionCommands] AS command
+    INNER JOIN [tb_security].[Users] AS requester
+        ON requester.[WindowsSid] = command.[RequestedByWindowsSid]
+    WHERE command.[CommandId] = @CommandId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AcknowledgeClientSessionCommand', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AcknowledgeClientSessionCommand];
+GO
+
+CREATE PROCEDURE [tb_app].[AcknowledgeClientSessionCommand]
+    @SessionId uniqueidentifier,
+    @CommandId bigint,
+    @Result nvarchar(40)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@UserSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    SET @Result = NULLIF(LTRIM(RTRIM(@Result)), N'');
+    IF @Result NOT IN (N'Displayed', N'SignedOut', N'Ignored', N'Failed')
+        THROW 52108, N'The client command acknowledgement result is invalid.', 1;
+
+    UPDATE command
+    SET
+        [DeliveredAtUtc] = COALESCE(command.[DeliveredAtUtc], SYSUTCDATETIME()),
+        [AcknowledgedAtUtc] = SYSUTCDATETIME(),
+        [AcknowledgementResult] = @Result
+    FROM [tb_security].[ClientSessionCommands] AS command
+    INNER JOIN [tb_security].[ClientSessions] AS session
+        ON session.[SessionId] = command.[SessionId]
+    WHERE command.[CommandId] = @CommandId
+      AND command.[SessionId] = @SessionId
+      AND session.[WindowsSid] = @UserSid;
+
+    IF @@ROWCOUNT = 0
+        THROW 52109, N'The client command was not found for the current user session.', 1;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.CloseClientSession', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[CloseClientSession];
+GO
+
+CREATE PROCEDURE [tb_app].[CloseClientSession]
+    @SessionId uniqueidentifier
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@UserSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    UPDATE [tb_security].[ClientSessions]
+    SET
+        [ClosedAtUtc] = COALESCE([ClosedAtUtc], SYSUTCDATETIME()),
+        [LastSeenAtUtc] = SYSUTCDATETIME(),
+        [IsBusy] = 0
+    WHERE [SessionId] = @SessionId
+      AND [WindowsSid] = @UserSid;
+END;
+GO
+
+PRINT N'TechBench V0010 client presence procedures created.';
+GO
+
+-- ============================================================================
+-- END 51-V0010-ClientPresenceProcedures.sql
 -- ============================================================================
 
 -- ============================================================================
@@ -20242,6 +20683,38 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 57-V0010-ClientPresenceGrants.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+GRANT EXECUTE ON OBJECT::[tb_app].[HeartbeatClientSession] TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[AcknowledgeClientSessionCommand] TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[CloseClientSession] TO [tb_role_user];
+
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetActiveClientSessions] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminQueueClientSessionCommand] TO [tb_role_admin];
+
+REVOKE EXECUTE ON OBJECT::[tb_app].[HeartbeatClientSession] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AcknowledgeClientSessionCommand] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[CloseClientSession] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetActiveClientSessions] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminQueueClientSessionCommand] FROM [tb_preview_reader];
+
+PRINT N'TechBench V0010 client presence grants applied.';
+GO
+
+-- ============================================================================
+-- END 57-V0010-ClientPresenceGrants.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 90-Verify.sql
 -- ============================================================================
 
@@ -20671,7 +21144,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9)
+IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10)
 BEGIN
     PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -21427,7 +21900,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9)
+IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10)
 BEGIN
     PRINT N'FAIL: V0003 verification supports installed schema version 3, 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -21911,7 +22384,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9)
+IF @InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10)
 BEGIN
     PRINT N'FAIL: V0004 verification supports installed schema version 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -22629,7 +23102,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9)
+IF @InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10)
 BEGIN
     PRINT N'FAIL: V0005 verification supports installed schema version 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -23836,7 +24309,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (6, 7, 8, 9)
+IF @InstalledSchemaVersion NOT IN (6, 7, 8, 9, 10)
 BEGIN
     PRINT N'FAIL: V0006 verification supports installed schema version 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -24391,7 +24864,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (7, 8, 9)
+IF @InstalledSchemaVersion NOT IN (7, 8, 9, 10)
 BEGIN
     PRINT N'FAIL: V0007 verification supports installed schema version 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -25053,7 +25526,7 @@ IF NOT EXISTS
 )
 BEGIN PRINT N'FAIL: V0008 migration marker is missing or invalid.'; SET @FailureCount+=1; END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (8, 9)
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (8, 9, 10)
 BEGIN PRINT N'FAIL: installed schema version is not 8 or 9.'; SET @FailureCount+=1; END;
 
 DECLARE @Objects TABLE([Name] nvarchar(300) PRIMARY KEY,[Type] char(2));
@@ -25162,7 +25635,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) <> 9
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (9, 10)
 BEGIN
     PRINT N'FAIL: installed schema version is not 9.';
     SET @FailureCount += 1;
@@ -25193,9 +25666,9 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF CHARINDEX(N'CONVERT(int, 9) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+IF CHARINDEX(N'CONVERT(int, 10) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
 BEGIN
-    PRINT N'FAIL: GetRepositoryCapabilities does not report schema version 9.';
+    PRINT N'FAIL: GetRepositoryCapabilities does not report the final schema version.';
     SET @FailureCount += 1;
 END;
 
@@ -25210,6 +25683,159 @@ GO
 
 -- ============================================================================
 -- END 98-V0009-WhdMissingNoteRecoveryVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 99-V0010-ClientPresenceVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @FailureCount int = 0;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.ClientPresence.0010'
+      AND [SchemaVersion] = 10
+      AND [ReleaseVersion] = N'0.5.23'
+)
+BEGIN
+    PRINT N'FAIL: V0010 client presence migration marker is missing or invalid.';
+    SET @FailureCount += 1;
+END;
+
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) <> 10
+BEGIN
+    PRINT N'FAIL: installed schema version is not 10.';
+    SET @FailureCount += 1;
+END;
+
+IF OBJECT_ID(N'tb_security.ClientSessions', N'U') IS NULL
+   OR OBJECT_ID(N'tb_security.ClientSessionCommands', N'U') IS NULL
+BEGIN
+    PRINT N'FAIL: client presence tables are missing.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @RequiredProcedures TABLE ([ProcedureName] sysname NOT NULL);
+INSERT INTO @RequiredProcedures([ProcedureName])
+VALUES
+    (N'tb_app.HeartbeatClientSession'),
+    (N'tb_app.AdminGetActiveClientSessions'),
+    (N'tb_app.AdminQueueClientSessionCommand'),
+    (N'tb_app.AcknowledgeClientSessionCommand'),
+    (N'tb_app.CloseClientSession');
+
+IF EXISTS
+(
+    SELECT 1
+    FROM @RequiredProcedures
+    WHERE OBJECT_ID([ProcedureName], N'P') IS NULL
+)
+BEGIN
+    PRINT N'FAIL: one or more V0010 client presence procedures are missing.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @ExpectedGrants TABLE
+(
+    [RoleName] sysname NOT NULL,
+    [ProcedureName] sysname NOT NULL
+);
+INSERT INTO @ExpectedGrants([RoleName], [ProcedureName])
+VALUES
+    (N'tb_role_user', N'tb_app.HeartbeatClientSession'),
+    (N'tb_role_user', N'tb_app.AcknowledgeClientSessionCommand'),
+    (N'tb_role_user', N'tb_app.CloseClientSession'),
+    (N'tb_role_admin', N'tb_app.AdminGetActiveClientSessions'),
+    (N'tb_role_admin', N'tb_app.AdminQueueClientSessionCommand');
+
+IF EXISTS
+(
+    SELECT 1
+    FROM @ExpectedGrants AS expected
+    WHERE NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.database_permissions AS permission
+        INNER JOIN sys.database_principals AS principal
+            ON principal.[principal_id] = permission.[grantee_principal_id]
+        WHERE principal.[name] = expected.[RoleName]
+          AND permission.[class] = 1
+          AND permission.[major_id] = OBJECT_ID(expected.[ProcedureName], N'P')
+          AND permission.[permission_name] = N'EXECUTE'
+          AND permission.[state] IN (N'G', N'W')
+    )
+)
+BEGIN
+    PRINT N'FAIL: one or more V0010 client presence execution grants are missing.';
+    SET @FailureCount += 1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions AS permission
+    INNER JOIN sys.database_principals AS principal
+        ON principal.[principal_id] = permission.[grantee_principal_id]
+    WHERE principal.[name] IN (N'tb_role_user', N'tb_role_admin')
+      AND permission.[state] IN (N'G', N'W')
+      AND
+      (
+          permission.[class] = 0
+          OR permission.[major_id] IN
+              (
+                  OBJECT_ID(N'tb_security.ClientSessions', N'U'),
+                  OBJECT_ID(N'tb_security.ClientSessionCommands', N'U')
+              )
+      )
+      AND permission.[permission_name] IN
+          (N'SELECT', N'INSERT', N'UPDATE', N'DELETE', N'CONTROL', N'ALTER')
+)
+BEGIN
+    PRINT N'FAIL: a human role has direct client presence table/control permission.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @HeartbeatDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.HeartbeatClientSession', N'P'));
+DECLARE @AdminCommandDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminQueueClientSessionCommand', N'P'));
+IF CHARINDEX(N'[WindowsSid] = @UserSid', @HeartbeatDefinition) = 0
+   OR CHARINDEX(N'[AcknowledgedAtUtc] IS NULL', @HeartbeatDefinition) = 0
+   OR CHARINDEX(N'@IsAdmin <> 1', @AdminCommandDefinition) = 0
+   OR CHARINDEX(N'@RequesterSessionId = @TargetSessionId', @AdminCommandDefinition) = 0
+BEGIN
+    PRINT N'FAIL: client presence ownership/Admin/self-command boundaries are missing.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'CONVERT(int, 10) AS [SchemaVersion]',
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+BEGIN
+    PRINT N'FAIL: GetRepositoryCapabilities does not report schema version 10.';
+    SET @FailureCount += 1;
+END;
+
+IF @FailureCount > 0
+BEGIN
+    RAISERROR(N'TechBench V0010 client presence verification failed with %d issue(s).', 16, 1, @FailureCount);
+    RETURN;
+END;
+
+PRINT N'TechBench V0010 client presence verification passed.';
+GO
+
+-- ============================================================================
+-- END 99-V0010-ClientPresenceVerify.sql
 -- ============================================================================
 
 PRINT N'TechBench deployment completed successfully on CSRI-SQL.';

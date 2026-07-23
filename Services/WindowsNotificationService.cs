@@ -70,6 +70,23 @@ public sealed class WindowsNotificationService : IUserNotificationService, IDisp
         }
     }
 
+    public void ShowAdminMessage(string title, string message)
+    {
+        if (_disposed || string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        try
+        {
+            ShowBalloon(title, message);
+        }
+        catch (InvalidOperationException)
+        {
+            // Administrative notices also appear inside TechBench.
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed)

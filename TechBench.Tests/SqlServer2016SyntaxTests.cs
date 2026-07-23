@@ -92,7 +92,7 @@ public sealed partial class SqlServer2016SyntaxTests
         var source = File.ReadAllText(path);
 
         Assert.Contains(
-            "@InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9)",
+            "@InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10)",
             source,
             StringComparison.OrdinalIgnoreCase);
 
@@ -147,13 +147,13 @@ public sealed partial class SqlServer2016SyntaxTests
     [Theory]
     [InlineData(
         "92-V0003-SharedReferenceVerify.sql",
-        "@InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9)")]
+        "@InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10)")]
     [InlineData(
         "93-V0004-AdminSharedVerify.sql",
-        "@InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9)")]
+        "@InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10)")]
     [InlineData(
         "94-V0005-TechBenchV1ImportVerify.sql",
-        "@InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9)")]
+        "@InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10)")]
     public void EarlierSchemaVerifiersAcceptTheFinalSchemaVersion(
         string fileName,
         string expectedVersionCheck)
@@ -701,6 +701,23 @@ public sealed partial class SqlServer2016SyntaxTests
         var procedures = source.IndexOf("50-V0008-FireDrillCredentialsProcedures.sql", StringComparison.Ordinal);
         var grants = source.IndexOf("56-V0008-FireDrillCredentialsGrants.sql", StringComparison.Ordinal);
         var verify = source.IndexOf("97-V0008-FireDrillCredentialsVerify.sql", StringComparison.Ordinal);
+
+        Assert.True(schema >= 0 && procedures > schema && grants > procedures && verify > grants);
+    }
+
+    [Fact]
+    public void StandaloneBuilderOrdersAllV0010ClientPresenceStages()
+    {
+        var root = Directory.GetParent(FindSqlDirectory())!.Parent!.FullName;
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "scripts",
+            "Build-StandaloneSqlDeployment.ps1"));
+
+        var schema = source.IndexOf("29-V0010-ClientPresenceSchema.sql", StringComparison.Ordinal);
+        var procedures = source.IndexOf("51-V0010-ClientPresenceProcedures.sql", StringComparison.Ordinal);
+        var grants = source.IndexOf("57-V0010-ClientPresenceGrants.sql", StringComparison.Ordinal);
+        var verify = source.IndexOf("99-V0010-ClientPresenceVerify.sql", StringComparison.Ordinal);
 
         Assert.True(schema >= 0 && procedures > schema && grants > procedures && verify > grants);
     }

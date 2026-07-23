@@ -29,6 +29,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly ICredentialStore _credentialStore;
     private readonly CurrentUserContext _currentUser;
     private readonly LocalPreferences _localPreferences;
+    private readonly Action _shutdownApplication;
+    private readonly string _clientVersion;
     private readonly PostingExecutionCoordinator _postingCoordinator = new();
     private readonly DispatcherTimer _sharedDataRefreshTimer = new();
     private readonly HashSet<string> _knownWhdTicketKeys = new(StringComparer.OrdinalIgnoreCase);
@@ -128,6 +130,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _credentialStore = credentialStore;
         _currentUser = currentUser;
         _localPreferences = localPreferences;
+        _shutdownApplication = shutdownApplication;
+        _clientVersion = appUpdateService.CurrentVersion;
         Updates = new AppUpdateViewModel(
             appUpdateService,
             PersistEditorDraftBeforeExit,
@@ -224,6 +228,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         RunSearch();
         NewEntry();
         RestoreEditorDraft();
+        InitializeAdminCenter();
 
     }
 
@@ -290,6 +295,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public string DatabasePath => _repository.DatabasePath;
     public bool CanWrite => _currentUser.CanWrite;
+    public bool CanAccessAdminCenter => _currentUser.IsAdmin && CanWrite;
     public bool IsReadOnlyPreview => _currentUser.IsReadOnlyPreview;
     public string ReadOnlyPreviewLabel => _currentUser.IsReadOnlyPreview
         ? $"READ-ONLY PREVIEW: {_currentUser.DisplayName} ({_currentUser.LoginName}) — authenticated as {_currentUser.AuthenticationLabel}"
@@ -874,6 +880,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Ticket List" => "Showing my assigned and group non-closed tickets",
             "Common Links" => "Showing commonly used websites",
             "Client Credentials" => "Showing synchronized client credentials",
+            "Admin Center" => "Showing server synchronization and active TechBench clients",
             _ => $"Showing {section}"
         };
     }
@@ -911,6 +918,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 break;
             case "Client Credentials":
                 RefreshFireDrillCredentials();
+                break;
+            case "Admin Center":
+                RefreshAdminCenter();
                 break;
         }
     }
@@ -3704,6 +3714,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _isDisposed = true;
+        DisposeAdminCenter();
         DisposeNoteFeatures();
         Updates.Dispose();
         _sharedDataRefreshTimer.Stop();

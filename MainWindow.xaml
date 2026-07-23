@@ -288,6 +288,7 @@
         <Style x:Key="NavLinksStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Common Links"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavCredentialsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Client Credentials"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavPostingHistoryStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Posting History"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+        <Style x:Key="NavAdminCenterStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Admin Center"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavSettingsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Settings"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
 
         <Style x:Key="BadgeTextStyle" TargetType="{x:Type TextBlock}">
@@ -452,6 +453,11 @@
 
                     <TextBlock Text="SYSTEM" Style="{StaticResource SidebarGroupLabelStyle}" />
                     <Button Content="Posting History" Command="{Binding NavigateCommand}" CommandParameter="Posting History" Style="{StaticResource NavPostingHistoryStyle}" />
+                    <Button Content="Admin Center"
+                            Command="{Binding NavigateCommand}"
+                            CommandParameter="Admin Center"
+                            Style="{StaticResource NavAdminCenterStyle}"
+                            Visibility="{Binding CanAccessAdminCenter, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <Button Content="Settings" Command="{Binding NavigateCommand}" CommandParameter="Settings" Style="{StaticResource NavSettingsStyle}" />
                 </StackPanel>
 
@@ -2924,6 +2930,204 @@
                         </ScrollViewer>
                     </Grid>
                 </Grid>
+
+                <ScrollViewer Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Admin Center}"
+                              VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1*" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="1*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0" Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="Web Help Desk synchronization" Style="{StaticResource SectionHeadingStyle}" />
+                                    <TextBlock Text="{Binding AdminWhdSyncSummary}"
+                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                               FontWeight="SemiBold"
+                                               TextWrapping="Wrap"
+                                               Margin="0,4,0,6" />
+                                    <TextBlock Text="{Binding AdminWhdSyncDetails}"
+                                               Style="{StaticResource MutedTextStyle}"
+                                               Margin="0,0,0,14" />
+                                    <Button Content="Sync WHD tickets now"
+                                            Command="{Binding RequestAdminWhdSyncCommand}"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            HorizontalAlignment="Left" />
+                                    <TextBlock Text="The server Sync Service performs the organization-wide synchronization."
+                                               Style="{StaticResource MutedTextStyle}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,12,0,0" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="Sage 50 customer synchronization" Style="{StaticResource SectionHeadingStyle}" />
+                                    <TextBlock Text="{Binding AdminSageSyncSummary}"
+                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                               FontWeight="SemiBold"
+                                               TextWrapping="Wrap"
+                                               Margin="0,4,0,6" />
+                                    <TextBlock Text="{Binding AdminSageSyncDetails}"
+                                               Style="{StaticResource MutedTextStyle}"
+                                               Margin="0,0,0,14" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Content="Sync Sage customers now"
+                                                Command="{Binding RequestAdminSageSyncCommand}"
+                                                Style="{StaticResource PrimaryButtonStyle}"
+                                                Margin="0,0,10,0" />
+                                        <Button Content="Approve removal and sync"
+                                                Command="{Binding ConfirmAdminSageRemovalCommand}"
+                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                Visibility="{Binding AdminSageRequiresConfirmation, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    </StackPanel>
+                                    <TextBlock Text="The server Sync Service performs this manual customer synchronization."
+                                               Style="{StaticResource MutedTextStyle}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,12,0,0" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <Border Style="{StaticResource CardStyle}" Margin="0,14,0,0">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Grid Grid.Row="0" Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Active TechBench clients" Style="{StaticResource SectionHeadingStyle}" />
+                                        <TextBlock Text="Clients are considered active while their 15-second heartbeat was seen within the last 90 seconds."
+                                                   Style="{StaticResource MutedTextStyle}"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1"
+                                            Content="Refresh"
+                                            Command="{Binding RefreshAdminCenterCommand}"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            VerticalAlignment="Top" />
+                                </Grid>
+
+                                <TextBlock Grid.Row="1"
+                                           Text="{Binding AdminCenterActionStatus}"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,12" />
+
+                                <Grid Grid.Row="2" MinHeight="360">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="1.25*" />
+                                        <ColumnDefinition Width="14" />
+                                        <ColumnDefinition Width="1*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <ListBox Grid.Column="0"
+                                             ItemsSource="{Binding ActiveClientSessions}"
+                                             SelectedItem="{Binding SelectedActiveClientSession}"
+                                             ItemContainerStyle="{StaticResource ListBoxItemCardStyle}"
+                                             Background="Transparent"
+                                             BorderThickness="0"
+                                             ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Style="{StaticResource SelectableEntryCardStyle}">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <StackPanel>
+                                                            <TextBlock Text="{Binding UserLabel}"
+                                                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                                                       FontWeight="SemiBold"
+                                                                       FontSize="15" />
+                                                            <TextBlock Foreground="{DynamicResource SecondaryTextBrush}"
+                                                                       Margin="0,4,0,0">
+                                                                <Run Text="{Binding LoginName}" />
+                                                                <Run Text=" on " />
+                                                                <Run Text="{Binding MachineName}" />
+                                                            </TextBlock>
+                                                            <TextBlock Foreground="{DynamicResource MutedTextBrush}"
+                                                                       Margin="0,3,0,0">
+                                                                <Run Text="Version " />
+                                                                <Run Text="{Binding ClientVersion}" />
+                                                                <Run Text=" | " />
+                                                                <Run Text="{Binding CurrentSection}" />
+                                                            </TextBlock>
+                                                        </StackPanel>
+                                                        <StackPanel Grid.Column="1" HorizontalAlignment="Right">
+                                                            <TextBlock Text="{Binding ActivityLabel}"
+                                                                       Foreground="{DynamicResource WarningBrush}"
+                                                                       FontWeight="SemiBold"
+                                                                       HorizontalAlignment="Right" />
+                                                            <TextBlock Text="{Binding LastSeenLabel}"
+                                                                       Foreground="{DynamicResource MutedTextBrush}"
+                                                                       HorizontalAlignment="Right"
+                                                                       Margin="0,5,0,0" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+
+                                    <Border Grid.Column="2"
+                                            Background="{DynamicResource PanelAltBackgroundBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="8"
+                                            Padding="18">
+                                        <StackPanel>
+                                            <TextBlock Text="Selected client" Style="{StaticResource SectionHeadingStyle}" />
+                                            <TextBlock Text="{Binding SelectedActiveClientSession.UserLabel}"
+                                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                                       FontSize="18"
+                                                       FontWeight="SemiBold"
+                                                       Margin="0,4,0,4" />
+                                            <TextBlock Foreground="{DynamicResource SecondaryTextBrush}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,0,0,14">
+                                                <Run Text="{Binding SelectedActiveClientSession.MachineName}" />
+                                                <Run Text=" | " />
+                                                <Run Text="{Binding SelectedActiveClientSession.CurrentSection}" />
+                                                <Run Text=" | " />
+                                                <Run Text="{Binding SelectedActiveClientSession.ActivityLabel}" />
+                                            </TextBlock>
+                                            <TextBlock Text="Message" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBox Text="{Binding AdminSessionMessage, UpdateSourceTrigger=PropertyChanged}"
+                                                     AcceptsReturn="True"
+                                                     TextWrapping="Wrap"
+                                                     MinHeight="92"
+                                                     MaxLength="500"
+                                                     VerticalScrollBarVisibility="Auto"
+                                                     Margin="0,0,0,12" />
+                                            <Button Content="Notify for update"
+                                                    Command="{Binding NotifyClientForUpdateCommand}"
+                                                    Style="{StaticResource PrimaryButtonStyle}"
+                                                    Margin="0,0,0,10" />
+                                            <Button Content="Require TechBench sign-out"
+                                                    Command="{Binding RequireClientSignOutCommand}"
+                                                    Style="{StaticResource SecondaryButtonStyle}" />
+                                            <TextBlock Text="Sign-out closes only TechBench. It waits for the current posting operation and preserves unsaved entry work as a recovery draft."
+                                                       Style="{StaticResource MutedTextStyle}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,14,0,0" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
 
                 <ScrollViewer Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Settings}"
                               VerticalScrollBarVisibility="Auto">

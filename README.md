@@ -4,7 +4,7 @@ TechBench V2 is the multi-user successor to TechBench 1.x. It keeps the existing
 
 The original TechBench workspace is not modified. V1 and V2 have separate product identities, executables, mutex names, settings, credential namespaces, packages, and update feeds.
 
-Current milestone: `0.5.22` - TechBench V2 uses the `0.5.x` development release line; "V2" remains the product generation and is assumed. The connection screen can check, download, and install client updates without opening the SQL-backed workspace, including automatic recovery when the database schema is newer than the installed client. The server-owned synchronization service imports WHD tickets, Sage customers, and the password-encrypted Credentials workbook into SQL Server. Version 0.5.22 retains the client Settings cleanup from 0.5.21 and repairs the x86 client package so its shared WHD assembly always has the matching architecture.
+Current milestone: `0.5.23` - TechBench V2 uses the `0.5.x` development release line; "V2" remains the product generation and is assumed. The Admin-only Admin Center in the normal client queues server-owned WHD and Sage synchronizations, shows active TechBench clients, sends update notices, and requests a safe TechBench-only sign-out. The server Sync Service still performs all organization-wide external-system work.
 
 ## What V2 stores where
 
@@ -20,6 +20,7 @@ SQL Server is the source of truth for:
 - server-side WHD synchronization requests, leases, cursors, health, technicians, groups, and AD-user mappings
 - server-side Sage customer synchronization requests, leases, health, and snapshot results
 - encrypted credential records plus synchronization requests, leases, and health
+- active TechBench client heartbeats and Admin-issued update/sign-out requests
 - import batches, legacy-ID mappings, and audit history
 
 The workstation keeps only non-business state:
@@ -50,7 +51,7 @@ Sage 50 customer data
 Password-encrypted Credentials workbook on the internal file share
     -> read-only daily import by the same TechBench Sync Service
     -> encrypted credential columns and explicit reveal procedures
-    -> TechBench database, schema version 9
+    -> TechBench database, schema version 10
 
 TechBench V2 WPF clients (x86)
     -> approved tb_app stored procedures over encrypted TDS
@@ -58,7 +59,7 @@ TechBench V2 WPF clients (x86)
     -> the same TechBench database
 ~~~
 
-The service performs the initial full organization ticket import, five-minute overlapping ticket deltas, and daily reference refreshes for WHD clients, statuses, technicians, and group memberships. SQL Server stores the durable queue, cursor, and health state. TechBench Admins use the server-local Manager to configure the non-secret WHD endpoint/service username, request an immediate run, and map AD users to WHD technicians; the WHD credential exists only as machine-protected data on the service host. Explicit closed or deleted records update the shared snapshot, but omission never closes a ticket.
+The service performs the initial full organization ticket import, five-minute overlapping ticket deltas, and daily reference refreshes for WHD clients, statuses, technicians, and group memberships. SQL Server stores the durable queue, cursor, and health state. TechBench Admins use the server-local Manager to configure the non-secret WHD endpoint/service username and map AD users to WHD technicians. They can request immediate WHD and Sage runs from either Server Manager or the client Admin Center; the service performs the work. The WHD credential exists only as machine-protected data on the service host. Explicit closed or deleted records update the shared snapshot, but omission never closes a ticket.
 
 Sage customer synchronization is manual-only. A TechBench Admin queues it from Server Manager, the Windows service runs the isolated 32-bit ODBC reader, and SQL Server validates every returned row before atomically applying the customer snapshot. Empty, malformed, over-length, or duplicate-ID snapshots change no customer data. If an established snapshot would remove at least 10 and at least 25 percent of existing Sage mappings, SQL Server rejects it and Server Manager exposes a separate Admin confirmation action showing the proposed counts. The approval references that rejected request and is accepted only when the rerun has exactly the same read, existing, and stale counts; a changed rerun is blocked for fresh review. The server Sage password is machine-protected on the service host. Personal Sage time-ticket posting remains workstation-side because it automates the signed-in employee's Sage Desktop session, but it needs only that user's server-stored employee ID and activity item ID; no Sage ODBC setting or credential is stored or used by the client.
 
@@ -82,7 +83,7 @@ The prepared CSRI mapping is:
 
 The database derives the caller's durable owner identity from the Windows SID. Stored procedures enforce owner and role checks, and a SQL Server row-level-security policy applies the WHD technician/group assignment boundary to every ticket-table access path. Hiding or disabling a WPF control is only a user-interface convenience and is not the authorization boundary.
 
-Only members of `CSRI\TechBench_Admins` may change organization-wide configuration or manually queue WHD, Sage, or Credentials synchronization. Only the dedicated service principal can claim those jobs and apply organization-wide snapshots. All authenticated TechBench users may search and explicitly reveal/copy the shared credentials; ordinary users can otherwise read their mapped direct/group WHD tickets and the resulting shared catalogs while managing their own work, notes, drafts, personal posting credentials, and user-specific identifiers.
+Only members of `CSRI\TechBench_Admins` may change organization-wide configuration or manually queue WHD, Sage, or Credentials synchronization. The client Admin Center can queue WHD/Sage work, display active TechBench client sessions, send update notices, and request a cooperative TechBench-only sign-out. It cannot sign a user out of Windows or kill a SQL session. Only the dedicated service principal can claim synchronization jobs and apply organization-wide snapshots. All authenticated TechBench users may search and explicitly reveal/copy the shared credentials; ordinary users can otherwise read their mapped direct/group WHD tickets and the resulting shared catalogs while managing their own work, notes, drafts, personal posting credentials, and user-specific identifiers.
 
 Settings does not provide a second manual Sage customer-mapping editor. Administrators manage customer matching in the dedicated Client Matching workspace so there is one shared, audited workflow.
 
@@ -99,7 +100,7 @@ Deployment:
 
 - domain-joined or trusted-domain Windows workstations
 - SQL Server 2016 at compatibility level 130
-- the `TechBench` database at schema version 9
+- the `TechBench` database at schema version 10
 - three distinct CSRI Active Directory principals mapped by the database deployment
 - a domain-joined x64 Windows service host with outbound HTTPS access to WHD and encrypted SQL access
 - the supported 32-bit Sage ODBC driver and a server-local 32-bit **System DSN** on that service host
@@ -113,7 +114,7 @@ SQL Server 2016 extended support ended July 14, 2026. Before production use, con
 
 ## Database deployment
 
-The DBA-owned deployment package is in [database/sqlserver2016](database/sqlserver2016). The standalone script creates or upgrades the database and installs the complete schema-version-9 stored-procedure contract:
+The DBA-owned deployment package is in [database/sqlserver2016](database/sqlserver2016). The standalone script creates or upgrades the database and installs the complete schema-version-10 stored-procedure contract:
 
 `database/sqlserver2016/Deploy-CSRI-Standalone.sql`
 
@@ -133,25 +134,25 @@ Application Name=TechBench V2;
 
 No SQL username, `sa` password, or other credential belongs in the client connection configuration.
 
-The desktop application and Server Manager check schema compatibility and refuse an incompatible deployment. Version `0.5.22` requires database schema version `9`; this release does not change the schema from 0.5.21. If the database is newer than the client, the connection screen checks the public release channel and offers to install a compatible client before any workspace connection is attempted.
+The desktop application and Server Manager check schema compatibility and refuse an incompatible deployment. Version `0.5.23` requires database schema version `10`. If the database is newer than the client, the connection screen checks the public release channel and offers to install a compatible client before any workspace connection is attempted.
 
-### Coordinated 0.5.22 upgrade
+### Coordinated 0.5.23 upgrade
 
 The database and client must be upgraded as one planned cutover:
 
 1. Back up the `TechBench` database.
-2. Stop the existing V2 clients and sync service, run the complete schema-version-9 standalone deployment, and confirm all verification output passes. If the Results grid reports a newly generated database-master-key recovery password, store it in the protected administrative password vault before closing SSMS.
-3. Run the 0.5.22 `TechBenchServerSetup.exe` as Administrator. It installs or repairs the x64 TechBench Sync Service under `CSRI\TechBench_Sync`, preserves existing machine-protected secrets, restores the required service and Manager read-and-execute ACLs, and installs the compiled Manager and direct EXE Start Menu shortcut.
+2. Stop the existing V2 clients and sync service, run the complete schema-version-10 standalone deployment, and confirm all verification output passes. If the Results grid reports a newly generated database-master-key recovery password, store it in the protected administrative password vault before closing SSMS.
+3. Run the 0.5.23 `TechBenchServerSetup.exe` as Administrator. It installs or repairs the x64 TechBench Sync Service under `CSRI\TechBench_Sync`, preserves existing machine-protected secrets, restores the required service and Manager read-and-execute ACLs, and installs the compiled Manager and direct EXE Start Menu shortcut.
 4. On the service host, create the 32-bit Sage **System DSN**, grant the service identity the required Sage read access, and provision the separate machine-protected Sage password.
-5. Grant `CSRI\TechBench_Sync` read access to both the Credentials share and workbook. In Server Manager, open **Credentials**, enter the UNC path and confirm the 4:00 AM schedule, select **Save settings**, enter the workbook open password under **Workbook open password**, select **Save / Rotate**, then select **Sync now**. Install the 0.5.22 client on workstations.
+5. Grant `CSRI\TechBench_Sync` read access to both the Credentials share and workbook. In Server Manager, open **Credentials**, enter the UNC path and confirm the 4:00 AM schedule, select **Save settings**, enter the workbook open password under **Workbook open password**, select **Save / Rotate**, then select **Sync now**. Install the 0.5.23 client on workstations.
 6. Test with at least one ordinary domain user and one TechBench administrator. Confirm the initial WHD full sync, a later automatic delta, a manually requested Sage customer sync, malformed/empty snapshot rejection, the explicit large-removal confirmation path, service health, and direct/group ticket visibility.
-7. Verify ordinary users cannot queue either server job or change shared configuration. Verify an Admin can open a read-only preview, cannot write through it, and cannot see another user's Personal Note or editor draft.
+7. Verify ordinary users cannot see the Admin Center, queue either server job, view active sessions, or change shared configuration. Verify an Admin can queue WHD/Sage work, view active TechBench clients, send an update notice, and request safe sign-out. Verify an Admin preview remains read-only and cannot see another user's Personal Note or editor draft.
 8. Verify shared clients, tickets, canonical customer matching, aliases, tags, templates, Common Links, work entries, Personal Note privacy, drafts, posting coordination, automatic refresh, and optimistic-concurrency conflicts.
 9. Have the DBA configure and test ongoing SQL Server backups before production data entry.
 
 To replace or repair any earlier V2 server installation, download and run `TechBenchServerSetup.exe` as Administrator. The setup EXE contains and verifies the matching server payload, closes the old Manager, preserves the installed service identity, configuration, and protected secrets, replaces both programs, restarts the service, repairs the Start Menu shortcut, and opens the Manager. No ZIP extraction or command-line bootstrap is required.
 
-The 0.5.22 client and service require the schema-version-9 procedure set. A database already verified at schema version 9 does not need another SQL deployment for this release.
+The 0.5.23 client and service require the schema-version-10 procedure set. The schema-10 deployment is required for this release.
 
 Users newly added to an AD group should sign out of Windows and sign back in before testing so their Windows security token includes the new membership.
 
@@ -161,8 +162,8 @@ Users newly added to an AD group should sign out of Windows and sign back in bef
 dotnet restore TechBenchV2.sln
 dotnet build TechBenchV2.sln -c Release
 dotnet test TechBench.Tests\TechBench.Tests.csproj -c Release
-.\scripts\Publish-TechBenchRelease.ps1 -Version 0.5.22
-.\scripts\Publish-TechBenchServer.ps1 -Version 0.5.22
+.\scripts\Publish-TechBenchRelease.ps1 -Version 0.5.23
+.\scripts\Publish-TechBenchServer.ps1 -Version 0.5.23
 ~~~
 
 Inspect and smoke-test both local packages before publishing. For an approved
@@ -187,6 +188,6 @@ Unit and contract tests do not replace the required integration run against the 
 - Verify counts, relationships, ownership, posting state, and sample note content before cutover.
 - Do not run V1 and V2 as dual writable production systems.
 
-V1 remains untouched and available for rollback or historical reference. Its data is not automatically migrated merely by installing 0.5.22; each user uses **Settings > Import V1 Database...**, reviews the preview, and explicitly starts their own import. Work history, Personal Notes, entry tags, follow-up state, posting state/history, and note links move to that user's SQL-owned records. Equivalent legacy link rows may share one canonical SQL relationship. A resumed batch counts mappings first accepted by that same batch as imported, while a later batch skips unchanged mappings. Dependent links and posting logs attach only through work-entry mappings accepted by the current batch, and a successful completion must account for every read item with zero errors. A user may abandon their own stale active V1 batch before restarting. Shared configuration, credentials, editor drafts, active posting attempts, and local caches are intentionally excluded.
+V1 remains untouched and available for rollback or historical reference. Its data is not automatically migrated merely by installing 0.5.23; each user uses **Settings > Import V1 Database...**, reviews the preview, and explicitly starts their own import. Work history, Personal Notes, entry tags, follow-up state, posting state/history, and note links move to that user's SQL-owned records. Equivalent legacy link rows may share one canonical SQL relationship. A resumed batch counts mappings first accepted by that same batch as imported, while a later batch skips unchanged mappings. Dependent links and posting logs attach only through work-entry mappings accepted by the current batch, and a successful completion must account for every read item with zero errors. A user may abandon their own stale active V1 batch before restarting. Shared configuration, credentials, editor drafts, active posting attempts, and local caches are intentionally excluded.
 
 For implementation details, see [docs/V2-ARCHITECTURE.md](docs/V2-ARCHITECTURE.md). For deployment, see the [database runbook](database/sqlserver2016/README-Deploy.md) and [sync-service runbook](docs/WHD-SYNC-SERVICE.md).

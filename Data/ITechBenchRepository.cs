@@ -150,6 +150,35 @@ public interface ITechBenchRepository
         bool allowLargeRemoval = false,
         Guid? confirmedRequestId = null);
 
+    ClientSessionHeartbeatResult HeartbeatClientSession(
+        Guid sessionId,
+        string machineName,
+        string clientVersion,
+        string currentSection,
+        bool hasUnsavedChanges,
+        bool isBusy) => new();
+
+    IReadOnlyList<ClientSessionInfo> GetActiveClientSessions(
+        Guid currentSessionId) => [];
+
+    ClientSessionCommand QueueClientSessionCommand(
+        Guid requesterSessionId,
+        Guid targetSessionId,
+        string commandType,
+        string message) =>
+        throw new NotSupportedException("Client session administration requires SQL Server schema 10.");
+
+    void AcknowledgeClientSessionCommand(
+        Guid sessionId,
+        long commandId,
+        string result)
+    {
+    }
+
+    void CloseClientSession(Guid sessionId)
+    {
+    }
+
     IReadOnlyList<WhdUserMapping> GetWhdUserMappings();
 
     IReadOnlyList<WhdTechnician> GetWhdTechnicians();
