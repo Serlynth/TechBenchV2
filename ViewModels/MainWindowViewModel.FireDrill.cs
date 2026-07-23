@@ -91,66 +91,31 @@ public sealed partial class MainWindowViewModel
     {
         FireDrillCredentialFields.Clear();
         if (SelectedFireDrillCredential is null) return;
-        AddFireDrillFields(_ => "***");
+        foreach (var field in SelectedFireDrillCredential.Fields)
+            FireDrillCredentialFields.Add(field with { Value = "***" });
     }
 
     private void PopulateRevealedFireDrillFields(FireDrillCredential credential)
     {
         FireDrillCredentialFields.Clear();
-        AddFireDrillFields(field => field switch
-        {
-            "FireboxIp" => credential.FireboxIp,
-            "Status" => credential.Status,
-            "Admin" => credential.Admin,
-            "CsriAdmin" => credential.CsriAdmin,
-            "FireboxDbCsri" => credential.FireboxDbCsri,
-            "AuthpointUser" => credential.AuthpointUser,
-            "SslVpnPassword" => credential.SslVpnPassword,
-            "AdAuthUser" => credential.AdAuthUser,
-            "AdPassword" => credential.AdPassword,
-            "RustPassword" => credential.RustPassword,
-            _ => string.Empty
-        });
-    }
-
-    private void AddFireDrillFields(Func<string, string> valueFor)
-    {
-        FireDrillCredentialFields.Add(new("Firebox IP", "FireboxIp", valueFor("FireboxIp")));
-        FireDrillCredentialFields.Add(new("Status", "Status", valueFor("Status")));
-        FireDrillCredentialFields.Add(new("Admin", "Admin", valueFor("Admin")));
-        FireDrillCredentialFields.Add(new("csriadmin", "CsriAdmin", valueFor("CsriAdmin")));
-        FireDrillCredentialFields.Add(new("Firebox-DB\\csri", "FireboxDbCsri", valueFor("FireboxDbCsri")));
-        FireDrillCredentialFields.Add(new("AuthPoint User", "AuthpointUser", valueFor("AuthpointUser")));
-        FireDrillCredentialFields.Add(new("SSL VPN Password", "SslVpnPassword", valueFor("SslVpnPassword")));
-        FireDrillCredentialFields.Add(new("AD Auth User", "AdAuthUser", valueFor("AdAuthUser")));
-        FireDrillCredentialFields.Add(new("AD Password", "AdPassword", valueFor("AdPassword")));
-        FireDrillCredentialFields.Add(new("RustPW", "RustPassword", valueFor("RustPassword")));
+        foreach (var field in credential.Fields)
+            FireDrillCredentialFields.Add(field);
     }
 
     private void CopyFireDrillField(object? parameter)
     {
         if (RevealedFireDrillCredential is null || parameter is not string field) return;
-        var value = field switch
-        {
-            "FireboxIp" => RevealedFireDrillCredential.FireboxIp,
-            "Status" => RevealedFireDrillCredential.Status,
-            "Admin" => RevealedFireDrillCredential.Admin,
-            "CsriAdmin" => RevealedFireDrillCredential.CsriAdmin,
-            "FireboxDbCsri" => RevealedFireDrillCredential.FireboxDbCsri,
-            "AuthpointUser" => RevealedFireDrillCredential.AuthpointUser,
-            "SslVpnPassword" => RevealedFireDrillCredential.SslVpnPassword,
-            "AdAuthUser" => RevealedFireDrillCredential.AdAuthUser,
-            "AdPassword" => RevealedFireDrillCredential.AdPassword,
-            "RustPassword" => RevealedFireDrillCredential.RustPassword,
-            _ => throw new InvalidOperationException("The selected credential field is invalid.")
-        };
+        var selectedField = RevealedFireDrillCredential.Fields.FirstOrDefault(candidate =>
+            candidate.FieldName.Equals(field, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException("The selected credential field is invalid.");
+        var value = selectedField.Value;
         if (string.IsNullOrEmpty(value))
         {
             StatusMessage = "That credential field is blank.";
             return;
         }
         System.Windows.Clipboard.SetText(value);
-        StatusMessage = $"Copied {field} for {RevealedFireDrillCredential.ClientName}.";
+        StatusMessage = $"Copied {selectedField.Label} for {RevealedFireDrillCredential.ClientName}.";
     }
 
     private void ClearRevealedFireDrillCredential()

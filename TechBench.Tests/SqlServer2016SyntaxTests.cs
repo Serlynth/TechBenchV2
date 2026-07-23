@@ -92,7 +92,7 @@ public sealed partial class SqlServer2016SyntaxTests
         var source = File.ReadAllText(path);
 
         Assert.Contains(
-            "@InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10, 11)",
+            "@InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)",
             source,
             StringComparison.OrdinalIgnoreCase);
 
@@ -147,13 +147,13 @@ public sealed partial class SqlServer2016SyntaxTests
     [Theory]
     [InlineData(
         "92-V0003-SharedReferenceVerify.sql",
-        "@InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10, 11)")]
+        "@InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10, 11, 12)")]
     [InlineData(
         "93-V0004-AdminSharedVerify.sql",
-        "@InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10, 11)")]
+        "@InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10, 11, 12)")]
     [InlineData(
         "94-V0005-TechBenchV1ImportVerify.sql",
-        "@InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10, 11)")]
+        "@InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10, 11, 12)")]
     public void EarlierSchemaVerifiersAcceptTheFinalSchemaVersion(
         string fileName,
         string expectedVersionCheck)
@@ -751,6 +751,37 @@ public sealed partial class SqlServer2016SyntaxTests
         var procedures = builder.IndexOf("52-V0011-ClientResponsesProcedures.sql", StringComparison.Ordinal);
         var grants = builder.IndexOf("58-V0011-ClientResponsesGrants.sql", StringComparison.Ordinal);
         var verify = builder.IndexOf("100-V0011-ClientResponsesVerify.sql", StringComparison.Ordinal);
+
+        Assert.True(schema >= 0 && procedures > schema && grants > procedures && verify > grants);
+    }
+
+    [Fact]
+    public void V0012PersistsFlexibleEncryptedCredentialFieldsAndOrdersEveryDeploymentStage()
+    {
+        var sqlDirectory = FindSqlDirectory();
+        var schemaSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "31-V0012-FlexibleCredentialFieldsSchema.sql"));
+        var procedureSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "53-V0012-FlexibleCredentialFieldsProcedures.sql"));
+
+        Assert.Contains("[tb_data].[FireDrillCredentialFields]", schemaSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[ValueEncrypted] varbinary(max)", schemaSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("OPENJSON(row_data.[FieldsJson])", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("EncryptByKey", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("FOR JSON PATH", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CONVERT(int, 12) AS [SchemaVersion]", procedureSource, StringComparison.OrdinalIgnoreCase);
+
+        var root = Directory.GetParent(sqlDirectory)!.Parent!.FullName;
+        var builder = File.ReadAllText(Path.Combine(
+            root,
+            "scripts",
+            "Build-StandaloneSqlDeployment.ps1"));
+        var schema = builder.IndexOf("31-V0012-FlexibleCredentialFieldsSchema.sql", StringComparison.Ordinal);
+        var procedures = builder.IndexOf("53-V0012-FlexibleCredentialFieldsProcedures.sql", StringComparison.Ordinal);
+        var grants = builder.IndexOf("59-V0012-FlexibleCredentialFieldsGrants.sql", StringComparison.Ordinal);
+        var verify = builder.IndexOf("101-V0012-FlexibleCredentialFieldsVerify.sql", StringComparison.Ordinal);
 
         Assert.True(schema >= 0 && procedures > schema && grants > procedures && verify > grants);
     }

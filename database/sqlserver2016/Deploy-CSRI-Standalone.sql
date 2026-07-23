@@ -3108,6 +3108,85 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 31-V0012-FlexibleCredentialFieldsSchema.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.ClientResponses.0011'
+      AND [SchemaVersion] = 11
+)
+BEGIN
+    RAISERROR(N'V0011 must be installed before flexible Credentials schema version 12.', 16, 1);
+    RETURN;
+END;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF OBJECT_ID(N'tb_data.FireDrillCredentialFields', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_data].[FireDrillCredentialFields]
+        (
+            [CredentialId] bigint NOT NULL,
+            [FieldKey] nvarchar(200) NOT NULL,
+            [FieldLabel] nvarchar(200) NOT NULL,
+            [SortOrder] int NOT NULL,
+            [ValueEncrypted] varbinary(max) NULL,
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_FireDrillCredentialFields]
+                PRIMARY KEY CLUSTERED ([CredentialId], [FieldKey]),
+            CONSTRAINT [UQ_FireDrillCredentialFields_Order]
+                UNIQUE ([CredentialId], [SortOrder]),
+            CONSTRAINT [FK_FireDrillCredentialFields_Credential]
+                FOREIGN KEY ([CredentialId])
+                REFERENCES [tb_data].[FireDrillCredentials]([CredentialId])
+                ON DELETE CASCADE,
+            CONSTRAINT [CK_FireDrillCredentialFields_Key]
+                CHECK (LEN(LTRIM(RTRIM([FieldKey]))) > 0),
+            CONSTRAINT [CK_FireDrillCredentialFields_Label]
+                CHECK (LEN(LTRIM(RTRIM([FieldLabel]))) > 0),
+            CONSTRAINT [CK_FireDrillCredentialFields_Order]
+                CHECK ([SortOrder] > 0)
+        );
+    END;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_deploy].[SchemaMigrations]
+        WHERE [MigrationId] = N'SqlServer2016.FlexibleCredentialFields.0012'
+    )
+        INSERT INTO [tb_deploy].[SchemaMigrations]
+            ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+        VALUES
+            (N'SqlServer2016.FlexibleCredentialFields.0012', 12, N'0.5.33', NULL);
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+PRINT N'SqlServer2016.FlexibleCredentialFields.0012 installed.';
+GO
+
+-- ============================================================================
+-- END 31-V0012-FlexibleCredentialFieldsSchema.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 30-Security.sql
 -- ============================================================================
 
@@ -20178,6 +20257,400 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 53-V0012-FlexibleCredentialFieldsProcedures.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+GO
+
+ALTER PROCEDURE [tb_app].[GetRepositoryCapabilities]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @UserSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@UserSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    SELECT CONVERT(int, 12) AS [SchemaVersion], CONVERT(bit, 0) AS [FullTextSearchAvailable],
+        CONVERT(bit, 1) AS [SupportsTickets], CONVERT(bit, 1) AS [SupportsWorkEntries],
+        CONVERT(bit, 1) AS [SupportsPrivateNotes], CONVERT(bit, 1) AS [SupportsPostingLeases],
+        CONVERT(bit, 1) AS [SupportsSyncLeases], CONVERT(bit, 1) AS [SupportsImports],
+        CONVERT(bit, 1) AS [SupportsTechBenchV1Import], CONVERT(bit, 1) AS [SupportsServerSageSync],
+        CONVERT(bit, 1) AS [SupportsAdminUserPreview], CONVERT(bit, 1) AS [SupportsFireDrillCredentials];
+END;
+GO
+
+ALTER PROCEDURE [tb_app].[SearchFireDrillCredentials]
+    @Search nvarchar(240) = NULL,
+    @Limit int = 250
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF USER_NAME() = N'tb_preview_reader'
+        THROW 52000, N'Credentials are unavailable in Admin user-preview mode.', 1;
+
+    DECLARE @Sid varbinary(85), @Login nvarchar(256), @Display nvarchar(160),
+            @Tech bit, @Manager bit, @Admin bit, @Sync bit;
+    EXEC [tb_security].[EnsureCurrentUser] @Sid OUTPUT, @Login OUTPUT, @Display OUTPUT,
+        @Tech OUTPUT, @Manager OUTPUT, @Admin OUTPUT, @Sync OUTPUT;
+
+    SET @Search = NULLIF(LTRIM(RTRIM(@Search)), N'');
+    SET @Limit = CASE WHEN @Limit IS NULL OR @Limit < 1 THEN 250 WHEN @Limit > 1000 THEN 1000 ELSE @Limit END;
+
+    SELECT TOP (@Limit)
+        credential.[CredentialId], credential.[ClientName], credential.[FireboxIp],
+        credential.[Status], credential.[LastSyncedAtUtc],
+        COALESCE
+        (
+            (
+                SELECT field.[FieldLabel] AS [label],
+                    field.[FieldKey] AS [fieldName],
+                    field.[SortOrder] AS [sortOrder],
+                    CONVERT(nvarchar(1), N'') AS [value]
+                FROM [tb_data].[FireDrillCredentialFields] field
+                WHERE field.[CredentialId] = credential.[CredentialId]
+                ORDER BY field.[SortOrder], field.[FieldKey]
+                FOR JSON PATH
+            ),
+            N'[]'
+        ) AS [FieldsJson]
+    FROM [tb_data].[FireDrillCredentials] credential
+    WHERE credential.[IsCurrent] = 1
+      AND (@Search IS NULL OR credential.[ClientName] LIKE N'%' + @Search + N'%'
+           OR credential.[FireboxIp] LIKE N'%' + @Search + N'%'
+           OR credential.[Status] LIKE N'%' + @Search + N'%')
+    ORDER BY credential.[ClientName], credential.[CredentialId];
+END;
+GO
+
+ALTER PROCEDURE [tb_app].[RevealFireDrillCredential]
+    @CredentialId bigint
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    IF SESSION_CONTEXT(N'TechBench.PreviewSessionId') IS NOT NULL
+        THROW 52001, N'Credentials are unavailable in Admin user-preview mode.', 1;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_data].[FireDrillCredentials]
+        WHERE [CredentialId] = @CredentialId AND [IsCurrent] = 1
+    )
+        THROW 52002, N'The credential was not found or is no longer current.', 1;
+
+    SELECT credential.[CredentialId], credential.[ClientName], credential.[FireboxIp],
+        credential.[Status], credential.[LastSyncedAtUtc],
+        COALESCE
+        (
+            (
+                SELECT field.[FieldLabel] AS [label],
+                    field.[FieldKey] AS [fieldName],
+                    field.[SortOrder] AS [sortOrder],
+                    COALESCE
+                    (
+                        CONVERT
+                        (
+                            nvarchar(max),
+                            DecryptByKeyAutoCert
+                            (
+                                CERT_ID(N'tb_FireDrillCredentialCertificate'),
+                                NULL,
+                                field.[ValueEncrypted],
+                                1,
+                                CONVERT
+                                (
+                                    nvarchar(64),
+                                    HASHBYTES
+                                    (
+                                        'SHA2_256',
+                                        CONVERT
+                                        (
+                                            varbinary(max),
+                                            credential.[ClientKey] + N'|' + field.[FieldKey]
+                                        )
+                                    ),
+                                    2
+                                )
+                            )
+                        ),
+                        N''
+                    ) AS [value]
+                FROM [tb_data].[FireDrillCredentialFields] field
+                WHERE field.[CredentialId] = credential.[CredentialId]
+                ORDER BY field.[SortOrder], field.[FieldKey]
+                FOR JSON PATH
+            ),
+            N'[]'
+        ) AS [FieldsJson]
+    FROM [tb_data].[FireDrillCredentials] credential
+    WHERE credential.[CredentialId] = @CredentialId
+      AND credential.[IsCurrent] = 1;
+END;
+GO
+
+ALTER PROCEDURE [tb_service].[ApplyFireDrillCredentialSnapshot]
+    @RequestId uniqueidentifier,
+    @LeaseId uniqueidentifier,
+    @WorkerId uniqueidentifier,
+    @RowsJson nvarchar(max),
+    @SourceModifiedAtUtc datetime2(3),
+    @SyncedAtUtc datetime2(3)
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    IF ISJSON(@RowsJson)<>1 THROW 52030, N'The Credentials snapshot is not valid JSON.', 1;
+
+    CREATE TABLE #Rows
+    (
+        [ClientKey] nvarchar(200) NOT NULL PRIMARY KEY,
+        [ClientName] nvarchar(240) NOT NULL,
+        [FireboxIp] nvarchar(120) NULL,
+        [Status] nvarchar(120) NULL,
+        [RowHash] binary(32) NULL,
+        [FieldsJson] nvarchar(max) NULL
+    );
+
+    INSERT INTO #Rows
+        ([ClientKey], [ClientName], [FireboxIp], [Status], [RowHash], [FieldsJson])
+    SELECT LOWER(LTRIM(RTRIM(source_row.[ClientName]))),
+        LTRIM(RTRIM(source_row.[ClientName])),
+        NULLIF(LTRIM(RTRIM(source_row.[FireboxIp])), N''),
+        NULLIF(LTRIM(RTRIM(source_row.[Status])), N''),
+        TRY_CONVERT(binary(32), source_row.[RowHashHex], 2),
+        source_row.[FieldsJson]
+    FROM OPENJSON(@RowsJson)
+    WITH
+    (
+        [ClientName] nvarchar(240) N'$.clientName',
+        [FireboxIp] nvarchar(120) N'$.fireboxIp',
+        [Status] nvarchar(120) N'$.status',
+        [RowHashHex] nvarchar(64) N'$.rowHashHex',
+        [FieldsJson] nvarchar(max) N'$.fields' AS JSON
+    ) source_row;
+
+    IF NOT EXISTS(SELECT 1 FROM #Rows)
+        THROW 52031, N'The Credentials snapshot contained no client rows; existing data was not changed.', 1;
+    IF EXISTS(SELECT 1 FROM #Rows WHERE LEN([ClientKey])=0)
+        THROW 52032, N'A Credentials row has no client name.', 1;
+    IF EXISTS(SELECT 1 FROM #Rows WHERE [RowHash] IS NULL OR ISJSON([FieldsJson])<>1)
+        THROW 52034, N'A Credentials row has invalid flexible field data.', 1;
+
+    CREATE TABLE #Fields
+    (
+        [ClientKey] nvarchar(200) NOT NULL,
+        [FieldKey] nvarchar(200) NOT NULL,
+        [FieldLabel] nvarchar(200) NOT NULL,
+        [SortOrder] int NOT NULL,
+        [FieldValue] nvarchar(3000) NULL,
+        CONSTRAINT [PK_FlexibleCredentialFields] PRIMARY KEY ([ClientKey], [FieldKey]),
+        CONSTRAINT [UQ_FlexibleCredentialFieldOrder] UNIQUE ([ClientKey], [SortOrder])
+    );
+
+    INSERT INTO #Fields
+        ([ClientKey], [FieldKey], [FieldLabel], [SortOrder], [FieldValue])
+    SELECT row_data.[ClientKey],
+        LTRIM(RTRIM(field_data.[FieldKey])),
+        LTRIM(RTRIM(field_data.[FieldLabel])),
+        field_data.[SortOrder],
+        field_data.[FieldValue]
+    FROM #Rows row_data
+    CROSS APPLY OPENJSON(row_data.[FieldsJson])
+    WITH
+    (
+        [FieldKey] nvarchar(200) N'$.fieldKey',
+        [FieldLabel] nvarchar(200) N'$.label',
+        [SortOrder] int N'$.sortOrder',
+        [FieldValue] nvarchar(3000) N'$.value'
+    ) field_data;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM #Fields
+        WHERE LEN([FieldKey])=0 OR LEN([FieldLabel])=0 OR [SortOrder] < 1
+    )
+        THROW 52035, N'A Credentials field has an invalid header or order.', 1;
+    IF EXISTS
+    (
+        SELECT 1
+        FROM #Rows row_data
+        WHERE NOT EXISTS
+        (
+            SELECT 1
+            FROM #Fields field_data
+            WHERE field_data.[ClientKey] = row_data.[ClientKey]
+        )
+    )
+        THROW 52036, N'A Credentials row has no flexible fields.', 1;
+
+    CREATE TABLE #Changed
+    (
+        [ClientKey] nvarchar(200) NOT NULL PRIMARY KEY
+    );
+    INSERT INTO #Changed([ClientKey])
+    SELECT source_row.[ClientKey]
+    FROM #Rows source_row
+    LEFT JOIN [tb_data].[FireDrillCredentials] target
+        ON target.[ClientKey] = source_row.[ClientKey]
+    WHERE target.[CredentialId] IS NULL
+       OR target.[SourceRowHash] <> source_row.[RowHash]
+       OR target.[IsCurrent] = 0;
+
+    DECLARE @ReadCount int=(SELECT COUNT(*) FROM #Rows),
+            @SavedCount int=(SELECT COUNT(*) FROM #Changed),
+            @StaleCount int=0;
+
+    BEGIN TRY
+    BEGIN TRANSACTION;
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM [tb_sync].[FireDrillSyncLeases]
+        WHERE [RequestId]=@RequestId AND [LeaseId]=@LeaseId
+          AND [WorkerId]=@WorkerId AND [ExpiresAtUtc]>SYSUTCDATETIME()
+    )
+        THROW 52033, N'The Credentials synchronization lease is no longer valid.', 1;
+
+    OPEN SYMMETRIC KEY [tb_FireDrillCredentialKey]
+        DECRYPTION BY CERTIFICATE [tb_FireDrillCredentialCertificate];
+
+    UPDATE target
+    SET [ClientName]=source_row.[ClientName],
+        [FireboxIp]=source_row.[FireboxIp],
+        [Status]=source_row.[Status],
+        [SourceRowHash]=source_row.[RowHash],
+        [SourceModifiedAtUtc]=@SourceModifiedAtUtc,
+        [LastSyncedAtUtc]=@SyncedAtUtc,
+        [IsCurrent]=1
+    FROM [tb_data].[FireDrillCredentials] target
+    INNER JOIN #Rows source_row ON source_row.[ClientKey]=target.[ClientKey]
+    INNER JOIN #Changed changed_row ON changed_row.[ClientKey]=source_row.[ClientKey];
+
+    INSERT INTO [tb_data].[FireDrillCredentials]
+        ([ClientKey], [ClientName], [FireboxIp], [Status], [SourceRowHash],
+         [SourceModifiedAtUtc], [LastSyncedAtUtc], [IsCurrent])
+    SELECT source_row.[ClientKey], source_row.[ClientName], source_row.[FireboxIp],
+        source_row.[Status], source_row.[RowHash], @SourceModifiedAtUtc,
+        @SyncedAtUtc, 1
+    FROM #Rows source_row
+    WHERE NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_data].[FireDrillCredentials] target
+        WHERE target.[ClientKey]=source_row.[ClientKey]
+    );
+
+    DELETE stored_field
+    FROM [tb_data].[FireDrillCredentialFields] stored_field
+    INNER JOIN [tb_data].[FireDrillCredentials] credential
+        ON credential.[CredentialId]=stored_field.[CredentialId]
+    INNER JOIN #Changed changed_row
+        ON changed_row.[ClientKey]=credential.[ClientKey];
+
+    INSERT INTO [tb_data].[FireDrillCredentialFields]
+        ([CredentialId], [FieldKey], [FieldLabel], [SortOrder], [ValueEncrypted])
+    SELECT credential.[CredentialId], source_field.[FieldKey],
+        source_field.[FieldLabel], source_field.[SortOrder],
+        CASE WHEN source_field.[FieldValue] IS NULL THEN NULL ELSE
+            EncryptByKey
+            (
+                Key_GUID(N'tb_FireDrillCredentialKey'),
+                CONVERT(varbinary(max), source_field.[FieldValue]),
+                1,
+                CONVERT
+                (
+                    nvarchar(64),
+                    HASHBYTES
+                    (
+                        'SHA2_256',
+                        CONVERT
+                        (
+                            varbinary(max),
+                            credential.[ClientKey] + N'|' + source_field.[FieldKey]
+                        )
+                    ),
+                    2
+                )
+            )
+        END
+    FROM #Fields source_field
+    INNER JOIN #Changed changed_row
+        ON changed_row.[ClientKey]=source_field.[ClientKey]
+    INNER JOIN [tb_data].[FireDrillCredentials] credential
+        ON credential.[ClientKey]=source_field.[ClientKey];
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM #Fields source_field
+        INNER JOIN #Changed changed_row
+            ON changed_row.[ClientKey]=source_field.[ClientKey]
+        INNER JOIN [tb_data].[FireDrillCredentials] credential
+            ON credential.[ClientKey]=source_field.[ClientKey]
+        INNER JOIN [tb_data].[FireDrillCredentialFields] stored_field
+            ON stored_field.[CredentialId]=credential.[CredentialId]
+           AND stored_field.[FieldKey]=source_field.[FieldKey]
+        WHERE source_field.[FieldValue] IS NOT NULL
+          AND stored_field.[ValueEncrypted] IS NULL
+    )
+        THROW 52037, N'A Credentials field could not be encrypted.', 1;
+
+    UPDATE target
+    SET [IsCurrent]=0, [LastSyncedAtUtc]=@SyncedAtUtc
+    FROM [tb_data].[FireDrillCredentials] target
+    WHERE target.[IsCurrent]=1
+      AND NOT EXISTS
+      (
+          SELECT 1
+          FROM #Rows source_row
+          WHERE source_row.[ClientKey]=target.[ClientKey]
+      );
+    SET @StaleCount=@@ROWCOUNT;
+
+    CLOSE SYMMETRIC KEY [tb_FireDrillCredentialKey];
+
+    UPDATE [tb_sync].[FireDrillSyncRequests]
+    SET [ReadCount]=@ReadCount, [SavedCount]=@SavedCount, [StaleCount]=@StaleCount
+    WHERE [RequestId]=@RequestId;
+
+    COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF EXISTS
+        (
+            SELECT 1 FROM sys.openkeys
+            WHERE [key_name]=N'tb_FireDrillCredentialKey'
+        )
+            CLOSE SYMMETRIC KEY [tb_FireDrillCredentialKey];
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT @ReadCount AS [ReadCount],
+        @SavedCount AS [SavedCount],
+        @StaleCount AS [StaleCount];
+END;
+GO
+
+PRINT N'TechBench V0012 flexible Credentials procedures created.';
+GO
+
+-- ============================================================================
+-- END 53-V0012-FlexibleCredentialFieldsProcedures.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 50-Grants.sql
 -- ============================================================================
 
@@ -20926,6 +21399,32 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 59-V0012-FlexibleCredentialFieldsGrants.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+GRANT EXECUTE ON OBJECT::[tb_app].[SearchFireDrillCredentials] TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[RevealFireDrillCredential] TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_service].[ApplyFireDrillCredentialSnapshot] TO [tb_role_sync_service];
+
+REVOKE EXECUTE ON OBJECT::[tb_app].[SearchFireDrillCredentials] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[RevealFireDrillCredential] FROM [tb_preview_reader];
+
+PRINT N'TechBench V0012 flexible Credentials grants applied.';
+GO
+
+-- ============================================================================
+-- END 59-V0012-FlexibleCredentialFieldsGrants.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 90-Verify.sql
 -- ============================================================================
 
@@ -21355,7 +21854,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
+IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
 BEGIN
     PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -22111,7 +22610,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10, 11)
+IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
 BEGIN
     PRINT N'FAIL: V0003 verification supports installed schema version 3, 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -22595,7 +23094,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10, 11)
+IF @InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10, 11, 12)
 BEGIN
     PRINT N'FAIL: V0004 verification supports installed schema version 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -23313,7 +23812,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10, 11)
+IF @InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10, 11, 12)
 BEGIN
     PRINT N'FAIL: V0005 verification supports installed schema version 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -24520,7 +25019,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (6, 7, 8, 9, 10, 11)
+IF @InstalledSchemaVersion NOT IN (6, 7, 8, 9, 10, 11, 12)
 BEGIN
     PRINT N'FAIL: V0006 verification supports installed schema version 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -25075,7 +25574,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (7, 8, 9, 10, 11)
+IF @InstalledSchemaVersion NOT IN (7, 8, 9, 10, 11, 12)
 BEGIN
     PRINT N'FAIL: V0007 verification supports installed schema version 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -25737,8 +26236,8 @@ IF NOT EXISTS
 )
 BEGIN PRINT N'FAIL: V0008 migration marker is missing or invalid.'; SET @FailureCount+=1; END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (8, 9, 10, 11)
-BEGIN PRINT N'FAIL: installed schema version is not 8 or 9.'; SET @FailureCount+=1; END;
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (8, 9, 10, 11, 12)
+BEGIN PRINT N'FAIL: installed schema version is not supported by V0008 verification.'; SET @FailureCount+=1; END;
 
 DECLARE @Objects TABLE([Name] nvarchar(300) PRIMARY KEY,[Type] char(2));
 INSERT INTO @Objects VALUES
@@ -25846,7 +26345,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (9, 10, 11)
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (9, 10, 11, 12)
 BEGIN
     PRINT N'FAIL: installed schema version is not 9.';
     SET @FailureCount += 1;
@@ -25878,6 +26377,7 @@ BEGIN
 END;
 
 IF CHARINDEX(N'CONVERT(int, 11) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+   AND CHARINDEX(N'CONVERT(int, 12) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
 BEGIN
     PRINT N'FAIL: GetRepositoryCapabilities does not report the final schema version.';
     SET @FailureCount += 1;
@@ -25923,7 +26423,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (10, 11)
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (10, 11, 12)
 BEGIN
     PRINT N'FAIL: installed schema version is not 10 or 11.';
     SET @FailureCount += 1;
@@ -26031,8 +26531,10 @@ END;
 
 IF CHARINDEX(N'CONVERT(int, 11) AS [SchemaVersion]',
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+   AND CHARINDEX(N'CONVERT(int, 12) AS [SchemaVersion]',
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
 BEGIN
-    PRINT N'FAIL: GetRepositoryCapabilities does not report schema version 11.';
+    PRINT N'FAIL: GetRepositoryCapabilities does not report a supported final schema version.';
     SET @FailureCount += 1;
 END;
 
@@ -26145,8 +26647,10 @@ END;
 
 IF CHARINDEX(N'CONVERT(int, 11) AS [SchemaVersion]',
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+   AND CHARINDEX(N'CONVERT(int, 12) AS [SchemaVersion]',
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
 BEGIN
-    PRINT N'FAIL: GetRepositoryCapabilities does not report schema version 11.';
+    PRINT N'FAIL: GetRepositoryCapabilities does not report a supported final schema version.';
     SET @FailureCount += 1;
 END;
 
@@ -26162,6 +26666,116 @@ GO
 
 -- ============================================================================
 -- END 100-V0011-ClientResponsesVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 101-V0012-FlexibleCredentialFieldsVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @FailureCount int=0;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId]=N'SqlServer2016.FlexibleCredentialFields.0012'
+      AND [SchemaVersion]=12
+)
+BEGIN
+    PRINT N'FAIL: V0012 flexible Credentials migration is not installed.';
+    SET @FailureCount+=1;
+END;
+
+IF OBJECT_ID(N'tb_data.FireDrillCredentialFields', N'U') IS NULL
+BEGIN
+    PRINT N'FAIL: the flexible Credentials field table is missing.';
+    SET @FailureCount+=1;
+END;
+
+DECLARE @CapabilitiesDefinition nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'));
+DECLARE @ApplyDefinition nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyFireDrillCredentialSnapshot'));
+DECLARE @RevealDefinition nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealFireDrillCredential'));
+
+IF CHARINDEX(N'CONVERT(int, 12) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition,N''))=0
+BEGIN
+    PRINT N'FAIL: repository capabilities do not report schema version 12.';
+    SET @FailureCount+=1;
+END;
+
+IF CHARINDEX(N'OPENJSON(row_data.[FieldsJson])', COALESCE(@ApplyDefinition,N''))=0
+   OR CHARINDEX(N'[tb_data].[FireDrillCredentialFields]', COALESCE(@ApplyDefinition,N''))=0
+BEGIN
+    PRINT N'FAIL: the Credentials snapshot procedure does not persist flexible fields.';
+    SET @FailureCount+=1;
+END;
+
+IF CHARINDEX(N'FOR JSON PATH', COALESCE(@RevealDefinition,N''))=0
+   OR CHARINDEX(N'[ValueEncrypted]', COALESCE(@RevealDefinition,N''))=0
+BEGIN
+    PRINT N'FAIL: the Credentials reveal procedure does not return flexible fields.';
+    SET @FailureCount+=1;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions
+    WHERE [grantee_principal_id]=DATABASE_PRINCIPAL_ID(N'tb_role_user')
+      AND [major_id]=OBJECT_ID(N'tb_app.SearchFireDrillCredentials')
+      AND [permission_name]=N'EXECUTE' AND [state] IN (N'G',N'W')
+)
+   OR NOT EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions
+    WHERE [grantee_principal_id]=DATABASE_PRINCIPAL_ID(N'tb_role_user')
+      AND [major_id]=OBJECT_ID(N'tb_app.RevealFireDrillCredential')
+      AND [permission_name]=N'EXECUTE' AND [state] IN (N'G',N'W')
+)
+BEGIN
+    PRINT N'FAIL: ordinary TechBench users cannot read flexible Credentials through approved procedures.';
+    SET @FailureCount+=1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions
+    WHERE [grantee_principal_id] IN
+    (
+        DATABASE_PRINCIPAL_ID(N'tb_role_user'),
+        DATABASE_PRINCIPAL_ID(N'tb_role_admin'),
+        DATABASE_PRINCIPAL_ID(N'tb_role_sync_service'),
+        DATABASE_PRINCIPAL_ID(N'tb_preview_reader')
+    )
+      AND [major_id]=OBJECT_ID(N'tb_data.FireDrillCredentialFields')
+      AND [permission_name] IN (N'SELECT',N'INSERT',N'UPDATE',N'DELETE',N'CONTROL',N'ALTER')
+      AND [state] IN (N'G',N'W')
+)
+BEGIN
+    PRINT N'FAIL: a TechBench principal has a direct flexible Credentials table grant.';
+    SET @FailureCount+=1;
+END;
+
+IF @FailureCount>0
+    THROW 52090, N'TechBench V0012 flexible Credentials verification failed.', 1;
+
+PRINT N'TechBench V0012 flexible Credentials verification passed.';
+GO
+
+-- ============================================================================
+-- END 101-V0012-FlexibleCredentialFieldsVerify.sql
 -- ============================================================================
 
 PRINT N'TechBench deployment completed successfully on CSRI-SQL.';

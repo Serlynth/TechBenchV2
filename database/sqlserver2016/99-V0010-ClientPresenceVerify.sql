@@ -21,7 +21,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (10, 11)
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (10, 11, 12)
 BEGIN
     PRINT N'FAIL: installed schema version is not 10 or 11.';
     SET @FailureCount += 1;
@@ -129,8 +129,10 @@ END;
 
 IF CHARINDEX(N'CONVERT(int, 11) AS [SchemaVersion]',
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+   AND CHARINDEX(N'CONVERT(int, 12) AS [SchemaVersion]',
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
 BEGIN
-    PRINT N'FAIL: GetRepositoryCapabilities does not report schema version 11.';
+    PRINT N'FAIL: GetRepositoryCapabilities does not report a supported final schema version.';
     SET @FailureCount += 1;
 END;
 

@@ -40,11 +40,11 @@ public sealed class CredentialWorkspaceLayoutTests
 
         Assert.Contains("ItemsSource=\"{Binding FireDrillCredentialFields}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Visibility=\"{Binding HasSelectedFireDrillCredential", xaml, StringComparison.Ordinal);
-        Assert.Contains("AddFireDrillFields(_ => \"***\")", viewModel, StringComparison.Ordinal);
+        Assert.Contains("SelectedFireDrillCredential.Fields", viewModel, StringComparison.Ordinal);
+        Assert.Contains("field with { Value = \"***\" }", viewModel, StringComparison.Ordinal);
         Assert.Contains("PopulateRevealedFireDrillFields", viewModel, StringComparison.Ordinal);
-        Assert.Contains("\"Firebox IP\"", viewModel, StringComparison.Ordinal);
-        Assert.Contains("\"SSL VPN Password\"", viewModel, StringComparison.Ordinal);
-        Assert.Contains("\"AD Password\"", viewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("AddFireDrillFields", viewModel, StringComparison.Ordinal);
+        Assert.Contains("credential.Fields", viewModel, StringComparison.Ordinal);
     }
 
     private static string ReadRepositoryFile(string relativePath)

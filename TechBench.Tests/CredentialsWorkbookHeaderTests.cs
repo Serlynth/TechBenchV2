@@ -34,6 +34,15 @@ public sealed class CredentialsWorkbookHeaderTests
     }
 
     [Theory]
+    [InlineData("  New   Password  ", "new password")]
+    [InlineData("Hosted DNS Account", "hosted dns account")]
+    [InlineData("SSLVPNPASSWORD", "sslvpnpassword")]
+    public void FlexibleHeadersHaveStableCaseInsensitiveKeys(string header, string expected)
+    {
+        Assert.Equal(expected, FireDrillSyncEngine.NormalizeFieldKey(header));
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]

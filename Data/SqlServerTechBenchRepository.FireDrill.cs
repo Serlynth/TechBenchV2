@@ -1,9 +1,13 @@
+using System.Text.Json;
 using TechBench.Models;
 
 namespace TechBench.Data;
 
 public sealed partial class SqlServerTechBenchRepository
 {
+    private static readonly JsonSerializerOptions FireDrillJsonOptions =
+        new(JsonSerializerDefaults.Web);
+
     public IReadOnlyList<FireDrillCredentialSummary> SearchFireDrillCredentials(string? searchTerm = null) =>
         QueryAsync(
             Procedures.SearchFireDrillCredentials,
@@ -17,7 +21,8 @@ public sealed partial class SqlServerTechBenchRepository
                 GetString(row, "ClientName"),
                 GetString(row, "FireboxIp"),
                 GetString(row, "Status"),
-                GetDateTime(row, "LastSyncedAtUtc", DateTime.MinValue))),
+                GetDateTime(row, "LastSyncedAtUtc", DateTime.MinValue),
+                ParseFireDrillFields(GetString(row, "FieldsJson")))),
             CancellationToken.None).GetAwaiter().GetResult();
 
     public FireDrillCredential? RevealFireDrillCredential(long credentialId)
@@ -32,15 +37,16 @@ public sealed partial class SqlServerTechBenchRepository
                 GetString(row, "FireboxIp"),
                 GetString(row, "Status"),
                 GetDateTime(row, "LastSyncedAtUtc", DateTime.MinValue),
-                GetString(row, "Admin"),
-                GetString(row, "CsriAdmin"),
-                GetString(row, "FireboxDbCsri"),
-                GetString(row, "AuthpointUser"),
-                GetString(row, "SslVpnPassword"),
-                GetString(row, "AdAuthUser"),
-                GetString(row, "AdPassword"),
-                GetString(row, "RustPassword"))),
+                ParseFireDrillFields(GetString(row, "FieldsJson")))),
             CancellationToken.None).GetAwaiter().GetResult();
     }
 
+    private static IReadOnlyList<FireDrillCredentialField> ParseFireDrillFields(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        return JsonSerializer.Deserialize<List<FireDrillCredentialField>>(json, FireDrillJsonOptions)?
+            .OrderBy(field => field.SortOrder)
+            .ThenBy(field => field.Label, StringComparer.OrdinalIgnoreCase)
+            .ToArray() ?? [];
+    }
 }

@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using ExcelDataReader;
@@ -8,16 +9,6 @@ namespace TechBench.SyncService;
 
 public sealed class FireDrillSyncEngine
 {
-    private static readonly string[] ExpectedHeaders =
-    [
-        "Client", "Firebox IP", "Status", "Admin", "csriadmin",
-        "*if enabled -Firebox-DB\\csri", "Authpoint User", "sslvpnpassword",
-        "AD Auth User", "AD Password", "RustPW"
-    ];
-    private static readonly IReadOnlyDictionary<int, string[]> HeaderAliases = new Dictionary<int, string[]>
-    {
-        [5] = ["*if enabled-Firebox-DB\\csri"]
-    };
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly SyncSqlRepository _repository;
     private readonly FireDrillSecretStore _secretStore;
@@ -63,14 +54,34 @@ public sealed class FireDrillSyncEngine
             if (!reader.NextResult()) throw new InvalidDataException("The Credentials workbook contains no visible worksheet.");
         }
         if (!reader.Read()) throw new InvalidDataException("The first visible Credentials worksheet is empty.");
-        if (reader.FieldCount < ExpectedHeaders.Length)
-            throw new InvalidDataException($"The Credentials header row has {reader.FieldCount} columns; {ExpectedHeaders.Length} are required.");
-        for (var index = 0; index < ExpectedHeaders.Length; index++)
+
+        var columns = new List<WorkbookColumn>();
+        var blankHeaderColumns = new List<int>();
+        var headerKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < reader.FieldCount; index++)
         {
-            var actual = CellText(reader.GetValue(index))?.Trim() ?? string.Empty;
-            if (!IsExpectedHeader(index, actual))
-                throw new InvalidDataException($"Credentials column {index + 1} must be '{ExpectedHeaders[index]}', but is '{actual}'. No data was changed.");
+            var label = NormalizeHeader(CellText(reader.GetValue(index)));
+            if (string.IsNullOrWhiteSpace(label))
+            {
+                blankHeaderColumns.Add(index);
+                continue;
+            }
+            if (label.Length > 200)
+                throw new InvalidDataException($"Credentials column {index + 1} has a header longer than 200 characters.");
+            var fieldKey = NormalizeFieldKey(label);
+            if (!headerKeys.Add(fieldKey))
+                throw new InvalidDataException($"Credentials contains more than one column named '{label}'. No data was changed.");
+            columns.Add(new WorkbookColumn(index, fieldKey, label));
         }
+        var clientColumn = columns.FirstOrDefault(column =>
+            column.FieldKey.Equals("client", StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidDataException("The Credentials worksheet must contain a column named 'Client'. No data was changed.");
+        var credentialColumns = columns
+            .Where(column => column.Index != clientColumn.Index)
+            .OrderBy(column => column.Index)
+            .ToArray();
+        if (credentialColumns.Length == 0)
+            throw new InvalidDataException("The Credentials worksheet has no credential columns. Existing SQL data was not changed.");
 
         var rows = new List<FireDrillCredentialRow>();
         var clients = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -78,25 +89,34 @@ public sealed class FireDrillSyncEngine
         while (reader.Read())
         {
             rowNumber++;
-            var client = CellText(reader.GetValue(0))?.Trim();
+            if (blankHeaderColumns.Any(index =>
+                    !string.IsNullOrWhiteSpace(CellText(reader.GetValue(index)))))
+                throw new InvalidDataException(
+                    $"Credentials row {rowNumber} contains data beneath a blank column header. No data was changed.");
+            var client = CellText(reader.GetValue(clientColumn.Index))?.Trim();
             // A row without a client cannot be associated with a TechBench record. Ignore it
             // even when the workbook has notes, formulas, or stale values in other columns.
             if (ShouldSkipRow(client)) continue;
             if (client.Length > 240) throw new InvalidDataException($"Credentials row {rowNumber} has a Client value longer than 240 characters.");
             if (!clients.Add(client)) throw new InvalidDataException($"Credentials contains more than one row for client '{client}'. No data was changed.");
 
+            var fields = credentialColumns
+                .Select((column, sortOrder) => new FireDrillCredentialFieldRow(
+                    column.FieldKey,
+                    column.Label,
+                    sortOrder + 1,
+                    Secret(CellText(reader.GetValue(column.Index)), rowNumber, column.Label)))
+                .ToArray();
+            var fireboxIp = SummaryField(fields, "firebox ip", 120, rowNumber);
+            var status = SummaryField(fields, "status", 120, rowNumber);
+            var rowHashHex = Convert.ToHexString(SHA256.HashData(
+                JsonSerializer.SerializeToUtf8Bytes(new { client, fields }, JsonOptions)));
             rows.Add(new FireDrillCredentialRow(
                 client,
-                Limited(CellText(reader.GetValue(1)), 120, rowNumber, ExpectedHeaders[1]),
-                Limited(CellText(reader.GetValue(2)), 120, rowNumber, ExpectedHeaders[2]),
-                Secret(CellText(reader.GetValue(3)), rowNumber, ExpectedHeaders[3]),
-                Secret(CellText(reader.GetValue(4)), rowNumber, ExpectedHeaders[4]),
-                Secret(CellText(reader.GetValue(5)), rowNumber, ExpectedHeaders[5]),
-                Secret(CellText(reader.GetValue(6)), rowNumber, ExpectedHeaders[6]),
-                Secret(CellText(reader.GetValue(7)), rowNumber, ExpectedHeaders[7]),
-                Secret(CellText(reader.GetValue(8)), rowNumber, ExpectedHeaders[8]),
-                Secret(CellText(reader.GetValue(9)), rowNumber, ExpectedHeaders[9]),
-                Secret(CellText(reader.GetValue(10)), rowNumber, ExpectedHeaders[10])));
+                fireboxIp,
+                status,
+                rowHashHex,
+                fields));
         }
 
         if (rows.Count == 0) throw new InvalidDataException("The Credentials worksheet contains no client rows. Existing SQL data was not changed.");
@@ -107,15 +127,24 @@ public sealed class FireDrillSyncEngine
 
     internal static bool IsExpectedHeader(int index, string? actual)
     {
-        if (index < 0 || index >= ExpectedHeaders.Length) return false;
+        string[] legacyHeaders =
+        [
+            "Client", "Firebox IP", "Status", "Admin", "csriadmin",
+            "*if enabled -Firebox-DB\\csri", "Authpoint User", "sslvpnpassword",
+            "AD Auth User", "AD Password", "RustPW"
+        ];
+        if (index < 0 || index >= legacyHeaders.Length) return false;
         var normalized = NormalizeHeader(actual);
-        if (normalized.Equals(NormalizeHeader(ExpectedHeaders[index]), StringComparison.OrdinalIgnoreCase)) return true;
-        return HeaderAliases.TryGetValue(index, out var aliases)
-            && aliases.Any(alias => normalized.Equals(NormalizeHeader(alias), StringComparison.OrdinalIgnoreCase));
+        if (normalized.Equals(NormalizeHeader(legacyHeaders[index]), StringComparison.OrdinalIgnoreCase)) return true;
+        return index == 5
+            && normalized.Equals(NormalizeHeader("*if enabled-Firebox-DB\\csri"), StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string NormalizeHeader(string? value) =>
+    internal static string NormalizeHeader(string? value) =>
         string.Join(' ', (value ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+    internal static string NormalizeFieldKey(string? value) =>
+        NormalizeHeader(value).ToLowerInvariant();
 
     private static string? CellText(object? value) => value switch
     {
@@ -126,10 +155,17 @@ public sealed class FireDrillSyncEngine
         _ => Convert.ToString(value, CultureInfo.InvariantCulture)
     };
 
-    private static string? Limited(string? value, int maximum, int row, string field)
+    private static string? SummaryField(
+        IEnumerable<FireDrillCredentialFieldRow> fields,
+        string fieldKey,
+        int maximum,
+        int row)
     {
-        value = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-        if (value?.Length > maximum) throw new InvalidDataException($"Credentials row {row} field '{field}' is longer than {maximum} characters.");
+        var field = fields.FirstOrDefault(candidate =>
+            candidate.FieldKey.Equals(fieldKey, StringComparison.OrdinalIgnoreCase));
+        var value = string.IsNullOrWhiteSpace(field?.Value) ? null : field.Value.Trim();
+        if (value?.Length > maximum)
+            throw new InvalidDataException($"Credentials row {row} field '{field?.Label ?? fieldKey}' is longer than {maximum} characters.");
         return value;
     }
 
@@ -173,4 +209,5 @@ public sealed class FireDrillSyncEngine
     }
 
     private sealed record WorkbookSnapshot(byte[] Bytes, DateTimeOffset ModifiedAtUtc);
+    private sealed record WorkbookColumn(int Index, string FieldKey, string Label);
 }

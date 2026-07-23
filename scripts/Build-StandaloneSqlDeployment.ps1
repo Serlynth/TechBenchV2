@@ -27,6 +27,7 @@ $orderedScripts = @(
     '28-V0009-WhdMissingNoteRecovery.sql'
     '29-V0010-ClientPresenceSchema.sql'
     '30-V0011-ClientResponsesSchema.sql'
+    '31-V0012-FlexibleCredentialFieldsSchema.sql'
     '30-Security.sql'
     '40-StoredProcedures.sql'
     '41-V0002-WorkProcedures.sql'
@@ -41,6 +42,7 @@ $orderedScripts = @(
     '50-V0008-FireDrillCredentialsProcedures.sql'
     '51-V0010-ClientPresenceProcedures.sql'
     '52-V0011-ClientResponsesProcedures.sql'
+    '53-V0012-FlexibleCredentialFieldsProcedures.sql'
     '50-Grants.sql'
     '51-V0002-OperationalGrants.sql'
     '52-V0004-AdminSharedGrants.sql'
@@ -50,6 +52,7 @@ $orderedScripts = @(
     '56-V0008-FireDrillCredentialsGrants.sql'
     '57-V0010-ClientPresenceGrants.sql'
     '58-V0011-ClientResponsesGrants.sql'
+    '59-V0012-FlexibleCredentialFieldsGrants.sql'
     '90-Verify.sql'
     '91-V0002-OperationalVerify.sql'
     '92-V0003-SharedReferenceVerify.sql'
@@ -61,6 +64,7 @@ $orderedScripts = @(
     '98-V0009-WhdMissingNoteRecoveryVerify.sql'
     '99-V0010-ClientPresenceVerify.sql'
     '100-V0011-ClientResponsesVerify.sql'
+    '101-V0012-FlexibleCredentialFieldsVerify.sql'
 )
 
 $sections = [System.Collections.Generic.List[string]]::new()

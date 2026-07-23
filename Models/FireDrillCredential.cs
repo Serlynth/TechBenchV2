@@ -5,7 +5,8 @@ public sealed record FireDrillCredentialSummary(
     string ClientName,
     string FireboxIp,
     string Status,
-    DateTime LastSyncedAtUtc)
+    DateTime LastSyncedAtUtc,
+    IReadOnlyList<FireDrillCredentialField> Fields)
 {
     public string LastSyncedLabel => LastSyncedAtUtc == DateTime.MinValue
         ? "Never"
@@ -18,13 +19,12 @@ public sealed record FireDrillCredential(
     string FireboxIp,
     string Status,
     DateTime LastSyncedAtUtc,
-    string Admin,
-    string CsriAdmin,
-    string FireboxDbCsri,
-    string AuthpointUser,
-    string SslVpnPassword,
-    string AdAuthUser,
-    string AdPassword,
-    string RustPassword);
+    IReadOnlyList<FireDrillCredentialField> Fields);
 
-public sealed record FireDrillCredentialField(string Label, string FieldName, string Value);
+public sealed record FireDrillCredentialField
+{
+    public string Label { get; init; } = string.Empty;
+    public string FieldName { get; init; } = string.Empty;
+    public int SortOrder { get; init; }
+    public string Value { get; init; } = string.Empty;
+}

@@ -85,14 +85,14 @@ public sealed record FireDrillCredentialRow(
     string ClientName,
     string? FireboxIp,
     string? Status,
-    string? Admin,
-    string? CsriAdmin,
-    string? FireboxDbCsri,
-    string? AuthpointUser,
-    string? SslVpnPassword,
-    string? AdAuthUser,
-    string? AdPassword,
-    string? RustPassword);
+    string RowHashHex,
+    IReadOnlyList<FireDrillCredentialFieldRow> Fields);
+
+public sealed record FireDrillCredentialFieldRow(
+    string FieldKey,
+    string Label,
+    int SortOrder,
+    string? Value);
 
 public sealed record FireDrillSyncCounts(int ReadCount, int SavedCount, int StaleCount);
 
