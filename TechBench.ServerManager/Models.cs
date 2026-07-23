@@ -52,7 +52,7 @@ internal sealed record UserMappingAssignment(
     bool IsAdmin,
     string TechnicianExternalId);
 
-internal sealed record Technician(string ExternalId, string Label)
+internal sealed record Technician(string ExternalId, string Label, string Username = "")
 {
     public override string ToString() => Label;
 }

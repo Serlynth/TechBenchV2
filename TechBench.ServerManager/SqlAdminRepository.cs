@@ -54,15 +54,30 @@ internal sealed class SqlAdminRepository(AppPaths paths)
     }
 
     public string RequestWhdSync()
+        => RequestWhdSync("Full").Status;
+
+    public SyncRequestReceipt RequestWhdTechnicianSync()
+        => RequestWhdSync("Technicians");
+
+    public SyncStatus LoadWhdStatus()
+    {
+        using var connection = OpenAdminConnection();
+        return LoadStatus(connection, "tb_app.GetWhdSyncStatus", false);
+    }
+
+    private SyncRequestReceipt RequestWhdSync(string requestType)
     {
         using var connection = OpenAdminConnection();
         using var command = StoredProcedure(connection, "tb_app.AdminRequestWhdSync");
-        // An Admin-initiated run refreshes the complete WHD snapshot,
-        // including the technician roster used by User Mappings.
-        command.Parameters.Add("@RequestType", SqlDbType.NVarChar, 40).Value = "Full";
-        command.Parameters.Add("@RequestId", SqlDbType.UniqueIdentifier).Value = Guid.NewGuid();
+        command.Parameters.Add("@RequestType", SqlDbType.NVarChar, 40).Value = requestType;
+        var requestId = Guid.NewGuid();
+        command.Parameters.Add("@RequestId", SqlDbType.UniqueIdentifier).Value = requestId;
         using var reader = command.ExecuteReader();
-        return reader.Read() ? ReadString(reader, "Status", "Queued") : "Queued";
+        if (!reader.Read())
+            throw new InvalidOperationException("SQL Server did not return the WHD synchronization request.");
+        return new SyncRequestReceipt(
+            ReadNullableGuid(reader, "RequestId") ?? requestId,
+            ReadString(reader, "Status", "Queued"));
     }
 
     public string RequestSageSync(bool allowLargeRemoval, Guid? confirmedRequestId)
@@ -276,7 +291,7 @@ internal sealed class SqlAdminRepository(AppPaths paths)
             if (!ReadBool(reader, "IsActive", true)) continue;
             var id = ReadString(reader, "ExternalId");
             var display = ReadString(reader, "DisplayName", id);
-            configuration.Technicians.Add(new(id, display));
+            configuration.Technicians.Add(new(id, display, ReadString(reader, "Username")));
         }
     }
 

@@ -1014,6 +1014,9 @@ public sealed class WhdRestClient
                 sessionDocument.RootElement,
                 "sessionKey",
                 "key");
+            var instanceId = NormalizeSessionInstanceId(ReadSessionString(
+                sessionDocument.RootElement,
+                "instanceId"));
 
             var embeddedTechnician = ParseSessionTechnician(
                 sessionDocument.RootElement,
@@ -1044,7 +1047,8 @@ public sealed class WhdRestClient
                     settings,
                     sessionAuthentication,
                     $"Techs/{currentTechnicianId.Trim()}",
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken,
+                    instanceId).ConfigureAwait(false);
                 if (currentTechnician is not null)
                 {
                     return currentTechnician;
@@ -1055,7 +1059,8 @@ public sealed class WhdRestClient
                 settings,
                 sessionAuthentication,
                 "Techs/currentTech",
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                instanceId).ConfigureAwait(false);
             if (currentTechnician is not null)
             {
                 return currentTechnician;
@@ -1126,12 +1131,13 @@ public sealed class WhdRestClient
         WhdConnectionSettings settings,
         WhdAuthParameters auth,
         string resource,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? instanceId = null)
     {
         var requestUri = BuildRequestUri(settings.BaseUrl, resource, auth, new Dictionary<string, string>
         {
             ["style"] = "long"
-        });
+        }, instanceId);
         using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
@@ -2290,9 +2296,10 @@ public sealed class WhdRestClient
         string baseUrl,
         string resource,
         WhdAuthParameters auth,
-        IDictionary<string, string> additionalQuery)
+        IDictionary<string, string> additionalQuery,
+        string? instanceId = null)
     {
-        var root = BuildApiRoot(baseUrl);
+        var root = BuildApiRoot(baseUrl, instanceId);
         var uriBuilder = new UriBuilder(new Uri($"{root.ToString().TrimEnd('/')}/{resource.TrimStart('/')}"));
         var query = new List<string>();
 
@@ -2310,7 +2317,7 @@ public sealed class WhdRestClient
         return uriBuilder.Uri;
     }
 
-    private static Uri BuildApiRoot(string baseUrl)
+    private static Uri BuildApiRoot(string baseUrl, string? instanceId = null)
     {
         var trimmed = baseUrl.Trim().TrimEnd('/');
         if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var input) || string.IsNullOrWhiteSpace(input.Scheme))
@@ -2346,6 +2353,12 @@ public sealed class WhdRestClient
             apiPath = $"{path}/helpdesk/WebObjects/Helpdesk.woa/ra";
         }
 
+        if (!string.IsNullOrWhiteSpace(instanceId) &&
+            apiPath.EndsWith("/ra", StringComparison.OrdinalIgnoreCase))
+        {
+            apiPath = $"{apiPath[..^3]}/{instanceId}/ra";
+        }
+
         var builder = new UriBuilder(input)
         {
             Path = apiPath,
@@ -2355,6 +2368,12 @@ public sealed class WhdRestClient
 
         return builder.Uri;
     }
+
+    private static string? NormalizeSessionInstanceId(string? value) =>
+        int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var instanceId)
+        && instanceId >= 0
+            ? instanceId.ToString(CultureInfo.InvariantCulture)
+            : null;
 
     private static string? Validate(WhdConnectionSettings settings)
     {

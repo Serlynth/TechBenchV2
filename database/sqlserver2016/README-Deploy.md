@@ -4,7 +4,7 @@ This package creates the shared `TechBench` database used by the TechBench V2
 WPF client and the dedicated TechBench sync service. Both use Windows Integrated
 Authentication; the service has a separate least-privilege database role.
 
-TechBench V2 `0.5.39` requires schema version `12`, including the server-owned
+TechBench V2 `0.5.40` requires schema version `12`, including the server-owned
 WHD/Sage/Credentials synchronization contracts and encrypted credential
 storage, restricted Admin read-only user preview, administrator-only shared-
 configuration boundary, owner-scoped V1 import, and verified missing-WHD-
@@ -14,9 +14,10 @@ acknowledgements and written responses, and reports whether a forced sign-out
 safely stored the user's current editor recovery draft. Schema 12 stores
 runtime-discovered Credentials workbook columns as individually encrypted
 fields so new headers appear after synchronization without another schema change.
-The 0.5.39 procedure set also recovers assigned WHD administrators that WHD
-12.x omits from its normal technician collection. Reapply the complete
-0.5.39 deployment even when the database already reports schema 12.
+The 0.5.40 procedure set adds a technician-only WHD synchronization request
+and supports current-account recovery for WHD Admin accounts omitted from the
+normal technician collection. Reapply the complete 0.5.40 deployment even
+when the database already reports schema 12.
 
 ## CSRI production deployment
 

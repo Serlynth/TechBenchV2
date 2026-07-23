@@ -2248,10 +2248,27 @@ BEGIN TRY
             CONSTRAINT [FK_WhdRequests_Requester]
                 FOREIGN KEY ([RequestedByWindowsSid]) REFERENCES [tb_security].[Users]([WindowsSid]),
             CONSTRAINT [CK_WhdRequests_Type]
-                CHECK ([RequestType] IN (N'Full', N'Incremental')),
+                CHECK ([RequestType] IN (N'Full', N'Incremental', N'Technicians')),
             CONSTRAINT [CK_WhdRequests_Status]
                 CHECK ([Status] IN (N'Queued', N'Running', N'Completed', N'Failed'))
         );
+    END;
+
+    IF OBJECT_ID(N'tb_sync.WhdSyncRequests', N'U') IS NOT NULL
+       AND EXISTS
+       (
+           SELECT 1
+           FROM sys.check_constraints
+           WHERE [parent_object_id] = OBJECT_ID(N'tb_sync.WhdSyncRequests')
+             AND [name] = N'CK_WhdRequests_Type'
+             AND [definition] NOT LIKE N'%Technicians%'
+       )
+    BEGIN
+        ALTER TABLE [tb_sync].[WhdSyncRequests]
+            DROP CONSTRAINT [CK_WhdRequests_Type];
+        ALTER TABLE [tb_sync].[WhdSyncRequests] WITH CHECK
+            ADD CONSTRAINT [CK_WhdRequests_Type]
+            CHECK ([RequestType] IN (N'Full', N'Incremental', N'Technicians'));
     END;
 
     IF NOT EXISTS
@@ -16838,8 +16855,8 @@ BEGIN
 
     IF @Admin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
         THROW 51820, N'Only a TechBench Admin may request WHD sync.', 1;
-    IF @RequestType NOT IN (N'Full', N'Incremental')
-        THROW 51821, N'RequestType must be Full or Incremental.', 1;
+    IF @RequestType NOT IN (N'Full', N'Incremental', N'Technicians')
+        THROW 51821, N'RequestType must be Full, Incremental, or Technicians.', 1;
 
     IF @RequestType = N'Incremental'
        AND NOT EXISTS
@@ -16898,7 +16915,8 @@ BEGIN
                 (N'Tickets')
         ) AS work_type([WorkType])
         WHERE @RequestType = N'Full'
-           OR work_type.[WorkType] = N'Tickets';
+           OR (@RequestType = N'Incremental' AND work_type.[WorkType] = N'Tickets')
+           OR (@RequestType = N'Technicians' AND work_type.[WorkType] = N'Technicians');
 
         COMMIT TRANSACTION;
     END TRY

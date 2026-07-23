@@ -1211,8 +1211,8 @@ BEGIN
 
     IF @Admin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
         THROW 51820, N'Only a TechBench Admin may request WHD sync.', 1;
-    IF @RequestType NOT IN (N'Full', N'Incremental')
-        THROW 51821, N'RequestType must be Full or Incremental.', 1;
+    IF @RequestType NOT IN (N'Full', N'Incremental', N'Technicians')
+        THROW 51821, N'RequestType must be Full, Incremental, or Technicians.', 1;
 
     IF @RequestType = N'Incremental'
        AND NOT EXISTS
@@ -1271,7 +1271,8 @@ BEGIN
                 (N'Tickets')
         ) AS work_type([WorkType])
         WHERE @RequestType = N'Full'
-           OR work_type.[WorkType] = N'Tickets';
+           OR (@RequestType = N'Incremental' AND work_type.[WorkType] = N'Tickets')
+           OR (@RequestType = N'Technicians' AND work_type.[WorkType] = N'Technicians');
 
         COMMIT TRANSACTION;
     END TRY

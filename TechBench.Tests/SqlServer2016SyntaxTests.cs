@@ -340,6 +340,36 @@ public sealed partial class SqlServer2016SyntaxTests
     }
 
     [Fact]
+    public void WhdAdminCanQueueTechnicianOnlySynchronization()
+    {
+        var sqlDirectory = FindSqlDirectory();
+        var schema = Regex.Replace(
+            File.ReadAllText(Path.Combine(sqlDirectory, "25-V0006-WhdServerSyncSchema.sql")),
+            @"\s+",
+            string.Empty);
+        var procedure = Regex.Replace(
+            ProcedureBody(
+                File.ReadAllText(Path.Combine(sqlDirectory, "48-V0006-WhdServerSyncProcedures.sql")),
+                "AdminRequestWhdSync",
+                "tb_app"),
+            @"\s+",
+            string.Empty);
+
+        Assert.Contains(
+            "CHECK([RequestType]IN(N'Full',N'Incremental',N'Technicians'))",
+            schema,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "@RequestTypeNOTIN(N'Full',N'Incremental',N'Technicians')",
+            procedure,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "@RequestType=N'Technicians'ANDwork_type.[WorkType]=N'Technicians'",
+            procedure,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void TagSuggestionsComeOnlyFromTheEffectiveUsersSavedWork()
     {
         var source = File.ReadAllText(Path.Combine(

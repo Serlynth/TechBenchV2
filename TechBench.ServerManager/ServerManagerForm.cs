@@ -62,6 +62,7 @@ internal sealed class ServerManagerForm : Form
         SelectionMode = DataGridViewSelectionMode.FullRowSelect
     };
     private readonly Label _mappingSummary = ValueLabel();
+    private readonly Label _mappingSyncStatus = StatusLabel();
 
     private readonly TextBox _sageDsn = Field();
     private readonly TextBox _sageUsername = Field();
@@ -326,9 +327,10 @@ internal sealed class ServerManagerForm : Form
     private TabPage BuildWhdMappingsTab()
     {
         var page = new TabPage("User Mappings") { Padding = new Padding(16) };
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         var mappingHeader = new FlowLayoutPanel
         {
@@ -350,8 +352,11 @@ internal sealed class ServerManagerForm : Form
         ConfigureMappingGrid();
         layout.Controls.Add(_mappingGrid, 0, 1);
         var map = Button("Save all mappings"); map.Click += async (_, _) => await SaveMappingsAsync();
-        var mappingActions = ButtonRow(map, _mappingSummary);
+        var syncTechnicians = Button("Sync WHD technicians");
+        syncTechnicians.Click += async (_, _) => await SyncWhdTechniciansAsync();
+        var mappingActions = ButtonRow(map, syncTechnicians, _mappingSummary);
         layout.Controls.Add(mappingActions, 0, 2);
+        layout.Controls.Add(_mappingSyncStatus, 0, 3);
         page.Controls.Add(layout);
         return page;
     }
@@ -558,6 +563,8 @@ internal sealed class ServerManagerForm : Form
         _whdSyncStatus.Text = FormatStatus(configuration.WhdStatus, false);
         _sageSyncStatus.Text = FormatStatus(configuration.SageStatus, true);
         _fireDrillSyncStatus.Text = FormatStatus(configuration.FireDrillStatus, true);
+        _mappingSyncStatus.Text =
+            $"{Math.Max(0, configuration.Technicians.Count - 1)} active WHD technician(s) available for mapping.";
         _confirmSageButton.Visible = configuration.SageStatus.RequiresLargeRemovalConfirmation;
         PopulateMappingGrid(configuration);
     }
@@ -698,6 +705,82 @@ internal sealed class ServerManagerForm : Form
             await SavePendingMappingsAsync(requireAuthorizedUsers: true);
             await RefreshConfigurationAsync(false);
         });
+    }
+
+    private async Task SyncWhdTechniciansAsync()
+    {
+        await RunAsync("Requesting a WHD technician-only synchronization...", async () =>
+        {
+            var receipt = await Task.Run(_repository.RequestWhdTechnicianSync);
+            AddLog($"WHD technician synchronization: {receipt.Status}.");
+            _mappingSyncStatus.Text = $"Technician synchronization {receipt.Status.ToLowerInvariant()}.";
+            await MonitorWhdTechnicianSyncAsync(receipt.RequestId);
+        });
+    }
+
+    private async Task MonitorWhdTechnicianSyncAsync(Guid requestId)
+    {
+        var claimDeadline = DateTime.UtcNow.AddSeconds(60);
+        var completionDeadline = DateTime.UtcNow.AddMinutes(3);
+        string? previousStatus = null;
+
+        while (DateTime.UtcNow < completionDeadline)
+        {
+            var status = await Task.Run(_repository.LoadWhdStatus);
+            _whdSyncStatus.Text = FormatStatus(status, false);
+            _mappingSyncStatus.Text =
+                $"Technician synchronization: {status.Status}. Work remaining: {status.QueueDepth}.";
+
+            if (status.RequestId == requestId &&
+                !status.Status.Equals(previousStatus, StringComparison.OrdinalIgnoreCase))
+            {
+                AddLog($"WHD technician synchronization: {status.Status}.");
+                previousStatus = status.Status;
+            }
+
+            if (status.RequestId == requestId &&
+                status.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase))
+            {
+                await RefreshConfigurationAsync(false);
+                var configuredUsername = _whdUsername.Text.Trim();
+                var configuredAccountWasFound = _configuration?.Technicians.Any(technician =>
+                    technician.Username.Equals(configuredUsername, StringComparison.OrdinalIgnoreCase)) == true;
+                _mappingSyncStatus.Text =
+                    $"{Math.Max(0, (_configuration?.Technicians.Count ?? 1) - 1)} active WHD technician(s) available for mapping."
+                    + (configuredAccountWasFound || string.IsNullOrWhiteSpace(configuredUsername)
+                        ? string.Empty
+                        : $" WHD still did not expose the configured account '{configuredUsername}'.");
+                AddLog("WHD technician synchronization completed and User Mappings was refreshed.");
+                return;
+            }
+
+            if (status.RequestId == requestId &&
+                status.Status.Equals("Failed", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(status.LastError)
+                    ? status.Message
+                    : status.LastError);
+            }
+
+            if (DateTime.UtcNow >= claimDeadline &&
+                status.RequestId == requestId &&
+                status.Status.Equals("Queued", StringComparison.OrdinalIgnoreCase))
+            {
+                var service = await Task.Run(_service.GetDetails);
+                var warning = service.Installed && service.Status.Equals("Running", StringComparison.OrdinalIgnoreCase)
+                    ? $"The technician request is still queued. Restart the Sync Service from the Service tab; if it remains queued, install the current server package."
+                    : $"The technician request is queued because the TechBench Sync Service is {service.Status}. Start it from the Service tab.";
+                _mappingSyncStatus.Text = warning;
+                AddLog("WARNING: " + warning);
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(2));
+        }
+
+        const string timeout = "The WHD technician synchronization is still running on the server. Return to User Mappings and refresh after it completes.";
+        _mappingSyncStatus.Text = timeout;
+        AddLog(timeout);
     }
 
     private async Task SavePendingMappingsAsync(bool requireAuthorizedUsers)

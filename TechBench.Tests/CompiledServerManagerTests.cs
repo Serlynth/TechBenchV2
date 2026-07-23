@@ -45,6 +45,8 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("ProtectedSecretStore.Whd", form, StringComparison.Ordinal);
         Assert.Contains("DataGridView", form, StringComparison.Ordinal);
         Assert.Contains("Save all mappings", form, StringComparison.Ordinal);
+        Assert.Contains("Sync WHD technicians", form, StringComparison.Ordinal);
+        Assert.Contains("MonitorWhdTechnicianSyncAsync", form, StringComparison.Ordinal);
         Assert.Contains("Save settings + mappings", form, StringComparison.Ordinal);
         Assert.Contains("CommitEdit(DataGridViewDataErrorContexts.Commit)", form, StringComparison.Ordinal);
         Assert.Contains("MonitorFireDrillSyncAsync", form, StringComparison.Ordinal);
@@ -58,10 +60,9 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("requireExactVersion && schema != 12", sql, StringComparison.Ordinal);
         Assert.Contains("requires database schema 12", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("requires database schema 8", sql, StringComparison.Ordinal);
-        Assert.Contains(
-            "command.Parameters.Add(\"@RequestType\", SqlDbType.NVarChar, 40).Value = \"Full\"",
-            sql,
-            StringComparison.Ordinal);
+        Assert.Contains("RequestWhdSync(\"Full\")", sql, StringComparison.Ordinal);
+        Assert.Contains("RequestWhdTechnicianSync", sql, StringComparison.Ordinal);
+        Assert.Contains("RequestWhdSync(\"Technicians\")", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("Sage.ActivityItemId", form + sql, StringComparison.Ordinal);
         Assert.DoesNotContain("Activity Item ID", form, StringComparison.Ordinal);
         Assert.Contains("tb_app.AdminSaveOrganizationSetting", sql, StringComparison.Ordinal);
