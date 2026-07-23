@@ -323,6 +323,23 @@ public sealed partial class SqlServer2016SyntaxTests
     }
 
     [Fact]
+    public void WhdTicketApplicationRecoversAssignedTechniciansOmittedFromTheTechnicianList()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindSqlDirectory(),
+            "48-V0006-WhdServerSyncProcedures.sql"));
+        var body = Regex.Replace(
+            ProcedureBody(source, "ApplyWhdTicketBatch", "tb_service"),
+            @"\s+",
+            string.Empty);
+
+        Assert.Contains("MERGE[tb_whd].[Technicians]", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[AssignedTechExternalId]ISNOTNULL", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[IsActive]=1", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[LastSyncedAtUtc]=@SyncedAtUtc", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void TagSuggestionsComeOnlyFromTheEffectiveUsersSavedWork()
     {
         var source = File.ReadAllText(Path.Combine(

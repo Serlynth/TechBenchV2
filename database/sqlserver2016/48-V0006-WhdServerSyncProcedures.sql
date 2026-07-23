@@ -596,6 +596,36 @@ BEGIN
         )
             THROW 51815, N'A WHD ticket referenced a client identity that was not durably applied.', 1;
 
+        -- WHD 12.x can omit its authenticated administrator from the Techs
+        -- collection even while tickets still identify that account by its
+        -- authoritative technician ID. Preserve every assigned technician
+        -- observed in the organization ticket snapshot so Admins can map the
+        -- corresponding AD user without inventing or manually entering IDs.
+        ;WITH assigned_technicians AS
+        (
+            SELECT
+                incoming.[AssignedTechExternalId] AS [ExternalId],
+                MAX(COALESCE(incoming.[AssignedTechName], incoming.[AssignedTechExternalId])) AS [DisplayName]
+            FROM @Tickets AS incoming
+            WHERE incoming.[AssignedTechExternalId] IS NOT NULL
+            GROUP BY incoming.[AssignedTechExternalId]
+        )
+        MERGE [tb_whd].[Technicians] AS target
+        USING assigned_technicians AS source
+            ON target.[ExternalId] = source.[ExternalId]
+        WHEN MATCHED THEN
+            UPDATE SET
+                [DisplayName] = COALESCE(NULLIF(source.[DisplayName], N''), target.[DisplayName]),
+                [IsActive] = 1,
+                [LastSyncedAtUtc] = @SyncedAtUtc
+        WHEN NOT MATCHED BY TARGET THEN
+            INSERT
+                ([ExternalId], [DisplayName], [Username], [Email], [IsActive],
+                 [WhdLastUpdatedUtc], [LastSyncedAtUtc])
+            VALUES
+                (source.[ExternalId], source.[DisplayName], NULL, NULL, 1,
+                 NULL, @SyncedAtUtc);
+
         UPDATE ticket
         SET
             [TicketNumber] = incoming.[TicketNumber],

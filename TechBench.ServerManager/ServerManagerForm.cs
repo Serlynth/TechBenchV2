@@ -927,7 +927,10 @@ internal sealed class ServerManagerForm : Form
     {
         static string Time(DateTime? value) => value?.ToLocalTime().ToString("g") ?? "Never";
         var health = string.IsNullOrWhiteSpace(status.LastError) ? status.Status : $"{status.Status}: {status.LastError}";
-        var result = $"Health: {health}\r\nQueue: {status.QueueDepth} | Last attempt: {Time(status.LastAttemptAtUtc)} | Last success: {Time(status.LastSuccessfulAtUtc)}";
+        var workLabel = status.Status.Equals("Running", StringComparison.OrdinalIgnoreCase)
+            ? $"Work remaining: {status.QueueDepth} (includes the active step)"
+            : $"Waiting: {status.QueueDepth}";
+        var result = $"Health: {health}\r\n{workLabel} | Last attempt: {Time(status.LastAttemptAtUtc)} | Last success: {Time(status.LastSuccessfulAtUtc)}";
         return sage ? result + $"\r\nLast snapshot: read {status.ReadCount}, saved {status.SavedCount}, stale {status.StaleCount}" : result;
     }
 

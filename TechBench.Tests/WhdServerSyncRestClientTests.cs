@@ -303,6 +303,114 @@ public sealed class WhdServerSyncRestClientTests
     }
 
     [Fact]
+    public async Task TechnicianSyncReadsNestedCurrentTechnicianFromSession()
+    {
+        var handler = new RecordingHandler(request =>
+        {
+            if (request.Method == HttpMethod.Delete)
+            {
+                return Json(HttpStatusCode.OK, "{}");
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/Session", StringComparison.Ordinal) == true)
+            {
+                return Json(HttpStatusCode.OK, """
+                    {
+                      "session": {
+                        "sessionKey": "nested-session",
+                        "currentTechnician": {
+                          "technicianId": 99,
+                          "firstName": "Helpdesk",
+                          "lastName": "Manager",
+                          "userName": "WHDmgr",
+                          "emailAddress": "whdmgr@example.test",
+                          "activeAccount": true
+                        }
+                      }
+                    }
+                    """);
+            }
+
+            return Json(HttpStatusCode.OK, """
+                [
+                  {
+                    "id": 7,
+                    "displayName": "Ada Admin",
+                    "username": "aadmin",
+                    "isInactive": false
+                  }
+                ]
+                """);
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetTechniciansAsync(ExplicitSettings("WHDmgr"));
+
+        Assert.True(result.Success, result.Message);
+        var manager = Assert.Single(
+            result.Technicians,
+            technician => technician.ExternalId == "WHD-TECH-99");
+        Assert.Equal("Helpdesk Manager", manager.DisplayName);
+        Assert.Equal("WHDmgr", manager.Username);
+        Assert.Equal("whdmgr@example.test", manager.Email);
+        Assert.True(manager.IsActive);
+        Assert.DoesNotContain(
+            handler.Requests,
+            request => request.Uri?.AbsolutePath.Contains("/Techs/currentTech", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public async Task TechnicianSyncUsesDirectCurrentTechnicianWhenApplicationSessionIsUnavailable()
+    {
+        var handler = new RecordingHandler(request =>
+        {
+            if (request.RequestUri?.AbsolutePath.EndsWith("/Session", StringComparison.Ordinal) == true)
+            {
+                return Json(HttpStatusCode.Unauthorized, """{"message":"Session requires a technician key"}""");
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/Techs/currentTech", StringComparison.Ordinal) == true)
+            {
+                return Json(HttpStatusCode.OK, """
+                    {
+                      "id": 99,
+                      "firstName": "Helpdesk",
+                      "lastName": "Manager",
+                      "username": "WHDmgr",
+                      "activeAccount": true
+                    }
+                    """);
+            }
+
+            return Json(HttpStatusCode.OK, """
+                [
+                  {
+                    "id": 7,
+                    "displayName": "Ada Admin",
+                    "username": "aadmin",
+                    "isInactive": false
+                  }
+                ]
+                """);
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetTechniciansAsync(ExplicitSettings("WHDmgr"));
+
+        Assert.True(result.Success, result.Message);
+        var manager = Assert.Single(
+            result.Technicians,
+            technician => technician.ExternalId == "WHD-TECH-99");
+        Assert.Equal("Helpdesk Manager", manager.DisplayName);
+        Assert.Equal("WHDmgr", manager.Username);
+        Assert.Contains(
+            handler.Requests,
+            request => request.Uri?.AbsolutePath.EndsWith("/Techs/currentTech", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
     public async Task TechnicianGroupSyncFallsBackToTechnicianMembershipData()
     {
         var handler = new RecordingHandler(request =>

@@ -394,6 +394,7 @@ DECLARE @MappingDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.
 DECLARE @TechnicianListDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminGetWhdTechnicians'));
 DECLARE @SearchDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SearchTickets'));
 DECLARE @GetTicketDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetTicket'));
+DECLARE @TicketApplyDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyWhdTicketBatch'));
 
 SELECT @ClaimDefinition = REPLACE(REPLACE(REPLACE(@ClaimDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @CompleteDefinition = REPLACE(REPLACE(REPLACE(@CompleteDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
@@ -401,6 +402,7 @@ SELECT @MappingDefinition = REPLACE(REPLACE(REPLACE(@MappingDefinition, N' ', N'
 SELECT @TechnicianListDefinition = REPLACE(REPLACE(REPLACE(@TechnicianListDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @SearchDefinition = REPLACE(REPLACE(REPLACE(@SearchDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @GetTicketDefinition = REPLACE(REPLACE(REPLACE(@GetTicketDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @TicketApplyDefinition = REPLACE(REPLACE(REPLACE(@TicketApplyDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 
 IF CHARINDEX(N'sp_getapplock', @ClaimDefinition) = 0
    OR CHARINDEX(N'READCOMMITTEDLOCK', @ClaimDefinition) = 0
@@ -431,6 +433,14 @@ END;
 IF CHARINDEX(N'WHERE[IsActive]=1', @TechnicianListDefinition) = 0
 BEGIN
     PRINT N'FAIL: WHD technician mapping choices include inactive technicians.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'MERGE[tb_whd].[Technicians]', @TicketApplyDefinition) = 0
+   OR CHARINDEX(N'[AssignedTechExternalId]ISNOTNULL', @TicketApplyDefinition) = 0
+   OR CHARINDEX(N'[IsActive]=1', @TicketApplyDefinition) = 0
+BEGIN
+    PRINT N'FAIL: WHD ticket application does not recover assigned technicians omitted by the Techs collection.';
     SET @FailureCount += 1;
 END;
 

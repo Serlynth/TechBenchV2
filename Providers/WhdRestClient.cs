@@ -1002,19 +1002,37 @@ public sealed class WhdRestClient
             using var sessionResponse = await _httpClient.GetAsync(sessionUri, cancellationToken);
             if (!sessionResponse.IsSuccessStatusCode)
             {
-                return null;
+                return await TryGetConfiguredTechnicianDirectlyAsync(
+                    settings,
+                    auth,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             var sessionContent = await sessionResponse.Content.ReadAsStringAsync(cancellationToken);
             using var sessionDocument = JsonDocument.Parse(sessionContent);
-            sessionKey = ReadString(sessionDocument.RootElement, "sessionKey");
+            sessionKey = ReadSessionString(
+                sessionDocument.RootElement,
+                "sessionKey",
+                "key");
+
+            var embeddedTechnician = ParseSessionTechnician(
+                sessionDocument.RootElement,
+                settings.Username);
+            if (embeddedTechnician is not null)
+            {
+                return embeddedTechnician;
+            }
+
             if (string.IsNullOrWhiteSpace(sessionKey))
             {
-                return null;
+                return await TryGetConfiguredTechnicianDirectlyAsync(
+                    settings,
+                    auth,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             var sessionAuthentication = WhdAuthParameters.SessionKey(sessionKey);
-            var currentTechnicianId = ReadStringAny(
+            var currentTechnicianId = ReadSessionString(
                 sessionDocument.RootElement,
                 "currentTechId",
                 "techId",
@@ -1050,7 +1068,10 @@ public sealed class WhdRestClient
             // configured organization username instead of silently dropping
             // the active account from the mapping roster.
             return string.IsNullOrWhiteSpace(currentTechnicianId)
-                ? null
+                ? await TryGetConfiguredTechnicianDirectlyAsync(
+                    settings,
+                    auth,
+                    cancellationToken).ConfigureAwait(false)
                 : new WhdSyncedTechnician
                 {
                     ExternalId = FormatWhdTechnicianId(currentTechnicianId),
@@ -1073,6 +1094,32 @@ public sealed class WhdRestClient
                     CancellationToken.None).ConfigureAwait(false);
             }
         }
+    }
+
+    private async Task<WhdSyncedTechnician?> TryGetConfiguredTechnicianDirectlyAsync(
+        WhdConnectionSettings settings,
+        WhdAuthParameters auth,
+        CancellationToken cancellationToken)
+    {
+        var currentTechnician = await TryGetTechnicianAsync(
+            settings,
+            auth,
+            "Techs/currentTech",
+            cancellationToken).ConfigureAwait(false);
+        if (currentTechnician is not null)
+        {
+            return currentTechnician;
+        }
+
+        // WHD 12.x installations differ on whether the single-Tech resource
+        // accepts a login name as its path identifier. It is safe to probe:
+        // unsupported builds return a normal 400/404 and the ticket snapshot
+        // still recovers assigned administrators omitted from the Techs list.
+        return await TryGetTechnicianAsync(
+            settings,
+            auth,
+            $"Techs/{Uri.EscapeDataString(settings.Username.Trim())}",
+            cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<WhdSyncedTechnician?> TryGetTechnicianAsync(
@@ -1946,6 +1993,97 @@ public sealed class WhdRestClient
             if (!string.IsNullOrWhiteSpace(value))
             {
                 return value;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ReadSessionString(JsonElement root, params string[] propertyNames)
+    {
+        var direct = ReadStringAny(root, propertyNames);
+        if (!string.IsNullOrWhiteSpace(direct))
+        {
+            return direct;
+        }
+
+        foreach (var containerName in new[]
+                 {
+                     "session",
+                     "currentTech",
+                     "currentTechnician",
+                     "tech",
+                     "technician",
+                     "user"
+                 })
+        {
+            var container = TryGetObject(root, containerName);
+            if (!container.HasValue)
+            {
+                continue;
+            }
+
+            var nested = ReadStringAny(container.Value, propertyNames);
+            if (!string.IsNullOrWhiteSpace(nested))
+            {
+                return nested;
+            }
+        }
+
+        return null;
+    }
+
+    private static WhdSyncedTechnician? ParseSessionTechnician(
+        JsonElement root,
+        string configuredUsername)
+    {
+        foreach (var containerName in new[]
+                 {
+                     "currentTech",
+                     "currentTechnician",
+                     "tech",
+                     "technician"
+                 })
+        {
+            var container = TryGetObject(root, containerName);
+            if (!container.HasValue)
+            {
+                var session = TryGetObject(root, "session");
+                container = session.HasValue
+                    ? TryGetObject(session.Value, containerName)
+                    : null;
+            }
+
+            if (!container.HasValue)
+            {
+                continue;
+            }
+
+            var technician = ParseTechnicians(container.Value).FirstOrDefault();
+            if (technician is not null)
+            {
+                return technician;
+            }
+
+            var id = ReadStringAny(container.Value, "id", "currentTechId", "techId", "technicianId");
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                return new WhdSyncedTechnician
+                {
+                    ExternalId = FormatWhdTechnicianId(id),
+                    DisplayName = BuildName(container.Value)
+                        ?? ReadStringAny(container.Value, "displayName", "fullName", "name")
+                        ?? configuredUsername.Trim(),
+                    Username = ReadStringAny(container.Value, "username", "userName", "loginName")
+                        ?? configuredUsername.Trim(),
+                    Email = ReadStringAny(container.Value, "email", "emailAddress"),
+                    IsActive = !ReadBooleanAny(
+                        container.Value,
+                        "deleted",
+                        "inactive",
+                        "isInactive",
+                        "disabled")
+                };
             }
         }
 
