@@ -43,6 +43,11 @@ public sealed class CredentialWorkspaceLayoutTests
         Assert.Contains("SelectedFireDrillCredential.Fields", viewModel, StringComparison.Ordinal);
         Assert.Contains("field with { Value = \"***\" }", viewModel, StringComparison.Ordinal);
         Assert.Contains("PopulateRevealedFireDrillFields", viewModel, StringComparison.Ordinal);
+        Assert.Contains("TrySetClipboardText(value)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("catch (ExternalException)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("string.Equals(candidate.FieldName, field", viewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("selected credential field is invalid", viewModel, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Clipboard.SetText", viewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("AddFireDrillFields", viewModel, StringComparison.Ordinal);
         Assert.Contains("credential.Fields", viewModel, StringComparison.Ordinal);
     }

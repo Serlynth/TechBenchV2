@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Runtime.InteropServices;
 using TechBench.Models;
 
 namespace TechBench.ViewModels;
@@ -104,18 +105,57 @@ public sealed partial class MainWindowViewModel
 
     private void CopyFireDrillField(object? parameter)
     {
-        if (RevealedFireDrillCredential is null || parameter is not string field) return;
+        if (RevealedFireDrillCredential is null ||
+            parameter is not string field ||
+            string.IsNullOrWhiteSpace(field))
+        {
+            StatusMessage = "Select and reveal a credential field before copying it.";
+            return;
+        }
         var selectedField = RevealedFireDrillCredential.Fields.FirstOrDefault(candidate =>
-            candidate.FieldName.Equals(field, StringComparison.OrdinalIgnoreCase))
-            ?? throw new InvalidOperationException("The selected credential field is invalid.");
+            string.Equals(candidate.FieldName, field, StringComparison.OrdinalIgnoreCase));
+        if (selectedField is null)
+        {
+            StatusMessage = "That credential field is no longer available. Hide and reveal the credentials, then try again.";
+            return;
+        }
         var value = selectedField.Value;
         if (string.IsNullOrEmpty(value))
         {
             StatusMessage = "That credential field is blank.";
             return;
         }
-        System.Windows.Clipboard.SetText(value);
+        if (!TrySetClipboardText(value))
+        {
+            StatusMessage = "Windows could not access the clipboard. Close any clipboard manager and try Copy again.";
+            return;
+        }
         StatusMessage = $"Copied {selectedField.Label} for {RevealedFireDrillCredential.ClientName}.";
+    }
+
+    internal static bool TrySetClipboardText(string value)
+    {
+        for (var attempt = 1; attempt <= 5; attempt++)
+        {
+            try
+            {
+                System.Windows.Clipboard.SetDataObject(value, copy: true);
+                return true;
+            }
+            catch (ExternalException) when (attempt < 5)
+            {
+                Thread.Sleep(40);
+            }
+            catch (ExternalException)
+            {
+                return false;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+        return false;
     }
 
     private void ClearRevealedFireDrillCredential()
