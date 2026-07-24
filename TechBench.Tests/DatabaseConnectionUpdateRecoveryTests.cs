@@ -59,6 +59,35 @@ public sealed class DatabaseConnectionUpdateRecoveryTests
         Assert.Contains("TrustServerCertificate: true", codeBehind, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void DatabaseOpenFailure_ExplainsStaleWindowsGroupToken()
+    {
+        var message = DatabaseConnectionWindow.BuildDatabaseOpenFailureMessage(
+            new DatabaseConnectionWindow.WindowsAccessDiagnostic(
+                @"CSRI\kallen",
+                IsUser: false,
+                IsAdmin: false));
+
+        Assert.Contains(@"CSRI\kallen", message, StringComparison.Ordinal);
+        Assert.Contains(@"CSRI\TechBench_Admins", message, StringComparison.Ordinal);
+        Assert.Contains("fully sign out of Windows and sign back in", message, StringComparison.Ordinal);
+        Assert.Contains("locking Windows", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DatabaseOpenFailure_WithAdminToken_ExplainsSqlRepair()
+    {
+        var message = DatabaseConnectionWindow.BuildDatabaseOpenFailureMessage(
+            new DatabaseConnectionWindow.WindowsAccessDiagnostic(
+                @"CSRI\kallen",
+                IsUser: false,
+                IsAdmin: true));
+
+        Assert.Contains(@"CSRI\TechBench_Admins", message, StringComparison.Ordinal);
+        Assert.Contains("DBA", message, StringComparison.Ordinal);
+        Assert.Contains("SQL installer", message, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

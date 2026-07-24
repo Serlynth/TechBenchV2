@@ -290,10 +290,69 @@ public partial class DatabaseConnectionWindow : Window
             -2 => "SQL Server did not respond before the connection timed out.",
             53 => "The SQL Server or instance could not be found.",
             229 => "Your Windows account does not have permission to use TechBench.",
-            4060 => "The TechBench database could not be opened.",
+            4060 => BuildDatabaseOpenFailureMessage(GetCurrentWindowsAccess()),
             18456 => "SQL Server did not accept your Windows domain identity.",
             51913 => "That non-Admin user must have opened TechBench V2 within the past hour and still have TechBench access.",
             _ => $"Could not connect to SQL Server: {exception.Message}"
         };
     }
+
+    private static WindowsAccessDiagnostic GetCurrentWindowsAccess()
+    {
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            var principal = new WindowsPrincipal(identity);
+            return new WindowsAccessDiagnostic(
+                identity.Name ?? Environment.UserName,
+                principal.IsInRole(@"CSRI\TechBench_Users"),
+                principal.IsInRole(@"CSRI\TechBench_Admins"));
+        }
+        catch
+        {
+            return new WindowsAccessDiagnostic(
+                WindowsIdentity.GetCurrent().Name ?? Environment.UserName,
+                IsUser: false,
+                IsAdmin: false,
+                CouldInspectGroups: false);
+        }
+    }
+
+    internal static string BuildDatabaseOpenFailureMessage(
+        WindowsAccessDiagnostic access)
+    {
+        if (!access.CouldInspectGroups)
+        {
+            return
+                $"The TechBench database could not be opened for {access.IdentityName}. "
+                + "TechBench could not inspect this Windows sign-in's domain groups. "
+                + @"Run `whoami /groups` and verify that CSRI\TechBench_Admins or "
+                + @"CSRI\TechBench_Users is present.";
+        }
+
+        if (!access.IsUser && !access.IsAdmin)
+        {
+            return
+                $"The TechBench database could not be opened for {access.IdentityName}. "
+                + @"This Windows sign-in does not currently contain CSRI\TechBench_Admins "
+                + @"or CSRI\TechBench_Users. If the account was recently added, fully sign "
+                + "out of Windows and sign back in. Closing TechBench, locking Windows, or "
+                + "restarting only the app will not refresh domain-group membership.";
+        }
+
+        var recognizedGroup = access.IsAdmin
+            ? @"CSRI\TechBench_Admins"
+            : @"CSRI\TechBench_Users";
+        return
+            $"The TechBench database could not be opened for {access.IdentityName}, even "
+            + $"though this Windows sign-in contains {recognizedGroup}. Have the DBA rerun "
+            + "the current TechBench SQL installer to repair the group login and TechBench "
+            + "database user, then try again.";
+    }
+
+    internal sealed record WindowsAccessDiagnostic(
+        string IdentityName,
+        bool IsUser,
+        bool IsAdmin,
+        bool CouldInspectGroups = true);
 }
