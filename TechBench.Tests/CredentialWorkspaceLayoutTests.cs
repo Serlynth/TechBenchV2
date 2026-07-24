@@ -11,7 +11,7 @@ public sealed class CredentialWorkspaceLayoutTests
         var xaml = ReadRepositoryFile("MainWindow.xaml");
 
         Assert.Contains(
-            "Content=\"Client Info\" Command=\"{Binding NavigateCommand}\" CommandParameter=\"Client Info\"",
+            "Content=\"CLIENT INFO\" Command=\"{Binding NavigateCommand}\" CommandParameter=\"Client Info\"",
             xaml,
             StringComparison.Ordinal);
         foreach (var section in new[] { "Client WiFi", "Domain/AD", "Connection", "Misc Info" })
@@ -27,6 +27,23 @@ public sealed class CredentialWorkspaceLayoutTests
             StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding CredentialWorkspaceTitle}\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("CommandParameter=\"Client Credentials\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SidebarNavigationScrollsAndUsesProminentSectionHeaders()
+    {
+        var xaml = ReadRepositoryFile("MainWindow.xaml");
+
+        Assert.Contains("x:Name=\"SidebarNavigationScrollViewer\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("VerticalScrollBarVisibility=\"Auto\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"NOTES\" Style=\"{StaticResource SidebarGroupLabelStyle}\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"WORKLOG\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Key=\"SidebarGroupHeaderStyle\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Key=\"SidebarGroupButtonStyle\"", xaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "x:Key=\"NavClientInfoStyle\" TargetType=\"{x:Type Button}\" BasedOn=\"{StaticResource SidebarGroupButtonStyle}\"",
+            xaml,
+            StringComparison.Ordinal);
     }
 
     [Fact]
