@@ -274,8 +274,17 @@ public sealed class WhdRestClient
                 }
             }
 
+            var contactsByLocation = await GetBestLocationContactsAsync(
+                settings,
+                auth,
+                cancellationToken);
+            clients = clients
+                .Select(location => EnrichLocation(location, contactsByLocation))
+                .ToList();
+
             return WhdClientSyncResult.Succeeded(
                 $"Synced {clients.Count} active Web Help Desk location(s)."
+                + $" Added contact details for {clients.Count(client => !string.IsNullOrWhiteSpace(client.ContactName))} location(s)."
                 + (isComplete ? string.Empty : " Paging stopped because WHD repeated a page; stale-client reconciliation was skipped."),
                 clients,
                 isComplete);
@@ -981,6 +990,77 @@ public sealed class WhdRestClient
         return ParseLocations(document.RootElement);
     }
 
+    private async Task<IReadOnlyDictionary<string, WhdLocationContact>> GetBestLocationContactsAsync(
+        WhdConnectionSettings settings,
+        WhdAuthParameters auth,
+        CancellationToken cancellationToken)
+    {
+        var contacts = new List<WhdLocationContact>();
+        var pageSignatures = new HashSet<string>(StringComparer.Ordinal);
+
+        for (var page = 1; page <= MaximumPageCount; page++)
+        {
+            var batch = await GetClientContactsPageAsync(
+                settings,
+                auth,
+                page,
+                PageSize,
+                cancellationToken);
+            if (batch.Count == 0)
+                break;
+
+            var signature = BuildPageSignature(
+                batch.Select(contact => $"{contact.LocationExternalId}:{contact.ExternalId}"));
+            if (!pageSignatures.Add(signature))
+                break;
+
+            contacts.AddRange(batch.Where(static contact => contact.IsActive));
+            if (batch.Count < PageSize)
+                break;
+        }
+
+        return contacts
+            .GroupBy(contact => contact.LocationExternalId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .OrderByDescending(static contact => contact.IsPrimary)
+                    .ThenByDescending(static contact => contact.CompletenessScore)
+                    .ThenBy(static contact => contact.Name, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(static contact => contact.ExternalId, StringComparer.OrdinalIgnoreCase)
+                    .First(),
+                StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task<IReadOnlyList<WhdLocationContact>> GetClientContactsPageAsync(
+        WhdConnectionSettings settings,
+        WhdAuthParameters auth,
+        int page,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var requestUri = BuildRequestUri(settings.BaseUrl, "Clients", auth, new Dictionary<string, string>
+        {
+            ["style"] = "long",
+            ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            ["page"] = page.ToString(CultureInfo.InvariantCulture)
+        });
+
+        using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var message = string.IsNullOrWhiteSpace(content) ? response.ReasonPhrase : content.Trim();
+            throw new HttpRequestException(
+                $"HTTP {(int)response.StatusCode} from Web Help Desk clients: {message}",
+                null,
+                response.StatusCode);
+        }
+
+        using var document = JsonDocument.Parse(content);
+        return ParseClientContacts(document.RootElement);
+    }
+
     private async Task<IReadOnlyList<WhdSyncedTechnician>> GetTechniciansPageAsync(
         WhdConnectionSettings settings,
         WhdAuthParameters auth,
@@ -1572,6 +1652,47 @@ public sealed class WhdRestClient
         return locations;
     }
 
+    private static IReadOnlyList<WhdLocationContact> ParseClientContacts(JsonElement root)
+    {
+        var contacts = new List<WhdLocationContact>();
+        foreach (var element in EnumerateRecords(root))
+        {
+            if (element.ValueKind != JsonValueKind.Object)
+                continue;
+
+            var location = TryGetObject(element, "location")
+                ?? TryGetObject(element, "defaultLocation");
+            var locationId = location.HasValue
+                ? ReadStringAny(location.Value, "id", "locationId")
+                : ReadStringAny(element, "locationId", "defaultLocationId");
+            var externalId = ReadStringAny(element, "id", "clientId", "username", "email");
+            if (string.IsNullOrWhiteSpace(locationId) || string.IsNullOrWhiteSpace(externalId))
+                continue;
+
+            var name = ReadStringAny(element, "displayName", "fullName", "name")
+                ?? BuildName(element)
+                ?? ReadStringAny(element, "username", "email")
+                ?? $"WHD client {externalId}";
+            contacts.Add(new WhdLocationContact(
+                FormatWhdLocationId(locationId),
+                externalId.Trim(),
+                name.Trim(),
+                TrimToNull(ReadStringAny(element, "email", "emailAddress")),
+                TrimToNull(ReadStringAny(element, "phone", "phone1", "phoneNumber")),
+                !ReadBooleanAny(element, "deleted", "inactive", "isInactive", "disabled"),
+                ReadBooleanAny(
+                    element,
+                    "isPrimary",
+                    "primary",
+                    "isPrimaryContact",
+                    "primaryContact",
+                    "isAdmin",
+                    "admin")));
+        }
+
+        return contacts;
+    }
+
     private static IReadOnlyList<WhdSyncedTechnician> ParseTechnicians(JsonElement root)
     {
         var technicians = new List<WhdSyncedTechnician>();
@@ -1775,8 +1896,30 @@ public sealed class WhdRestClient
             Name = trimmedName,
             LocationName = trimmedName,
             ContactName = null,
+            Phone = TrimToNull(ReadStringAny(locationElement, "phone", "phone1", "phoneNumber")),
+            Address = FormatAddress(locationElement),
             IsActive = isActive
         });
+    }
+
+    private static WhdSyncedClient EnrichLocation(
+        WhdSyncedClient location,
+        IReadOnlyDictionary<string, WhdLocationContact> contactsByLocation)
+    {
+        if (!contactsByLocation.TryGetValue(location.ExternalId, out var contact))
+            return location;
+
+        return new WhdSyncedClient
+        {
+            ExternalId = location.ExternalId,
+            Name = location.Name,
+            LocationName = location.LocationName,
+            ContactName = contact.Name,
+            ContactEmail = contact.Email,
+            Phone = contact.Phone ?? location.Phone,
+            Address = location.Address,
+            IsActive = location.IsActive
+        };
     }
 
     private static void AddStatusType(List<WhdStatusType> statusTypes, JsonElement statusTypeElement)
@@ -1951,8 +2094,53 @@ public sealed class WhdRestClient
                 : FormatWhdId(clientId),
             Name = name,
             LocationName = string.IsNullOrWhiteSpace(locationName) ? null : locationName.Trim(),
-            ContactName = string.IsNullOrWhiteSpace(clientName) ? null : clientName.Trim()
+            ContactName = string.IsNullOrWhiteSpace(clientName) ? null : clientName.Trim(),
+            ContactEmail = TrimToNull(ReadStringAny(element, "email", "emailAddress")),
+            Phone = TrimToNull(ReadStringAny(element, "phone", "phone1", "phoneNumber"))
+                ?? (locationElement.HasValue
+                    ? TrimToNull(ReadStringAny(locationElement.Value, "phone", "phone1", "phoneNumber"))
+                    : null),
+            Address = locationElement.HasValue ? FormatAddress(locationElement.Value) : null
         };
+    }
+
+    private static string? FormatAddress(JsonElement element)
+    {
+        var street = TrimToNull(ReadStringAny(element, "address", "address1", "street"));
+        var city = TrimToNull(ReadStringAny(element, "city"));
+        var state = TrimToNull(ReadStringAny(element, "state", "province"));
+        var postalCode = TrimToNull(ReadStringAny(element, "postalCode", "zip", "zipCode"));
+        var country = TrimToNull(ReadStringAny(element, "country"));
+
+        var cityLine = string.Join(
+            ", ",
+            new[] { city, state }.Where(static value => !string.IsNullOrWhiteSpace(value)));
+        if (!string.IsNullOrWhiteSpace(postalCode))
+            cityLine = string.IsNullOrWhiteSpace(cityLine) ? postalCode : $"{cityLine} {postalCode}";
+
+        var parts = new[] { street, TrimToNull(cityLine), country }
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return parts.Length == 0 ? null : string.Join(", ", parts);
+    }
+
+    private static string? TrimToNull(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private sealed record WhdLocationContact(
+        string LocationExternalId,
+        string ExternalId,
+        string Name,
+        string? Email,
+        string? Phone,
+        bool IsActive,
+        bool IsPrimary)
+    {
+        public int CompletenessScore =>
+            (string.IsNullOrWhiteSpace(Name) ? 0 : 1)
+            + (string.IsNullOrWhiteSpace(Email) ? 0 : 1)
+            + (string.IsNullOrWhiteSpace(Phone) ? 0 : 1);
     }
 
     private static string BuildClientDisplayName(string? locationName, string clientName)

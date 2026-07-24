@@ -383,6 +383,9 @@ public sealed partial class SqlServerTechBenchRepository
             LastSyncedAt = GetNullableDateTime(reader, "LastSyncedAt"),
             WhdLocationName = GetNullableString(reader, "WhdLocationName"),
             WhdContactName = GetNullableString(reader, "WhdContactName"),
+            WhdContactEmail = GetNullableString(reader, "WhdContactEmail"),
+            WhdPhone = GetNullableString(reader, "WhdPhone"),
+            WhdAddress = GetNullableString(reader, "WhdAddress"),
             SageCustomerId = GetNullableString(reader, "SageCustomerId"),
             SageCustomerName = GetNullableString(reader, "SageCustomerName"),
             SageContactName = GetNullableString(reader, "SageContactName"),
@@ -488,6 +491,9 @@ public sealed partial class SqlServerTechBenchRepository
         target.LastSyncedAt = source.LastSyncedAt;
         target.WhdLocationName = source.WhdLocationName;
         target.WhdContactName = source.WhdContactName;
+        target.WhdContactEmail = source.WhdContactEmail;
+        target.WhdPhone = source.WhdPhone;
+        target.WhdAddress = source.WhdAddress;
         target.SageCustomerId = source.SageCustomerId;
         target.SageCustomerName = source.SageCustomerName;
         target.SageContactName = source.SageContactName;

@@ -16,7 +16,7 @@ BEGIN
     EXEC [tb_security].[GetCurrentAccess]
         @UserSid=@UserSid OUTPUT, @IsManager=@IsManager OUTPUT,
         @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
-    SELECT CONVERT(int, 12) AS [SchemaVersion], CONVERT(bit, 0) AS [FullTextSearchAvailable],
+    SELECT CONVERT(int, 13) AS [SchemaVersion], CONVERT(bit, 0) AS [FullTextSearchAvailable],
         CONVERT(bit, 1) AS [SupportsTickets], CONVERT(bit, 1) AS [SupportsWorkEntries],
         CONVERT(bit, 1) AS [SupportsPrivateNotes], CONVERT(bit, 1) AS [SupportsPostingLeases],
         CONVERT(bit, 1) AS [SupportsSyncLeases], CONVERT(bit, 1) AS [SupportsImports],

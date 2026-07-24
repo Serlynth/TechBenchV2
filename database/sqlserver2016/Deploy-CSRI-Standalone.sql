@@ -3204,6 +3204,70 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 32-V0013-WhdClientContactDetailsSchema.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.FlexibleCredentialFields.0012'
+      AND [SchemaVersion] = 12
+)
+BEGIN
+    RAISERROR(N'V0012 must be installed before WHD client contact schema version 13.', 16, 1);
+    RETURN;
+END;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF COL_LENGTH(N'tb_data.Clients', N'WhdContactEmail') IS NULL
+        ALTER TABLE [tb_data].[Clients]
+            ADD [WhdContactEmail] nvarchar(255) NULL;
+
+    IF COL_LENGTH(N'tb_data.Clients', N'WhdPhone') IS NULL
+        ALTER TABLE [tb_data].[Clients]
+            ADD [WhdPhone] nvarchar(80) NULL;
+
+    IF COL_LENGTH(N'tb_data.Clients', N'WhdAddress') IS NULL
+        ALTER TABLE [tb_data].[Clients]
+            ADD [WhdAddress] nvarchar(600) NULL;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_deploy].[SchemaMigrations]
+        WHERE [MigrationId] = N'SqlServer2016.WhdClientContactDetails.0013'
+    )
+        INSERT INTO [tb_deploy].[SchemaMigrations]
+            ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+        VALUES
+            (N'SqlServer2016.WhdClientContactDetails.0013', 13, N'0.5.54', NULL);
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+PRINT N'SqlServer2016.WhdClientContactDetails.0013 installed.';
+GO
+
+-- ============================================================================
+-- END 32-V0013-WhdClientContactDetailsSchema.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 30-Security.sql
 -- ============================================================================
 
@@ -3728,6 +3792,9 @@ BEGIN
         client.[LastSyncedAtUtc] AS [LastSyncedAt],
         client.[WhdLocationName],
         client.[WhdContactName],
+        client.[WhdContactEmail],
+        client.[WhdPhone],
+        client.[WhdAddress],
         client.[SageCustomerId],
         client.[SageCustomerName],
         client.[SageContactName],
@@ -3742,6 +3809,9 @@ BEGIN
           OR client.[Name] LIKE @Pattern ESCAPE N'~'
           OR client.[WhdLocationName] LIKE @Pattern ESCAPE N'~'
           OR client.[WhdContactName] LIKE @Pattern ESCAPE N'~'
+          OR client.[WhdContactEmail] LIKE @Pattern ESCAPE N'~'
+          OR client.[WhdPhone] LIKE @Pattern ESCAPE N'~'
+          OR client.[WhdAddress] LIKE @Pattern ESCAPE N'~'
           OR client.[SageCustomerId] LIKE @Pattern ESCAPE N'~'
           OR client.[SageCustomerName] LIKE @Pattern ESCAPE N'~'
           OR client.[SageContactName] LIKE @Pattern ESCAPE N'~'
@@ -3787,6 +3857,9 @@ BEGIN
         client.[LastSyncedAtUtc] AS [LastSyncedAt],
         client.[WhdLocationName],
         client.[WhdContactName],
+        client.[WhdContactEmail],
+        client.[WhdPhone],
+        client.[WhdAddress],
         client.[SageCustomerId],
         client.[SageCustomerName],
         client.[SageContactName],
@@ -4020,6 +4093,9 @@ BEGIN
             client.[LastSyncedAtUtc] AS [LastSyncedAt],
             client.[WhdLocationName],
             client.[WhdContactName],
+            client.[WhdContactEmail],
+            client.[WhdPhone],
+            client.[WhdAddress],
             client.[SageCustomerId],
             client.[SageCustomerName],
             client.[SageContactName],
@@ -15905,6 +15981,9 @@ BEGIN
         [Name] nvarchar(240) NOT NULL,
         [LocationName] nvarchar(240) NULL,
         [ContactName] nvarchar(240) NULL,
+        [ContactEmail] nvarchar(255) NULL,
+        [Phone] nvarchar(80) NULL,
+        [Address] nvarchar(600) NULL,
         [IsActive] bit NOT NULL
     );
 
@@ -15915,6 +15994,9 @@ BEGIN
             NULLIF(LTRIM(RTRIM([Name])), N'') AS [Name],
             NULLIF(LTRIM(RTRIM([LocationName])), N'') AS [LocationName],
             NULLIF(LTRIM(RTRIM([ContactName])), N'') AS [ContactName],
+            NULLIF(LTRIM(RTRIM([ContactEmail])), N'') AS [ContactEmail],
+            NULLIF(LTRIM(RTRIM([Phone])), N'') AS [Phone],
+            NULLIF(LTRIM(RTRIM([Address])), N'') AS [Address],
             COALESCE([IsActive], 1) AS [IsActive]
         FROM OPENJSON(@Json)
         WITH
@@ -15923,6 +16005,9 @@ BEGIN
             [Name] nvarchar(240) '$.name',
             [LocationName] nvarchar(240) '$.locationName',
             [ContactName] nvarchar(240) '$.contactName',
+            [ContactEmail] nvarchar(255) '$.contactEmail',
+            [Phone] nvarchar(80) '$.phone',
+            [Address] nvarchar(600) '$.address',
             [IsActive] bit '$.isActive'
         )
     ),
@@ -15933,8 +16018,10 @@ BEGIN
         FROM parsed
         WHERE [ExternalId] IS NOT NULL AND [Name] IS NOT NULL
     )
-    INSERT INTO @Snapshot([ExternalId], [Name], [LocationName], [ContactName], [IsActive])
-    SELECT [ExternalId], [Name], [LocationName], [ContactName], [IsActive]
+    INSERT INTO @Snapshot
+        ([ExternalId], [Name], [LocationName], [ContactName], [ContactEmail], [Phone], [Address], [IsActive])
+    SELECT
+        [ExternalId], [Name], [LocationName], [ContactName], [ContactEmail], [Phone], [Address], [IsActive]
     FROM ranked
     WHERE [RowNumber] = 1;
 
@@ -15962,7 +16049,26 @@ BEGIN
         SET
             [Name] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[Name] ELSE client.[Name] END,
             [WhdLocationName] = snapshot.[LocationName],
-            [WhdContactName] = snapshot.[ContactName],
+            [WhdContactName] =
+                CASE WHEN @ClientWorkType = N'Clients'
+                    THEN snapshot.[ContactName]
+                    ELSE COALESCE(client.[WhdContactName], snapshot.[ContactName])
+                END,
+            [WhdContactEmail] =
+                CASE WHEN @ClientWorkType = N'Clients'
+                    THEN snapshot.[ContactEmail]
+                    ELSE COALESCE(client.[WhdContactEmail], snapshot.[ContactEmail])
+                END,
+            [WhdPhone] =
+                CASE WHEN @ClientWorkType = N'Clients'
+                    THEN snapshot.[Phone]
+                    ELSE COALESCE(client.[WhdPhone], snapshot.[Phone])
+                END,
+            [WhdAddress] =
+                CASE WHEN @ClientWorkType = N'Clients'
+                    THEN snapshot.[Address]
+                    ELSE COALESCE(client.[WhdAddress], snapshot.[Address])
+                END,
             [IsActive] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[IsActive] ELSE client.[IsActive] END,
             [LastSyncedAtUtc] = @SyncedAtUtc,
             [UpdatedAtUtc] = SYSUTCDATETIME(),
@@ -16021,14 +16127,15 @@ BEGIN
         INSERT INTO [tb_data].[Clients]
         (
             [Name], [Source], [ExternalId], [IsActive], [LastSyncedAtUtc],
-            [WhdLocationName], [WhdContactName], [MatchStatus],
+            [WhdLocationName], [WhdContactName], [WhdContactEmail], [WhdPhone], [WhdAddress], [MatchStatus],
             [CreatedByWindowsSid], [UpdatedByWindowsSid]
         )
         OUTPUT inserted.[ExternalId], inserted.[Id]
             INTO @NewClients([ExternalId], [ClientId])
         SELECT
             snapshot.[Name], N'WHD', snapshot.[ExternalId], snapshot.[IsActive], @SyncedAtUtc,
-            snapshot.[LocationName], snapshot.[ContactName], N'Unmatched', @ActorSid, @ActorSid
+            snapshot.[LocationName], snapshot.[ContactName], snapshot.[ContactEmail],
+            snapshot.[Phone], snapshot.[Address], N'Unmatched', @ActorSid, @ActorSid
         FROM @Snapshot AS snapshot
         WHERE NOT EXISTS
         (
@@ -16056,7 +16163,26 @@ BEGIN
         SET
             [Name] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[Name] ELSE client.[Name] END,
             [WhdLocationName] = snapshot.[LocationName],
-            [WhdContactName] = snapshot.[ContactName],
+            [WhdContactName] =
+                CASE WHEN @ClientWorkType = N'Clients'
+                    THEN snapshot.[ContactName]
+                    ELSE COALESCE(client.[WhdContactName], snapshot.[ContactName])
+                END,
+            [WhdContactEmail] =
+                CASE WHEN @ClientWorkType = N'Clients'
+                    THEN snapshot.[ContactEmail]
+                    ELSE COALESCE(client.[WhdContactEmail], snapshot.[ContactEmail])
+                END,
+            [WhdPhone] =
+                CASE WHEN @ClientWorkType = N'Clients'
+                    THEN snapshot.[Phone]
+                    ELSE COALESCE(client.[WhdPhone], snapshot.[Phone])
+                END,
+            [WhdAddress] =
+                CASE WHEN @ClientWorkType = N'Clients'
+                    THEN snapshot.[Address]
+                    ELSE COALESCE(client.[WhdAddress], snapshot.[Address])
+                END,
             [IsActive] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[IsActive] ELSE client.[IsActive] END,
             [LastSyncedAtUtc] = @SyncedAtUtc,
             [UpdatedAtUtc] = SYSUTCDATETIME(),
@@ -20326,7 +20452,7 @@ BEGIN
     EXEC [tb_security].[GetCurrentAccess]
         @UserSid=@UserSid OUTPUT, @IsManager=@IsManager OUTPUT,
         @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
-    SELECT CONVERT(int, 12) AS [SchemaVersion], CONVERT(bit, 0) AS [FullTextSearchAvailable],
+    SELECT CONVERT(int, 13) AS [SchemaVersion], CONVERT(bit, 0) AS [FullTextSearchAvailable],
         CONVERT(bit, 1) AS [SupportsTickets], CONVERT(bit, 1) AS [SupportsWorkEntries],
         CONVERT(bit, 1) AS [SupportsPrivateNotes], CONVERT(bit, 1) AS [SupportsPostingLeases],
         CONVERT(bit, 1) AS [SupportsSyncLeases], CONVERT(bit, 1) AS [SupportsImports],
@@ -21902,7 +22028,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)
 BEGIN
     PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -22658,7 +22784,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)
 BEGIN
     PRINT N'FAIL: V0003 verification supports installed schema version 3, 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -23142,7 +23268,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10, 11, 12)
+IF @InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13)
 BEGIN
     PRINT N'FAIL: V0004 verification supports installed schema version 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -23860,7 +23986,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10, 11, 12)
+IF @InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10, 11, 12, 13)
 BEGIN
     PRINT N'FAIL: V0005 verification supports installed schema version 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -25067,7 +25193,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (6, 7, 8, 9, 10, 11, 12)
+IF @InstalledSchemaVersion NOT IN (6, 7, 8, 9, 10, 11, 12, 13)
 BEGIN
     PRINT N'FAIL: V0006 verification supports installed schema version 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -25632,7 +25758,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (7, 8, 9, 10, 11, 12)
+IF @InstalledSchemaVersion NOT IN (7, 8, 9, 10, 11, 12, 13)
 BEGIN
     PRINT N'FAIL: V0007 verification supports installed schema version 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -26294,7 +26420,7 @@ IF NOT EXISTS
 )
 BEGIN PRINT N'FAIL: V0008 migration marker is missing or invalid.'; SET @FailureCount+=1; END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (8, 9, 10, 11, 12)
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (8, 9, 10, 11, 12, 13)
 BEGIN PRINT N'FAIL: installed schema version is not supported by V0008 verification.'; SET @FailureCount+=1; END;
 
 DECLARE @Objects TABLE([Name] nvarchar(300) PRIMARY KEY,[Type] char(2));
@@ -26403,7 +26529,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (9, 10, 11, 12)
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (9, 10, 11, 12, 13)
 BEGIN
     PRINT N'FAIL: installed schema version is not 9.';
     SET @FailureCount += 1;
@@ -26436,6 +26562,7 @@ END;
 
 IF CHARINDEX(N'CONVERT(int, 11) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
    AND CHARINDEX(N'CONVERT(int, 12) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+   AND CHARINDEX(N'CONVERT(int, 13) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
 BEGIN
     PRINT N'FAIL: GetRepositoryCapabilities does not report the final schema version.';
     SET @FailureCount += 1;
@@ -26481,7 +26608,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (10, 11, 12)
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (10, 11, 12, 13)
 BEGIN
     PRINT N'FAIL: installed schema version is not 10 or 11.';
     SET @FailureCount += 1;
@@ -26591,6 +26718,8 @@ IF CHARINDEX(N'CONVERT(int, 11) AS [SchemaVersion]',
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
    AND CHARINDEX(N'CONVERT(int, 12) AS [SchemaVersion]',
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+   AND CHARINDEX(N'CONVERT(int, 13) AS [SchemaVersion]',
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
 BEGIN
     PRINT N'FAIL: GetRepositoryCapabilities does not report a supported final schema version.';
     SET @FailureCount += 1;
@@ -26636,7 +26765,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (11, 12)
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (11, 12, 13)
 BEGIN
     PRINT N'FAIL: installed schema version is not 11 or 12.';
     SET @FailureCount += 1;
@@ -26707,6 +26836,8 @@ IF CHARINDEX(N'CONVERT(int, 11) AS [SchemaVersion]',
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
    AND CHARINDEX(N'CONVERT(int, 12) AS [SchemaVersion]',
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+   AND CHARINDEX(N'CONVERT(int, 13) AS [SchemaVersion]',
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
 BEGIN
     PRINT N'FAIL: GetRepositoryCapabilities does not report a supported final schema version.';
     SET @FailureCount += 1;
@@ -26766,8 +26897,9 @@ DECLARE @RevealDefinition nvarchar(max)=
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealFireDrillCredential'));
 
 IF CHARINDEX(N'CONVERT(int, 12) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition,N''))=0
+   AND CHARINDEX(N'CONVERT(int, 13) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition,N''))=0
 BEGIN
-    PRINT N'FAIL: repository capabilities do not report schema version 12.';
+    PRINT N'FAIL: repository capabilities do not report a supported final schema version.';
     SET @FailureCount+=1;
 END;
 
@@ -26834,6 +26966,83 @@ GO
 
 -- ============================================================================
 -- END 101-V0012-FlexibleCredentialFieldsVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 102-V0013-WhdClientContactDetailsVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @FailureCount int = 0;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.WhdClientContactDetails.0013'
+      AND [SchemaVersion] = 13
+)
+BEGIN
+    PRINT N'FAIL: V0013 WHD client contact migration is not installed.';
+    SET @FailureCount += 1;
+END;
+
+IF COL_LENGTH(N'tb_data.Clients', N'WhdContactEmail') IS NULL
+   OR COL_LENGTH(N'tb_data.Clients', N'WhdPhone') IS NULL
+   OR COL_LENGTH(N'tb_data.Clients', N'WhdAddress') IS NULL
+BEGIN
+    PRINT N'FAIL: one or more WHD client contact columns are missing.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @CapabilitiesDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'));
+DECLARE @SearchDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SearchClients', N'P'));
+DECLARE @GetDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetClient', N'P'));
+DECLARE @ApplyDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyWhdClientSnapshot', N'P'));
+
+IF CHARINDEX(N'CONVERT(int, 13) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition, N'')) = 0
+BEGIN
+    PRINT N'FAIL: repository capabilities do not report schema version 13.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'client.[WhdContactEmail]', COALESCE(@SearchDefinition, N'')) = 0
+   OR CHARINDEX(N'client.[WhdPhone]', COALESCE(@SearchDefinition, N'')) = 0
+   OR CHARINDEX(N'client.[WhdAddress]', COALESCE(@SearchDefinition, N'')) = 0
+   OR CHARINDEX(N'client.[WhdContactEmail]', COALESCE(@GetDefinition, N'')) = 0
+BEGIN
+    PRINT N'FAIL: approved client readers do not return WHD contact details.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'[ContactEmail] nvarchar(255) ''$.contactEmail''', COALESCE(@ApplyDefinition, N'')) = 0
+   OR CHARINDEX(N'[WhdContactEmail]', COALESCE(@ApplyDefinition, N'')) = 0
+   OR CHARINDEX(N'[WhdPhone]', COALESCE(@ApplyDefinition, N'')) = 0
+   OR CHARINDEX(N'[WhdAddress]', COALESCE(@ApplyDefinition, N'')) = 0
+BEGIN
+    PRINT N'FAIL: WHD synchronization does not persist the new contact details.';
+    SET @FailureCount += 1;
+END;
+
+IF @FailureCount > 0
+    THROW 52100, N'TechBench V0013 WHD client contact verification failed.', 1;
+
+PRINT N'TechBench V0013 WHD client contact verification passed.';
+GO
+
+-- ============================================================================
+-- END 102-V0013-WhdClientContactDetailsVerify.sql
 -- ============================================================================
 
 PRINT N'TechBench deployment completed successfully on CSRI-SQL.';

@@ -92,7 +92,7 @@ public sealed partial class SqlServer2016SyntaxTests
         var source = File.ReadAllText(path);
 
         Assert.Contains(
-            "@InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)",
+            "@InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)",
             source,
             StringComparison.OrdinalIgnoreCase);
 
@@ -147,13 +147,13 @@ public sealed partial class SqlServer2016SyntaxTests
     [Theory]
     [InlineData(
         "92-V0003-SharedReferenceVerify.sql",
-        "@InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10, 11, 12)")]
+        "@InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)")]
     [InlineData(
         "93-V0004-AdminSharedVerify.sql",
-        "@InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10, 11, 12)")]
+        "@InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13)")]
     [InlineData(
         "94-V0005-TechBenchV1ImportVerify.sql",
-        "@InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10, 11, 12)")]
+        "@InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10, 11, 12, 13)")]
     public void EarlierSchemaVerifiersAcceptTheFinalSchemaVersion(
         string fileName,
         string expectedVersionCheck)
@@ -791,7 +791,7 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("@ResponseMessage nvarchar(500) = NULL", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("[AdminGetRecentClientSessionResponses]", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetRecentClientSessionResponses]", grantSource, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("NOT IN (11, 12)", verifySource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("NOT IN (11, 12, 13)", verifySource, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) <> 11", verifySource, StringComparison.OrdinalIgnoreCase);
 
         var root = Directory.GetParent(sqlDirectory)!.Parent!.FullName;
@@ -823,7 +823,7 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("OPENJSON(row_data.[FieldsJson])", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("EncryptByKey", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("FOR JSON PATH", procedureSource, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("CONVERT(int, 12) AS [SchemaVersion]", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CONVERT(int, 13) AS [SchemaVersion]", procedureSource, StringComparison.OrdinalIgnoreCase);
 
         var root = Directory.GetParent(sqlDirectory)!.Parent!.FullName;
         var builder = File.ReadAllText(Path.Combine(
@@ -836,6 +836,38 @@ public sealed partial class SqlServer2016SyntaxTests
         var verify = builder.IndexOf("101-V0012-FlexibleCredentialFieldsVerify.sql", StringComparison.Ordinal);
 
         Assert.True(schema >= 0 && procedures > schema && grants > procedures && verify > grants);
+    }
+
+    [Fact]
+    public void V0013PersistsWhdClientContactDetailsAndOrdersDeployment()
+    {
+        var sqlDirectory = FindSqlDirectory();
+        var schemaSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "32-V0013-WhdClientContactDetailsSchema.sql"));
+        var applySource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "48-V0006-WhdServerSyncProcedures.sql"));
+        var verifySource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "102-V0013-WhdClientContactDetailsVerify.sql"));
+
+        Assert.Contains("[WhdContactEmail] nvarchar(255)", schemaSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[WhdPhone] nvarchar(80)", schemaSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[WhdAddress] nvarchar(600)", schemaSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("'$.contactEmail'", applySource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("schema version 13", verifySource, StringComparison.OrdinalIgnoreCase);
+
+        var root = Directory.GetParent(sqlDirectory)!.Parent!.FullName;
+        var builder = File.ReadAllText(Path.Combine(
+            root,
+            "scripts",
+            "Build-StandaloneSqlDeployment.ps1"));
+        var schema = builder.IndexOf("32-V0013-WhdClientContactDetailsSchema.sql", StringComparison.Ordinal);
+        var procedures = builder.IndexOf("48-V0006-WhdServerSyncProcedures.sql", StringComparison.Ordinal);
+        var verify = builder.IndexOf("102-V0013-WhdClientContactDetailsVerify.sql", StringComparison.Ordinal);
+
+        Assert.True(schema >= 0 && procedures > schema && verify > procedures);
     }
 
     [Fact]

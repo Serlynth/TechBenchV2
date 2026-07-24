@@ -402,13 +402,46 @@ public sealed class WhdRestClientTests
     [Fact]
     public async Task SyncsWhdLocationsAsCustomerCompanies()
     {
-        const string response = """
+        const string locationResponse = """
             [
-              {"id": 12, "locationName": "Friends Central School", "isInactive": false},
+              {
+                "id": 12,
+                "locationName": "Friends Central School",
+                "address": "1101 City Avenue",
+                "city": "Wynnewood",
+                "state": "PA",
+                "postalCode": "19096",
+                "phone": "610-555-0100",
+                "isInactive": false
+              },
               {"id": 13, "locationName": "Old Location", "isInactive": true}
             ]
             """;
-        var handler = new RecordingHandler(_ => Json(HttpStatusCode.OK, response));
+        const string clientResponse = """
+            [
+              {
+                "id": 72,
+                "firstName": "Alex",
+                "lastName": "Morgan",
+                "email": "alex@example.test",
+                "phone": "610-555-0123",
+                "isAdmin": true,
+                "location": {"id": 12}
+              },
+              {
+                "id": 73,
+                "firstName": "Secondary",
+                "lastName": "Contact",
+                "email": "secondary@example.test",
+                "location": {"id": 12}
+              }
+            ]
+            """;
+        var handler = new RecordingHandler(request => Json(
+            HttpStatusCode.OK,
+            request.RequestUri?.AbsolutePath.EndsWith("/Clients", StringComparison.Ordinal) == true
+                ? clientResponse
+                : locationResponse));
         using var httpClient = new HttpClient(handler);
         var client = new WhdRestClient(httpClient);
 
@@ -419,8 +452,12 @@ public sealed class WhdRestClientTests
         Assert.Equal("WHD-LOCATION-12", location.ExternalId);
         Assert.Equal("Friends Central School", location.Name);
         Assert.Equal("Friends Central School", location.LocationName);
-        Assert.Null(location.ContactName);
+        Assert.Equal("Alex Morgan", location.ContactName);
+        Assert.Equal("alex@example.test", location.ContactEmail);
+        Assert.Equal("610-555-0123", location.Phone);
+        Assert.Equal("1101 City Avenue, Wynnewood, PA 19096", location.Address);
         Assert.Contains("/Locations", handler.Requests[0].Uri?.AbsolutePath);
+        Assert.Contains("/Clients", handler.Requests[1].Uri?.AbsolutePath);
     }
 
     [Fact]

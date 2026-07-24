@@ -72,6 +72,55 @@ public sealed class ClientInfoProfileWindowTests
         Assert.Contains("Content=\"Reveal All\"", profileXaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Hide\"", profileXaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Copy\"", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("WEB HELP DESK MATCH", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("MAIN CONTACT", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"ADDRESS\"", profileXaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FullProfileConfidentlyMatchesWHDContactDetails()
+    {
+        var clients = new[]
+        {
+            new Client
+            {
+                Id = 7,
+                Name = "Acme Services LLC",
+                WhdLocationName = "Acme Services",
+                WhdContactName = "Jamie Rivera",
+                WhdContactEmail = "jamie@example.test",
+                WhdPhone = "610-555-0188",
+                WhdAddress = "100 Main Street, Malvern, PA 19355"
+            },
+            new Client { Id = 8, Name = "Another Client" }
+        };
+
+        var match = ClientProfileWhdMatcher.FindConfidentMatch("Acme Services, Inc.", clients);
+        var profile = new ClientInfoProfileViewModel(
+            new FireDrillCredentialSummary(1, "Acme Services, Inc.", "", "", DateTime.UtcNow, []),
+            _ => null,
+            match);
+
+        Assert.NotNull(match);
+        Assert.True(profile.HasWhdMatch);
+        Assert.Equal("Jamie Rivera", profile.WhdContactName);
+        Assert.Equal("jamie@example.test", profile.WhdContactEmail);
+        Assert.Equal("610-555-0188", profile.WhdPhone);
+        Assert.Equal("100 Main Street, Malvern, PA 19355", profile.WhdAddress);
+    }
+
+    [Fact]
+    public void FullProfileDoesNotGuessWhenANameMatchIsAmbiguous()
+    {
+        var clients = new[]
+        {
+            new Client { Id = 1, Name = "North Campus", Source = "WHD" },
+            new Client { Id = 2, Name = "North Campus", Source = "WHD" }
+        };
+
+        var match = ClientProfileWhdMatcher.FindConfidentMatch("North Campus", clients);
+
+        Assert.Null(match);
     }
 
     private static FireDrillCredentialField Field(

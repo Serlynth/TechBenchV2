@@ -31,6 +31,9 @@ public sealed class WhdSyncedClient
     public string Name { get; init; } = string.Empty;
     public string? LocationName { get; init; }
     public string? ContactName { get; init; }
+    public string? ContactEmail { get; init; }
+    public string? Phone { get; init; }
+    public string? Address { get; init; }
     public bool IsActive { get; init; } = true;
 }
 

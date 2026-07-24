@@ -119,8 +119,26 @@ public sealed partial class MainWindowViewModel
     }
 
     internal ClientInfoProfileViewModel CreateClientInfoProfile(
-        FireDrillCredentialSummary summary) =>
-        new(summary, _repository.RevealFireDrillCredential);
+        FireDrillCredentialSummary summary)
+    {
+        Client? whdMatch = null;
+        try
+        {
+            whdMatch = ClientProfileWhdMatcher.FindConfidentMatch(
+                summary.ClientName,
+                _repository.GetClients());
+        }
+        catch
+        {
+            // Contact enrichment is best-effort. A transient client-list read
+            // must never prevent the synchronized profile from opening.
+        }
+
+        return new ClientInfoProfileViewModel(
+            summary,
+            _repository.RevealFireDrillCredential,
+            whdMatch);
+    }
 
     private void RefreshFireDrillCredentials()
     {

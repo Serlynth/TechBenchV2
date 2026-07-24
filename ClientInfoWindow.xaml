@@ -32,11 +32,19 @@
             <Setter Property="MinHeight" Value="38" />
             <Setter Property="Padding" Value="11,7" />
         </Style>
+
+        <Style x:Key="ProfileContactValueStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="Margin" Value="0,3,16,0" />
+        </Style>
     </Window.Resources>
 
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="168" />
+            <RowDefinition Height="248" />
             <RowDefinition Height="*" />
             <RowDefinition Height="58" />
         </Grid.RowDefinitions>
@@ -51,78 +59,145 @@
                     <GradientStop Color="#0B1728" Offset="1" />
                 </LinearGradientBrush>
             </Border.Background>
-            <Grid Margin="34,25">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
+            <Grid Margin="34,22,34,20">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="118" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
 
-                <Border Width="86"
-                        Height="86"
-                        CornerRadius="43"
-                        Background="{DynamicResource AccentBrush}"
-                        BorderBrush="#88B9FF"
-                        BorderThickness="2"
-                        VerticalAlignment="Center">
-                    <TextBlock Text="{Binding ClientInitials}"
-                               Foreground="White"
-                               FontSize="30"
-                               FontWeight="Bold"
-                               HorizontalAlignment="Center"
-                               VerticalAlignment="Center" />
-                </Border>
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
 
-                <StackPanel Grid.Column="1" Margin="24,0,24,0" VerticalAlignment="Center">
-                    <TextBlock Text="COMPLETE CLIENT PROFILE"
-                               Foreground="#8DBEFF"
-                               FontSize="11"
-                               FontWeight="Bold"
-                               Margin="0,0,0,5" />
-                    <TextBlock Text="{Binding ClientName}"
-                               Foreground="White"
-                               FontSize="31"
-                               FontWeight="SemiBold"
-                               TextWrapping="NoWrap"
-                               TextTrimming="CharacterEllipsis"
-                               Margin="0,0,0,13" />
-                    <WrapPanel>
-                        <Border Style="{StaticResource ProfileBadgeStyle}">
-                            <TextBlock Text="{Binding FieldCountLabel}" Foreground="#EAF3FF" FontSize="12" />
-                        </Border>
-                        <Border Style="{StaticResource ProfileBadgeStyle}">
-                            <TextBlock Text="{Binding GroupCountLabel}" Foreground="#EAF3FF" FontSize="12" />
-                        </Border>
-                        <Border Style="{StaticResource ProfileBadgeStyle}">
-                            <TextBlock Text="{Binding LastSyncedLabel}" Foreground="#EAF3FF" FontSize="12" />
-                        </Border>
-                    </WrapPanel>
-                </StackPanel>
-
-                <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                    <Border Background="#112D25"
-                            BorderBrush="{DynamicResource SuccessBrush}"
-                            BorderThickness="1"
-                            CornerRadius="13"
-                            Padding="12,6"
-                            HorizontalAlignment="Right"
-                            Margin="0,0,0,14">
-                        <TextBlock Text="{Binding VisibilityLabel}"
-                                   Foreground="#BDF7DC"
-                                   FontWeight="SemiBold"
-                                   FontSize="12" />
+                    <Border Width="86"
+                            Height="86"
+                            CornerRadius="43"
+                            Background="{DynamicResource AccentBrush}"
+                            BorderBrush="#88B9FF"
+                            BorderThickness="2"
+                            VerticalAlignment="Center">
+                        <TextBlock Text="{Binding ClientInitials}"
+                                   Foreground="White"
+                                   FontSize="30"
+                                   FontWeight="Bold"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center" />
                     </Border>
-                    <WrapPanel HorizontalAlignment="Right">
-                        <Button Content="Hide"
-                                Command="{Binding HideCommand}"
-                                MinWidth="88"
-                                Margin="0,0,8,0" />
-                        <Button Content="Reveal All"
-                                Command="{Binding RevealCommand}"
-                                Style="{StaticResource PrimaryButtonStyle}"
-                                MinWidth="112" />
-                    </WrapPanel>
-                </StackPanel>
+
+                    <StackPanel Grid.Column="1" Margin="24,0,24,0" VerticalAlignment="Center">
+                        <TextBlock Text="COMPLETE CLIENT PROFILE"
+                                   Foreground="#8DBEFF"
+                                   FontSize="11"
+                                   FontWeight="Bold"
+                                   Margin="0,0,0,5" />
+                        <TextBlock Text="{Binding ClientName}"
+                                   Foreground="White"
+                                   FontSize="31"
+                                   FontWeight="SemiBold"
+                                   TextWrapping="NoWrap"
+                                   TextTrimming="CharacterEllipsis"
+                                   Margin="0,0,0,11" />
+                        <WrapPanel>
+                            <Border Style="{StaticResource ProfileBadgeStyle}">
+                                <TextBlock Text="{Binding FieldCountLabel}" Foreground="#EAF3FF" FontSize="12" />
+                            </Border>
+                            <Border Style="{StaticResource ProfileBadgeStyle}">
+                                <TextBlock Text="{Binding GroupCountLabel}" Foreground="#EAF3FF" FontSize="12" />
+                            </Border>
+                            <Border Style="{StaticResource ProfileBadgeStyle}">
+                                <TextBlock Text="{Binding LastSyncedLabel}" Foreground="#EAF3FF" FontSize="12" />
+                            </Border>
+                        </WrapPanel>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                        <Border Background="#112D25"
+                                BorderBrush="{DynamicResource SuccessBrush}"
+                                BorderThickness="1"
+                                CornerRadius="13"
+                                Padding="12,6"
+                                HorizontalAlignment="Right"
+                                Margin="0,0,0,14">
+                            <TextBlock Text="{Binding VisibilityLabel}"
+                                       Foreground="#BDF7DC"
+                                       FontWeight="SemiBold"
+                                       FontSize="12" />
+                        </Border>
+                        <WrapPanel HorizontalAlignment="Right">
+                            <Button Content="Hide"
+                                    Command="{Binding HideCommand}"
+                                    MinWidth="88"
+                                    Margin="0,0,8,0" />
+                            <Button Content="Reveal All"
+                                    Command="{Binding RevealCommand}"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    MinWidth="112" />
+                        </WrapPanel>
+                    </StackPanel>
+                </Grid>
+
+                <Border Grid.Row="1"
+                        Background="#10253E"
+                        BorderBrush="#31567E"
+                        BorderThickness="1"
+                        CornerRadius="10"
+                        Padding="16,11">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.15*" />
+                            <ColumnDefinition Width="1.1*" />
+                            <ColumnDefinition Width="1.35*" />
+                            <ColumnDefinition Width="1.0*" />
+                            <ColumnDefinition Width="1.8*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                            <TextBlock Text="WEB HELP DESK MATCH"
+                                       Foreground="#79AEF4"
+                                       FontSize="10"
+                                       FontWeight="Bold" />
+                            <TextBlock Text="{Binding WhdMatchLabel}"
+                                       Style="{StaticResource ProfileContactValueStyle}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Visibility="{Binding HasWhdContactName, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="MAIN CONTACT" Foreground="#8EA9C7" FontSize="10" FontWeight="Bold" />
+                            <TextBlock Text="{Binding WhdContactName}"
+                                       Style="{StaticResource ProfileContactValueStyle}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2"
+                                    VerticalAlignment="Center"
+                                    Visibility="{Binding HasWhdContactEmail, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="EMAIL" Foreground="#8EA9C7" FontSize="10" FontWeight="Bold" />
+                            <TextBlock Text="{Binding WhdContactEmail}"
+                                       Style="{StaticResource ProfileContactValueStyle}"
+                                       ToolTip="{Binding WhdContactEmail}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="3"
+                                    VerticalAlignment="Center"
+                                    Visibility="{Binding HasWhdPhone, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="PHONE" Foreground="#8EA9C7" FontSize="10" FontWeight="Bold" />
+                            <TextBlock Text="{Binding WhdPhone}"
+                                       Style="{StaticResource ProfileContactValueStyle}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="4"
+                                    VerticalAlignment="Center"
+                                    Visibility="{Binding HasWhdAddress, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="ADDRESS" Foreground="#8EA9C7" FontSize="10" FontWeight="Bold" />
+                            <TextBlock Text="{Binding WhdAddress}"
+                                       Style="{StaticResource ProfileContactValueStyle}"
+                                       ToolTip="{Binding WhdAddress}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
             </Grid>
         </Border>
 

@@ -57,8 +57,8 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("TechBench_Admins", directory, StringComparison.Ordinal);
         Assert.Contains("GetMembers(recursive: true)", directory, StringComparison.Ordinal);
         Assert.Contains("SaveMappings", sql, StringComparison.Ordinal);
-        Assert.Contains("requireExactVersion && schema != 12", sql, StringComparison.Ordinal);
-        Assert.Contains("requires database schema 12", sql, StringComparison.Ordinal);
+        Assert.Contains("requireExactVersion && schema != 13", sql, StringComparison.Ordinal);
+        Assert.Contains("requires database schema 13", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("requires database schema 8", sql, StringComparison.Ordinal);
         Assert.Contains("RequestWhdSync(\"Full\")", sql, StringComparison.Ordinal);
         Assert.Contains("RequestWhdTechnicianSync", sql, StringComparison.Ordinal);

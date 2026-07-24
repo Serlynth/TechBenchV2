@@ -250,6 +250,9 @@ BEGIN
         client.[LastSyncedAtUtc] AS [LastSyncedAt],
         client.[WhdLocationName],
         client.[WhdContactName],
+        client.[WhdContactEmail],
+        client.[WhdPhone],
+        client.[WhdAddress],
         client.[SageCustomerId],
         client.[SageCustomerName],
         client.[SageContactName],
@@ -264,6 +267,9 @@ BEGIN
           OR client.[Name] LIKE @Pattern ESCAPE N'~'
           OR client.[WhdLocationName] LIKE @Pattern ESCAPE N'~'
           OR client.[WhdContactName] LIKE @Pattern ESCAPE N'~'
+          OR client.[WhdContactEmail] LIKE @Pattern ESCAPE N'~'
+          OR client.[WhdPhone] LIKE @Pattern ESCAPE N'~'
+          OR client.[WhdAddress] LIKE @Pattern ESCAPE N'~'
           OR client.[SageCustomerId] LIKE @Pattern ESCAPE N'~'
           OR client.[SageCustomerName] LIKE @Pattern ESCAPE N'~'
           OR client.[SageContactName] LIKE @Pattern ESCAPE N'~'
@@ -309,6 +315,9 @@ BEGIN
         client.[LastSyncedAtUtc] AS [LastSyncedAt],
         client.[WhdLocationName],
         client.[WhdContactName],
+        client.[WhdContactEmail],
+        client.[WhdPhone],
+        client.[WhdAddress],
         client.[SageCustomerId],
         client.[SageCustomerName],
         client.[SageContactName],
@@ -542,6 +551,9 @@ BEGIN
             client.[LastSyncedAtUtc] AS [LastSyncedAt],
             client.[WhdLocationName],
             client.[WhdContactName],
+            client.[WhdContactEmail],
+            client.[WhdPhone],
+            client.[WhdAddress],
             client.[SageCustomerId],
             client.[SageCustomerName],
             client.[SageContactName],

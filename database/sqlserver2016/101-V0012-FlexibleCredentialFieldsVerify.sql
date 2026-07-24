@@ -34,8 +34,9 @@ DECLARE @RevealDefinition nvarchar(max)=
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealFireDrillCredential'));
 
 IF CHARINDEX(N'CONVERT(int, 12) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition,N''))=0
+   AND CHARINDEX(N'CONVERT(int, 13) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition,N''))=0
 BEGIN
-    PRINT N'FAIL: repository capabilities do not report schema version 12.';
+    PRINT N'FAIL: repository capabilities do not report a supported final schema version.';
     SET @FailureCount+=1;
 END;
 

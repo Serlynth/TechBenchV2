@@ -10,6 +10,9 @@ public sealed class Client
     public DateTime? LastSyncedAt { get; set; }
     public string? WhdLocationName { get; set; }
     public string? WhdContactName { get; set; }
+    public string? WhdContactEmail { get; set; }
+    public string? WhdPhone { get; set; }
+    public string? WhdAddress { get; set; }
     public string? SageCustomerId { get; set; }
     public string? SageCustomerName { get; set; }
     public string? SageContactName { get; set; }

@@ -261,6 +261,9 @@ BEGIN
         [Name] nvarchar(240) NOT NULL,
         [LocationName] nvarchar(240) NULL,
         [ContactName] nvarchar(240) NULL,
+        [ContactEmail] nvarchar(255) NULL,
+        [Phone] nvarchar(80) NULL,
+        [Address] nvarchar(600) NULL,
         [IsActive] bit NOT NULL
     );
 
@@ -271,6 +274,9 @@ BEGIN
             NULLIF(LTRIM(RTRIM([Name])), N'') AS [Name],
             NULLIF(LTRIM(RTRIM([LocationName])), N'') AS [LocationName],
             NULLIF(LTRIM(RTRIM([ContactName])), N'') AS [ContactName],
+            NULLIF(LTRIM(RTRIM([ContactEmail])), N'') AS [ContactEmail],
+            NULLIF(LTRIM(RTRIM([Phone])), N'') AS [Phone],
+            NULLIF(LTRIM(RTRIM([Address])), N'') AS [Address],
             COALESCE([IsActive], 1) AS [IsActive]
         FROM OPENJSON(@Json)
         WITH
@@ -279,6 +285,9 @@ BEGIN
             [Name] nvarchar(240) '$.name',
             [LocationName] nvarchar(240) '$.locationName',
             [ContactName] nvarchar(240) '$.contactName',
+            [ContactEmail] nvarchar(255) '$.contactEmail',
+            [Phone] nvarchar(80) '$.phone',
+            [Address] nvarchar(600) '$.address',
             [IsActive] bit '$.isActive'
         )
     ),
@@ -289,8 +298,10 @@ BEGIN
         FROM parsed
         WHERE [ExternalId] IS NOT NULL AND [Name] IS NOT NULL
     )
-    INSERT INTO @Snapshot([ExternalId], [Name], [LocationName], [ContactName], [IsActive])
-    SELECT [ExternalId], [Name], [LocationName], [ContactName], [IsActive]
+    INSERT INTO @Snapshot
+        ([ExternalId], [Name], [LocationName], [ContactName], [ContactEmail], [Phone], [Address], [IsActive])
+    SELECT
+        [ExternalId], [Name], [LocationName], [ContactName], [ContactEmail], [Phone], [Address], [IsActive]
     FROM ranked
     WHERE [RowNumber] = 1;
 
@@ -318,7 +329,26 @@ BEGIN
         SET
             [Name] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[Name] ELSE client.[Name] END,
             [WhdLocationName] = snapshot.[LocationName],
-            [WhdContactName] = snapshot.[ContactName],
+            [WhdContactName] =
+                CASE WHEN @ClientWorkType = N'Clients'
+                    THEN snapshot.[ContactName]
+                    ELSE COALESCE(client.[WhdContactName], snapshot.[ContactName])
+                END,
+            [WhdContactEmail] =
+                CASE WHEN @ClientWorkType = N'Clients'
+                    THEN snapshot.[ContactEmail]
+                    ELSE COALESCE(client.[WhdContactEmail], snapshot.[ContactEmail])
+                END,
+            [WhdPhone] =
+                CASE WHEN @ClientWorkType = N'Clients'
+                    THEN snapshot.[Phone]
+                    ELSE COALESCE(client.[WhdPhone], snapshot.[Phone])
+                END,
+            [WhdAddress] =
+                CASE WHEN @ClientWorkType = N'Clients'
+                    THEN snapshot.[Address]
+                    ELSE COALESCE(client.[WhdAddress], snapshot.[Address])
+                END,
             [IsActive] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[IsActive] ELSE client.[IsActive] END,
             [LastSyncedAtUtc] = @SyncedAtUtc,
             [UpdatedAtUtc] = SYSUTCDATETIME(),
@@ -377,14 +407,15 @@ BEGIN
         INSERT INTO [tb_data].[Clients]
         (
             [Name], [Source], [ExternalId], [IsActive], [LastSyncedAtUtc],
-            [WhdLocationName], [WhdContactName], [MatchStatus],
+            [WhdLocationName], [WhdContactName], [WhdContactEmail], [WhdPhone], [WhdAddress], [MatchStatus],
             [CreatedByWindowsSid], [UpdatedByWindowsSid]
         )
         OUTPUT inserted.[ExternalId], inserted.[Id]
             INTO @NewClients([ExternalId], [ClientId])
         SELECT
             snapshot.[Name], N'WHD', snapshot.[ExternalId], snapshot.[IsActive], @SyncedAtUtc,
-            snapshot.[LocationName], snapshot.[ContactName], N'Unmatched', @ActorSid, @ActorSid
+            snapshot.[LocationName], snapshot.[ContactName], snapshot.[ContactEmail],
+            snapshot.[Phone], snapshot.[Address], N'Unmatched', @ActorSid, @ActorSid
         FROM @Snapshot AS snapshot
         WHERE NOT EXISTS
         (
@@ -412,7 +443,26 @@ BEGIN
         SET
             [Name] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[Name] ELSE client.[Name] END,
             [WhdLocationName] = snapshot.[LocationName],
-            [WhdContactName] = snapshot.[ContactName],
+            [WhdContactName] =
+                CASE WHEN @ClientWorkType = N'Clients'
+                    THEN snapshot.[ContactName]
+                    ELSE COALESCE(client.[WhdContactName], snapshot.[ContactName])
+                END,
+            [WhdContactEmail] =
+                CASE WHEN @ClientWorkType = N'Clients'
+                    THEN snapshot.[ContactEmail]
+                    ELSE COALESCE(client.[WhdContactEmail], snapshot.[ContactEmail])
+                END,
+            [WhdPhone] =
+                CASE WHEN @ClientWorkType = N'Clients'
+                    THEN snapshot.[Phone]
+                    ELSE COALESCE(client.[WhdPhone], snapshot.[Phone])
+                END,
+            [WhdAddress] =
+                CASE WHEN @ClientWorkType = N'Clients'
+                    THEN snapshot.[Address]
+                    ELSE COALESCE(client.[WhdAddress], snapshot.[Address])
+                END,
             [IsActive] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[IsActive] ELSE client.[IsActive] END,
             [LastSyncedAtUtc] = @SyncedAtUtc,
             [UpdatedAtUtc] = SYSUTCDATETIME(),

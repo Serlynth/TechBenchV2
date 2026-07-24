@@ -14,12 +14,14 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
 
     public ClientInfoProfileViewModel(
         FireDrillCredentialSummary summary,
-        Func<long, FireDrillCredential?> revealCredential)
+        Func<long, FireDrillCredential?> revealCredential,
+        Client? whdClient = null)
     {
         ArgumentNullException.ThrowIfNull(summary);
         ArgumentNullException.ThrowIfNull(revealCredential);
         _summary = summary;
         _revealCredential = revealCredential;
+        WhdClient = whdClient;
         _statusMessage = "Values are hidden. Click Reveal All to view this client's complete information.";
         RevealCommand = new RelayCommand(_ => Reveal(), _ => !IsRevealed);
         HideCommand = new RelayCommand(_ => Hide(), _ => IsRevealed);
@@ -34,6 +36,19 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
     public RelayCommand HideCommand { get; }
     public RelayCommand CopyFieldCommand { get; }
     public string ClientName => _summary.ClientName;
+    public Client? WhdClient { get; }
+    public bool HasWhdMatch => WhdClient is not null;
+    public bool HasWhdContactName => !string.IsNullOrWhiteSpace(WhdClient?.WhdContactName);
+    public bool HasWhdContactEmail => !string.IsNullOrWhiteSpace(WhdClient?.WhdContactEmail);
+    public bool HasWhdPhone => !string.IsNullOrWhiteSpace(WhdClient?.WhdPhone);
+    public bool HasWhdAddress => !string.IsNullOrWhiteSpace(WhdClient?.WhdAddress);
+    public string WhdMatchLabel => HasWhdMatch
+        ? $"WHD · {WhdClient!.WhdLocationName ?? WhdClient.Name}"
+        : "No confident WHD client match";
+    public string WhdContactName => WhdClient?.WhdContactName ?? string.Empty;
+    public string WhdContactEmail => WhdClient?.WhdContactEmail ?? string.Empty;
+    public string WhdPhone => WhdClient?.WhdPhone ?? string.Empty;
+    public string WhdAddress => WhdClient?.WhdAddress ?? string.Empty;
     public string WindowTitle => $"{ClientName} - Client Info";
     public string ClientInitials => BuildInitials(ClientName);
     public string FieldCountLabel => $"{_summary.Fields.Count} synchronized field{(_summary.Fields.Count == 1 ? string.Empty : "s")}";
