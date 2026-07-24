@@ -286,15 +286,20 @@
         <Style x:Key="NavClientsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Client List"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavTicketsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Ticket List"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavLinksStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Common Links"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavCredentialsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Client Credentials"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavClientWifiStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}">
+        <Style x:Key="NavClientInfoStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Client Info"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+        <Style x:Key="NavClientInfoChildStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}">
             <Setter Property="Padding" Value="28,9" />
+        </Style>
+        <Style x:Key="NavClientWifiStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource NavClientInfoChildStyle}">
             <Style.Triggers>
                 <DataTrigger Binding="{Binding CurrentSection}" Value="Client WiFi">
                     <Setter Property="Tag" Value="Active" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <Style x:Key="NavDomainAdStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource NavClientInfoChildStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Domain/AD"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+        <Style x:Key="NavConnectionStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource NavClientInfoChildStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Connection"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+        <Style x:Key="NavMiscInfoStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource NavClientInfoChildStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Misc Info"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavPostingHistoryStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Posting History"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavAdminCenterStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Admin Center"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavSettingsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Settings"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
@@ -456,9 +461,15 @@
                     <Button Content="Clients" Command="{Binding NavigateCommand}" CommandParameter="Client List" Style="{StaticResource NavClientsStyle}" />
                     <Button Content="Tickets" Command="{Binding NavigateCommand}" CommandParameter="Ticket List" Style="{StaticResource NavTicketsStyle}" />
                     <Button Content="Links" Command="{Binding NavigateCommand}" CommandParameter="Common Links" Style="{StaticResource NavLinksStyle}" />
-                    <Button Content="Client Credentials" Command="{Binding NavigateCommand}" CommandParameter="Client Credentials" Style="{StaticResource NavCredentialsStyle}"
+                    <Button Content="Client Info" Command="{Binding NavigateCommand}" CommandParameter="Client Info" Style="{StaticResource NavClientInfoStyle}"
                             Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <Button Content="Client WiFi" Command="{Binding NavigateCommand}" CommandParameter="Client WiFi" Style="{StaticResource NavClientWifiStyle}"
+                            Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <Button Content="Domain/AD" Command="{Binding NavigateCommand}" CommandParameter="Domain/AD" Style="{StaticResource NavDomainAdStyle}"
+                            Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <Button Content="Connection" Command="{Binding NavigateCommand}" CommandParameter="Connection" Style="{StaticResource NavConnectionStyle}"
+                            Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <Button Content="Misc Info" Command="{Binding NavigateCommand}" CommandParameter="Misc Info" Style="{StaticResource NavMiscInfoStyle}"
                             Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
                     <TextBlock Text="SYSTEM" Style="{StaticResource SidebarGroupLabelStyle}" />
@@ -2133,11 +2144,14 @@
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBox Grid.Column="0" Text="{Binding FireDrillSearchText, UpdateSourceTrigger=PropertyChanged}"
                                              ToolTip="Search client name" Margin="0,0,8,0" />
                                     <Button Grid.Column="1" Content="Search" Command="{Binding SearchFireDrillCommand}"
-                                            Style="{StaticResource PrimaryButtonStyle}" Padding="14,7" />
+                                            Style="{StaticResource PrimaryButtonStyle}" Padding="14,7" Margin="0,0,8,0" />
+                                    <Button Grid.Column="2" Content="Clear" Command="{Binding ClearFireDrillSearchCommand}"
+                                            Padding="14,7" />
                                 </Grid>
                             </StackPanel>
 

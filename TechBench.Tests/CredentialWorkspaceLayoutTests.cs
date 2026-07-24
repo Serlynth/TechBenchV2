@@ -6,40 +6,39 @@ namespace TechBench.Tests;
 public sealed class CredentialWorkspaceLayoutTests
 {
     [Fact]
-    public void SidebarUsesFullClientCredentialsLabel()
+    public void SidebarUsesClickableClientInfoParentAndFilteredChildren()
     {
         var xaml = ReadRepositoryFile("MainWindow.xaml");
 
         Assert.Contains(
-            "Content=\"Client Credentials\" Command=\"{Binding NavigateCommand}\" CommandParameter=\"Client Credentials\"",
+            "Content=\"Client Info\" Command=\"{Binding NavigateCommand}\" CommandParameter=\"Client Info\"",
             xaml,
             StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "Content=\"Credentials\" Command=\"{Binding NavigateCommand}\" CommandParameter=\"Client Credentials\"",
-            xaml,
-            StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void SidebarExposesClientWifiToTheSameAuthorizedUsers()
-    {
-        var xaml = ReadRepositoryFile("MainWindow.xaml");
-
-        Assert.Contains(
-            "Content=\"Client WiFi\" Command=\"{Binding NavigateCommand}\" CommandParameter=\"Client WiFi\"",
-            xaml,
-            StringComparison.Ordinal);
-        var buttonStart = xaml.IndexOf("Content=\"Client WiFi\"", StringComparison.Ordinal);
-        var buttonEnd = xaml.IndexOf("/>", buttonStart, StringComparison.Ordinal);
-        Assert.True(buttonStart >= 0 && buttonEnd > buttonStart);
-        var button = xaml[buttonStart..buttonEnd];
-        Assert.Contains("Style=\"{StaticResource NavClientWifiStyle}\"", button, StringComparison.Ordinal);
-        Assert.Contains("Visibility=\"{Binding CanAccessFireDrill", button, StringComparison.Ordinal);
+        foreach (var section in new[] { "Client WiFi", "Domain/AD", "Connection", "Misc Info" })
+        {
+            Assert.Contains(
+                $"Content=\"{section}\" Command=\"{{Binding NavigateCommand}}\" CommandParameter=\"{section}\"",
+                xaml,
+                StringComparison.Ordinal);
+        }
         Assert.Contains(
             "Visibility=\"{Binding IsCredentialWorkspaceSection, Converter={StaticResource BooleanToVisibilityConverter}}\"",
             xaml,
             StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding CredentialWorkspaceTitle}\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("CommandParameter=\"Client Credentials\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CredentialWorkspaceSearchHasSearchAndClearActions()
+    {
+        var xaml = ReadRepositoryFile("MainWindow.xaml");
+        var viewModel = ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.FireDrill.cs"));
+
+        Assert.Contains("Command=\"{Binding SearchFireDrillCommand}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Clear\" Command=\"{Binding ClearFireDrillSearchCommand}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("FireDrillSearchText = string.Empty;", viewModel, StringComparison.Ordinal);
+        Assert.Contains("RefreshFireDrillCredentials();", viewModel, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -141,9 +140,45 @@ public sealed class CredentialWorkspaceLayoutTests
                 Field("Wireless - Admin Password", 4)).Label);
 
         var viewModel = ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.FireDrill.cs"));
-        Assert.Contains("item.Fields.Any(CredentialFieldGrouper.IsWirelessField)", viewModel, StringComparison.Ordinal);
-        Assert.Contains("fields.Where(CredentialFieldGrouper.IsWirelessField)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("item.Fields.Any(IsFieldVisibleInCurrentCredentialSection)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("\"Client WiFi\" => CredentialFieldGrouper.IsWirelessField(field)", viewModel, StringComparison.Ordinal);
         Assert.Contains(".Select(CredentialFieldGrouper.CreateWirelessDisplayField)", viewModel, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CredentialSubsectionsClassifyFieldsWithoutOverlap()
+    {
+        var wireless = Field("Wireless Guest Password", 0);
+        var domain = Field("AD Password", 1);
+        var localDomain = Field("Local Domain", 2);
+        var connection = Field("Firebox IP", 3);
+        var authPoint = Field("AuthPoint User", 4);
+        var misc = Field("Microsoft 365 Password", 5);
+
+        Assert.True(CredentialFieldGrouper.IsWirelessField(wireless));
+        Assert.True(CredentialFieldGrouper.IsDomainOrAdField(domain));
+        Assert.True(CredentialFieldGrouper.IsDomainOrAdField(localDomain));
+        Assert.True(CredentialFieldGrouper.IsConnectionField(connection));
+        Assert.True(CredentialFieldGrouper.IsConnectionField(authPoint));
+        Assert.True(CredentialFieldGrouper.IsMiscInfoField(misc));
+
+        foreach (var field in new[] { wireless, domain, localDomain, connection, authPoint })
+            Assert.False(CredentialFieldGrouper.IsMiscInfoField(field));
+    }
+
+    [Fact]
+    public void ViewModelFiltersEveryClientInfoWorkspace()
+    {
+        var viewModel = ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.FireDrill.cs"));
+        var navigation = ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.cs"));
+
+        foreach (var section in new[] { "Client Info", "Client WiFi", "Domain/AD", "Connection", "Misc Info" })
+            Assert.Contains($"\"{section}\"", viewModel + navigation, StringComparison.Ordinal);
+
+        Assert.Contains("item.Fields.Any(IsFieldVisibleInCurrentCredentialSection)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("\"Domain/AD\" => CredentialFieldGrouper.IsDomainOrAdField(field)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("\"Connection\" => CredentialFieldGrouper.IsConnectionField(field)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("\"Misc Info\" => CredentialFieldGrouper.IsMiscInfoField(field)", viewModel, StringComparison.Ordinal);
     }
 
     private static FireDrillCredentialField Field(string label, int order) =>

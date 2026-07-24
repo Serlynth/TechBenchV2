@@ -365,6 +365,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(WindowTitle));
                 OnPropertyChanged(nameof(IsCredentialWorkspaceSection));
                 OnPropertyChanged(nameof(IsClientWifiSection));
+                OnPropertyChanged(nameof(IsDomainAdSection));
+                OnPropertyChanged(nameof(IsConnectionSection));
+                OnPropertyChanged(nameof(IsMiscInfoSection));
                 OnPropertyChanged(nameof(CredentialWorkspaceTitle));
                 OnPropertyChanged(nameof(CredentialWorkspaceDescription));
                 OnPropertyChanged(nameof(CredentialEmptyText));
@@ -886,8 +889,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Client List" => "Showing synced/imported clients",
             "Ticket List" => "Showing my assigned and group non-closed tickets",
             "Common Links" => "Showing commonly used websites",
-            "Client Credentials" => "Showing synchronized client credentials",
+            "Client Info" => "Showing all synchronized client information",
             "Client WiFi" => "Showing synchronized client WiFi information",
+            "Domain/AD" => "Showing synchronized local domain and Active Directory information",
+            "Connection" => "Showing synchronized WatchGuard connection information",
+            "Misc Info" => "Showing remaining synchronized client information",
             "Admin Center" => "Showing server synchronization and active TechBench clients",
             _ => $"Showing {section}"
         };
@@ -924,8 +930,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             case "Common Links":
                 RefreshCommonLinks();
                 break;
-            case "Client Credentials":
+            case "Client Info":
             case "Client WiFi":
+            case "Domain/AD":
+            case "Connection":
+            case "Misc Info":
                 RefreshFireDrillCredentials();
                 break;
             case "Admin Center":

@@ -23,7 +23,9 @@ internal static partial class CredentialFieldGrouper
         new("Active Directory", 50,
         [
             "active directory", "domain admin", "domain password",
-            "ad auth", "ad user", "ad password"
+            "domain controller", "domain login", "domain username",
+            "domain account", "local domain", "ad auth", "ad user",
+            "ad password", "ad admin"
         ]),
         new("Remote Access", 60,
         [
@@ -38,6 +40,16 @@ internal static partial class CredentialFieldGrouper
             "status",
             "admin",
             "csriadmin"
+        };
+
+    private static readonly HashSet<string> ActiveDirectoryLegacyLabels =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "ad",
+            "domain",
+            "domain name",
+            "local ad",
+            "local domain"
         };
 
     public static IReadOnlyList<FireDrillCredentialFieldGroup> Group(
@@ -68,6 +80,26 @@ internal static partial class CredentialFieldGrouper
                Normalize(field.FieldName).StartsWith("wireless", StringComparison.Ordinal);
     }
 
+    public static bool IsDomainOrAdField(FireDrillCredentialField field)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        return ResolveGroup(field).Name.Equals("Active Directory", StringComparison.Ordinal);
+    }
+
+    public static bool IsConnectionField(FireDrillCredentialField field)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        return ResolveGroup(field).Name.Equals("WatchGuard", StringComparison.Ordinal);
+    }
+
+    public static bool IsMiscInfoField(FireDrillCredentialField field)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        return !IsWirelessField(field) &&
+               !IsDomainOrAdField(field) &&
+               !IsConnectionField(field);
+    }
+
     public static FireDrillCredentialField CreateWirelessDisplayField(
         FireDrillCredentialField field)
     {
@@ -89,6 +121,11 @@ internal static partial class CredentialFieldGrouper
         if (WatchGuardLegacyLabels.Contains(label))
         {
             return new("WatchGuard", 10);
+        }
+
+        if (ActiveDirectoryLegacyLabels.Contains(label))
+        {
+            return new("Active Directory", 50);
         }
 
         foreach (var rule in KnownGroups)

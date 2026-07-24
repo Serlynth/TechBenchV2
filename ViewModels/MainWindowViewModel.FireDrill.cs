@@ -15,6 +15,7 @@ public sealed partial class MainWindowViewModel
     public ObservableCollection<FireDrillCredentialField> FireDrillCredentialFields { get; } = new();
     public ObservableCollection<FireDrillCredentialFieldGroup> FireDrillCredentialGroups { get; } = new();
     public RelayCommand SearchFireDrillCommand { get; private set; } = null!;
+    public RelayCommand ClearFireDrillSearchCommand { get; private set; } = null!;
     public RelayCommand RevealFireDrillCommand { get; private set; } = null!;
     public RelayCommand CopyFireDrillFieldCommand { get; private set; } = null!;
     public RelayCommand HideFireDrillCommand { get; private set; } = null!;
@@ -24,23 +25,52 @@ public sealed partial class MainWindowViewModel
     public bool HasSelectedFireDrillCredential => SelectedFireDrillCredential is not null;
     public bool IsFireDrillCredentialRevealed => RevealedFireDrillCredential is not null;
     public bool IsCredentialWorkspaceSection =>
-        CurrentSection.Equals("Client Credentials", StringComparison.Ordinal) ||
-        IsClientWifiSection;
+        CurrentSection.Equals("Client Info", StringComparison.Ordinal) ||
+        IsClientWifiSection ||
+        IsDomainAdSection ||
+        IsConnectionSection ||
+        IsMiscInfoSection;
     public bool IsClientWifiSection =>
         CurrentSection.Equals("Client WiFi", StringComparison.Ordinal);
-    public string CredentialWorkspaceTitle =>
-        IsClientWifiSection ? "Client WiFi" : "Client Credentials";
-    public string CredentialWorkspaceDescription => IsClientWifiSection
-        ? "Search synchronized client WiFi information. Wireless values remain hidden until you explicitly reveal a client."
-        : "Search the server-synchronized client credentials. Passwords remain hidden until you explicitly reveal a client.";
-    public string CredentialEmptyText => IsClientWifiSection
-        ? "No matching clients have Wireless fields."
-        : "No matching credential clients.";
-    public string CredentialRevealButtonLabel =>
-        IsClientWifiSection ? "Reveal WiFi" : "Reveal Credentials";
-    public string CredentialSelectionPrompt => IsClientWifiSection
-        ? "Select a client to view its WiFi fields."
-        : "Select a client to view its credential fields.";
+    public bool IsDomainAdSection =>
+        CurrentSection.Equals("Domain/AD", StringComparison.Ordinal);
+    public bool IsConnectionSection =>
+        CurrentSection.Equals("Connection", StringComparison.Ordinal);
+    public bool IsMiscInfoSection =>
+        CurrentSection.Equals("Misc Info", StringComparison.Ordinal);
+    public string CredentialWorkspaceTitle => CurrentSection;
+    public string CredentialWorkspaceDescription => CurrentSection switch
+    {
+        "Client WiFi" => "Search synchronized client WiFi information. WiFi values remain hidden until you explicitly reveal a client.",
+        "Domain/AD" => "Search synchronized local domain and Active Directory information. Values remain hidden until you explicitly reveal a client.",
+        "Connection" => "Search synchronized WatchGuard connection information. Values remain hidden until you explicitly reveal a client.",
+        "Misc Info" => "Search synchronized client information that is not WiFi, Domain/AD, or WatchGuard connection data. Values remain hidden until you explicitly reveal a client.",
+        _ => "Search all synchronized client information. Values remain hidden until you explicitly reveal a client."
+    };
+    public string CredentialEmptyText => CurrentSection switch
+    {
+        "Client WiFi" => "No matching clients have WiFi fields.",
+        "Domain/AD" => "No matching clients have Domain/AD fields.",
+        "Connection" => "No matching clients have WatchGuard connection fields.",
+        "Misc Info" => "No matching clients have miscellaneous information.",
+        _ => "No matching client information."
+    };
+    public string CredentialRevealButtonLabel => CurrentSection switch
+    {
+        "Client WiFi" => "Reveal WiFi",
+        "Domain/AD" => "Reveal Domain/AD",
+        "Connection" => "Reveal Connection",
+        "Misc Info" => "Reveal Misc Info",
+        _ => "Reveal Client Info"
+    };
+    public string CredentialSelectionPrompt => CurrentSection switch
+    {
+        "Client WiFi" => "Select a client to view its WiFi fields.",
+        "Domain/AD" => "Select a client to view its local domain and Active Directory fields.",
+        "Connection" => "Select a client to view its WatchGuard connection fields.",
+        "Misc Info" => "Select a client to view its miscellaneous information.",
+        _ => "Select a client to view all synchronized information."
+    };
 
     public string FireDrillSearchText
     {
@@ -80,6 +110,7 @@ public sealed partial class MainWindowViewModel
     private void InitializeFireDrillCredentials()
     {
         SearchFireDrillCommand = new RelayCommand(_ => RefreshFireDrillCredentials());
+        ClearFireDrillSearchCommand = new RelayCommand(_ => ClearFireDrillSearch());
         RevealFireDrillCommand = new RelayCommand(_ => RevealFireDrillCredential(), _ => SelectedFireDrillCredential is not null && CanAccessFireDrill);
         CopyFireDrillFieldCommand = new RelayCommand(
             CopyFireDrillField,
@@ -93,16 +124,19 @@ public sealed partial class MainWindowViewModel
         var selectedId = SelectedFireDrillCredential?.CredentialId;
         FireDrillCredentials.Clear();
         foreach (var item in _repository.SearchFireDrillCredentials(FireDrillSearchText)
-                     .Where(item => !IsClientWifiSection ||
-                                    item.Fields.Any(CredentialFieldGrouper.IsWirelessField)))
+                     .Where(item => item.Fields.Any(IsFieldVisibleInCurrentCredentialSection)))
             FireDrillCredentials.Add(item);
         SelectedFireDrillCredential = selectedId.HasValue
             ? FireDrillCredentials.FirstOrDefault(item => item.CredentialId == selectedId.Value)
             : null;
         OnPropertyChanged(nameof(HasFireDrillCredentials));
-        StatusMessage = IsClientWifiSection
-            ? $"Showing {FireDrillCredentials.Count} client WiFi record(s)."
-            : $"Showing {FireDrillCredentials.Count} client credential record(s).";
+        StatusMessage = $"Showing {FireDrillCredentials.Count} {CredentialWorkspaceTitle} record(s).";
+    }
+
+    private void ClearFireDrillSearch()
+    {
+        FireDrillSearchText = string.Empty;
+        RefreshFireDrillCredentials();
     }
 
     private void RevealFireDrillCredential()
@@ -133,10 +167,12 @@ public sealed partial class MainWindowViewModel
         FireDrillCredentialFields.Clear();
         FireDrillCredentialGroups.Clear();
 
-        var visibleFields = IsClientWifiSection
-            ? fields.Where(CredentialFieldGrouper.IsWirelessField)
-                .Select(CredentialFieldGrouper.CreateWirelessDisplayField)
-            : fields;
+        var visibleFields = fields.Where(IsFieldVisibleInCurrentCredentialSection);
+        if (IsClientWifiSection)
+        {
+            visibleFields = visibleFields
+                .Select(CredentialFieldGrouper.CreateWirelessDisplayField);
+        }
 
         foreach (var field in visibleFields)
             FireDrillCredentialFields.Add(field);
@@ -144,6 +180,16 @@ public sealed partial class MainWindowViewModel
         foreach (var group in CredentialFieldGrouper.Group(FireDrillCredentialFields))
             FireDrillCredentialGroups.Add(group);
     }
+
+    private bool IsFieldVisibleInCurrentCredentialSection(
+        FireDrillCredentialField field) => CurrentSection switch
+    {
+        "Client WiFi" => CredentialFieldGrouper.IsWirelessField(field),
+        "Domain/AD" => CredentialFieldGrouper.IsDomainOrAdField(field),
+        "Connection" => CredentialFieldGrouper.IsConnectionField(field),
+        "Misc Info" => CredentialFieldGrouper.IsMiscInfoField(field),
+        _ => true
+    };
 
     private async void CopyFireDrillField(object? parameter)
     {
