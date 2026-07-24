@@ -19,6 +19,31 @@ public partial class MainWindow : Window
     private bool _previewExpiryHandled;
     private MarkdownEditorWindow? _markdownEditorWindow;
 
+    private void FireDrillCredentialsListBox_MouseDoubleClick(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.ListBox listBox ||
+            e.OriginalSource is not DependencyObject source ||
+            ItemsControl.ContainerFromElement(listBox, source) is not System.Windows.Controls.ListBoxItem
+            {
+                DataContext: FireDrillCredentialSummary summary
+            } ||
+            DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var profileWindow = new ClientInfoWindow
+        {
+            Owner = this,
+            DataContext = viewModel.CreateClientInfoProfile(summary)
+        };
+        profileWindow.Show();
+        profileWindow.Activate();
+        e.Handled = true;
+    }
+
     public MainWindow(
         SqlServerConnectionFactory connectionFactory,
         CurrentUserContext currentUser)

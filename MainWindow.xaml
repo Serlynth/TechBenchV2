@@ -2232,10 +2232,12 @@
                                        HorizontalAlignment="Center" VerticalAlignment="Center"
                                        Visibility="{Binding HasFireDrillCredentials, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
 
-                            <ListBox ItemsSource="{Binding FireDrillCredentials}"
+                            <ListBox x:Name="FireDrillCredentialsListBox"
+                                     ItemsSource="{Binding FireDrillCredentials}"
                                      SelectedItem="{Binding SelectedFireDrillCredential}"
                                      Style="{StaticResource ListBoxChromeLessStyle}"
-                                     ItemContainerStyle="{StaticResource ListBoxItemCardStyle}">
+                                     ItemContainerStyle="{StaticResource ListBoxItemCardStyle}"
+                                     MouseDoubleClick="FireDrillCredentialsListBox_MouseDoubleClick">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
                                         <Border Style="{StaticResource CardStyle}">

@@ -62,7 +62,10 @@ public sealed class CredentialWorkspaceLayoutTests
     public void ResultCardsExposeOnlyClientName()
     {
         var xaml = ReadRepositoryFile("MainWindow.xaml");
-        var start = xaml.IndexOf("<ListBox ItemsSource=\"{Binding FireDrillCredentials}\"", StringComparison.Ordinal);
+        var itemsSource = xaml.IndexOf(
+            "ItemsSource=\"{Binding FireDrillCredentials}\"",
+            StringComparison.Ordinal);
+        var start = xaml.LastIndexOf("<ListBox", itemsSource, StringComparison.Ordinal);
         var end = xaml.IndexOf("</ListBox>", start, StringComparison.Ordinal);
         Assert.True(start >= 0 && end > start);
         var list = xaml[start..end];

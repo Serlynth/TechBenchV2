@@ -118,6 +118,10 @@ public sealed partial class MainWindowViewModel
         HideFireDrillCommand = new RelayCommand(_ => HideFireDrillCredential(), _ => RevealedFireDrillCredential is not null);
     }
 
+    internal ClientInfoProfileViewModel CreateClientInfoProfile(
+        FireDrillCredentialSummary summary) =>
+        new(summary, _repository.RevealFireDrillCredential);
+
     private void RefreshFireDrillCredentials()
     {
         if (!CanAccessFireDrill) return;
