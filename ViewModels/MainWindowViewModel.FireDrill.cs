@@ -135,6 +135,7 @@ public sealed partial class MainWindowViewModel
 
         var visibleFields = IsClientWifiSection
             ? fields.Where(CredentialFieldGrouper.IsWirelessField)
+                .Select(CredentialFieldGrouper.CreateWirelessDisplayField)
             : fields;
 
         foreach (var field in visibleFields)

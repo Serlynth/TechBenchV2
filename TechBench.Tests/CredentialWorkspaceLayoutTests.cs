@@ -130,9 +130,20 @@ public sealed class CredentialWorkspaceLayoutTests
         Assert.True(CredentialFieldGrouper.IsWirelessField(Field(" wireless password", 1)));
         Assert.False(CredentialFieldGrouper.IsWirelessField(Field("Microsoft 365 Password", 2)));
 
+        var source = Field("Wireless Guest Password", 3);
+        var display = CredentialFieldGrouper.CreateWirelessDisplayField(source);
+        Assert.Equal("Guest Password", display.Label);
+        Assert.Equal(source.FieldName, display.FieldName);
+        Assert.Equal(source.Value, display.Value);
+        Assert.Equal(
+            "Admin Password",
+            CredentialFieldGrouper.CreateWirelessDisplayField(
+                Field("Wireless - Admin Password", 4)).Label);
+
         var viewModel = ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.FireDrill.cs"));
         Assert.Contains("item.Fields.Any(CredentialFieldGrouper.IsWirelessField)", viewModel, StringComparison.Ordinal);
         Assert.Contains("fields.Where(CredentialFieldGrouper.IsWirelessField)", viewModel, StringComparison.Ordinal);
+        Assert.Contains(".Select(CredentialFieldGrouper.CreateWirelessDisplayField)", viewModel, StringComparison.Ordinal);
     }
 
     private static FireDrillCredentialField Field(string label, int order) =>

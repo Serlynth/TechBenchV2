@@ -68,6 +68,18 @@ internal static partial class CredentialFieldGrouper
                Normalize(field.FieldName).StartsWith("wireless", StringComparison.Ordinal);
     }
 
+    public static FireDrillCredentialField CreateWirelessDisplayField(
+        FireDrillCredentialField field)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        var displayLabel = WirelessLabelPrefixRegex()
+            .Replace(field.Label ?? string.Empty, string.Empty)
+            .Trim();
+        return string.IsNullOrWhiteSpace(displayLabel)
+            ? field
+            : field with { Label = displayLabel };
+    }
+
     private static CredentialGroup ResolveGroup(FireDrillCredentialField field)
     {
         var label = Normalize(field.Label);
@@ -124,6 +136,11 @@ internal static partial class CredentialFieldGrouper
 
     [GeneratedRegex(@"\s+", RegexOptions.CultureInvariant)]
     private static partial Regex WhitespaceRegex();
+
+    [GeneratedRegex(
+        @"^\s*wireless(?=\s|[-_/\\:]|$)[\s\-_/\\:]*",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex WirelessLabelPrefixRegex();
 
     private sealed record CredentialGroup(string Name, int SortOrder);
 
