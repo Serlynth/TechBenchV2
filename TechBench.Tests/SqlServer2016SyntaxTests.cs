@@ -871,6 +871,29 @@ public sealed partial class SqlServer2016SyntaxTests
     }
 
     [Fact]
+    public void AutomaticWhdSynchronizationQueuesTicketsOnly()
+    {
+        var procedureSource = File.ReadAllText(Path.Combine(
+            FindSqlDirectory(),
+            "48-V0006-WhdServerSyncProcedures.sql"));
+        var claimStart = procedureSource.IndexOf(
+            "CREATE PROCEDURE [tb_service].[ClaimWhdSyncWork]",
+            StringComparison.OrdinalIgnoreCase);
+        var claimEnd = procedureSource.IndexOf(
+            "CREATE PROCEDURE [tb_service].[RenewWhdSyncLease]",
+            claimStart,
+            StringComparison.OrdinalIgnoreCase);
+
+        Assert.True(claimStart >= 0 && claimEnd > claimStart);
+        var claimBody = procedureSource[claimStart..claimEnd];
+        Assert.Contains(
+            "WHERE work_type.[WorkType] = N'Tickets'",
+            claimBody,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("@IncludeReferenceWork", claimBody, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void V0009PermitsOnlyVerifiedMissingWhdTechNoteRecoveryDeletion()
     {
         var sqlDirectory = FindSqlDirectory();

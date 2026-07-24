@@ -185,7 +185,8 @@
                                     Visibility="{Binding HasWhdPhone, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <TextBlock Text="PHONE" Foreground="#8EA9C7" FontSize="10" FontWeight="Bold" />
                             <TextBlock Text="{Binding WhdPhone}"
-                                       Style="{StaticResource ProfileContactValueStyle}" />
+                                       Style="{StaticResource ProfileContactValueStyle}"
+                                       ToolTip="{Binding WhdPhone}" />
                         </StackPanel>
 
                         <StackPanel Grid.Column="4"

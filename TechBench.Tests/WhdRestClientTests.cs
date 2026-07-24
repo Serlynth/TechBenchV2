@@ -461,6 +461,77 @@ public sealed class WhdRestClientTests
     }
 
     [Fact]
+    public async Task FullClientSyncLoadsDetailedWhdContactInformation()
+    {
+        const string locationResponse = """
+            [
+              {
+                "id": 12,
+                "locationName": "Holy Ghost Prep",
+                "address": "Fallback location address",
+                "city": "Bensalem",
+                "state": "PA",
+                "postalCode": "19020"
+              }
+            ]
+            """;
+        const string clientListResponse = """
+            [
+              {
+                "id": 72,
+                "firstName": "Mike",
+                "lastName": "Jacobs",
+                "isAdmin": true,
+                "location": {"id": 12}
+              }
+            ]
+            """;
+        const string clientDetailResponse = """
+            {
+              "id": 72,
+              "firstName": "Mike",
+              "lastName": "Jacobs",
+              "email": "technology@holyghostprep.org",
+              "secondaryEmail": "mjacobs@holyghostprep.org",
+              "phone": "(215) 639-2102",
+              "phone2": "(610) 613-1882",
+              "address": "2429 Bristol Pike",
+              "city": "Bensalem",
+              "state": "PA",
+              "zip": "19020",
+              "location": {"id": 12}
+            }
+            """;
+        var handler = new RecordingHandler(request =>
+        {
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            return Json(
+                HttpStatusCode.OK,
+                path.EndsWith("/Clients/72", StringComparison.Ordinal)
+                    ? clientDetailResponse
+                    : path.EndsWith("/Clients", StringComparison.Ordinal)
+                        ? clientListResponse
+                        : locationResponse);
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetClientsAsync(ExplicitSettings());
+
+        Assert.True(result.Success, result.Message);
+        var location = Assert.Single(result.Clients);
+        Assert.Equal("Mike Jacobs", location.ContactName);
+        Assert.Equal(
+            "technology@holyghostprep.org / mjacobs@holyghostprep.org",
+            location.ContactEmail);
+        Assert.Equal("(215) 639-2102 / (610) 613-1882", location.Phone);
+        Assert.Equal("2429 Bristol Pike, Bensalem, PA 19020", location.Address);
+        Assert.Contains(
+            handler.Requests,
+            request => request.Uri?.AbsolutePath.EndsWith("/Clients/72", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
     public async Task AutoAuthenticationUsesPermissionLightProbeOnlyOncePerConnection()
     {
         const string response = "[{\"id\":1,\"subject\":\"One\",\"clientReporter\":{\"id\":1,\"displayName\":\"Client\"}}]";

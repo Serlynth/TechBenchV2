@@ -17,6 +17,7 @@ public sealed class WhdRestClient
     private const string ConfiguredOrganizationAccountExternalId = "WHD-CONFIGURED-ORGANIZATION-ACCOUNT";
     private const int PageSize = 100;
     private const int MaximumPageCount = 10_000;
+    private const int MaximumConcurrentClientDetailRequests = 6;
     internal static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(90);
     private static readonly TimeSpan PostReconciliationWindow = TimeSpan.FromSeconds(20);
     private readonly HttpClient _httpClient;
@@ -1019,7 +1020,7 @@ public sealed class WhdRestClient
                 break;
         }
 
-        return contacts
+        var selectedContacts = contacts
             .GroupBy(contact => contact.LocationExternalId, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 group => group.Key,
@@ -1030,6 +1031,68 @@ public sealed class WhdRestClient
                     .ThenBy(static contact => contact.ExternalId, StringComparer.OrdinalIgnoreCase)
                     .First(),
                 StringComparer.OrdinalIgnoreCase);
+
+        using var detailGate = new SemaphoreSlim(MaximumConcurrentClientDetailRequests);
+        var detailTasks = selectedContacts
+            .Select(async pair =>
+            {
+                var contact = pair.Value;
+                if (contact.HasCompleteDetails)
+                    return pair;
+
+                await detailGate.WaitAsync(cancellationToken);
+                try
+                {
+                    var detailed = await GetClientContactDetailsAsync(
+                        settings,
+                        auth,
+                        contact,
+                        cancellationToken);
+                    return new KeyValuePair<string, WhdLocationContact>(pair.Key, detailed);
+                }
+                finally
+                {
+                    detailGate.Release();
+                }
+            })
+            .ToArray();
+
+        return (await Task.WhenAll(detailTasks))
+            .ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task<WhdLocationContact> GetClientContactDetailsAsync(
+        WhdConnectionSettings settings,
+        WhdAuthParameters auth,
+        WhdLocationContact listContact,
+        CancellationToken cancellationToken)
+    {
+        var encodedClientId = Uri.EscapeDataString(listContact.ExternalId);
+        var requestUri = BuildRequestUri(
+            settings.BaseUrl,
+            $"Clients/{encodedClientId}",
+            auth,
+            new Dictionary<string, string>());
+        using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return listContact;
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var message = string.IsNullOrWhiteSpace(content) ? response.ReasonPhrase : content.Trim();
+            throw new HttpRequestException(
+                $"HTTP {(int)response.StatusCode} from Web Help Desk client {listContact.ExternalId}: {message}",
+                null,
+                response.StatusCode);
+        }
+
+        using var document = JsonDocument.Parse(content);
+        var detailed = ParseClientContacts(document.RootElement).FirstOrDefault();
+        if (detailed is null)
+            return listContact;
+
+        return MergeContactDetails(listContact, detailed);
     }
 
     private async Task<IReadOnlyList<WhdLocationContact>> GetClientContactsPageAsync(
@@ -1677,8 +1740,13 @@ public sealed class WhdRestClient
                 FormatWhdLocationId(locationId),
                 externalId.Trim(),
                 name.Trim(),
-                TrimToNull(ReadStringAny(element, "email", "emailAddress")),
-                TrimToNull(ReadStringAny(element, "phone", "phone1", "phoneNumber")),
+                JoinDistinctValues(
+                    ReadStringAny(element, "email", "emailAddress"),
+                    ReadStringAny(element, "secondaryEmail", "secondaryEmailAddress", "email2")),
+                JoinDistinctValues(
+                    ReadStringAny(element, "phone", "phone1", "phoneNumber"),
+                    ReadStringAny(element, "phone2", "secondaryPhone", "alternatePhone")),
+                FormatAddress(element),
                 !ReadBooleanAny(element, "deleted", "inactive", "isInactive", "disabled"),
                 ReadBooleanAny(
                     element,
@@ -1917,10 +1985,23 @@ public sealed class WhdRestClient
             ContactName = contact.Name,
             ContactEmail = contact.Email,
             Phone = contact.Phone ?? location.Phone,
-            Address = location.Address,
+            Address = contact.Address ?? location.Address,
             IsActive = location.IsActive
         };
     }
+
+    private static WhdLocationContact MergeContactDetails(
+        WhdLocationContact listContact,
+        WhdLocationContact detailedContact) =>
+        new(
+            listContact.LocationExternalId,
+            listContact.ExternalId,
+            detailedContact.Name,
+            detailedContact.Email ?? listContact.Email,
+            detailedContact.Phone ?? listContact.Phone,
+            detailedContact.Address ?? listContact.Address,
+            listContact.IsActive && detailedContact.IsActive,
+            listContact.IsPrimary || detailedContact.IsPrimary);
 
     private static void AddStatusType(List<WhdStatusType> statusTypes, JsonElement statusTypeElement)
     {
@@ -2095,12 +2176,19 @@ public sealed class WhdRestClient
             Name = name,
             LocationName = string.IsNullOrWhiteSpace(locationName) ? null : locationName.Trim(),
             ContactName = string.IsNullOrWhiteSpace(clientName) ? null : clientName.Trim(),
-            ContactEmail = TrimToNull(ReadStringAny(element, "email", "emailAddress")),
-            Phone = TrimToNull(ReadStringAny(element, "phone", "phone1", "phoneNumber"))
+            ContactEmail = JoinDistinctValues(
+                ReadStringAny(element, "email", "emailAddress"),
+                ReadStringAny(element, "secondaryEmail", "secondaryEmailAddress", "email2")),
+            Phone = JoinDistinctValues(
+                    ReadStringAny(element, "phone", "phone1", "phoneNumber"),
+                    ReadStringAny(element, "phone2", "secondaryPhone", "alternatePhone"))
                 ?? (locationElement.HasValue
-                    ? TrimToNull(ReadStringAny(locationElement.Value, "phone", "phone1", "phoneNumber"))
+                    ? JoinDistinctValues(
+                        ReadStringAny(locationElement.Value, "phone", "phone1", "phoneNumber"),
+                        ReadStringAny(locationElement.Value, "phone2", "secondaryPhone", "alternatePhone"))
                     : null),
-            Address = locationElement.HasValue ? FormatAddress(locationElement.Value) : null
+            Address = FormatAddress(element)
+                ?? (locationElement.HasValue ? FormatAddress(locationElement.Value) : null)
         };
     }
 
@@ -2128,19 +2216,36 @@ public sealed class WhdRestClient
     private static string? TrimToNull(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
+    private static string? JoinDistinctValues(params string?[] values)
+    {
+        var distinct = values
+            .Select(TrimToNull)
+            .Where(static value => value is not null)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return distinct.Length == 0 ? null : string.Join(" / ", distinct);
+    }
+
     private sealed record WhdLocationContact(
         string LocationExternalId,
         string ExternalId,
         string Name,
         string? Email,
         string? Phone,
+        string? Address,
         bool IsActive,
         bool IsPrimary)
     {
+        public bool HasCompleteDetails =>
+            !string.IsNullOrWhiteSpace(Email)
+            && !string.IsNullOrWhiteSpace(Phone)
+            && !string.IsNullOrWhiteSpace(Address);
+
         public int CompletenessScore =>
             (string.IsNullOrWhiteSpace(Name) ? 0 : 1)
             + (string.IsNullOrWhiteSpace(Email) ? 0 : 1)
-            + (string.IsNullOrWhiteSpace(Phone) ? 0 : 1);
+            + (string.IsNullOrWhiteSpace(Phone) ? 0 : 1)
+            + (string.IsNullOrWhiteSpace(Address) ? 0 : 1);
     }
 
     private static string BuildClientDisplayName(string? locationName, string clientName)

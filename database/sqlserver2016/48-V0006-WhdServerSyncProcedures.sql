@@ -149,19 +149,6 @@ BEGIN
             ) THEN N'Incremental'
             ELSE N'Full'
         END;
-        DECLARE @IncludeReferenceWork bit = CASE
-            WHEN @AutoRequestType = N'Full' THEN 1
-            WHEN
-            (
-                SELECT COUNT(DISTINCT [WorkType])
-                FROM [tb_sync].[WhdSyncWork]
-                WHERE [State] = N'Completed'
-                  AND [WorkType] IN (N'Clients', N'Statuses', N'Technicians', N'Groups')
-                  AND [CompletedAtUtc] >= DATEADD(day, -1, @Now)
-            ) < 4 THEN 1
-            ELSE 0
-        END;
-
         INSERT INTO [tb_sync].[WhdSyncRequests]
             ([RequestId], [RequestedByWindowsSid], [RequestType])
         VALUES
@@ -179,8 +166,10 @@ BEGIN
                 (N'Groups'),
                 (N'Tickets')
         ) AS work_type([WorkType])
-        WHERE work_type.[WorkType] = N'Tickets'
-           OR @IncludeReferenceWork = 1;
+        /* Automatic synchronization is intentionally ticket-only. Client,
+           status, technician, and group reference data is refreshed only by
+           an explicit Admin full-WHD synchronization request. */
+        WHERE work_type.[WorkType] = N'Tickets';
     END;
 
     SELECT TOP (1) @WorkId = w.[WorkId]
