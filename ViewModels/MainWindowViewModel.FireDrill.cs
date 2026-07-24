@@ -167,13 +167,20 @@ public sealed partial class MainWindowViewModel
         FireDrillCredentialFields.Clear();
         FireDrillCredentialGroups.Clear();
 
-        var visibleFields = fields.Where(IsFieldVisibleInCurrentCredentialSection);
         if (IsClientWifiSection)
         {
-            visibleFields = visibleFields
-                .Select(CredentialFieldGrouper.CreateWirelessDisplayField);
+            var wirelessGroup =
+                CredentialFieldGrouper.CreateWirelessSectionGroup(fields);
+            if (wirelessGroup is null)
+                return;
+
+            foreach (var field in wirelessGroup.Fields)
+                FireDrillCredentialFields.Add(field);
+            FireDrillCredentialGroups.Add(wirelessGroup);
+            return;
         }
 
+        var visibleFields = fields.Where(IsFieldVisibleInCurrentCredentialSection);
         foreach (var field in visibleFields)
             FireDrillCredentialFields.Add(field);
 

@@ -142,7 +142,33 @@ public sealed class CredentialWorkspaceLayoutTests
         var viewModel = ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.FireDrill.cs"));
         Assert.Contains("item.Fields.Any(IsFieldVisibleInCurrentCredentialSection)", viewModel, StringComparison.Ordinal);
         Assert.Contains("\"Client WiFi\" => CredentialFieldGrouper.IsWirelessField(field)", viewModel, StringComparison.Ordinal);
-        Assert.Contains(".Select(CredentialFieldGrouper.CreateWirelessDisplayField)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("CredentialFieldGrouper.CreateWirelessSectionGroup(fields)", viewModel, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ClientWifiKeepsWirelessAdminInWirelessGroupAfterPrefixRemoval()
+    {
+        FireDrillCredentialField[] fields =
+        [
+            Field("Wireless Admin", 0),
+            Field("Wireless Admin Password", 1),
+            Field("Wireless Management Url", 2),
+            Field("Firebox IP", 3)
+        ];
+
+        var group = CredentialFieldGrouper.CreateWirelessSectionGroup(fields);
+
+        Assert.NotNull(group);
+        Assert.Equal("Wireless", group.Name);
+        Assert.Equal(
+            ["Admin", "Admin Password", "Management Url"],
+            group.Fields.Select(field => field.Label));
+        Assert.DoesNotContain(
+            group.Fields,
+            field => field.Label.StartsWith("Wireless", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(
+            group.Fields,
+            field => field.Label.Equals("Firebox IP", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

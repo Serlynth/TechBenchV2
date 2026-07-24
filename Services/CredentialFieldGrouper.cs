@@ -112,6 +112,26 @@ internal static partial class CredentialFieldGrouper
             : field with { Label = displayLabel };
     }
 
+    public static FireDrillCredentialFieldGroup? CreateWirelessSectionGroup(
+        IEnumerable<FireDrillCredentialField> fields)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+
+        var wirelessFields = fields
+            .Where(IsWirelessField)
+            .Select(CreateWirelessDisplayField)
+            .OrderBy(field => field.SortOrder)
+            .ThenBy(field => field.Label, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return wirelessFields.Length == 0
+            ? null
+            : new FireDrillCredentialFieldGroup(
+                "Wireless",
+                5,
+                wirelessFields);
+    }
+
     private static CredentialGroup ResolveGroup(FireDrillCredentialField field)
     {
         var label = Normalize(field.Label);
