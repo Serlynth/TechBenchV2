@@ -2980,6 +2980,8 @@
                                 <ColumnDefinition Width="1*" />
                                 <ColumnDefinition Width="14" />
                                 <ColumnDefinition Width="1*" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="1*" />
                             </Grid.ColumnDefinitions>
 
                             <Border Grid.Column="0" Style="{StaticResource CardStyle}">
@@ -3031,6 +3033,40 @@
                                                Margin="0,12,0,0" />
                                 </StackPanel>
                             </Border>
+
+                            <Border Grid.Column="4" Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="Credentials synchronization"
+                                               Style="{StaticResource SectionHeadingStyle}" />
+                                    <TextBlock Text="{Binding AdminCredentialsSyncSummary}"
+                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                               FontWeight="SemiBold"
+                                               TextWrapping="Wrap"
+                                               Margin="0,4,0,6" />
+                                    <TextBlock Text="{Binding AdminCredentialsSyncDetails}"
+                                               Style="{StaticResource MutedTextStyle}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,0,0,10" />
+                                    <ProgressBar Height="8"
+                                                 Minimum="0"
+                                                 Maximum="100"
+                                                 Value="{Binding AdminCredentialsSyncProgressValue}"
+                                                 IsIndeterminate="{Binding IsAdminCredentialsSyncIndeterminate}"
+                                                 Margin="0,0,0,8" />
+                                    <TextBlock Text="{Binding AdminCredentialsSyncProgressText}"
+                                               Style="{StaticResource MutedTextStyle}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,0,0,14" />
+                                    <Button Content="Sync Credentials now"
+                                            Command="{Binding RequestAdminCredentialsSyncCommand}"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            HorizontalAlignment="Left" />
+                                    <TextBlock Text="The server Sync Service reads the configured workbook and updates encrypted SQL storage."
+                                               Style="{StaticResource MutedTextStyle}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,12,0,0" />
+                                </StackPanel>
+                            </Border>
                         </Grid>
 
                         <Border Style="{StaticResource CardStyle}" Margin="0,14,0,0">
@@ -3054,7 +3090,7 @@
                                     <Button Grid.Column="1"
                                             Content="Refresh all"
                                             Command="{Binding RefreshAdminCenterCommand}"
-                                            ToolTip="Refresh WHD and Sage synchronization status, active clients, and recent responses."
+                                            ToolTip="Refresh WHD, Sage, and Credentials synchronization status, active clients, and recent responses."
                                             Style="{StaticResource SecondaryButtonStyle}"
                                             VerticalAlignment="Top" />
                                 </Grid>

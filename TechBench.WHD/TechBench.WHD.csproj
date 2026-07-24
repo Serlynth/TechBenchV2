@@ -6,9 +6,9 @@
     <Nullable>enable</Nullable>
     <AssemblyName>TechBench.WHD</AssemblyName>
     <RootNamespace>TechBench</RootNamespace>
-    <Version>0.5.42</Version>
-    <AssemblyVersion>0.5.42.0</AssemblyVersion>
-    <FileVersion>0.5.42.0</FileVersion>
+    <Version>0.5.43</Version>
+    <AssemblyVersion>0.5.43.0</AssemblyVersion>
+    <FileVersion>0.5.43.0</FileVersion>
     <PlatformTarget Condition="'$(PlatformTarget)' == ''">AnyCPU</PlatformTarget>
     <OutputPath>bin\$(Configuration)\$(PlatformTarget)\</OutputPath>
     <IntermediateOutputPath>obj\$(Configuration)\$(PlatformTarget)\</IntermediateOutputPath>

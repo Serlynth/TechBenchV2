@@ -124,6 +124,12 @@ public interface ITechBenchRepository
 
     FireDrillCredential? RevealFireDrillCredential(long credentialId) => null;
 
+    CredentialsSyncServiceStatus GetCredentialsSyncStatus() => new();
+
+    CredentialsSyncRequestResult RequestCredentialsSync() =>
+        throw new NotSupportedException(
+            "Credentials synchronization requires the shared SQL Server workspace.");
+
     int SaveCommonLink(CommonLink link);
 
     void DeleteCommonLink(int id);

@@ -181,6 +181,33 @@ public sealed class SqlServerTechBenchRepositoryContractTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void CredentialsSyncUsesOnlyTheExistingAdminServerQueueContract()
+    {
+        Assert.Equal(
+            "[tb_app].[AdminRequestFireDrillSync]",
+            SqlServerTechBenchRepository.Procedures.RequestCredentialsSync);
+        Assert.Equal(
+            "[tb_app].[GetFireDrillSyncStatus]",
+            SqlServerTechBenchRepository.Procedures.GetCredentialsSyncStatus);
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
+            nameof(ITechBenchRepository.RequestCredentialsSync)));
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
+            nameof(ITechBenchRepository.GetCredentialsSyncStatus)));
+
+        var repositorySource = File.ReadAllText(FindRepositoryFile(
+            "Data",
+            "SqlServerTechBenchRepository.FireDrill.cs"));
+        Assert.Contains(
+            "GetCredentialsSyncStatusAsync",
+            repositorySource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "RequestCredentialsSyncAsync",
+            repositorySource,
+            StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryFile(params string[] relativeParts)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

@@ -133,6 +133,12 @@ public sealed class SharedAdminPolicyTests
         Assert.Null(typeof(MainWindowViewModel).GetProperty("RefreshWhdAdministrationCommand"));
         Assert.NotNull(typeof(MainWindowViewModel).GetProperty("RequestAdminWhdSyncCommand"));
         Assert.NotNull(typeof(MainWindowViewModel).GetProperty("RequestAdminSageSyncCommand"));
+        Assert.NotNull(typeof(MainWindowViewModel).GetProperty(
+            "RequestAdminCredentialsSyncCommand"));
+        Assert.NotNull(typeof(MainWindowViewModel).GetProperty(
+            "AdminCredentialsSyncProgressText"));
+        Assert.NotNull(typeof(MainWindowViewModel).GetProperty(
+            "IsAdminCredentialsSyncIndeterminate"));
         Assert.NotNull(typeof(MainWindowViewModel).GetProperty("CanAccessAdminCenter"));
         Assert.DoesNotContain(
             typeof(MainWindowViewModel).GetFields(
@@ -152,6 +158,14 @@ public sealed class SharedAdminPolicyTests
             "MainWindowViewModel.AdminCenter.cs"));
         Assert.Contains("_repository.RequestWhdSync", adminSource, StringComparison.Ordinal);
         Assert.Contains("_repository.RequestSageSync", adminSource, StringComparison.Ordinal);
+        Assert.Contains(
+            "_repository.RequestCredentialsSync",
+            adminSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "TimeSpan.FromSeconds(1)",
+            adminSource,
+            StringComparison.Ordinal);
         Assert.DoesNotContain("_whdRestClient", adminSource, StringComparison.Ordinal);
 
         var xaml = File.ReadAllText(FindRepositoryFile("MainWindow.xaml"));
@@ -159,6 +173,11 @@ public sealed class SharedAdminPolicyTests
         Assert.Contains("Visibility=\"{Binding CanAccessAdminCenter", xaml, StringComparison.Ordinal);
         Assert.Contains("Sync all WHD data now", xaml, StringComparison.Ordinal);
         Assert.Contains("Sync Sage customers now", xaml, StringComparison.Ordinal);
+        Assert.Contains("Sync Credentials now", xaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "IsIndeterminate=\"{Binding IsAdminCredentialsSyncIndeterminate}\"",
+            xaml,
+            StringComparison.Ordinal);
     }
 
     [Fact]
