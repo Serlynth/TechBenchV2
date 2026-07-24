@@ -181,6 +181,52 @@ public sealed class SharedAdminPolicyTests
     }
 
     [Fact]
+    public void CredentialsSyncStatusCannotBlockWorkspaceStartup()
+    {
+        var adminSource = File.ReadAllText(FindRepositoryFile(
+            "ViewModels",
+            "MainWindowViewModel.AdminCenter.cs"));
+        var initializeStart = adminSource.IndexOf(
+            "private void InitializeAdminCenter()",
+            StringComparison.Ordinal);
+        var initializeEnd = adminSource.IndexOf(
+            "private async void HandleClientSessionTimerTick",
+            initializeStart,
+            StringComparison.Ordinal);
+
+        Assert.True(initializeStart >= 0 && initializeEnd > initializeStart);
+        var initializeBody = adminSource[initializeStart..initializeEnd];
+        Assert.Contains(
+            "RunClientSessionHeartbeatAsync",
+            initializeBody,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "_ = RefreshAdminCenterAsync();",
+            initializeBody,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "GetAdminCredentialsSyncStatusSafely",
+            adminSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "catch (Exception ex)",
+            adminSource,
+            StringComparison.Ordinal);
+
+        var mainSource = File.ReadAllText(FindRepositoryFile(
+            "ViewModels",
+            "MainWindowViewModel.cs"));
+        Assert.Contains(
+            "case \"Admin Center\":",
+            mainSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "RefreshAdminCenter();",
+            mainSource,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AdminCenterUsesCooperativeClientPresenceAndSafeSignOutContracts()
     {
         Assert.NotNull(typeof(ITechBenchRepository).GetMethod(

@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.Windows.Threading;
-using Microsoft.Data.SqlClient;
 using TechBench.Models;
 
 namespace TechBench.ViewModels;
@@ -239,10 +238,6 @@ public sealed partial class MainWindowViewModel
         _clientSessionTimer.Tick += HandleClientSessionTimerTick;
         _clientSessionTimer.Start();
         _ = RunClientSessionHeartbeatAsync();
-        if (CanAccessAdminCenter)
-        {
-            _ = RefreshAdminCenterAsync();
-        }
     }
 
     private async void HandleClientSessionTimerTick(object? sender, EventArgs e)
@@ -289,11 +284,7 @@ public sealed partial class MainWindowViewModel
                 await ProcessClientSessionCommandAsync(_pendingClientSessionCommand);
             }
         }
-        catch (Exception ex) when (
-            ex is SqlException
-                or InvalidOperationException
-                or TimeoutException
-                or TaskCanceledException)
+        catch (Exception ex)
         {
             if (CanAccessAdminCenter)
             {
@@ -404,7 +395,7 @@ public sealed partial class MainWindowViewModel
             var snapshot = await Task.Run(() => new AdminCenterSnapshot(
                 _repository.GetWhdSyncStatus(),
                 _repository.GetSageSyncStatus(),
-                _repository.GetCredentialsSyncStatus(),
+                GetAdminCredentialsSyncStatusSafely(),
                 _repository.GetActiveClientSessions(_clientSessionId),
                 _repository.GetRecentClientSessionResponses()));
             _adminWhdSyncStatus = snapshot.WhdStatus;
@@ -507,7 +498,7 @@ public sealed partial class MainWindowViewModel
             var result = await Task.Run(_repository.RequestCredentialsSync);
             AdminCenterActionStatus = result.Message;
             _adminCredentialsSyncStatus =
-                await Task.Run(_repository.GetCredentialsSyncStatus);
+                await Task.Run(GetAdminCredentialsSyncStatusSafely);
             RaiseAdminSyncProperties();
         }
         catch (Exception ex)
@@ -542,7 +533,7 @@ public sealed partial class MainWindowViewModel
             {
                 await Task.Delay(TimeSpan.FromSeconds(1));
                 _adminCredentialsSyncStatus =
-                    await Task.Run(_repository.GetCredentialsSyncStatus);
+                    await Task.Run(GetAdminCredentialsSyncStatusSafely);
                 RaiseAdminSyncProperties();
                 AdminCenterActionStatus =
                     $"Credentials synchronization: {_adminCredentialsSyncStatus.Summary}";
@@ -564,6 +555,22 @@ public sealed partial class MainWindowViewModel
         {
             _isAdminCredentialsSyncMonitoring = false;
             RequestAdminCredentialsSyncCommand.RaiseCanExecuteChanged();
+        }
+    }
+
+    private CredentialsSyncServiceStatus GetAdminCredentialsSyncStatusSafely()
+    {
+        try
+        {
+            return _repository.GetCredentialsSyncStatus();
+        }
+        catch (Exception ex)
+        {
+            return new CredentialsSyncServiceStatus
+            {
+                Health = "Unavailable",
+                Message = $"Credentials synchronization status will retry: {ex.Message}"
+            };
         }
     }
 
