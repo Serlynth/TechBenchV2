@@ -39,9 +39,25 @@ public partial class App : System.Windows.Application
 
         var app = new App();
         app.DispatcherUnhandledException += (_, eventArgs) =>
+        {
             CrashLog.Record(
                 "Application.DispatcherUnhandledException",
                 eventArgs.Exception);
+            eventArgs.Handled = true;
+            try
+            {
+                AppDialogWindow.Error(
+                    "TechBench V2 recovered from an interface error",
+                    "TechBench prevented an unexpected interface error from closing the application."
+                    + $"\n\n{eventArgs.Exception.Message}"
+                    + $"\n\nDiagnostic details were saved to:\n{CrashLog.FilePath}");
+            }
+            catch
+            {
+                // The original exception is already logged. Avoid a second
+                // exception in the recovery dialog from terminating the process.
+            }
+        };
         app.InitializeComponent();
         app.Run();
     }

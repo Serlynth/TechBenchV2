@@ -16,13 +16,11 @@ public sealed partial class MainWindowViewModel
     private ClientSessionInfo? _selectedActiveClientSession;
     private WhdSyncServiceStatus _adminWhdSyncStatus = new();
     private SageSyncServiceStatus _adminSageSyncStatus = new();
-    private CredentialsSyncServiceStatus _adminCredentialsSyncStatus = new();
     private ClientSessionCommand? _pendingClientSessionCommand;
     private string _adminSessionMessage =
         "A TechBench update is ready. Please save your work and close TechBench.";
     private string _adminCenterActionStatus = "Ready";
     private bool _isAdminCenterBusy;
-    private bool _isAdminCredentialsSyncMonitoring;
     private bool _isAdminCommandTrackingRefreshRunning;
     private bool _isClientSessionHeartbeatRunning;
     private bool _clientSessionWasRegistered;
@@ -43,8 +41,6 @@ public sealed partial class MainWindowViewModel
     public AsyncRelayCommand RequestAdminSageSyncCommand { get; private set; } = null!;
 
     public AsyncRelayCommand ConfirmAdminSageRemovalCommand { get; private set; } = null!;
-
-    public AsyncRelayCommand RequestAdminCredentialsSyncCommand { get; private set; } = null!;
 
     public AsyncRelayCommand RefreshAdminCenterCommand { get; private set; } = null!;
 
@@ -122,7 +118,6 @@ public sealed partial class MainWindowViewModel
                 RefreshAdminCenterCommand?.RaiseCanExecuteChanged();
                 RequestAdminWhdSyncCommand?.RaiseCanExecuteChanged();
                 RequestAdminSageSyncCommand?.RaiseCanExecuteChanged();
-                RequestAdminCredentialsSyncCommand?.RaiseCanExecuteChanged();
                 ConfirmAdminSageRemovalCommand?.RaiseCanExecuteChanged();
                 NotifyClientForUpdateCommand?.RaiseCanExecuteChanged();
                 RequireClientSignOutCommand?.RaiseCanExecuteChanged();
@@ -149,59 +144,6 @@ public sealed partial class MainWindowViewModel
     public bool AdminSageRequiresConfirmation =>
         _adminSageSyncStatus.RequiresLargeRemovalConfirmation;
 
-    public string AdminCredentialsSyncSummary => _adminCredentialsSyncStatus.Summary;
-
-    public string AdminCredentialsSyncDetails =>
-        $"Queue: {_adminCredentialsSyncStatus.QueueDepth} | Last attempt: "
-        + FormatAdminTimestamp(_adminCredentialsSyncStatus.LastRunAt)
-        + " | Last success: "
-        + FormatAdminTimestamp(_adminCredentialsSyncStatus.LastSuccessfulRunAt);
-
-    public string AdminCredentialsSyncProgressText
-    {
-        get
-        {
-            if (_adminCredentialsSyncStatus.Health.Equals(
-                    "Queued",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                return "Waiting for the server Sync Service to begin.";
-            }
-
-            if (_adminCredentialsSyncStatus.Health.Equals(
-                    "Running",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                return "Reading the workbook and updating SQL Server.";
-            }
-
-            if (_adminCredentialsSyncStatus.Health.Equals(
-                    "Completed",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                return $"Completed: {_adminCredentialsSyncStatus.LastReadCount ?? 0} read, "
-                    + $"{_adminCredentialsSyncStatus.LastSavedCount ?? 0} saved, "
-                    + $"{_adminCredentialsSyncStatus.LastStaleCount ?? 0} stale.";
-            }
-
-            return _adminCredentialsSyncStatus.Health.Equals(
-                    "NeverRun",
-                    StringComparison.OrdinalIgnoreCase)
-                ? "No Credentials synchronization has completed yet."
-                : _adminCredentialsSyncStatus.Message;
-        }
-    }
-
-    public bool IsAdminCredentialsSyncIndeterminate =>
-        _adminCredentialsSyncStatus.IsActive;
-
-    public double AdminCredentialsSyncProgressValue =>
-        _adminCredentialsSyncStatus.Health.Equals(
-            "Completed",
-            StringComparison.OrdinalIgnoreCase)
-                ? 100
-                : 0;
-
     private void InitializeAdminCenter()
     {
         RequestAdminWhdSyncCommand = new AsyncRelayCommand(
@@ -210,11 +152,6 @@ public sealed partial class MainWindowViewModel
         RequestAdminSageSyncCommand = new AsyncRelayCommand(
             parameter => RequestAdminSageSyncAsync(false),
             _ => CanAccessAdminCenter && !IsAdminCenterBusy);
-        RequestAdminCredentialsSyncCommand = new AsyncRelayCommand(
-            RequestAdminCredentialsSyncAsync,
-            _ => CanAccessAdminCenter
-                && !IsAdminCenterBusy
-                && !_isAdminCredentialsSyncMonitoring);
         ConfirmAdminSageRemovalCommand = new AsyncRelayCommand(
             parameter => RequestAdminSageSyncAsync(true),
             _ => CanAccessAdminCenter
@@ -395,12 +332,10 @@ public sealed partial class MainWindowViewModel
             var snapshot = await Task.Run(() => new AdminCenterSnapshot(
                 _repository.GetWhdSyncStatus(),
                 _repository.GetSageSyncStatus(),
-                GetAdminCredentialsSyncStatusSafely(),
                 _repository.GetActiveClientSessions(_clientSessionId),
                 _repository.GetRecentClientSessionResponses()));
             _adminWhdSyncStatus = snapshot.WhdStatus;
             _adminSageSyncStatus = snapshot.SageStatus;
-            _adminCredentialsSyncStatus = snapshot.CredentialsStatus;
             var selectedSessionIds = _selectedActiveClientSessions
                 .Select(static session => session.SessionId)
                 .ToHashSet();
@@ -416,10 +351,6 @@ public sealed partial class MainWindowViewModel
             ApplyRecentClientResponses(snapshot.Responses);
 
             RaiseAdminSyncProperties();
-            if (_adminCredentialsSyncStatus.IsActive)
-            {
-                _ = MonitorAdminCredentialsSyncAsync();
-            }
             AdminCenterActionStatus =
                 $"Refreshed {ActiveClientSessions.Count} active TechBench session(s) at {DateTime.Now:t}.";
         }
@@ -487,90 +418,6 @@ public sealed partial class MainWindowViewModel
         finally
         {
             IsAdminCenterBusy = false;
-        }
-    }
-
-    private async Task RequestAdminCredentialsSyncAsync(object? parameter)
-    {
-        IsAdminCenterBusy = true;
-        try
-        {
-            var result = await Task.Run(_repository.RequestCredentialsSync);
-            AdminCenterActionStatus = result.Message;
-            _adminCredentialsSyncStatus =
-                await Task.Run(GetAdminCredentialsSyncStatusSafely);
-            RaiseAdminSyncProperties();
-        }
-        catch (Exception ex)
-        {
-            AdminCenterActionStatus =
-                $"Credentials synchronization could not be requested: {ex.Message}";
-            return;
-        }
-        finally
-        {
-            IsAdminCenterBusy = false;
-        }
-
-        if (_adminCredentialsSyncStatus.IsActive)
-        {
-            await MonitorAdminCredentialsSyncAsync();
-        }
-    }
-
-    private async Task MonitorAdminCredentialsSyncAsync()
-    {
-        if (_isAdminCredentialsSyncMonitoring)
-        {
-            return;
-        }
-
-        _isAdminCredentialsSyncMonitoring = true;
-        RequestAdminCredentialsSyncCommand.RaiseCanExecuteChanged();
-        try
-        {
-            for (var attempt = 0; attempt < 600 && !_isDisposed; attempt++)
-            {
-                await Task.Delay(TimeSpan.FromSeconds(1));
-                _adminCredentialsSyncStatus =
-                    await Task.Run(GetAdminCredentialsSyncStatusSafely);
-                RaiseAdminSyncProperties();
-                AdminCenterActionStatus =
-                    $"Credentials synchronization: {_adminCredentialsSyncStatus.Summary}";
-                if (!_adminCredentialsSyncStatus.IsActive)
-                {
-                    return;
-                }
-            }
-
-            AdminCenterActionStatus =
-                "Credentials synchronization is still active. Normal Admin Center refresh will continue tracking it.";
-        }
-        catch (Exception ex)
-        {
-            AdminCenterActionStatus =
-                $"Credentials synchronization progress will retry on the next refresh: {ex.Message}";
-        }
-        finally
-        {
-            _isAdminCredentialsSyncMonitoring = false;
-            RequestAdminCredentialsSyncCommand.RaiseCanExecuteChanged();
-        }
-    }
-
-    private CredentialsSyncServiceStatus GetAdminCredentialsSyncStatusSafely()
-    {
-        try
-        {
-            return _repository.GetCredentialsSyncStatus();
-        }
-        catch (Exception ex)
-        {
-            return new CredentialsSyncServiceStatus
-            {
-                Health = "Unavailable",
-                Message = $"Credentials synchronization status will retry: {ex.Message}"
-            };
         }
     }
 
@@ -717,13 +564,7 @@ public sealed partial class MainWindowViewModel
         OnPropertyChanged(nameof(AdminSageSyncSummary));
         OnPropertyChanged(nameof(AdminSageSyncDetails));
         OnPropertyChanged(nameof(AdminSageRequiresConfirmation));
-        OnPropertyChanged(nameof(AdminCredentialsSyncSummary));
-        OnPropertyChanged(nameof(AdminCredentialsSyncDetails));
-        OnPropertyChanged(nameof(AdminCredentialsSyncProgressText));
-        OnPropertyChanged(nameof(IsAdminCredentialsSyncIndeterminate));
-        OnPropertyChanged(nameof(AdminCredentialsSyncProgressValue));
         ConfirmAdminSageRemovalCommand.RaiseCanExecuteChanged();
-        RequestAdminCredentialsSyncCommand.RaiseCanExecuteChanged();
     }
 
     private void DisposeAdminCenter()
@@ -749,7 +590,6 @@ public sealed partial class MainWindowViewModel
     private sealed record AdminCenterSnapshot(
         WhdSyncServiceStatus WhdStatus,
         SageSyncServiceStatus SageStatus,
-        CredentialsSyncServiceStatus CredentialsStatus,
         IReadOnlyList<ClientSessionInfo> Sessions,
         IReadOnlyList<ClientSessionCommandResponse> Responses);
 }

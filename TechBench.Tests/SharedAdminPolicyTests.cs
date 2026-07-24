@@ -133,11 +133,11 @@ public sealed class SharedAdminPolicyTests
         Assert.Null(typeof(MainWindowViewModel).GetProperty("RefreshWhdAdministrationCommand"));
         Assert.NotNull(typeof(MainWindowViewModel).GetProperty("RequestAdminWhdSyncCommand"));
         Assert.NotNull(typeof(MainWindowViewModel).GetProperty("RequestAdminSageSyncCommand"));
-        Assert.NotNull(typeof(MainWindowViewModel).GetProperty(
+        Assert.Null(typeof(MainWindowViewModel).GetProperty(
             "RequestAdminCredentialsSyncCommand"));
-        Assert.NotNull(typeof(MainWindowViewModel).GetProperty(
+        Assert.Null(typeof(MainWindowViewModel).GetProperty(
             "AdminCredentialsSyncProgressText"));
-        Assert.NotNull(typeof(MainWindowViewModel).GetProperty(
+        Assert.Null(typeof(MainWindowViewModel).GetProperty(
             "IsAdminCredentialsSyncIndeterminate"));
         Assert.NotNull(typeof(MainWindowViewModel).GetProperty("CanAccessAdminCenter"));
         Assert.DoesNotContain(
@@ -158,12 +158,8 @@ public sealed class SharedAdminPolicyTests
             "MainWindowViewModel.AdminCenter.cs"));
         Assert.Contains("_repository.RequestWhdSync", adminSource, StringComparison.Ordinal);
         Assert.Contains("_repository.RequestSageSync", adminSource, StringComparison.Ordinal);
-        Assert.Contains(
+        Assert.DoesNotContain(
             "_repository.RequestCredentialsSync",
-            adminSource,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "TimeSpan.FromSeconds(1)",
             adminSource,
             StringComparison.Ordinal);
         Assert.DoesNotContain("_whdRestClient", adminSource, StringComparison.Ordinal);
@@ -173,8 +169,8 @@ public sealed class SharedAdminPolicyTests
         Assert.Contains("Visibility=\"{Binding CanAccessAdminCenter", xaml, StringComparison.Ordinal);
         Assert.Contains("Sync all WHD data now", xaml, StringComparison.Ordinal);
         Assert.Contains("Sync Sage customers now", xaml, StringComparison.Ordinal);
-        Assert.Contains("Sync Credentials now", xaml, StringComparison.Ordinal);
-        Assert.Contains(
+        Assert.DoesNotContain("Sync Credentials now", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain(
             "IsIndeterminate=\"{Binding IsAdminCredentialsSyncIndeterminate}\"",
             xaml,
             StringComparison.Ordinal);
@@ -204,10 +200,7 @@ public sealed class SharedAdminPolicyTests
             "_ = RefreshAdminCenterAsync();",
             initializeBody,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "GetAdminCredentialsSyncStatusSafely",
-            adminSource,
-            StringComparison.Ordinal);
+        Assert.DoesNotContain("CredentialsSync", adminSource, StringComparison.Ordinal);
         Assert.Contains(
             "catch (Exception ex)",
             adminSource,
@@ -350,6 +343,10 @@ public sealed class SharedAdminPolicyTests
             StringComparison.Ordinal);
         Assert.Contains(
             "CrashLog.Record",
+            appSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "eventArgs.Handled = true;",
             appSource,
             StringComparison.Ordinal);
         Assert.True(File.Exists(FindRepositoryFile("Services", "CrashLog.cs")));
