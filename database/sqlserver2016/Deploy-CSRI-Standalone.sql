@@ -25563,9 +25563,10 @@ SELECT @TicketApplyDefinition = REPLACE(REPLACE(REPLACE(@TicketApplyDefinition, 
 
 IF CHARINDEX(N'sp_getapplock', @ClaimDefinition) = 0
    OR CHARINDEX(N'READCOMMITTEDLOCK', @ClaimDefinition) = 0
-   OR CHARINDEX(N'DATEADD(day,-1,@Now)', @ClaimDefinition) = 0
+   OR CHARINDEX(N'WHEREwork_type.[WorkType]=N''Tickets''', @ClaimDefinition) = 0
+   OR CHARINDEX(N'@IncludeReferenceWork', @ClaimDefinition) > 0
 BEGIN
-    PRINT N'FAIL: ClaimWhdSyncWork lacks queue serialization, RCSI-safe claiming, or daily reference cadence.';
+    PRINT N'FAIL: ClaimWhdSyncWork lacks queue serialization, RCSI-safe claiming, or ticket-only automatic scheduling.';
     SET @FailureCount += 1;
 END;
 

@@ -891,6 +891,18 @@ public sealed partial class SqlServer2016SyntaxTests
             claimBody,
             StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("@IncludeReferenceWork", claimBody, StringComparison.OrdinalIgnoreCase);
+
+        var verificationSource = File.ReadAllText(Path.Combine(
+            FindSqlDirectory(),
+            "95-V0006-WhdServerSyncVerify.sql"));
+        Assert.Contains(
+            "WHEREwork_type.[WorkType]=N''Tickets''",
+            verificationSource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            "daily reference cadence",
+            verificationSource,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
