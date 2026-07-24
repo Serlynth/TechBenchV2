@@ -481,6 +481,59 @@ public sealed class WhdServerSyncRestClientTests
     }
 
     [Fact]
+    public async Task TechnicianSyncRepresentsConfiguredOrganizationAccountWhenWhdOmitsItsIdentity()
+    {
+        var handler = new RecordingHandler(request =>
+        {
+            if (request.Method == HttpMethod.Delete)
+            {
+                return Json(HttpStatusCode.OK, "{}");
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/Techs", StringComparison.Ordinal) == true)
+            {
+                return Json(HttpStatusCode.OK, """
+                    [
+                      {
+                        "id": 7,
+                        "displayName": "Ada Admin",
+                        "username": "aadmin",
+                        "isInactive": false
+                      }
+                    ]
+                    """);
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/Session", StringComparison.Ordinal) == true)
+            {
+                return Json(HttpStatusCode.OK, """
+                    {
+                      "type": "Session",
+                      "sessionKey": "application-session",
+                      "instanceId": -1
+                    }
+                    """);
+            }
+
+            return Json(HttpStatusCode.NotFound, "{}");
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetTechniciansAsync(ExplicitSettings("WHDMgr"));
+
+        Assert.True(result.Success, result.Message);
+        Assert.True(result.IsComplete);
+        Assert.Equal(2, result.Technicians.Count);
+        var manager = Assert.Single(
+            result.Technicians,
+            technician => technician.ExternalId == "WHD-CONFIGURED-ORGANIZATION-ACCOUNT");
+        Assert.Equal("Helpdesk Manager (organization-wide account)", manager.DisplayName);
+        Assert.Equal("WHDMgr", manager.Username);
+        Assert.True(manager.IsActive);
+    }
+
+    [Fact]
     public async Task TechnicianGroupSyncFallsBackToTechnicianMembershipData()
     {
         var handler = new RecordingHandler(request =>

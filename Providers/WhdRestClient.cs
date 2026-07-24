@@ -14,6 +14,7 @@ namespace TechBench.Providers;
 
 public sealed class WhdRestClient
 {
+    private const string ConfiguredOrganizationAccountExternalId = "WHD-CONFIGURED-ORGANIZATION-ACCOUNT";
     private const int PageSize = 100;
     private const int MaximumPageCount = 10_000;
     internal static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(90);
@@ -352,6 +353,29 @@ public sealed class WhdRestClient
                 {
                     technicians.Add(currentTechnician);
                 }
+            }
+
+            // An application API key authenticates the integration, not a
+            // technician session. WHD 12.x therefore omits its built-in
+            // Helpdesk Manager account from both /Techs and currentTech even
+            // though the configured username is active and valid. Preserve a
+            // stable organization-account mapping choice when WHD exposes no
+            // numeric technician identity. This is intentionally distinct
+            // from a normal WHD-TECH-* assignment and is used to identify the
+            // shared organization account in TechBench administration.
+            if (!technicians.Any(technician =>
+                    string.Equals(
+                        technician.Username,
+                        settings.Username,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                technicians.Add(new WhdSyncedTechnician
+                {
+                    ExternalId = ConfiguredOrganizationAccountExternalId,
+                    DisplayName = "Helpdesk Manager (organization-wide account)",
+                    Username = settings.Username.Trim(),
+                    IsActive = true
+                });
             }
 
             return WhdTechnicianSyncResult.Succeeded(
