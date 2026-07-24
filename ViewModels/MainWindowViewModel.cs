@@ -363,6 +363,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _currentSection, value))
             {
                 OnPropertyChanged(nameof(WindowTitle));
+                OnPropertyChanged(nameof(IsCredentialWorkspaceSection));
+                OnPropertyChanged(nameof(IsClientWifiSection));
+                OnPropertyChanged(nameof(CredentialWorkspaceTitle));
+                OnPropertyChanged(nameof(CredentialWorkspaceDescription));
+                OnPropertyChanged(nameof(CredentialEmptyText));
+                OnPropertyChanged(nameof(CredentialRevealButtonLabel));
+                OnPropertyChanged(nameof(CredentialSelectionPrompt));
             }
         }
     }
@@ -858,7 +865,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void Navigate(string section)
     {
-        if (!section.Equals("Client Credentials", StringComparison.Ordinal))
+        if (!section.Equals(CurrentSection, StringComparison.Ordinal))
         {
             ClearRevealedFireDrillCredential();
         }
@@ -880,6 +887,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Ticket List" => "Showing my assigned and group non-closed tickets",
             "Common Links" => "Showing commonly used websites",
             "Client Credentials" => "Showing synchronized client credentials",
+            "Client WiFi" => "Showing synchronized client WiFi information",
             "Admin Center" => "Showing server synchronization and active TechBench clients",
             _ => $"Showing {section}"
         };
@@ -917,6 +925,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 RefreshCommonLinks();
                 break;
             case "Client Credentials":
+            case "Client WiFi":
                 RefreshFireDrillCredentials();
                 break;
             case "Admin Center":

@@ -287,6 +287,14 @@
         <Style x:Key="NavTicketsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Ticket List"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavLinksStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Common Links"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavCredentialsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Client Credentials"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+        <Style x:Key="NavClientWifiStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}">
+            <Setter Property="Padding" Value="28,9" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding CurrentSection}" Value="Client WiFi">
+                    <Setter Property="Tag" Value="Active" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
         <Style x:Key="NavPostingHistoryStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Posting History"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavAdminCenterStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Admin Center"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavSettingsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Settings"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
@@ -449,6 +457,8 @@
                     <Button Content="Tickets" Command="{Binding NavigateCommand}" CommandParameter="Ticket List" Style="{StaticResource NavTicketsStyle}" />
                     <Button Content="Links" Command="{Binding NavigateCommand}" CommandParameter="Common Links" Style="{StaticResource NavLinksStyle}" />
                     <Button Content="Client Credentials" Command="{Binding NavigateCommand}" CommandParameter="Client Credentials" Style="{StaticResource NavCredentialsStyle}"
+                            Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <Button Content="Client WiFi" Command="{Binding NavigateCommand}" CommandParameter="Client WiFi" Style="{StaticResource NavClientWifiStyle}"
                             Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
                     <TextBlock Text="SYSTEM" Style="{StaticResource SidebarGroupLabelStyle}" />
@@ -2106,7 +2116,7 @@
                     </Border>
                 </Grid>
 
-                <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Client Credentials}">
+                <Grid Visibility="{Binding IsCredentialWorkspaceSection, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="0.9*" />
                         <ColumnDefinition Width="14" />
@@ -2116,8 +2126,8 @@
                     <Border Grid.Column="0" Style="{StaticResource CardStyle}">
                         <DockPanel>
                             <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
-                                <TextBlock Text="Client Credentials" Style="{StaticResource SectionHeadingStyle}" />
-                                <TextBlock Text="Search the server-synchronized client credentials. Passwords remain hidden until you explicitly reveal a client."
+                                <TextBlock Text="{Binding CredentialWorkspaceTitle}" Style="{StaticResource SectionHeadingStyle}" />
+                                <TextBlock Text="{Binding CredentialWorkspaceDescription}"
                                            Style="{StaticResource MutedTextStyle}" TextWrapping="Wrap" Margin="0,0,0,12" />
                                 <Grid>
                                     <Grid.ColumnDefinitions>
@@ -2131,7 +2141,7 @@
                                 </Grid>
                             </StackPanel>
 
-                            <TextBlock Text="No matching credential clients."
+                            <TextBlock Text="{Binding CredentialEmptyText}"
                                        Style="{StaticResource MutedTextStyle}"
                                        HorizontalAlignment="Center" VerticalAlignment="Center"
                                        Visibility="{Binding HasFireDrillCredentials, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
@@ -2168,13 +2178,13 @@
                                 </StackPanel>
                                 <WrapPanel Grid.Column="1" HorizontalAlignment="Right">
                                     <Button Content="Hide" Command="{Binding HideFireDrillCommand}" Margin="0,0,8,0" />
-                                    <Button Content="Reveal Credentials" Command="{Binding RevealFireDrillCommand}"
+                                    <Button Content="{Binding CredentialRevealButtonLabel}" Command="{Binding RevealFireDrillCommand}"
                                             Style="{StaticResource PrimaryButtonStyle}" />
                                 </WrapPanel>
                             </Grid>
 
                             <Grid Grid.Row="1">
-                                <TextBlock Text="Select a client to view its credential fields."
+                                <TextBlock Text="{Binding CredentialSelectionPrompt}"
                                            Style="{StaticResource MutedTextStyle}" TextWrapping="Wrap"
                                            HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460"
                                            Visibility="{Binding HasSelectedFireDrillCredential, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />

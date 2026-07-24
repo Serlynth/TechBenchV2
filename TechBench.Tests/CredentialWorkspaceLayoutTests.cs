@@ -21,6 +21,28 @@ public sealed class CredentialWorkspaceLayoutTests
     }
 
     [Fact]
+    public void SidebarExposesClientWifiToTheSameAuthorizedUsers()
+    {
+        var xaml = ReadRepositoryFile("MainWindow.xaml");
+
+        Assert.Contains(
+            "Content=\"Client WiFi\" Command=\"{Binding NavigateCommand}\" CommandParameter=\"Client WiFi\"",
+            xaml,
+            StringComparison.Ordinal);
+        var buttonStart = xaml.IndexOf("Content=\"Client WiFi\"", StringComparison.Ordinal);
+        var buttonEnd = xaml.IndexOf("/>", buttonStart, StringComparison.Ordinal);
+        Assert.True(buttonStart >= 0 && buttonEnd > buttonStart);
+        var button = xaml[buttonStart..buttonEnd];
+        Assert.Contains("Style=\"{StaticResource NavClientWifiStyle}\"", button, StringComparison.Ordinal);
+        Assert.Contains("Visibility=\"{Binding CanAccessFireDrill", button, StringComparison.Ordinal);
+        Assert.Contains(
+            "Visibility=\"{Binding IsCredentialWorkspaceSection, Converter={StaticResource BooleanToVisibilityConverter}}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding CredentialWorkspaceTitle}\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ResultCardsExposeOnlyClientName()
     {
         var xaml = ReadRepositoryFile("MainWindow.xaml");
@@ -83,19 +105,34 @@ public sealed class CredentialWorkspaceLayoutTests
             Field("Barracuda Password", 12),
             Field("SonicWall Username", 13),
             Field("SonicWall Password", 14),
-            Field("Unclassified note", 15)
+            Field("Unclassified note", 15),
+            Field("Wireless SSID", 16),
+            Field("Wireless Password", 17)
         ];
 
         var groups = CredentialFieldGrouper.Group(fields);
 
         Assert.Equal(
-            ["WatchGuard", "Microsoft 365", "ESET", "Barracuda", "SonicWall", "Other"],
+            ["Wireless", "WatchGuard", "Microsoft 365", "ESET", "Barracuda", "SonicWall", "Other"],
             groups.Select(group => group.Name));
+        Assert.Equal(2, groups.Single(group => group.Name == "Wireless").Fields.Count);
         Assert.Equal(7, groups.Single(group => group.Name == "WatchGuard").Fields.Count);
         Assert.Equal(2, groups.Single(group => group.Name == "SonicWall").Fields.Count);
         Assert.Equal(
             "Unclassified note",
             groups.Single(group => group.Name == "Other").Fields.Single().Label);
+    }
+
+    [Fact]
+    public void ClientWifiUsesOnlyWirelessPrefixedFields()
+    {
+        Assert.True(CredentialFieldGrouper.IsWirelessField(Field("Wireless SSID", 0)));
+        Assert.True(CredentialFieldGrouper.IsWirelessField(Field(" wireless password", 1)));
+        Assert.False(CredentialFieldGrouper.IsWirelessField(Field("Microsoft 365 Password", 2)));
+
+        var viewModel = ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.FireDrill.cs"));
+        Assert.Contains("item.Fields.Any(CredentialFieldGrouper.IsWirelessField)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("fields.Where(CredentialFieldGrouper.IsWirelessField)", viewModel, StringComparison.Ordinal);
     }
 
     private static FireDrillCredentialField Field(string label, int order) =>

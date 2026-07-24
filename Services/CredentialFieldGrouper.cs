@@ -7,6 +7,7 @@ internal static partial class CredentialFieldGrouper
 {
     private static readonly CredentialGroupRule[] KnownGroups =
     [
+        new("Wireless", 5, ["wireless"]),
         new("WatchGuard", 10,
         [
             "watchguard", "firebox", "authpoint", "sslvpn",
@@ -58,6 +59,13 @@ internal static partial class CredentialFieldGrouper
             .ThenBy(group => group.Fields.Min(field => field.SortOrder))
             .ThenBy(group => group.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    public static bool IsWirelessField(FireDrillCredentialField field)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        return Normalize(field.Label).StartsWith("wireless", StringComparison.Ordinal) ||
+               Normalize(field.FieldName).StartsWith("wireless", StringComparison.Ordinal);
     }
 
     private static CredentialGroup ResolveGroup(FireDrillCredentialField field)
