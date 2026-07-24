@@ -311,11 +311,11 @@
                                            FontWeight="Bold"
                                            VerticalAlignment="Center" />
                                 <TextBlock Grid.Column="1"
-                                           Text="›"
+                                           Text="&#x2192;"
                                            Foreground="{TemplateBinding Foreground}"
-                                           FontSize="17"
+                                           FontSize="15"
                                            FontWeight="SemiBold"
-                                           Margin="8,-3,2,-3"
+                                           Margin="8,-2,3,-2"
                                            VerticalAlignment="Center" />
                             </Grid>
                         </Border>
@@ -530,7 +530,7 @@
                 </StackPanel>
 
                 <ScrollViewer x:Name="SidebarNavigationScrollViewer"
-                              VerticalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Hidden"
                               HorizontalScrollBarVisibility="Disabled"
                               PanningMode="VerticalOnly">
                     <StackPanel>

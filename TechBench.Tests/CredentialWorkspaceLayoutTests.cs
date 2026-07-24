@@ -35,7 +35,9 @@ public sealed class CredentialWorkspaceLayoutTests
         var xaml = ReadRepositoryFile("MainWindow.xaml");
 
         Assert.Contains("x:Name=\"SidebarNavigationScrollViewer\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("VerticalScrollBarVisibility=\"Auto\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("VerticalScrollBarVisibility=\"Hidden\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"&#x2192;\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"›\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"NOTES\" Style=\"{StaticResource SidebarGroupLabelStyle}\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Text=\"WORKLOG\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Key=\"SidebarGroupHeaderStyle\"", xaml, StringComparison.Ordinal);
