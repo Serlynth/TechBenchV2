@@ -126,10 +126,30 @@ internal sealed class ActiveDirectoryUserProvider
                 }
                 else
                 {
-                    users.Add(loginName, new DirectoryUser(loginName, displayName, isAdmin));
+                    users.Add(
+                        loginName,
+                        new DirectoryUser(
+                            loginName,
+                            displayName,
+                            isAdmin,
+                            ToSqlSidHex(user.Sid)));
                 }
             }
         }
+    }
+
+    private static string ToSqlSidHex(System.Security.Principal.SecurityIdentifier? sid)
+    {
+        if (sid is null)
+        {
+            throw new InvalidOperationException(
+                "Active Directory returned a user without a Windows SID. "
+                + "No SQL users were changed.");
+        }
+
+        var bytes = new byte[sid.BinaryLength];
+        sid.GetBinaryForm(bytes, 0);
+        return "0x" + Convert.ToHexString(bytes);
     }
 
     private static string FirstNonBlank(params string?[] values) =>

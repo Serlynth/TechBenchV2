@@ -433,6 +433,8 @@ END;
 
 IF CHARINDEX(N'OPENJSON(@AuthorizedUsersJson)', @UserReconciliationDefinition) = 0
    OR CHARINDEX(N'IFNOTEXISTS(SELECT1FROM@RawUsers)', @UserReconciliationDefinition) = 0
+   OR CHARINDEX(N'$.windowsSid', @UserReconciliationDefinition) = 0
+   OR CHARINDEX(N'TRY_CONVERT(varbinary(85),[WindowsSidHex],1)', @UserReconciliationDefinition) = 0
    OR CHARINDEX(N'DELETEmapping_row', @UserReconciliationDefinition) = 0
    OR CHARINDEX(N'[IsTechnician]=0', @UserReconciliationDefinition) = 0
 BEGIN

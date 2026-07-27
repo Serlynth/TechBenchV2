@@ -31,7 +31,11 @@ internal sealed class SyncStatus
     public int StaleCount { get; set; }
 }
 
-internal sealed record DirectoryUser(string LoginName, string DisplayName, bool IsAdmin);
+internal sealed record DirectoryUser(
+    string LoginName,
+    string DisplayName,
+    bool IsAdmin,
+    string WindowsSidHex = "");
 
 internal sealed record UserMapping(
     string LoginName,
