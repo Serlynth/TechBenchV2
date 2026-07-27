@@ -17505,20 +17505,23 @@ BEGIN
     (
         [LoginName] nvarchar(256) NULL,
         [DisplayName] nvarchar(160) NULL,
-        [IsAdmin] bit NULL
+        [IsAdmin] bit NULL,
+        [WindowsSidHex] nvarchar(172) NULL
     );
 
-    INSERT INTO @RawUsers([LoginName], [DisplayName], [IsAdmin])
+    INSERT INTO @RawUsers([LoginName], [DisplayName], [IsAdmin], [WindowsSidHex])
     SELECT
         NULLIF(LTRIM(RTRIM([LoginName])), N''),
         NULLIF(LTRIM(RTRIM([DisplayName])), N''),
-        COALESCE([IsAdmin], 0)
+        COALESCE([IsAdmin], 0),
+        NULLIF(LTRIM(RTRIM([WindowsSidHex])), N'')
     FROM OPENJSON(@AuthorizedUsersJson)
     WITH
     (
         [LoginName] nvarchar(256) N'$.loginName',
         [DisplayName] nvarchar(160) N'$.displayName',
-        [IsAdmin] bit N'$.isAdmin'
+        [IsAdmin] bit N'$.isAdmin',
+        [WindowsSidHex] nvarchar(172) N'$.windowsSid'
     );
 
     IF NOT EXISTS (SELECT 1 FROM @RawUsers)
@@ -17540,8 +17543,19 @@ BEGIN
     (
         SELECT 1
         FROM @RawUsers
-        WHERE SUSER_SID([LoginName], 0) IS NULL
-           OR DATALENGTH(SUSER_SID([LoginName], 0)) NOT BETWEEN 8 AND 85
+        WHERE COALESCE
+              (
+                  TRY_CONVERT(varbinary(85), [WindowsSidHex], 1),
+                  SUSER_SID([LoginName], 0)
+              ) IS NULL
+           OR DATALENGTH
+              (
+                  COALESCE
+                  (
+                      TRY_CONVERT(varbinary(85), [WindowsSidHex], 1),
+                      SUSER_SID([LoginName], 0)
+                  )
+              ) NOT BETWEEN 8 AND 85
     )
         THROW 51832, N'An authorized Windows user could not be resolved in Active Directory.', 1;
 
@@ -17555,7 +17569,11 @@ BEGIN
 
     INSERT INTO @AuthorizedUsers([WindowsSid], [LoginName], [DisplayName], [IsAdmin])
     SELECT
-        SUSER_SID(raw_user.[LoginName], 0),
+        COALESCE
+        (
+            TRY_CONVERT(varbinary(85), raw_user.[WindowsSidHex], 1),
+            SUSER_SID(raw_user.[LoginName], 0)
+        ),
         raw_user.[LoginName],
         LEFT
         (
@@ -27402,6 +27420,8 @@ END;
 
 IF CHARINDEX(N'OPENJSON(@AuthorizedUsersJson)', @UserReconciliationDefinition) = 0
    OR CHARINDEX(N'IFNOTEXISTS(SELECT1FROM@RawUsers)', @UserReconciliationDefinition) = 0
+   OR CHARINDEX(N'$.windowsSid', @UserReconciliationDefinition) = 0
+   OR CHARINDEX(N'TRY_CONVERT(varbinary(85),[WindowsSidHex],1)', @UserReconciliationDefinition) = 0
    OR CHARINDEX(N'DELETEmapping_row', @UserReconciliationDefinition) = 0
    OR CHARINDEX(N'[IsTechnician]=0', @UserReconciliationDefinition) = 0
 BEGIN

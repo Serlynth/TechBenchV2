@@ -520,16 +520,17 @@ internal sealed class ServerManagerForm : Form
         try
         {
             _configuration = await Task.Run(_repository.Load);
+            string? reconciliationError = null;
             try
             {
                 var directoryUsers = await Task.Run(_directoryUsers.LoadAuthorizedUsers);
-                var retiredCount = await Task.Run(
-                    () => _repository.ReconcileAuthorizedUsers(directoryUsers));
                 var mergedMappings = ActiveDirectoryUserProvider.MergeMappings(
                     directoryUsers,
                     _configuration.UserMappings);
                 _configuration.UserMappings.Clear();
                 _configuration.UserMappings.AddRange(mergedMappings);
+                var retiredCount = await Task.Run(
+                    () => _repository.ReconcileAuthorizedUsers(directoryUsers));
                 if (retiredCount > 0)
                 {
                     AddLog(
@@ -540,11 +541,25 @@ internal sealed class ServerManagerForm : Form
             catch (Exception directoryError)
             {
                 AddLog(
-                    "WARNING: Active Directory users could not be refreshed or reconciled; "
-                    + "showing registered SQL users only. No users were retired. "
+                    "ERROR: Active Directory authorized-user reconciliation failed. "
+                    + "The mapping grid uses the current AD snapshot when it was available, "
+                    + "but SQL users were not retired. "
                     + directoryError.Message);
+                reconciliationError =
+                    "Authorized-user cleanup failed. See Activity, then use Refresh after correcting the error.";
+                if (showErrors)
+                {
+                    ShowError(
+                        "TechBench loaded its SQL configuration, but could not reconcile "
+                        + "the authorized Active Directory users.\r\n\r\n"
+                        + FriendlySqlError(directoryError));
+                }
             }
             ApplyConfiguration(_configuration);
+            if (reconciliationError is not null)
+            {
+                _mappingSyncStatus.Text = reconciliationError;
+            }
             AddLog("Shared WHD and Sage settings refreshed from SQL Server.");
         }
         catch (Exception ex)

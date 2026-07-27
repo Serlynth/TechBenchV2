@@ -60,7 +60,9 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("ReconcileAuthorizedUsers", sql, StringComparison.Ordinal);
         Assert.Contains("AdminReconcileWhdAuthorizedUsers", sql, StringComparison.Ordinal);
         Assert.Contains("ReconcileAuthorizedUsers(directoryUsers)", form, StringComparison.Ordinal);
-        Assert.Contains("No users were retired", form, StringComparison.Ordinal);
+        Assert.Contains("authorized-user reconciliation failed", form, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("windowsSid = user.WindowsSidHex", sql, StringComparison.Ordinal);
+        Assert.Contains("ToSqlSidHex(user.Sid)", directory, StringComparison.Ordinal);
         Assert.Contains("MinimumSupportedSchemaVersion = 13", sql, StringComparison.Ordinal);
         Assert.Contains("MaximumSupportedSchemaVersion = 14", sql, StringComparison.Ordinal);
         Assert.Contains("supports database schemas", sql, StringComparison.Ordinal);

@@ -165,7 +165,8 @@ internal sealed class SqlAdminRepository(AppPaths paths)
             {
                 loginName = user.LoginName,
                 displayName = user.DisplayName,
-                isAdmin = user.IsAdmin
+                isAdmin = user.IsAdmin,
+                windowsSid = user.WindowsSidHex
             })
             .ToArray();
         var json = JsonSerializer.Serialize(snapshot);
