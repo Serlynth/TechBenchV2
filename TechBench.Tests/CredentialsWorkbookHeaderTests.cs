@@ -105,8 +105,162 @@ public sealed class CredentialsWorkbookHeaderTests
                 StringComparison.Ordinal));
     }
 
-    private static byte[] CreateClientUsersWorkbook()
+    [Fact]
+    public void RedesignedClientUsersWorksheetDiscoversGroupedColumnsDynamically()
     {
+        var workbook = FireDrillSyncEngine.ReadWorkbookContents(
+            CreateClientUsersWorkbook(
+                [
+                    "PERSON", "", "", "", "", "",
+                    "ACTIVE DIRECTORY", "",
+                    "MICROSOFT 365", "",
+                    "VPN", "",
+                    "SECURITY & NOTES", "",
+                    "BACKUP PORTAL", ""
+                ],
+                [
+                    "Client",
+                    "Location / Site",
+                    "User / Contact",
+                    "Role / Department",
+                    "Account Status",
+                    "Email Address",
+                    "AD Username",
+                    "AD Password",
+                    "Microsoft 365 Username",
+                    "Microsoft 365 Password",
+                    "VPN Username",
+                    "VPN Password",
+                    "Notes",
+                    "Last Verified",
+                    "Login URL",
+                    "Password"
+                ],
+                [
+                    "Example Client",
+                    "Main office",
+                    "Dana Brooks",
+                    "Accounting",
+                    "Active",
+                    "dana@example.test",
+                    "EXAMPLE\\dbrooks",
+                    "AD-secret",
+                    "dana@example.test",
+                    "M365-secret",
+                    "dbrooks",
+                    "VPN-secret",
+                    "Primary contact",
+                    "2026-07-27",
+                    "https://backup.example.test",
+                    "Backup-secret"
+                ]),
+            string.Empty);
+
+        var person = Assert.Single(Assert.IsAssignableFrom<
+            IReadOnlyList<CredentialsClientUserRow>>(workbook.ClientUsers));
+        Assert.Equal("dana@example.test", person.Email);
+        Assert.Collection(
+            person.Accounts,
+            account =>
+            {
+                Assert.Equal("ACTIVE DIRECTORY", account.AccountSystem);
+                Assert.Contains(
+                    account.Fields,
+                    field => field.FieldKey == "ad password"
+                             && field.Value == "AD-secret");
+            },
+            account =>
+            {
+                Assert.Equal("BACKUP PORTAL", account.AccountSystem);
+                Assert.Contains(
+                    account.Fields,
+                    field => field.FieldKey == "login url"
+                             && field.Value == "https://backup.example.test");
+                Assert.Contains(
+                    account.Fields,
+                    field => field.FieldKey == "password"
+                             && field.Value == "Backup-secret");
+            },
+            account =>
+            {
+                Assert.Equal("MICROSOFT 365", account.AccountSystem);
+                Assert.Contains(
+                    account.Fields,
+                    field => field.FieldKey == "microsoft 365 password"
+                             && field.Value == "M365-secret");
+            },
+            account =>
+            {
+                Assert.Equal("SECURITY & NOTES", account.AccountSystem);
+                Assert.Contains(
+                    account.Fields,
+                    field => field.FieldKey == "notes"
+                             && field.Value == "Primary contact");
+                Assert.DoesNotContain(
+                    account.Fields,
+                    field => field.FieldKey == "pin");
+            },
+            account =>
+            {
+                Assert.Equal("VPN", account.AccountSystem);
+                Assert.Contains(
+                    account.Fields,
+                    field => field.FieldKey == "vpn password"
+                             && field.Value == "VPN-secret");
+            });
+    }
+
+    private static byte[] CreateClientUsersWorkbook(params string[][] clientUsersRows)
+    {
+        if (clientUsersRows.Length == 0)
+        {
+            clientUsersRows =
+            [
+                [
+                    "Client",
+                    "Location / Site",
+                    "User / Contact",
+                    "Role / Department",
+                    "Account Status",
+                    "Account / System",
+                    "Username / Email",
+                    "Password",
+                    "PIN",
+                    "MFA / Recovery",
+                    "Notes",
+                    "Last Verified"
+                ],
+                [
+                    "Example Client",
+                    "Main office",
+                    "Dana Brooks",
+                    "Accounting",
+                    "Active",
+                    "Microsoft 365",
+                    "dana@example.test",
+                    "M365-secret",
+                    "1234",
+                    "Authenticator",
+                    "Primary account",
+                    "2026-07-27"
+                ],
+                [
+                    "Example Client",
+                    "Main office",
+                    "Dana Brooks",
+                    "Accounting",
+                    "Active",
+                    "VPN",
+                    "dana@example.test",
+                    "VPN-secret",
+                    "",
+                    "Recovery code",
+                    "",
+                    "2026-07-27"
+                ]
+            ];
+        }
+
         using var memory = new MemoryStream();
         using (var archive = new ZipArchive(
                    memory,
@@ -167,49 +321,7 @@ public sealed class CredentialsWorkbookHeaderTests
             WriteEntry(
                 archive,
                 "xl/worksheets/sheet2.xml",
-                Worksheet(
-                    [
-                        "Client",
-                        "Location / Site",
-                        "User / Contact",
-                        "Role / Department",
-                        "Account Status",
-                        "Account / System",
-                        "Username / Email",
-                        "Password",
-                        "PIN",
-                        "MFA / Recovery",
-                        "Notes",
-                        "Last Verified"
-                    ],
-                    [
-                        "Example Client",
-                        "Main office",
-                        "Dana Brooks",
-                        "Accounting",
-                        "Active",
-                        "Microsoft 365",
-                        "dana@example.test",
-                        "M365-secret",
-                        "1234",
-                        "Authenticator",
-                        "Primary account",
-                        "2026-07-27"
-                    ],
-                    [
-                        "Example Client",
-                        "Main office",
-                        "Dana Brooks",
-                        "Accounting",
-                        "Active",
-                        "VPN",
-                        "dana@example.test",
-                        "VPN-secret",
-                        "",
-                        "Recovery code",
-                        "",
-                        "2026-07-27"
-                    ]));
+                Worksheet(clientUsersRows));
         }
 
         return memory.ToArray();

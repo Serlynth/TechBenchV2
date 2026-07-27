@@ -172,12 +172,39 @@ public sealed class FireDrillSyncEngine
         if (!reader.Read())
             throw new InvalidDataException("The 'Client Users' worksheet is empty.");
 
-        var columns = new List<WorkbookColumn>();
+        var firstRow = Enumerable.Range(0, reader.FieldCount)
+            .Select(index => NormalizeHeader(CellText(reader.GetValue(index))))
+            .ToArray();
+        string[] groupLabels;
+        string[] headerLabels;
+        var headerRowNumber = 1;
+        if (ContainsClientUserIdentityHeaders(firstRow))
+        {
+            groupLabels = Enumerable.Repeat(string.Empty, firstRow.Length).ToArray();
+            headerLabels = firstRow;
+        }
+        else
+        {
+            if (!reader.Read())
+                throw new InvalidDataException(
+                    "The 'Client Users' worksheet does not contain its column header row.");
+            headerRowNumber = 2;
+            headerLabels = Enumerable.Range(0, reader.FieldCount)
+                .Select(index => NormalizeHeader(CellText(reader.GetValue(index))))
+                .ToArray();
+            if (!ContainsClientUserIdentityHeaders(headerLabels))
+                throw new InvalidDataException(
+                    "The 'Client Users' worksheet must contain columns named 'Client' and "
+                    + "'User / Contact'. No data was changed.");
+            groupLabels = ExpandMergedGroupLabels(firstRow, headerLabels.Length);
+        }
+
+        var columns = new List<ClientUserWorkbookColumn>();
         var blankHeaderColumns = new List<int>();
         var headerKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        for (var index = 0; index < reader.FieldCount; index++)
+        for (var index = 0; index < headerLabels.Length; index++)
         {
-            var label = NormalizeHeader(CellText(reader.GetValue(index)));
+            var label = headerLabels[index];
             if (string.IsNullOrWhiteSpace(label))
             {
                 blankHeaderColumns.Add(index);
@@ -188,10 +215,27 @@ public sealed class FireDrillSyncEngine
                 throw new InvalidDataException(
                     $"'Client Users' column {index + 1} has a header longer than 200 characters.");
             var fieldKey = NormalizeFieldKey(label);
-            if (!headerKeys.Add(fieldKey))
+            var groupLabel = index < groupLabels.Length
+                ? NormalizeHeader(groupLabels[index])
+                : string.Empty;
+            if (groupLabel.Length > 200)
                 throw new InvalidDataException(
-                    $"'Client Users' contains more than one column named '{label}'. No data was changed.");
-            columns.Add(new WorkbookColumn(index, fieldKey, label));
+                    $"'Client Users' column group above column {index + 1} is longer than 200 characters.");
+            var groupKey = NormalizeFieldKey(groupLabel);
+            var uniquenessKey = string.IsNullOrWhiteSpace(groupKey)
+                ? fieldKey
+                : $"{groupKey}\u001f{fieldKey}";
+            if (!headerKeys.Add(uniquenessKey))
+                throw new InvalidDataException(
+                    $"'Client Users' contains more than one column named '{label}'"
+                    + (string.IsNullOrWhiteSpace(groupLabel) ? "." : $" in the '{groupLabel}' group.")
+                    + " No data was changed.");
+            columns.Add(new ClientUserWorkbookColumn(
+                index,
+                fieldKey,
+                label,
+                groupKey,
+                groupLabel));
         }
 
         var clientColumn = RequiredColumn(columns, "client");
@@ -199,21 +243,26 @@ public sealed class FireDrillSyncEngine
         var locationColumn = OptionalColumn(columns, "location / site");
         var roleColumn = OptionalColumn(columns, "role / department");
         var statusColumn = OptionalColumn(columns, "account status");
-        var systemColumn = OptionalColumn(columns, "account / system");
-        var usernameColumn = OptionalColumn(columns, "username / email");
-        string[] identityKeys =
+        var emailColumn = OptionalColumn(columns, "email address")
+            ?? OptionalColumn(columns, "email");
+        var legacySystemColumn = OptionalColumn(columns, "account / system");
+        var legacyUsernameColumn = OptionalColumn(columns, "username / email");
+        string[] personKeys =
         [
             "client", "location / site", "user / contact", "role / department",
-            "account status", "account / system"
+            "account status", "email address", "email"
         ];
-        var accountColumns = columns
-            .Where(column => !identityKeys.Contains(column.FieldKey, StringComparer.OrdinalIgnoreCase))
+        var valueColumns = columns
+            .Where(column => !personKeys.Contains(
+                column.FieldKey,
+                StringComparer.OrdinalIgnoreCase))
             .OrderBy(column => column.Index)
             .ToArray();
+        var hasGroupedHeaders = groupLabels.Any(label => !string.IsNullOrWhiteSpace(label));
 
         var people = new Dictionary<string, ClientUserAccumulator>(StringComparer.OrdinalIgnoreCase);
         var accountKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var rowNumber = 1;
+        var rowNumber = headerRowNumber;
         while (reader.Read())
         {
             rowNumber++;
@@ -234,16 +283,19 @@ public sealed class FireDrillSyncEngine
             var location = Cell(reader, locationColumn);
             var role = Cell(reader, roleColumn);
             var status = Cell(reader, statusColumn);
-            var accountSystem = Cell(reader, systemColumn) ?? "General";
             EnsureLength(location, 240, rowNumber, "Location / Site");
             EnsureLength(role, 240, rowNumber, "Role / Department");
-            EnsureLength(accountSystem, 240, rowNumber, "Account / System");
 
-            var usernameOrEmail = Cell(reader, usernameColumn);
-            var email = usernameOrEmail?.Contains('@') == true
-                ? usernameOrEmail
-                : null;
-            EnsureLength(email, 320, rowNumber, "Username / Email");
+            var email = Cell(reader, emailColumn);
+            if (!hasGroupedHeaders
+                && string.IsNullOrWhiteSpace(email))
+            {
+                var usernameOrEmail = Cell(reader, legacyUsernameColumn);
+                email = usernameOrEmail?.Contains('@') == true
+                    ? usernameOrEmail
+                    : null;
+            }
+            EnsureLength(email, 320, rowNumber, emailColumn?.Label ?? "Username / Email");
 
             var personSourceKey = "CU-" + HashKey(client, location, displayName);
             if (!people.TryGetValue(personSourceKey, out var person))
@@ -258,33 +310,32 @@ public sealed class FireDrillSyncEngine
                 person.Merge(role, email, location, IsActiveStatus(status));
             }
 
-            var accountFields = accountColumns
-                .Select((column, sortOrder) => new FireDrillCredentialFieldRow(
-                    column.FieldKey,
-                    column.Label,
-                    sortOrder + 1,
-                    Secret(CellText(reader.GetValue(column.Index)), rowNumber, column.Label)))
-                .ToArray();
-            if (!accountFields.Any(field => !string.IsNullOrWhiteSpace(field.Value))
-                && string.IsNullOrWhiteSpace(Cell(reader, systemColumn)))
-                continue;
-
-            var accountSourceKey = "CA-" + HashKey(
-                personSourceKey,
-                accountSystem,
-                usernameOrEmail);
-            if (!accountKeys.Add(accountSourceKey))
-                throw new InvalidDataException(
-                    $"'Client Users' contains duplicate account rows for '{displayName}' at '{client}' "
-                    + $"({accountSystem}). No data was changed.");
-            var accountHash = Convert.ToHexString(SHA256.HashData(
-                JsonSerializer.SerializeToUtf8Bytes(
-                    new { accountSystem, accountFields }, JsonOptions)));
-            person.Accounts.Add(new CredentialsClientUserAccountRow(
-                accountSourceKey,
-                accountSystem,
-                accountHash,
-                accountFields));
+            if (hasGroupedHeaders)
+            {
+                AddGroupedAccounts(
+                    reader,
+                    rowNumber,
+                    person,
+                    personSourceKey,
+                    client,
+                    displayName,
+                    valueColumns,
+                    accountKeys);
+            }
+            else
+            {
+                AddLegacyAccount(
+                    reader,
+                    rowNumber,
+                    person,
+                    personSourceKey,
+                    client,
+                    displayName,
+                    valueColumns,
+                    legacySystemColumn,
+                    legacyUsernameColumn,
+                    accountKeys);
+            }
         }
 
         if (people.Count == 0)
@@ -296,6 +347,150 @@ public sealed class FireDrillSyncEngine
             .ThenBy(person => person.DisplayName, StringComparer.OrdinalIgnoreCase)
             .Select(person => person.ToRow())
             .ToArray();
+    }
+
+    private static void AddGroupedAccounts(
+        IExcelDataReader reader,
+        int rowNumber,
+        ClientUserAccumulator person,
+        string personSourceKey,
+        string client,
+        string displayName,
+        IReadOnlyList<ClientUserWorkbookColumn> valueColumns,
+        ISet<string> accountKeys)
+    {
+        var groupedColumns = valueColumns
+            .GroupBy(
+                column => string.IsNullOrWhiteSpace(column.GroupKey)
+                    ? "other"
+                    : column.GroupKey,
+                StringComparer.OrdinalIgnoreCase);
+        foreach (var group in groupedColumns)
+        {
+            var orderedColumns = group.OrderBy(column => column.Index).ToArray();
+            var accountFields = orderedColumns
+                .Select((column, sortOrder) => new FireDrillCredentialFieldRow(
+                    column.FieldKey,
+                    column.Label,
+                    sortOrder + 1,
+                    Secret(
+                        CellText(reader.GetValue(column.Index)),
+                        rowNumber,
+                        column.Label)))
+                .ToArray();
+            if (!accountFields.Any(field => !string.IsNullOrWhiteSpace(field.Value)))
+                continue;
+
+            var accountSystem = orderedColumns
+                .Select(column => column.GroupLabel)
+                .FirstOrDefault(label => !string.IsNullOrWhiteSpace(label))
+                ?? "Other";
+            EnsureLength(accountSystem, 240, rowNumber, "column group");
+            AddAccount(
+                person,
+                personSourceKey,
+                client,
+                displayName,
+                accountSystem,
+                null,
+                accountFields,
+                accountKeys);
+        }
+    }
+
+    private static void AddLegacyAccount(
+        IExcelDataReader reader,
+        int rowNumber,
+        ClientUserAccumulator person,
+        string personSourceKey,
+        string client,
+        string displayName,
+        IReadOnlyList<ClientUserWorkbookColumn> valueColumns,
+        ClientUserWorkbookColumn? systemColumn,
+        ClientUserWorkbookColumn? usernameColumn,
+        ISet<string> accountKeys)
+    {
+        var accountSystem = Cell(reader, systemColumn) ?? "General";
+        EnsureLength(accountSystem, 240, rowNumber, "Account / System");
+        var usernameOrEmail = Cell(reader, usernameColumn);
+        var accountFields = valueColumns
+            .Where(column => column.Index != systemColumn?.Index)
+            .Select((column, sortOrder) => new FireDrillCredentialFieldRow(
+                column.FieldKey,
+                column.Label,
+                sortOrder + 1,
+                Secret(
+                    CellText(reader.GetValue(column.Index)),
+                    rowNumber,
+                    column.Label)))
+            .ToArray();
+        if (!accountFields.Any(field => !string.IsNullOrWhiteSpace(field.Value))
+            && string.IsNullOrWhiteSpace(Cell(reader, systemColumn)))
+            return;
+        AddAccount(
+            person,
+            personSourceKey,
+            client,
+            displayName,
+            accountSystem,
+            usernameOrEmail,
+            accountFields,
+            accountKeys);
+    }
+
+    private static void AddAccount(
+        ClientUserAccumulator person,
+        string personSourceKey,
+        string client,
+        string displayName,
+        string accountSystem,
+        string? accountDiscriminator,
+        IReadOnlyList<FireDrillCredentialFieldRow> accountFields,
+        ISet<string> accountKeys)
+    {
+        var accountSourceKey = "CA-" + HashKey(
+            personSourceKey,
+            accountSystem,
+            accountDiscriminator);
+        if (!accountKeys.Add(accountSourceKey))
+            throw new InvalidDataException(
+                $"'Client Users' contains duplicate account rows for '{displayName}' at '{client}' "
+                + $"({accountSystem}). No data was changed.");
+        var accountHash = Convert.ToHexString(SHA256.HashData(
+            JsonSerializer.SerializeToUtf8Bytes(
+                new { accountSystem, accountFields },
+                JsonOptions)));
+        person.Accounts.Add(new CredentialsClientUserAccountRow(
+            accountSourceKey,
+            accountSystem,
+            accountHash,
+            accountFields));
+    }
+
+    private static bool ContainsClientUserIdentityHeaders(
+        IEnumerable<string> headers)
+    {
+        var keys = headers
+            .Where(header => !string.IsNullOrWhiteSpace(header))
+            .Select(NormalizeFieldKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return keys.Contains("client") && keys.Contains("user / contact");
+    }
+
+    private static string[] ExpandMergedGroupLabels(
+        IReadOnlyList<string> rawLabels,
+        int columnCount)
+    {
+        var expanded = new string[columnCount];
+        var current = string.Empty;
+        for (var index = 0; index < columnCount; index++)
+        {
+            if (index < rawLabels.Count
+                && !string.IsNullOrWhiteSpace(rawLabels[index]))
+                current = NormalizeHeader(rawLabels[index]);
+            expanded[index] = current;
+        }
+        return expanded;
     }
 
     internal static bool ShouldSkipRow([NotNullWhen(false)] string? client) => string.IsNullOrWhiteSpace(client);
@@ -321,22 +516,22 @@ public sealed class FireDrillSyncEngine
     internal static string NormalizeFieldKey(string? value) =>
         NormalizeHeader(value).ToLowerInvariant();
 
-    private static WorkbookColumn RequiredColumn(
-        IReadOnlyList<WorkbookColumn> columns,
+    private static ClientUserWorkbookColumn RequiredColumn(
+        IReadOnlyList<ClientUserWorkbookColumn> columns,
         string fieldKey) =>
         OptionalColumn(columns, fieldKey)
         ?? throw new InvalidDataException(
             $"The 'Client Users' worksheet must contain a column named '{fieldKey}'. No data was changed.");
 
-    private static WorkbookColumn? OptionalColumn(
-        IEnumerable<WorkbookColumn> columns,
+    private static ClientUserWorkbookColumn? OptionalColumn(
+        IEnumerable<ClientUserWorkbookColumn> columns,
         string fieldKey) =>
         columns.FirstOrDefault(column =>
             column.FieldKey.Equals(fieldKey, StringComparison.OrdinalIgnoreCase));
 
     private static string? Cell(
         IExcelDataReader reader,
-        WorkbookColumn? column)
+        ClientUserWorkbookColumn? column)
     {
         if (column is null) return null;
         var value = CellText(reader.GetValue(column.Index))?.Trim();
@@ -436,6 +631,12 @@ public sealed class FireDrillSyncEngine
 
     private sealed record WorkbookSnapshot(byte[] Bytes, DateTimeOffset ModifiedAtUtc);
     private sealed record WorkbookColumn(int Index, string FieldKey, string Label);
+    private sealed record ClientUserWorkbookColumn(
+        int Index,
+        string FieldKey,
+        string Label,
+        string GroupKey,
+        string GroupLabel);
 
     private sealed class ClientUserAccumulator
     {
