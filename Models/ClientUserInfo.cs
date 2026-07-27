@@ -1,5 +1,10 @@
 namespace TechBench.Models;
 
+public sealed record ClientUserClientSummary(
+    int ClientId,
+    string ClientName,
+    int UserCount);
+
 public sealed record ClientUserSummary(
     long ClientUserId,
     int ClientId,
