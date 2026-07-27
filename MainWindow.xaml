@@ -3300,6 +3300,11 @@
                                                FontSize="11"
                                                FontWeight="SemiBold" />
                                 </Border>
+                                <Button Content="Open Demo Mode"
+                                        Click="OpenEquipmentBoardDemo_Click"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        ToolTip="Open an isolated sample inventory board. Demo changes are never written to SQL Server."
+                                        Margin="0,0,10,0" />
                                 <Button Content="+  New device"
                                         Command="{Binding NewEquipmentCommand}"
                                         Style="{StaticResource PrimaryButtonStyle}"

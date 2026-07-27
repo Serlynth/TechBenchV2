@@ -550,6 +550,15 @@ public partial class MainWindow : Window
         FocusEditorClient();
     }
 
+    private void OpenEquipmentBoardDemo_Click(object sender, RoutedEventArgs e)
+    {
+        var demoWindow = new EquipmentBoardDemoWindow
+        {
+            Owner = this
+        };
+        demoWindow.ShowDialog();
+    }
+
     private void EditorClientComboBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (e.OriginalSource is not System.Windows.Controls.TextBox editableTextBox || !editableTextBox.IsKeyboardFocused)

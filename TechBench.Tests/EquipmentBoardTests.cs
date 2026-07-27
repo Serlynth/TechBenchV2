@@ -6,6 +6,35 @@ namespace TechBench.Tests;
 public sealed class EquipmentBoardTests
 {
     [Fact]
+    public void LiveInventoryBoardLaunchesAnIsolatedLocalDemo()
+    {
+        var mainWindowXaml = ReadRepositoryFile("MainWindow.xaml");
+        var mainWindowCode = ReadRepositoryFile("MainWindow.xaml.cs");
+
+        Assert.Contains("Open Demo Mode", mainWindowXaml);
+        Assert.Contains(
+            "Click=\"OpenEquipmentBoardDemo_Click\"",
+            mainWindowXaml);
+        Assert.Contains(
+            "new EquipmentBoardDemoWindow",
+            mainWindowCode);
+        Assert.Contains("demoWindow.ShowDialog();", mainWindowCode);
+    }
+
+    private static string ReadRepositoryFile(string relativePath)
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null &&
+               !File.Exists(Path.Combine(directory.FullName, "TechBenchV2.sln")))
+        {
+            directory = directory.Parent;
+        }
+
+        Assert.NotNull(directory);
+        return File.ReadAllText(Path.Combine(directory.FullName, relativePath));
+    }
+
+    [Fact]
     public void StockLaneReportsItsAssignmentAndLiveItemCount()
     {
         var lane = new EquipmentLane("Stock", null);
