@@ -7,20 +7,26 @@ namespace TechBench.ViewModels;
 public sealed partial class MainWindowViewModel
 {
     private string _clientUserSearchText = string.Empty;
+    private IReadOnlyList<ClientUserSummary> _allClientUsers = [];
+    private ClientUserClientSummary? _selectedClientUserClient;
     private ClientUserSummary? _selectedClientUser;
     private ClientUserSummary? _revealedClientUser;
     private bool _isCopyingClientUserField;
 
+    public ObservableCollection<ClientUserClientSummary> ClientUserClients { get; } = new();
     public ObservableCollection<ClientUserSummary> ClientUsers { get; } = new();
     public ObservableCollection<ClientUserAccountGroup> ClientUserAccountGroups { get; } = new();
     public RelayCommand SearchClientUsersCommand { get; private set; } = null!;
     public RelayCommand ClearClientUserSearchCommand { get; private set; } = null!;
+    public RelayCommand CloseClientUserDetailsCommand { get; private set; } = null!;
     public RelayCommand RevealClientUserCommand { get; private set; } = null!;
     public RelayCommand HideClientUserCommand { get; private set; } = null!;
     public RelayCommand CopyClientUserFieldCommand { get; private set; } = null!;
 
     public bool CanAccessClientUsers => !_currentUser.IsReadOnlyPreview;
+    public bool HasClientUserClients => ClientUserClients.Count > 0;
     public bool HasClientUsers => ClientUsers.Count > 0;
+    public bool HasSelectedClientUserClient => SelectedClientUserClient is not null;
     public bool HasSelectedClientUser => SelectedClientUser is not null;
     public bool IsClientUserRevealed => RevealedClientUser is not null;
 
@@ -28,6 +34,17 @@ public sealed partial class MainWindowViewModel
     {
         get => _clientUserSearchText;
         set => SetProperty(ref _clientUserSearchText, value);
+    }
+
+    public ClientUserClientSummary? SelectedClientUserClient
+    {
+        get => _selectedClientUserClient;
+        set
+        {
+            if (!SetProperty(ref _selectedClientUserClient, value)) return;
+            PopulateClientUsers(value?.ClientId);
+            OnPropertyChanged(nameof(HasSelectedClientUserClient));
+        }
     }
 
     public ClientUserSummary? SelectedClientUser
@@ -39,6 +56,7 @@ public sealed partial class MainWindowViewModel
             RevealedClientUser = null;
             PopulateClientUserGroups(value?.Accounts, masked: true);
             OnPropertyChanged(nameof(HasSelectedClientUser));
+            CloseClientUserDetailsCommand.RaiseCanExecuteChanged();
             RevealClientUserCommand.RaiseCanExecuteChanged();
         }
     }
@@ -59,6 +77,9 @@ public sealed partial class MainWindowViewModel
     {
         SearchClientUsersCommand = new RelayCommand(_ => RefreshClientUsers());
         ClearClientUserSearchCommand = new RelayCommand(_ => ClearClientUserSearch());
+        CloseClientUserDetailsCommand = new RelayCommand(
+            _ => CloseClientUserDetails(),
+            _ => SelectedClientUser is not null);
         RevealClientUserCommand = new RelayCommand(
             _ => RevealClientUser(),
             _ => SelectedClientUser is not null && CanAccessClientUsers);
@@ -73,25 +94,65 @@ public sealed partial class MainWindowViewModel
     private void RefreshClientUsers()
     {
         if (!CanAccessClientUsers) return;
-        var selectedId = SelectedClientUser?.ClientUserId;
-        ClientUsers.Clear();
-        foreach (var user in _repository.SearchClientUsers(
-                     searchTerm: ClientUserSearchText))
+        var selectedClientId = SelectedClientUserClient?.ClientId;
+        var search = ClientUserSearchText.Trim();
+        SelectedClientUserClient = null;
+        _allClientUsers = _repository.SearchClientUsers();
+        var matchingClientIds = string.IsNullOrWhiteSpace(search)
+            ? _allClientUsers.Select(user => user.ClientId).ToHashSet()
+            : _repository.SearchClientUsers(searchTerm: search)
+                .Select(user => user.ClientId)
+                .ToHashSet();
+
+        ClientUserClients.Clear();
+        foreach (var client in _allClientUsers
+                     .Where(user => matchingClientIds.Contains(user.ClientId))
+                     .GroupBy(user => new { user.ClientId, user.ClientName })
+                     .Select(group => new ClientUserClientSummary(
+                         group.Key.ClientId,
+                         group.Key.ClientName,
+                         group.Count()))
+                     .OrderBy(client => client.ClientName, StringComparer.OrdinalIgnoreCase))
         {
-            ClientUsers.Add(user);
+            ClientUserClients.Add(client);
         }
 
-        SelectedClientUser = selectedId.HasValue
-            ? ClientUsers.FirstOrDefault(user => user.ClientUserId == selectedId.Value)
-            : null;
-        OnPropertyChanged(nameof(HasClientUsers));
-        StatusMessage = $"Showing {ClientUsers.Count} synchronized client user(s).";
+        SelectedClientUserClient = selectedClientId.HasValue
+            ? ClientUserClients.FirstOrDefault(client => client.ClientId == selectedClientId.Value)
+              ?? ClientUserClients.FirstOrDefault()
+            : ClientUserClients.FirstOrDefault();
+        OnPropertyChanged(nameof(HasClientUserClients));
+        StatusMessage =
+            $"Showing {ClientUserClients.Count} client(s) with synchronized users.";
     }
 
     private void ClearClientUserSearch()
     {
         ClientUserSearchText = string.Empty;
         RefreshClientUsers();
+    }
+
+    private void PopulateClientUsers(int? clientId)
+    {
+        SelectedClientUser = null;
+        ClientUsers.Clear();
+        if (clientId.HasValue)
+        {
+            foreach (var user in _allClientUsers
+                         .Where(user => user.ClientId == clientId.Value)
+                         .OrderBy(user => user.DisplayName, StringComparer.OrdinalIgnoreCase))
+            {
+                ClientUsers.Add(user);
+            }
+        }
+
+        OnPropertyChanged(nameof(HasClientUsers));
+    }
+
+    private void CloseClientUserDetails()
+    {
+        SelectedClientUser = null;
+        ClearRevealedClientUser();
     }
 
     private void RevealClientUser()

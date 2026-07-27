@@ -49,18 +49,32 @@ public sealed class ClientUsersWorkspaceTests
     }
 
     [Fact]
-    public void ClientUsersWorkspaceSearchesAndRevealsDynamicAccountGroups()
+    public void ClientUsersWorkspaceSelectsClientThenOpensUserDetailsDrawer()
     {
         var xaml = ReadRepositoryFile("MainWindow.xaml");
         var viewModel = ReadRepositoryFile(
             Path.Combine("ViewModels", "MainWindowViewModel.ClientUsers.cs"));
+        var models = ReadRepositoryFile(
+            Path.Combine("Models", "ClientUserInfo.cs"));
 
         Assert.Contains(
             "ConverterParameter=Client Users",
             xaml,
             StringComparison.Ordinal);
         Assert.Contains(
+            "ItemsSource=\"{Binding ClientUserClients}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "SelectedItem=\"{Binding SelectedClientUserClient}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "ItemsSource=\"{Binding ClientUsers}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "SelectedItem=\"{Binding SelectedClientUser}\"",
             xaml,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -76,6 +90,14 @@ public sealed class ClientUsersWorkspaceTests
             xaml,
             StringComparison.Ordinal);
         Assert.Contains(
+            "Command=\"{Binding CloseClientUserDetailsCommand}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "TranslateTransform X=\"760\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "Content=\"Clear\"",
             xaml,
             StringComparison.Ordinal);
@@ -86,6 +108,18 @@ public sealed class ClientUsersWorkspaceTests
         Assert.Contains(
             "field with { Value = \"***\" }",
             viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ".GroupBy(user => new { user.ClientId, user.ClientName })",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "PopulateClientUsers(value?.ClientId)",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "record ClientUserClientSummary",
+            models,
             StringComparison.Ordinal);
         Assert.Contains(
             "await ClipboardService.TrySetTextAsync(field.Value)",

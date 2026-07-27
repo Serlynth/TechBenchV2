@@ -2268,16 +2268,16 @@
 
                 <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Client Users}">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="0.9*" />
+                        <ColumnDefinition Width="0.82*" />
                         <ColumnDefinition Width="14" />
-                        <ColumnDefinition Width="1.1*" />
+                        <ColumnDefinition Width="1.18*" />
                     </Grid.ColumnDefinitions>
 
                     <Border Grid.Column="0" Style="{StaticResource CardStyle}">
                         <DockPanel>
                             <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
-                                <TextBlock Text="Client Users" Style="{StaticResource SectionHeadingStyle}" />
-                                <TextBlock Text="Search synchronized contacts and accounts from the Client Users workbook sheet."
+                                <TextBlock Text="Clients" Style="{StaticResource SectionHeadingStyle}" />
+                                <TextBlock Text="Choose a client to see its synchronized users."
                                            Style="{StaticResource MutedTextStyle}" TextWrapping="Wrap" Margin="0,0,0,12" />
                                 <Grid>
                                     <Grid.ColumnDefinitions>
@@ -2287,7 +2287,7 @@
                                     </Grid.ColumnDefinitions>
                                     <TextBox Grid.Column="0"
                                              Text="{Binding ClientUserSearchText, UpdateSourceTrigger=PropertyChanged}"
-                                             ToolTip="Search client, user, email, role, or location"
+                                             ToolTip="Search clients or their users"
                                              Margin="0,0,8,0" />
                                     <Button Grid.Column="1" Content="Search"
                                             Command="{Binding SearchClientUsersCommand}"
@@ -2299,7 +2299,59 @@
                                 </Grid>
                             </StackPanel>
 
-                            <TextBlock Text="No synchronized client users match this search."
+                            <TextBlock Text="No synchronized clients match this search."
+                                       Style="{StaticResource MutedTextStyle}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Visibility="{Binding HasClientUserClients, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+
+                            <ListBox ItemsSource="{Binding ClientUserClients}"
+                                     SelectedItem="{Binding SelectedClientUserClient}"
+                                     Style="{StaticResource ListBoxChromeLessStyle}"
+                                     ItemContainerStyle="{StaticResource ListBoxItemCardStyle}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource CardStyle}">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding ClientName}" FontWeight="SemiBold" FontSize="15" />
+                                                    <TextBlock Text="Synchronized client" Style="{StaticResource MutedTextStyle}" />
+                                                </StackPanel>
+                                                <Border Grid.Column="1"
+                                                        Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                        BorderBrush="{DynamicResource BorderBrush}"
+                                                        BorderThickness="1" CornerRadius="12"
+                                                        Padding="10,4" VerticalAlignment="Center">
+                                                    <TextBlock>
+                                                        <Run Text="{Binding UserCount}" />
+                                                        <Run Text=" users" />
+                                                    </TextBlock>
+                                                </Border>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                    </Border>
+
+                    <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                                <TextBlock Text="{Binding SelectedClientUserClient.ClientName, TargetNullValue=Users}"
+                                           Style="{StaticResource SectionHeadingStyle}" />
+                                <TextBlock Text="Select a user to open their contact and account details."
+                                           Style="{StaticResource MutedTextStyle}" TextWrapping="Wrap" />
+                            </StackPanel>
+
+                            <TextBlock Text="Select a client on the left."
+                                       Style="{StaticResource MutedTextStyle}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Visibility="{Binding HasSelectedClientUserClient, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                            <TextBlock Text="This client has no synchronized users."
                                        Style="{StaticResource MutedTextStyle}"
                                        HorizontalAlignment="Center" VerticalAlignment="Center"
                                        Visibility="{Binding HasClientUsers, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
@@ -2311,12 +2363,23 @@
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
                                         <Border Style="{StaticResource CardStyle}">
-                                            <StackPanel>
-                                                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="14" />
-                                                <TextBlock Text="{Binding ClientName}" Style="{StaticResource MutedTextStyle}" />
-                                                <TextBlock Text="{Binding RoleDepartment}" Style="{StaticResource MutedTextStyle}" />
-                                                <TextBlock Text="{Binding Email}" Style="{StaticResource MutedTextStyle}" />
-                                            </StackPanel>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="15" />
+                                                    <TextBlock Text="{Binding RoleDepartment}" Style="{StaticResource MutedTextStyle}" />
+                                                    <TextBlock Text="{Binding Email}" Style="{StaticResource MutedTextStyle}" />
+                                                    <TextBlock Text="{Binding LocationName}" Style="{StaticResource MutedTextStyle}" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right">
+                                                    <TextBlock Text="{Binding AccountCount}" FontSize="18"
+                                                               FontWeight="SemiBold" HorizontalAlignment="Center" />
+                                                    <TextBlock Text="accounts" Style="{StaticResource MutedTextStyle}" />
+                                                </StackPanel>
+                                            </Grid>
                                         </Border>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
@@ -2324,80 +2387,105 @@
                         </DockPanel>
                     </Border>
 
-                    <Border Grid.Column="2" Style="{StaticResource CardStyle}">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="*" />
-                            </Grid.RowDefinitions>
+                    <Grid Grid.ColumnSpan="3" Panel.ZIndex="30"
+                          Background="#72000000"
+                          Visibility="{Binding HasSelectedClientUser, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Border HorizontalAlignment="Right"
+                                Width="760"
+                                Margin="80,0,0,0">
+                            <Border.Style>
+                                <Style TargetType="{x:Type Border}" BasedOn="{StaticResource CardStyle}">
+                                    <Setter Property="RenderTransform">
+                                        <Setter.Value>
+                                            <TranslateTransform X="760" />
+                                        </Setter.Value>
+                                    </Setter>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasSelectedClientUser}" Value="True">
+                                            <DataTrigger.EnterActions>
+                                                <BeginStoryboard>
+                                                    <Storyboard>
+                                                        <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                                                                         From="760" To="0" Duration="0:0:0.22">
+                                                            <DoubleAnimation.EasingFunction>
+                                                                <CubicEase EasingMode="EaseOut" />
+                                                            </DoubleAnimation.EasingFunction>
+                                                        </DoubleAnimation>
+                                                    </Storyboard>
+                                                </BeginStoryboard>
+                                            </DataTrigger.EnterActions>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
 
-                            <Grid Grid.Row="0" Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel>
-                                    <TextBlock Text="{Binding SelectedClientUser.DisplayName, TargetNullValue=Select a user}"
-                                               Style="{StaticResource SectionHeadingStyle}" Margin="0" />
-                                    <TextBlock Text="{Binding SelectedClientUser.ClientName}"
-                                               Style="{StaticResource MutedTextStyle}" />
-                                </StackPanel>
-                                <WrapPanel Grid.Column="1">
-                                    <Button Content="Hide" Command="{Binding HideClientUserCommand}" Margin="0,0,8,0" />
-                                    <Button Content="Reveal Accounts" Command="{Binding RevealClientUserCommand}"
-                                            Style="{StaticResource PrimaryButtonStyle}" />
-                                </WrapPanel>
-                            </Grid>
-
-                            <Border Grid.Row="1"
-                                    Background="{DynamicResource PanelAltBackgroundBrush}"
-                                    BorderBrush="{DynamicResource BorderBrush}"
-                                    BorderThickness="1"
-                                    CornerRadius="8"
-                                    Padding="12"
-                                    Margin="0,0,0,12"
-                                    Visibility="{Binding HasSelectedClientUser, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                <Grid>
+                                <Grid Grid.Row="0" Margin="0,0,0,12">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="1.1*" />
-                                        <ColumnDefinition Width="1.1*" />
-                                        <ColumnDefinition Width="1.2*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0">
-                                        <TextBlock Text="Role / Department" Style="{StaticResource FieldLabelStyle}" />
-                                        <TextBlock Text="{Binding SelectedClientUser.RoleDepartment, TargetNullValue=-}"
-                                                   Style="{StaticResource DetailValueStyle}" TextWrapping="Wrap" />
-                                        <TextBlock Text="Location / Site" Style="{StaticResource FieldLabelStyle}" Margin="0,10,0,0" />
-                                        <TextBlock Text="{Binding SelectedClientUser.LocationName, TargetNullValue=-}"
-                                                   Style="{StaticResource DetailValueStyle}" TextWrapping="Wrap" />
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding SelectedClientUser.DisplayName}"
+                                                   Style="{StaticResource SectionHeadingStyle}" Margin="0" />
+                                        <TextBlock Text="{Binding SelectedClientUser.ClientName}"
+                                                   Style="{StaticResource MutedTextStyle}" />
                                     </StackPanel>
-                                    <StackPanel Grid.Column="1" Margin="16,0">
-                                        <TextBlock Text="Email" Style="{StaticResource FieldLabelStyle}" />
-                                        <TextBlock Text="{Binding SelectedClientUser.Email, TargetNullValue=-}"
-                                                   Style="{StaticResource DetailValueStyle}" TextWrapping="Wrap" />
-                                        <TextBlock Text="Phone" Style="{StaticResource FieldLabelStyle}" Margin="0,10,0,0" />
-                                        <TextBlock Text="{Binding SelectedClientUser.Phone, TargetNullValue=-}"
-                                                   Style="{StaticResource DetailValueStyle}" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="2">
-                                        <TextBlock Text="Accounts" Style="{StaticResource FieldLabelStyle}" />
-                                        <TextBlock Text="{Binding SelectedClientUser.AccountCount}"
-                                                   Style="{StaticResource DetailValueStyle}" />
-                                        <TextBlock Text="Last synchronized" Style="{StaticResource FieldLabelStyle}" Margin="0,10,0,0" />
-                                        <TextBlock Text="{Binding SelectedClientUser.LastSyncedLabel}"
-                                                   Style="{StaticResource DetailValueStyle}" />
-                                    </StackPanel>
+                                    <WrapPanel Grid.Column="1">
+                                        <Button Content="Hide Values" Command="{Binding HideClientUserCommand}" Margin="0,0,8,0" />
+                                        <Button Content="Reveal Accounts" Command="{Binding RevealClientUserCommand}"
+                                                Style="{StaticResource PrimaryButtonStyle}" Margin="0,0,8,0" />
+                                        <Button Content="Close" Command="{Binding CloseClientUserDetailsCommand}"
+                                                Padding="14,7" />
+                                    </WrapPanel>
                                 </Grid>
-                            </Border>
 
-                            <Grid Grid.Row="2">
-                                <TextBlock Text="Select a user to view contact and account information."
-                                           Style="{StaticResource MutedTextStyle}" TextWrapping="Wrap"
-                                           HorizontalAlignment="Center" VerticalAlignment="Center"
-                                           Visibility="{Binding HasSelectedClientUser, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
-                                <ScrollViewer VerticalScrollBarVisibility="Auto"
-                                              Visibility="{Binding HasSelectedClientUser, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <Border Grid.Row="1"
+                                        Background="{DynamicResource PanelAltBackgroundBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Padding="12"
+                                        Margin="0,0,0,12">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="1.1*" />
+                                            <ColumnDefinition Width="1.1*" />
+                                            <ColumnDefinition Width="1.2*" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="Role / Department" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBlock Text="{Binding SelectedClientUser.RoleDepartment, TargetNullValue=-}"
+                                                       Style="{StaticResource DetailValueStyle}" TextWrapping="Wrap" />
+                                            <TextBlock Text="Location / Site" Style="{StaticResource FieldLabelStyle}" Margin="0,10,0,0" />
+                                            <TextBlock Text="{Binding SelectedClientUser.LocationName, TargetNullValue=-}"
+                                                       Style="{StaticResource DetailValueStyle}" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="16,0">
+                                            <TextBlock Text="Email" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBlock Text="{Binding SelectedClientUser.Email, TargetNullValue=-}"
+                                                       Style="{StaticResource DetailValueStyle}" TextWrapping="Wrap" />
+                                            <TextBlock Text="Phone" Style="{StaticResource FieldLabelStyle}" Margin="0,10,0,0" />
+                                            <TextBlock Text="{Binding SelectedClientUser.Phone, TargetNullValue=-}"
+                                                       Style="{StaticResource DetailValueStyle}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="Accounts" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBlock Text="{Binding SelectedClientUser.AccountCount}"
+                                                       Style="{StaticResource DetailValueStyle}" />
+                                            <TextBlock Text="Last synchronized" Style="{StaticResource FieldLabelStyle}" Margin="0,10,0,0" />
+                                            <TextBlock Text="{Binding SelectedClientUser.LastSyncedLabel}"
+                                                       Style="{StaticResource DetailValueStyle}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
                                     <ItemsControl ItemsSource="{Binding ClientUserAccountGroups}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
@@ -2449,8 +2537,8 @@
                                     </ItemsControl>
                                 </ScrollViewer>
                             </Grid>
-                        </Grid>
-                    </Border>
+                        </Border>
+                    </Grid>
                 </Grid>
 
                 <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Ticket List}">
