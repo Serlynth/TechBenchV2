@@ -39,7 +39,7 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         _notifyUpdateAvailable = notifyUpdateAvailable ?? (_ => { });
         _localPreferences = localPreferences;
         _statusText = updateService.IsInstalled
-            ? "TechBench checks for stable updates automatically."
+            ? BuildChannelStatusText(updateService)
             : "Install TechBench with Setup.exe to enable automatic updates.";
 
         CheckForUpdatesCommand = new AsyncRelayCommand(
@@ -68,6 +68,7 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
     public bool IsInstalled => _updateService.IsInstalled;
     public bool IsChecking => _isChecking;
     public bool IsDownloading => _isDownloading;
+    public bool CanChangeUpdateChannel => !IsChecking && !IsDownloading;
     public bool HasAvailableUpdate => _availableUpdate is not null;
     public bool IsUpdateCompletion => !string.IsNullOrWhiteSpace(_completedVersion);
     public bool CanInstallUpdate =>
@@ -136,6 +137,20 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
     public void RefreshCommandStates()
     {
         InstallUpdateCommand.RaiseCanExecuteChanged();
+    }
+
+    public void HandleReleaseChannelChanged(string releaseChannel)
+    {
+        _availableUpdate = null;
+        _completedVersion = null;
+        _isBannerDismissed = false;
+        _lastNotifiedVersion = null;
+        StatusText = releaseChannel.Equals(
+                V2AppUpdateService.InventoryBetaReleaseChannel,
+                StringComparison.OrdinalIgnoreCase)
+            ? "Inventory Beta selected. Select Check for Updates to look for beta builds."
+            : "Stable selected. Select Check for Updates to return to stable releases.";
+        RaiseDisplayProperties();
     }
 
     public void Dispose()
@@ -308,6 +323,7 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
 
         _isChecking = value;
         OnPropertyChanged(nameof(IsChecking));
+        OnPropertyChanged(nameof(CanChangeUpdateChannel));
         RaiseCommandStates();
     }
 
@@ -320,6 +336,7 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
 
         _isDownloading = value;
         OnPropertyChanged(nameof(IsDownloading));
+        OnPropertyChanged(nameof(CanChangeUpdateChannel));
         OnPropertyChanged(nameof(IsProgressVisible));
         OnPropertyChanged(nameof(BannerDetail));
         OnPropertyChanged(nameof(HeaderUpdateLabel));
@@ -363,4 +380,14 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         ShowUpdateBannerCommand.RaiseCanExecuteChanged();
         OnPropertyChanged(nameof(CanInstallUpdate));
     }
+
+    private static string BuildChannelStatusText(
+        IAppUpdateService updateService) =>
+        updateService is IAppUpdateChannelService
+        {
+            SelectedReleaseChannel:
+                V2AppUpdateService.InventoryBetaReleaseChannel
+        }
+            ? "TechBench checks for Inventory Beta updates automatically."
+            : "TechBench checks for stable updates automatically.";
 }

@@ -18,7 +18,8 @@ public sealed class SqlServerConnectionFactory
         "[tb_app].[AdminListPreviewUsers]";
     public const string PreviewReaderExecutionStatement =
         "EXECUTE AS USER = N'tb_preview_reader';";
-    public const int SupportedSchemaVersion = 13;
+    public const int MinimumSupportedSchemaVersion = 13;
+    public const int SupportedSchemaVersion = 14;
 
     private const string PreviewApplicationName =
         "TechBench V2 Read-only User Preview";
@@ -270,11 +271,13 @@ public sealed class SqlServerConnectionFactory
         try
         {
             var schemaVersion = reader.GetInt32(reader.GetOrdinal("SchemaVersion"));
-            if (schemaVersion != SupportedSchemaVersion)
+            if (schemaVersion < MinimumSupportedSchemaVersion
+                || schemaVersion > SupportedSchemaVersion)
             {
                 throw new InvalidOperationException(
                     $"The TechBench database schema is version {schemaVersion}, "
-                    + $"but this client requires version {SupportedSchemaVersion}. "
+                    + "but this client supports versions "
+                    + $"{MinimumSupportedSchemaVersion} through {SupportedSchemaVersion}. "
                     + "Contact the TechBench administrator.");
             }
 
