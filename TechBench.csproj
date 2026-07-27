@@ -21,6 +21,8 @@
     <OutputPath>bin\$(Configuration)\$(PlatformTarget)\</OutputPath>
     <IntermediateOutputPath Condition="'$(TechBenchTestBuild)' == 'true'">obj\$(Configuration)\TestBuild\</IntermediateOutputPath>
     <IntermediateOutputPath Condition="'$(TechBenchTestBuild)' != 'true'">obj\$(Configuration)\ClientBuild\</IntermediateOutputPath>
+    <TechBenchReleaseChannel Condition="'$(TechBenchReleaseChannel)' == ''">v2</TechBenchReleaseChannel>
+    <DefineConstants Condition="'$(TechBenchReleaseChannel)' == 'inventory-beta'">$(DefineConstants);TECHBENCH_INVENTORY_BETA</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

@@ -92,7 +92,7 @@ public sealed partial class SqlServer2016SyntaxTests
         var source = File.ReadAllText(path);
 
         Assert.Contains(
-            "@InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)",
+            "@InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)",
             source,
             StringComparison.OrdinalIgnoreCase);
 
@@ -147,13 +147,13 @@ public sealed partial class SqlServer2016SyntaxTests
     [Theory]
     [InlineData(
         "92-V0003-SharedReferenceVerify.sql",
-        "@InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)")]
+        "@InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)")]
     [InlineData(
         "93-V0004-AdminSharedVerify.sql",
-        "@InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13)")]
+        "@InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)")]
     [InlineData(
         "94-V0005-TechBenchV1ImportVerify.sql",
-        "@InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10, 11, 12, 13)")]
+        "@InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10, 11, 12, 13, 14)")]
     public void EarlierSchemaVerifiersAcceptTheFinalSchemaVersion(
         string fileName,
         string expectedVersionCheck)
@@ -301,6 +301,40 @@ public sealed partial class SqlServer2016SyntaxTests
             "(N'tb_service.ApplyAutomaticWhdFamilyMember')",
             schemaV7AllowList,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void EarlierServicePermissionVerifiersAllowEveryFinalSchemaServiceGrant()
+    {
+        var sqlDirectory = FindSqlDirectory();
+        var grantedProcedures = Directory
+            .EnumerateFiles(sqlDirectory, "*Grants.sql")
+            .SelectMany(path => Regex.Matches(
+                File.ReadAllText(path),
+                @"GRANT\s+EXECUTE\s+ON\s+OBJECT::\[tb_service\]\.\[(?<procedure>[^\]]+)\]\s+TO\s+\[tb_role_sync_service\]",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+                .Select(match => match.Groups["procedure"].Value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        Assert.NotEmpty(grantedProcedures);
+
+        foreach (var verifierFile in new[]
+                 {
+                     "95-V0006-WhdServerSyncVerify.sql",
+                     "96-V0007-ServerOwnedSageAndAdminPreviewVerify.sql"
+                 })
+        {
+            var verifierSource = File.ReadAllText(Path.Combine(sqlDirectory, verifierFile));
+            foreach (var procedure in grantedProcedures)
+            {
+                Assert.Contains(
+                    $"(N'tb_service.{procedure}')",
+                    verifierSource,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+        }
     }
 
     [Fact]
@@ -791,7 +825,7 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("@ResponseMessage nvarchar(500) = NULL", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("[AdminGetRecentClientSessionResponses]", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetRecentClientSessionResponses]", grantSource, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("NOT IN (11, 12, 13)", verifySource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("NOT IN (11, 12, 13, 14)", verifySource, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) <> 11", verifySource, StringComparison.OrdinalIgnoreCase);
 
         var root = Directory.GetParent(sqlDirectory)!.Parent!.FullName;
@@ -823,7 +857,7 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("OPENJSON(row_data.[FieldsJson])", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("EncryptByKey", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("FOR JSON PATH", procedureSource, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("CONVERT(int, 13) AS [SchemaVersion]", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CONVERT(int, 14) AS [SchemaVersion]", procedureSource, StringComparison.OrdinalIgnoreCase);
 
         var root = Directory.GetParent(sqlDirectory)!.Parent!.FullName;
         var builder = File.ReadAllText(Path.Combine(
@@ -868,6 +902,109 @@ public sealed partial class SqlServer2016SyntaxTests
         var verify = builder.IndexOf("102-V0013-WhdClientContactDetailsVerify.sql", StringComparison.Ordinal);
 
         Assert.True(schema >= 0 && procedures > schema && verify > procedures);
+    }
+
+    [Fact]
+    public void V0014PersistsAdminEquipmentBoardAndOrdersEveryDeploymentStage()
+    {
+        var sqlDirectory = FindSqlDirectory();
+        var schemaSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "33-V0014-EquipmentBoardSchema.sql"));
+        var procedureSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "54-V0014-EquipmentBoardProcedures.sql"));
+        var grantSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "60-V0014-EquipmentBoardGrants.sql"));
+        var verifySource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "103-V0014-EquipmentBoardVerify.sql"));
+
+        Assert.Contains("[tb_inventory].[Equipment]", schemaSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[AssignedToWindowsSid] varbinary(85)", schemaSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[WorkflowStage] nvarchar(24)", schemaSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("N'Deployment'", schemaSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[AdminMoveEquipment]", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("@TargetWorkflowStage nvarchar(24)", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("IS_ROLEMEMBER(N'tb_role_admin')", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "@SourceStage NOT IN (N'Assigned', N'Deployment')",
+            procedureSource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "GRANT EXECUTE ON OBJECT::[tb_app].[AdminMoveEquipment] TO [tb_role_admin]",
+            grantSource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("schema version 14", verifySource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "N'IS_ROLEMEMBER(N''tb_role_admin'')'",
+            verifySource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            "N'ISROLEMEMBER(N''tb_role_admin'')'",
+            verifySource,
+            StringComparison.OrdinalIgnoreCase);
+
+        var root = Directory.GetParent(sqlDirectory)!.Parent!.FullName;
+        var builder = File.ReadAllText(Path.Combine(
+            root,
+            "scripts",
+            "Build-StandaloneSqlDeployment.ps1"));
+        var schema = builder.IndexOf("33-V0014-EquipmentBoardSchema.sql", StringComparison.Ordinal);
+        var procedures = builder.IndexOf("54-V0014-EquipmentBoardProcedures.sql", StringComparison.Ordinal);
+        var grants = builder.IndexOf("60-V0014-EquipmentBoardGrants.sql", StringComparison.Ordinal);
+        var verify = builder.IndexOf("103-V0014-EquipmentBoardVerify.sql", StringComparison.Ordinal);
+
+        Assert.True(schema >= 0 && procedures > schema && grants > procedures && verify > grants);
+    }
+
+    [Fact]
+    public void V0014PreservesTheAccumulatedRepositoryCapabilityContract()
+    {
+        var sqlDirectory = FindSqlDirectory();
+        var procedureSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "54-V0014-EquipmentBoardProcedures.sql"));
+        var capabilityBody = ProcedureBody(
+            procedureSource,
+            "GetRepositoryCapabilities",
+            "tb_app");
+        var verificationSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "103-V0014-EquipmentBoardVerify.sql"));
+
+        Assert.Contains(
+            "CONVERT(int, 14) AS [SchemaVersion]",
+            capabilityBody,
+            StringComparison.OrdinalIgnoreCase);
+
+        string[] accumulatedCapabilities =
+        [
+            "[FullTextSearchAvailable]",
+            "[SupportsTickets]",
+            "[SupportsWorkEntries]",
+            "[SupportsPrivateNotes]",
+            "[SupportsPostingLeases]",
+            "[SupportsSyncLeases]",
+            "[SupportsImports]",
+            "[SupportsTechBenchV1Import]",
+            "[SupportsServerSageSync]",
+            "[SupportsAdminUserPreview]",
+            "[SupportsFireDrillCredentials]",
+            "[EquipmentBoardAvailable]"
+        ];
+
+        foreach (var capability in accumulatedCapabilities)
+        {
+            Assert.Contains(capability, capabilityBody, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(capability, verificationSource, StringComparison.OrdinalIgnoreCase);
+        }
+
+        Assert.Contains(
+            "capabilities dropped one or more capabilities introduced by an earlier schema version",
+            verificationSource,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

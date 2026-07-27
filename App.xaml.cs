@@ -65,8 +65,13 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs e)
     {
         UpdateCompletionVersion = ReadArgumentValue(e.Args, "--updated-to");
+        var isEquipmentDemo = e.Args.Any(argument =>
+            argument.Equals("--equipment-demo", StringComparison.OrdinalIgnoreCase));
 
-        _singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var isFirstInstance);
+        var mutexName = isEquipmentDemo
+            ? $@"{SingleInstanceMutexName}.EquipmentDemo"
+            : SingleInstanceMutexName;
+        _singleInstanceMutex = new Mutex(initiallyOwned: true, mutexName, out var isFirstInstance);
         if (!isFirstInstance)
         {
             _singleInstanceMutex.Dispose();
@@ -79,6 +84,14 @@ public partial class App : System.Windows.Application
         }
 
         base.OnStartup(e);
+        if (isEquipmentDemo)
+        {
+            ShutdownMode = ShutdownMode.OnMainWindowClose;
+            MainWindow = new EquipmentBoardDemoWindow();
+            MainWindow.Show();
+            return;
+        }
+
         SqlServerConnectionOptions? connectionOptions = null;
         string? connectionStatus = null;
         try

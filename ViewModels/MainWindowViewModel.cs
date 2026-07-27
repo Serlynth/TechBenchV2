@@ -178,6 +178,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         InitializeV1DatabaseImport();
         InitializeCommonLinks();
         InitializeFireDrillCredentials();
+        InitializeEquipmentBoard();
 
         StatusFilterOptions.Add("Any");
         StatusFilterOptions.Add("Draft");
@@ -296,6 +297,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public string DatabasePath => _repository.DatabasePath;
     public bool CanWrite => _currentUser.CanWrite;
     public bool CanAccessAdminCenter => _currentUser.IsAdmin && CanWrite;
+    public bool CanAccessEquipmentBoard =>
+        CanAccessAdminCenter && _repository.EquipmentBoardAvailable;
     public bool IsReadOnlyPreview => _currentUser.IsReadOnlyPreview;
     public string ReadOnlyPreviewLabel => _currentUser.IsReadOnlyPreview
         ? $"READ-ONLY PREVIEW: {_currentUser.DisplayName} ({_currentUser.LoginName}) — authenticated as {_currentUser.AuthenticationLabel}"
@@ -868,6 +871,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void Navigate(string section)
     {
+        if (section.Equals("Equipment Board", StringComparison.Ordinal)
+            && !CanAccessEquipmentBoard)
+        {
+            StatusMessage = CanAccessAdminCenter
+                ? "The equipment board is not installed in this TechBench database yet."
+                : "Only TechBench Admins can open the equipment board.";
+            return;
+        }
+
         if (!section.Equals(CurrentSection, StringComparison.Ordinal))
         {
             ClearRevealedFireDrillCredential();
@@ -894,6 +906,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Domain/AD" => "Showing synchronized local domain and Active Directory information",
             "Connection" => "Showing synchronized WatchGuard connection information",
             "Misc Info" => "Showing remaining synchronized client information",
+            "Equipment Board" => "Showing shared stock and technician equipment assignments",
             "Admin Center" => "Showing server synchronization and active TechBench clients",
             _ => $"Showing {section}"
         };
@@ -936,6 +949,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             case "Connection":
             case "Misc Info":
                 RefreshFireDrillCredentials();
+                break;
+            case "Equipment Board":
+                _ = RefreshEquipmentBoardAsync();
                 break;
             case "Admin Center":
                 RefreshAdminCenter();

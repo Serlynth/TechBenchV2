@@ -13,8 +13,8 @@ public sealed class ServerManagerScriptTests
         Assert.Contains("'Start', 'Stop', 'Restart'", source, StringComparison.Ordinal);
         Assert.Contains("Install / Apply password", source, StringComparison.Ordinal);
         Assert.Contains("Show service password", source, StringComparison.Ordinal);
-        Assert.Contains("$schemaVersion -ne 13", source, StringComparison.Ordinal);
-        Assert.Contains("database schema 13", source, StringComparison.Ordinal);
+        Assert.Contains("$schemaVersion -lt 13 -or $schemaVersion -gt 14", source, StringComparison.Ordinal);
+        Assert.Contains("database schemas 13 through 14", source, StringComparison.Ordinal);
         Assert.DoesNotContain("database schema 8", source, StringComparison.Ordinal);
         Assert.Contains("ShowWhdSecretCheckBox", source, StringComparison.Ordinal);
         Assert.Contains("ShowSageSecretCheckBox", source, StringComparison.Ordinal);
@@ -100,7 +100,7 @@ public sealed class ServerManagerScriptTests
         var installer = ReadScript("Install-TechBenchSyncService.ps1");
         var uninstaller = ReadScript("Uninstall-TechBenchSyncService.ps1");
 
-        Assert.Contains("[int]$RequiredDatabaseSchemaVersion = 13", publisher, StringComparison.Ordinal);
+        Assert.Contains("[int]$RequiredDatabaseSchemaVersion = 14", publisher, StringComparison.Ordinal);
         Assert.Contains("'TechBench-ServerManager.ps1'", publisher, StringComparison.Ordinal);
         Assert.Contains(
             "RequiredDatabaseSchemaVersion = $RequiredDatabaseSchemaVersion",

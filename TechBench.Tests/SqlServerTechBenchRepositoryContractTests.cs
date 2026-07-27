@@ -7,9 +7,10 @@ namespace TechBench.Tests;
 public sealed class SqlServerTechBenchRepositoryContractTests
 {
     [Fact]
-    public void ClientTargetsV0012Schema()
+    public void ClientTargetsV0014Schema()
     {
-        Assert.Equal(13, SqlServerConnectionFactory.SupportedSchemaVersion);
+        Assert.Equal(14, SqlServerConnectionFactory.SupportedSchemaVersion);
+        Assert.Equal(13, SqlServerConnectionFactory.MinimumSupportedSchemaVersion);
     }
 
     [Fact]
@@ -151,6 +152,23 @@ public sealed class SqlServerTechBenchRepositoryContractTests
             "AddRequiredText(command, \"@RequestType\", 40, \"Full\")",
             source,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EquipmentBoardUsesOnlyAdminStoredProcedures()
+    {
+        Assert.Equal(
+            "[tb_app].[AdminGetEquipmentBoard]",
+            SqlServerTechBenchRepository.Procedures.GetEquipmentBoard);
+        Assert.Equal(
+            "[tb_app].[AdminSaveEquipment]",
+            SqlServerTechBenchRepository.Procedures.SaveEquipment);
+        Assert.Equal(
+            "[tb_app].[AdminMoveEquipment]",
+            SqlServerTechBenchRepository.Procedures.MoveEquipment);
+        Assert.Equal(
+            "[tb_app].[AdminArchiveEquipment]",
+            SqlServerTechBenchRepository.Procedures.ArchiveEquipment);
     }
 
     [Fact]

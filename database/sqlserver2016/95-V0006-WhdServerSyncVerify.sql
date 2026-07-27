@@ -25,7 +25,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (6, 7, 8, 9, 10, 11, 12, 13)
+IF @InstalledSchemaVersion NOT IN (6, 7, 8, 9, 10, 11, 12, 13, 14)
 BEGIN
     PRINT N'FAIL: V0006 verification supports installed schema version 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -289,6 +289,12 @@ BEGIN
         (N'tb_service.RenewFireDrillSyncLease'),
         (N'tb_service.ApplyFireDrillCredentialSnapshot'),
         (N'tb_service.CompleteFireDrillSyncWork');
+END;
+
+IF @InstalledSchemaVersion >= 14
+BEGIN
+    INSERT INTO @ServiceProcedures([ObjectName]) VALUES
+        (N'tb_service.ApplyCredentialsClientUserSnapshot');
 END;
 
 IF EXISTS

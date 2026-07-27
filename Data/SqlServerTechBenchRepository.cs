@@ -30,6 +30,7 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
     private readonly ConcurrentDictionary<string, long> _clientAliasIds =
         new(StringComparer.OrdinalIgnoreCase);
     private bool _fullTextSearchAvailable;
+    private bool _equipmentBoardAvailable;
 
     public SqlServerTechBenchRepository(
         SqlServerConnectionFactory connectionFactory,
@@ -47,6 +48,7 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         $"SQL Server: {_connectionFactory.Options.Server}/{_connectionFactory.Options.Database}";
 
     public bool FullTextSearchAvailable => _fullTextSearchAvailable;
+    public bool EquipmentBoardAvailable => _equipmentBoardAvailable;
 
     public static class Procedures
     {
@@ -121,6 +123,13 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         public const string GetWhdUserMappings = "[tb_app].[AdminGetWhdUserMappings]";
         public const string GetWhdTechnicians = "[tb_app].[AdminGetWhdTechnicians]";
         public const string SaveWhdUserMapping = "[tb_app].[AdminSaveWhdUserMapping]";
+        public const string GetEquipmentBoard = "[tb_app].[AdminGetEquipmentBoard]";
+        public const string GetInventoryClients = "[tb_app].[AdminGetInventoryClients]";
+        public const string GetEquipmentAssignmentHistory =
+            "[tb_app].[AdminGetEquipmentAssignmentHistory]";
+        public const string SaveEquipment = "[tb_app].[AdminSaveEquipment]";
+        public const string MoveEquipment = "[tb_app].[AdminMoveEquipment]";
+        public const string ArchiveEquipment = "[tb_app].[AdminArchiveEquipment]";
         public const string AddPostingLog = "[tb_app].[AddPostingLog]";
         public const string GetLatestVerifiedWhdPostingLog =
             "[tb_app].[GetLatestVerifiedWhdPostingLog]";
@@ -182,25 +191,30 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         }
         try
         {
-            _fullTextSearchAvailable = await QueryAsync(
+            var capabilities = await QueryAsync(
                     Procedures.GetRepositoryCapabilities,
                     null,
                     async (reader, token) =>
                     {
                         if (!await reader.ReadAsync(token).ConfigureAwait(false))
                         {
-                            return false;
+                            return (FullText: false, Equipment: false);
                         }
 
-                        return GetBoolean(reader, "FullTextSearchAvailable");
+                        return (
+                            FullText: GetBoolean(reader, "FullTextSearchAvailable"),
+                            Equipment: GetBoolean(reader, "EquipmentBoardAvailable"));
                     },
                     cancellationToken)
                 .ConfigureAwait(false);
+            _fullTextSearchAvailable = capabilities.FullText;
+            _equipmentBoardAvailable = capabilities.Equipment;
         }
         catch (SqlException ex) when (ex.Number == 2812)
         {
             // Older deployment packages do not expose the capability procedure.
             _fullTextSearchAvailable = false;
+            _equipmentBoardAvailable = false;
         }
     }
 
@@ -456,6 +470,11 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         GetValue(reader, columnName) is { } value
             ? Convert.ToInt64(value, CultureInfo.InvariantCulture)
             : fallback;
+
+    private static long? GetNullableInt64(SqlDataReader reader, string columnName) =>
+        GetValue(reader, columnName) is { } value
+            ? Convert.ToInt64(value, CultureInfo.InvariantCulture)
+            : null;
 
     private static bool GetBoolean(
         SqlDataReader reader,

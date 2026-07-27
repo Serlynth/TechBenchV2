@@ -1,0 +1,746 @@
+using System.Collections.ObjectModel;
+using System.Windows.Data;
+using Microsoft.Data.SqlClient;
+using TechBench.Models;
+
+namespace TechBench.ViewModels;
+
+public sealed partial class MainWindowViewModel
+{
+    private EquipmentItem? _selectedEquipment;
+    private bool _isEquipmentEditorVisible;
+    private bool _isEquipmentBoardBusy;
+    private bool _isNewEquipment;
+    private string _equipmentDeviceType = "Desktop";
+    private string _equipmentAssetTag = string.Empty;
+    private string _equipmentName = string.Empty;
+    private string _equipmentSerialNumber = string.Empty;
+    private string _equipmentPartNumber = string.Empty;
+    private string _equipmentIpAddress = string.Empty;
+    private string _equipmentManufacturer = string.Empty;
+    private string _equipmentModel = string.Empty;
+    private InventoryClient? _equipmentClient;
+    private InventoryClientUser? _equipmentClientUser;
+    private string _equipmentLocationName = string.Empty;
+    private string _equipmentNotes = string.Empty;
+    private string _equipmentBoardStatus =
+        "Drag equipment from Stock to a technician, then into Deployment when work is complete.";
+    private string _equipmentSearchText = string.Empty;
+
+    public ObservableCollection<EquipmentLane> EquipmentLanes { get; } = new();
+    public ObservableCollection<EquipmentLane> DeploymentLanes { get; } = new();
+    public ObservableCollection<InventoryClient> InventoryClientOptions { get; } = new();
+    public ObservableCollection<InventoryClientUser> InventoryClientUserOptions { get; } = new();
+    public ObservableCollection<EquipmentAssignmentHistoryEntry>
+        EquipmentAssignmentHistory { get; } = new();
+    public ObservableCollection<string> EquipmentTypeOptions { get; } =
+    [
+        "Desktop",
+        "Laptop",
+        "Server",
+        "Switch",
+        "Firewall",
+        "Access Point",
+        "Printer",
+        "UPS",
+        "Phone",
+        "Other"
+    ];
+
+    public AsyncRelayCommand RefreshEquipmentBoardCommand { get; private set; } = null!;
+    public RelayCommand NewEquipmentCommand { get; private set; } = null!;
+    public AsyncRelayCommand SaveEquipmentCommand { get; private set; } = null!;
+    public AsyncRelayCommand ArchiveEquipmentCommand { get; private set; } = null!;
+    public RelayCommand CancelEquipmentEditCommand { get; private set; } = null!;
+    public RelayCommand ClearEquipmentSearchCommand { get; private set; } = null!;
+
+    public EquipmentItem? SelectedEquipment
+    {
+        get => _selectedEquipment;
+        set
+        {
+            if (SetProperty(ref _selectedEquipment, value) && value is not null)
+            {
+                LoadEquipmentEditor(value);
+            }
+        }
+    }
+
+    public bool IsEquipmentEditorVisible
+    {
+        get => _isEquipmentEditorVisible;
+        private set
+        {
+            if (SetProperty(ref _isEquipmentEditorVisible, value))
+            {
+                OnPropertyChanged(nameof(EquipmentEditorTitle));
+            }
+        }
+    }
+
+    public bool IsEquipmentBoardBusy
+    {
+        get => _isEquipmentBoardBusy;
+        private set
+        {
+            if (SetProperty(ref _isEquipmentBoardBusy, value))
+            {
+                RefreshEquipmentBoardCommand?.RaiseCanExecuteChanged();
+                NewEquipmentCommand?.RaiseCanExecuteChanged();
+                SaveEquipmentCommand?.RaiseCanExecuteChanged();
+                ArchiveEquipmentCommand?.RaiseCanExecuteChanged();
+                CancelEquipmentEditCommand?.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string EquipmentEditorTitle => _isNewEquipment
+        ? "Add Equipment"
+        : "Equipment Details";
+
+    public string EquipmentAssignmentLabel => _isNewEquipment
+        ? "Stock"
+        : SelectedEquipment?.AssignmentLabel ?? "Stock";
+
+    public string EquipmentDeviceType
+    {
+        get => _equipmentDeviceType;
+        set => SetEquipmentEditorProperty(ref _equipmentDeviceType, value);
+    }
+
+    public string EquipmentAssetTag
+    {
+        get => _equipmentAssetTag;
+        set => SetEquipmentEditorProperty(ref _equipmentAssetTag, value);
+    }
+
+    public string EquipmentName
+    {
+        get => _equipmentName;
+        set => SetEquipmentEditorProperty(ref _equipmentName, value);
+    }
+
+    public string EquipmentSerialNumber
+    {
+        get => _equipmentSerialNumber;
+        set => SetEquipmentEditorProperty(ref _equipmentSerialNumber, value);
+    }
+
+    public string EquipmentPartNumber
+    {
+        get => _equipmentPartNumber;
+        set => SetEquipmentEditorProperty(ref _equipmentPartNumber, value);
+    }
+
+    public string EquipmentIpAddress
+    {
+        get => _equipmentIpAddress;
+        set => SetEquipmentEditorProperty(ref _equipmentIpAddress, value);
+    }
+
+    public string EquipmentManufacturer
+    {
+        get => _equipmentManufacturer;
+        set => SetEquipmentEditorProperty(ref _equipmentManufacturer, value);
+    }
+
+    public string EquipmentModel
+    {
+        get => _equipmentModel;
+        set => SetEquipmentEditorProperty(ref _equipmentModel, value);
+    }
+
+    public InventoryClient? EquipmentClient
+    {
+        get => _equipmentClient;
+        set
+        {
+            if (!SetProperty(ref _equipmentClient, value))
+            {
+                return;
+            }
+
+            RefreshInventoryClientUserOptions();
+            if (value is null)
+            {
+                EquipmentClientUser = null;
+                EquipmentLocationName = string.Empty;
+            }
+            else if (string.IsNullOrWhiteSpace(EquipmentLocationName))
+            {
+                EquipmentLocationName = value.PrimaryLocation;
+            }
+
+            SaveEquipmentCommand?.RaiseCanExecuteChanged();
+        }
+    }
+
+    public InventoryClientUser? EquipmentClientUser
+    {
+        get => _equipmentClientUser;
+        set
+        {
+            if (SetProperty(ref _equipmentClientUser, value))
+            {
+                if (value is not null
+                    && !string.IsNullOrWhiteSpace(value.LocationName))
+                {
+                    EquipmentLocationName = value.LocationName;
+                }
+                SaveEquipmentCommand?.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string EquipmentLocationName
+    {
+        get => _equipmentLocationName;
+        set => SetEquipmentEditorProperty(ref _equipmentLocationName, value);
+    }
+
+    public string EquipmentNotes
+    {
+        get => _equipmentNotes;
+        set => SetEquipmentEditorProperty(ref _equipmentNotes, value);
+    }
+
+    public string EquipmentBoardStatus
+    {
+        get => _equipmentBoardStatus;
+        private set => SetProperty(ref _equipmentBoardStatus, value);
+    }
+
+    public string EquipmentSearchText
+    {
+        get => _equipmentSearchText;
+        set
+        {
+            if (SetProperty(ref _equipmentSearchText, value ?? string.Empty))
+            {
+                RefreshEquipmentSearch();
+                ClearEquipmentSearchCommand?.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string EquipmentDeviceCountLabel
+    {
+        get
+        {
+            var count = AllEquipmentLanes.Sum(static lane => lane.Items.Count);
+            return $"{count} device{(count == 1 ? string.Empty : "s")}";
+        }
+    }
+
+    public string EquipmentDeploymentCountLabel
+    {
+        get
+        {
+            var count = DeploymentLanes.Sum(static lane => lane.Items.Count);
+            return count == 1 ? "1 item" : $"{count} items";
+        }
+    }
+
+    private void InitializeEquipmentBoard()
+    {
+        RefreshEquipmentBoardCommand = new AsyncRelayCommand(
+            _ => RefreshEquipmentBoardAsync(),
+            _ => CanAccessEquipmentBoard && !IsEquipmentBoardBusy);
+        NewEquipmentCommand = new RelayCommand(
+            _ => BeginNewEquipment(),
+            _ => CanAccessEquipmentBoard && !IsEquipmentBoardBusy);
+        SaveEquipmentCommand = new AsyncRelayCommand(
+            _ => SaveEquipmentAsync(),
+            _ => CanSaveEquipment());
+        ArchiveEquipmentCommand = new AsyncRelayCommand(
+            _ => ArchiveEquipmentAsync(),
+            _ => CanAccessEquipmentBoard
+                && !IsEquipmentBoardBusy
+                && !_isNewEquipment
+                && SelectedEquipment is { EquipmentId: > 0 });
+        CancelEquipmentEditCommand = new RelayCommand(
+            _ => CloseEquipmentEditor(),
+            _ => !IsEquipmentBoardBusy);
+        ClearEquipmentSearchCommand = new RelayCommand(
+            _ => EquipmentSearchText = string.Empty,
+            _ => !string.IsNullOrWhiteSpace(EquipmentSearchText));
+    }
+
+    private async Task RefreshEquipmentBoardAsync(long? selectEquipmentId = null)
+    {
+        if (!CanAccessEquipmentBoard || IsEquipmentBoardBusy)
+        {
+            return;
+        }
+
+        IsEquipmentBoardBusy = true;
+        EquipmentBoardStatus = "Refreshing equipment and technician lanes…";
+        try
+        {
+            var result = await Task.Run(() =>
+            {
+                var mappings = _repository.GetWhdUserMappings();
+                var equipment = _repository.GetEquipmentBoard();
+                var clients = _repository.GetInventoryClients();
+                return (mappings, equipment, clients);
+            });
+
+            RefreshInventoryClientOptions(result.clients);
+            RebuildEquipmentLanes(result.mappings, result.equipment);
+            var selectedId = selectEquipmentId ?? SelectedEquipment?.EquipmentId;
+            SelectedEquipment = selectedId is > 0
+                ? result.equipment.FirstOrDefault(item => item.EquipmentId == selectedId)
+                : null;
+
+            EquipmentBoardStatus =
+                $"{result.equipment.Count} active item(s) across "
+                + $"{EquipmentLanes.Count} work lane(s) plus Deployment. "
+                + "Drag a card to set ownership, priority, or deployment readiness.";
+        }
+        catch (Exception ex) when (
+            ex is SqlException
+                or InvalidOperationException
+                or TimeoutException)
+        {
+            EquipmentBoardStatus = $"Equipment board refresh failed: {ex.Message}";
+            _dialogService.Error("Equipment Board", EquipmentBoardStatus);
+        }
+        finally
+        {
+            IsEquipmentBoardBusy = false;
+        }
+    }
+
+    private void RebuildEquipmentLanes(
+        IReadOnlyList<WhdUserMapping> mappings,
+        IReadOnlyList<EquipmentItem> equipment)
+    {
+        EquipmentLanes.Clear();
+        DeploymentLanes.Clear();
+        var stockLane = new EquipmentLane(
+            "Stock Room",
+            null,
+            EquipmentWorkflowStages.Stock);
+        EquipmentLanes.Add(stockLane);
+        var unassignedDeploymentLane = new EquipmentLane(
+            "Unassigned",
+            null,
+            EquipmentWorkflowStages.Deployment);
+        DeploymentLanes.Add(unassignedDeploymentLane);
+
+        var lanesByLogin = new Dictionary<string, EquipmentLane>(
+            StringComparer.OrdinalIgnoreCase);
+        var deploymentLanesByLogin = new Dictionary<string, EquipmentLane>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var mapping in mappings
+                     .Where(static mapping => !string.IsNullOrWhiteSpace(mapping.LoginName))
+                     .OrderBy(static mapping => mapping.DisplayName)
+                     .ThenBy(static mapping => mapping.LoginName))
+        {
+            var title = string.IsNullOrWhiteSpace(mapping.DisplayName)
+                ? mapping.LoginName
+                : mapping.DisplayName;
+            var lane = new EquipmentLane(title, mapping.LoginName);
+            lanesByLogin[mapping.LoginName] = lane;
+            EquipmentLanes.Add(lane);
+            var deploymentLane = new EquipmentLane(
+                title,
+                mapping.LoginName,
+                EquipmentWorkflowStages.Deployment);
+            deploymentLanesByLogin[mapping.LoginName] = deploymentLane;
+            DeploymentLanes.Add(deploymentLane);
+        }
+
+        foreach (var item in equipment
+                     .OrderBy(static item => item.SortOrder)
+                     .ThenBy(static item => item.EquipmentId))
+        {
+            if (item.IsDeployment)
+            {
+                if (string.IsNullOrWhiteSpace(item.AssignedToLoginName))
+                {
+                    unassignedDeploymentLane.Items.Add(item);
+                    continue;
+                }
+
+                if (!deploymentLanesByLogin.TryGetValue(
+                        item.AssignedToLoginName,
+                        out var deploymentLane))
+                {
+                    deploymentLane = new EquipmentLane(
+                        string.IsNullOrWhiteSpace(item.AssignedToDisplayName)
+                            ? item.AssignedToLoginName
+                            : item.AssignedToDisplayName,
+                        item.AssignedToLoginName,
+                        EquipmentWorkflowStages.Deployment);
+                    deploymentLanesByLogin[item.AssignedToLoginName] =
+                        deploymentLane;
+                    DeploymentLanes.Add(deploymentLane);
+                }
+
+                deploymentLane.Items.Add(item);
+                continue;
+            }
+
+            if (item.IsInStock)
+            {
+                stockLane.Items.Add(item);
+                continue;
+            }
+
+            if (!lanesByLogin.TryGetValue(item.AssignedToLoginName, out var lane))
+            {
+                lane = new EquipmentLane(
+                    string.IsNullOrWhiteSpace(item.AssignedToDisplayName)
+                        ? item.AssignedToLoginName
+                        : item.AssignedToDisplayName,
+                    item.AssignedToLoginName);
+                lanesByLogin[item.AssignedToLoginName] = lane;
+                EquipmentLanes.Add(lane);
+            }
+
+            lane.Items.Add(item);
+        }
+
+        OnPropertyChanged(nameof(EquipmentDeviceCountLabel));
+        OnPropertyChanged(nameof(EquipmentDeploymentCountLabel));
+        RefreshEquipmentSearch();
+    }
+
+    private void BeginNewEquipment()
+    {
+        SelectedEquipment = null;
+        _isNewEquipment = true;
+        EquipmentAssetTag = string.Empty;
+        EquipmentDeviceType = "Desktop";
+        EquipmentName = string.Empty;
+        EquipmentSerialNumber = string.Empty;
+        EquipmentPartNumber = string.Empty;
+        EquipmentIpAddress = string.Empty;
+        EquipmentManufacturer = string.Empty;
+        EquipmentModel = string.Empty;
+        EquipmentClient = null;
+        EquipmentClientUser = null;
+        EquipmentLocationName = string.Empty;
+        EquipmentNotes = string.Empty;
+        EquipmentAssignmentHistory.Clear();
+        IsEquipmentEditorVisible = true;
+        OnPropertyChanged(nameof(EquipmentEditorTitle));
+        OnPropertyChanged(nameof(EquipmentAssignmentLabel));
+        SaveEquipmentCommand.RaiseCanExecuteChanged();
+        ArchiveEquipmentCommand.RaiseCanExecuteChanged();
+    }
+
+    private void LoadEquipmentEditor(EquipmentItem item)
+    {
+        _isNewEquipment = false;
+        EquipmentAssetTag = item.AssetTag;
+        EquipmentDeviceType = item.DeviceType;
+        EquipmentName = item.Name;
+        EquipmentSerialNumber = item.SerialNumber;
+        EquipmentPartNumber = item.PartNumber;
+        EquipmentIpAddress = item.IpAddress;
+        EquipmentManufacturer = item.Manufacturer;
+        EquipmentModel = item.Model;
+        EquipmentClient = InventoryClientOptions.FirstOrDefault(client =>
+            client.ClientId == item.ClientId);
+        EquipmentClientUser = InventoryClientUserOptions.FirstOrDefault(user =>
+            user.ClientUserId == item.ClientUserId);
+        EquipmentLocationName = item.LocationName;
+        EquipmentNotes = item.Notes;
+        IsEquipmentEditorVisible = true;
+        OnPropertyChanged(nameof(EquipmentEditorTitle));
+        OnPropertyChanged(nameof(EquipmentAssignmentLabel));
+        SaveEquipmentCommand.RaiseCanExecuteChanged();
+        ArchiveEquipmentCommand.RaiseCanExecuteChanged();
+        _ = RefreshEquipmentAssignmentHistoryAsync(item.EquipmentId);
+    }
+
+    private void CloseEquipmentEditor()
+    {
+        _isNewEquipment = false;
+        SelectedEquipment = null;
+        IsEquipmentEditorVisible = false;
+        OnPropertyChanged(nameof(EquipmentEditorTitle));
+        OnPropertyChanged(nameof(EquipmentAssignmentLabel));
+        SaveEquipmentCommand.RaiseCanExecuteChanged();
+        ArchiveEquipmentCommand.RaiseCanExecuteChanged();
+    }
+
+    private bool CanSaveEquipment() =>
+        CanAccessEquipmentBoard
+        && !IsEquipmentBoardBusy
+        && IsEquipmentEditorVisible
+        && !string.IsNullOrWhiteSpace(EquipmentDeviceType)
+        && !string.IsNullOrWhiteSpace(EquipmentName);
+
+    private async Task SaveEquipmentAsync()
+    {
+        if (!CanSaveEquipment())
+        {
+            return;
+        }
+
+        IsEquipmentBoardBusy = true;
+        EquipmentBoardStatus = _isNewEquipment
+            ? "Adding equipment to Stock…"
+            : "Saving equipment details…";
+        try
+        {
+            var source = _isNewEquipment ? null : SelectedEquipment;
+            var record = new EquipmentItem
+            {
+                EquipmentId = source?.EquipmentId ?? 0,
+                AssetTag = EquipmentAssetTag.Trim(),
+                DeviceType = EquipmentDeviceType.Trim(),
+                Name = EquipmentName.Trim(),
+                SerialNumber = EquipmentSerialNumber.Trim(),
+                PartNumber = EquipmentPartNumber.Trim(),
+                IpAddress = EquipmentIpAddress.Trim(),
+                Manufacturer = EquipmentManufacturer.Trim(),
+                Model = EquipmentModel.Trim(),
+                ClientId = EquipmentClient?.ClientId,
+                ClientName = EquipmentClient?.Name ?? string.Empty,
+                ClientUserId = EquipmentClientUser?.ClientUserId,
+                ClientUserDisplayName =
+                    EquipmentClientUser?.DisplayName ?? string.Empty,
+                ClientUserEmail = EquipmentClientUser?.Email ?? string.Empty,
+                LocationName = EquipmentLocationName.Trim(),
+                Notes = EquipmentNotes.Trim(),
+                WorkflowStage = source?.WorkflowStage ?? EquipmentWorkflowStages.Stock,
+                AssignedToLoginName = source?.AssignedToLoginName ?? string.Empty,
+                AssignedToDisplayName = source?.AssignedToDisplayName ?? string.Empty,
+                SortOrder = source?.SortOrder ?? 0,
+                RowVersion = source?.RowVersion
+            };
+            var saved = await Task.Run(() => _repository.SaveEquipment(record));
+            IsEquipmentBoardBusy = false;
+            await RefreshEquipmentBoardAsync(saved.EquipmentId);
+            EquipmentBoardStatus = $"Saved {saved.DeviceType}: {saved.Name}.";
+        }
+        catch (Exception ex) when (
+            ex is SqlException
+                or InvalidOperationException
+                or TimeoutException
+                or ArgumentException)
+        {
+            EquipmentBoardStatus = $"Equipment save failed: {ex.Message}";
+            _dialogService.Error("Equipment Board", EquipmentBoardStatus);
+        }
+        finally
+        {
+            IsEquipmentBoardBusy = false;
+        }
+    }
+
+    private async Task ArchiveEquipmentAsync()
+    {
+        var equipment = SelectedEquipment;
+        if (equipment is null
+            || !_dialogService.Confirm(
+                "Archive Equipment",
+                $"Remove {equipment.Name} from the active equipment board? "
+                + "Its record will be archived, not permanently deleted.",
+                "Archive",
+                "Cancel"))
+        {
+            return;
+        }
+
+        IsEquipmentBoardBusy = true;
+        EquipmentBoardStatus = $"Archiving {equipment.Name}…";
+        try
+        {
+            await Task.Run(() => _repository.ArchiveEquipment(equipment));
+            CloseEquipmentEditor();
+            IsEquipmentBoardBusy = false;
+            await RefreshEquipmentBoardAsync();
+            EquipmentBoardStatus = $"Archived {equipment.Name}.";
+        }
+        catch (Exception ex) when (
+            ex is SqlException
+                or InvalidOperationException
+                or TimeoutException)
+        {
+            EquipmentBoardStatus = $"Equipment archive failed: {ex.Message}";
+            _dialogService.Error("Equipment Board", EquipmentBoardStatus);
+        }
+        finally
+        {
+            IsEquipmentBoardBusy = false;
+        }
+    }
+
+    public async Task AssignEquipmentAsync(
+        EquipmentItem equipment,
+        EquipmentLane targetLane,
+        int targetIndex)
+    {
+        ArgumentNullException.ThrowIfNull(equipment);
+        ArgumentNullException.ThrowIfNull(targetLane);
+
+        if (!CanAccessEquipmentBoard
+            || IsEquipmentBoardBusy)
+        {
+            return;
+        }
+
+        IsEquipmentBoardBusy = true;
+        EquipmentBoardStatus =
+            $"Moving {equipment.Name} to {targetLane.Title}…";
+        try
+        {
+            var result = await Task.Run(() =>
+            {
+                var updated = _repository.MoveEquipment(
+                    equipment,
+                    targetLane.IsStock
+                        ? null
+                        : targetLane.AssignedToLoginName,
+                    targetLane.WorkflowStage,
+                    targetIndex);
+                var mappings = _repository.GetWhdUserMappings();
+                return (updated, mappings);
+            });
+            RebuildEquipmentLanes(
+                result.mappings,
+                result.updated);
+            SelectedEquipment = null;
+            EquipmentBoardStatus =
+                $"Moved {equipment.Name} to {targetLane.Title}.";
+        }
+        catch (Exception ex) when (
+            ex is SqlException
+                or InvalidOperationException
+                or TimeoutException
+                or ArgumentException)
+        {
+            EquipmentBoardStatus = $"Equipment assignment failed: {ex.Message}";
+            _dialogService.Error("Equipment Board", EquipmentBoardStatus);
+            IsEquipmentBoardBusy = false;
+            await RefreshEquipmentBoardAsync(equipment.EquipmentId);
+        }
+        finally
+        {
+            IsEquipmentBoardBusy = false;
+        }
+    }
+
+    private void SetEquipmentEditorProperty(
+        ref string field,
+        string? value,
+        [System.Runtime.CompilerServices.CallerMemberName] string? propertyName = null)
+    {
+        if (SetProperty(ref field, value ?? string.Empty, propertyName))
+        {
+            SaveEquipmentCommand?.RaiseCanExecuteChanged();
+        }
+    }
+
+    private void RefreshEquipmentSearch()
+    {
+        foreach (var lane in AllEquipmentLanes)
+        {
+            var view = CollectionViewSource.GetDefaultView(lane.Items);
+            view.Filter = MatchesEquipmentSearch;
+            view.Refresh();
+        }
+    }
+
+    private bool MatchesEquipmentSearch(object value)
+    {
+        if (value is not EquipmentItem item)
+        {
+            return false;
+        }
+
+        var query = EquipmentSearchText.Trim();
+        return query.Length == 0
+            || item.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || item.AssetTag.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || item.DeviceType.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || item.SerialNumber.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || item.PartNumber.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || item.IpAddress.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || item.Manufacturer.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || item.Model.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || item.ClientName.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || item.ClientUserDisplayName.Contains(
+                query,
+                StringComparison.OrdinalIgnoreCase)
+            || item.ClientUserEmail.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || item.LocationName.Contains(query, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void RefreshInventoryClientOptions(
+        IReadOnlyList<InventoryClient> clients)
+    {
+        var selectedClientId = EquipmentClient?.ClientId;
+        InventoryClientOptions.Clear();
+        foreach (var client in clients)
+        {
+            InventoryClientOptions.Add(client);
+        }
+
+        EquipmentClient = selectedClientId is > 0
+            ? InventoryClientOptions.FirstOrDefault(client =>
+                client.ClientId == selectedClientId)
+            : null;
+    }
+
+    private void RefreshInventoryClientUserOptions()
+    {
+        var selectedUserId = EquipmentClientUser?.ClientUserId;
+        InventoryClientUserOptions.Clear();
+        if (EquipmentClient is not null)
+        {
+            foreach (var user in EquipmentClient.Users
+                         .Where(static user => user.IsActive)
+                         .OrderBy(static user => user.DisplayName))
+            {
+                InventoryClientUserOptions.Add(user);
+            }
+        }
+
+        _equipmentClientUser = selectedUserId is > 0
+            ? InventoryClientUserOptions.FirstOrDefault(user =>
+                user.ClientUserId == selectedUserId)
+            : null;
+        OnPropertyChanged(nameof(EquipmentClientUser));
+    }
+
+    private async Task RefreshEquipmentAssignmentHistoryAsync(long equipmentId)
+    {
+        EquipmentAssignmentHistory.Clear();
+        if (equipmentId <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var history = await Task.Run(() =>
+                _repository.GetEquipmentAssignmentHistory(equipmentId));
+            if (SelectedEquipment?.EquipmentId != equipmentId)
+            {
+                return;
+            }
+
+            foreach (var entry in history)
+            {
+                EquipmentAssignmentHistory.Add(entry);
+            }
+        }
+        catch (Exception ex) when (
+            ex is SqlException
+                or InvalidOperationException
+                or TimeoutException)
+        {
+            EquipmentBoardStatus =
+                $"Equipment history could not be loaded: {ex.Message}";
+        }
+    }
+
+    private IEnumerable<EquipmentLane> AllEquipmentLanes =>
+        EquipmentLanes.Concat(DeploymentLanes);
+}

@@ -9,7 +9,11 @@ public sealed class V2AppUpdateService : IAppUpdateService
 {
     public const string ReleaseRepositoryUrl =
         "https://github.com/Serlynth/TechBenchV2-Releases";
+#if TECHBENCH_INVENTORY_BETA
+    public const string ReleaseChannel = "inventory-beta";
+#else
     public const string ReleaseChannel = "v2";
+#endif
 
     private readonly UpdateManager _updateManager;
     private readonly SemaphoreSlim _operationGate = new(1, 1);
