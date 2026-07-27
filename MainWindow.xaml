@@ -3350,11 +3350,7 @@
                                             <Grid Width="320"
                                                   Height="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType={x:Type ScrollViewer}}}"
                                                   Margin="0,0,16,0"
-                                                  Background="Transparent"
-                                                  AllowDrop="{Binding IsReorderable}"
-                                                  DragOver="EquipmentLaneHeader_DragOver"
-                                                  DragLeave="EquipmentLaneHeader_DragLeave"
-                                                  Drop="EquipmentLaneHeader_Drop">
+                                                  Background="Transparent">
                                                 <Grid.RowDefinitions>
                                                     <RowDefinition Height="Auto" />
                                                     <RowDefinition Height="*" />
@@ -3363,6 +3359,7 @@
                                                       Margin="2,0,2,10"
                                                       Background="Transparent"
                                                       PreviewMouseLeftButtonDown="EquipmentLaneHeader_PreviewMouseLeftButtonDown"
+                                                      PreviewMouseLeftButtonUp="EquipmentLaneHeader_PreviewMouseLeftButtonUp"
                                                       PreviewMouseMove="EquipmentLaneHeader_PreviewMouseMove"
                                                       ToolTip="Drag this technician and drop anywhere on another technician column to rearrange it.">
                                                     <Grid.Style>
@@ -3563,11 +3560,7 @@
                                                     <Grid Width="320"
                                                           Height="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType={x:Type ScrollViewer}}}"
                                                           Margin="0,0,16,0"
-                                                          Background="Transparent"
-                                                          AllowDrop="{Binding IsReorderable}"
-                                                          DragOver="EquipmentLaneHeader_DragOver"
-                                                          DragLeave="EquipmentLaneHeader_DragLeave"
-                                                          Drop="EquipmentLaneHeader_Drop">
+                                                          Background="Transparent">
                                                         <Grid.RowDefinitions>
                                                             <RowDefinition Height="Auto" />
                                                             <RowDefinition Height="*" />
@@ -3576,6 +3569,7 @@
                                                               Margin="2,0,2,8"
                                                               Background="Transparent"
                                                               PreviewMouseLeftButtonDown="EquipmentLaneHeader_PreviewMouseLeftButtonDown"
+                                                              PreviewMouseLeftButtonUp="EquipmentLaneHeader_PreviewMouseLeftButtonUp"
                                                               PreviewMouseMove="EquipmentLaneHeader_PreviewMouseMove"
                                                               ToolTip="Drag this technician and drop anywhere on another technician column to rearrange it.">
                                                             <Grid.Style>

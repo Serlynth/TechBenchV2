@@ -26,8 +26,10 @@ public partial class MainWindow : Window
     private System.Windows.Point _equipmentLaneDragStartPoint;
     private EquipmentLane? _pendingEquipmentLaneDrag;
     private EquipmentLaneDragPreview? _equipmentLaneDragPreview;
-    private bool _equipmentLaneDropHandled;
-    private bool _equipmentLaneDragCancelled;
+    private FrameworkElement? _equipmentLaneDragSourceElement;
+    private FrameworkElement? _equipmentLaneDragTargetElement;
+    private ScrollViewer? _equipmentLaneDragScrollViewer;
+    private bool _equipmentLaneDragStarted;
     private GridLength _expandedEquipmentDeploymentHeight =
         new(230, GridUnitType.Pixel);
 
@@ -70,160 +72,207 @@ public partial class MainWindow : Window
             ? lane
             : null;
         _equipmentLaneDragStartPoint = e.GetPosition(null);
+        if (_pendingEquipmentLaneDrag is not null
+            && sender is FrameworkElement sourceElement)
+        {
+            _equipmentLaneDragSourceElement = sourceElement;
+            _equipmentLaneDragScrollViewer =
+                FindVisualAncestor<ScrollViewer>(sourceElement);
+            sourceElement.CaptureMouse();
+        }
     }
 
     private void EquipmentLaneHeader_PreviewMouseMove(
         object sender,
         System.Windows.Input.MouseEventArgs e)
     {
-        if (e.LeftButton != MouseButtonState.Pressed
-            || _pendingEquipmentLaneDrag is not { } lane)
+        if (_pendingEquipmentLaneDrag is null)
         {
+            return;
+        }
+
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            EndEquipmentLaneDrag();
             return;
         }
 
         var currentPosition = e.GetPosition(null);
-        if (Math.Abs(currentPosition.X - _equipmentLaneDragStartPoint.X)
-                < SystemParameters.MinimumHorizontalDragDistance
-            && Math.Abs(currentPosition.Y - _equipmentLaneDragStartPoint.Y)
-                < SystemParameters.MinimumVerticalDragDistance)
+        if (!_equipmentLaneDragStarted)
         {
-            return;
-        }
-
-        _pendingEquipmentLaneDrag = null;
-        if (sender is not FrameworkElement sourceElement)
-        {
-            return;
-        }
-
-        using var preview = new EquipmentLaneDragPreview(sourceElement);
-        _equipmentLaneDragPreview = preview;
-        _equipmentLaneDropHandled = false;
-        _equipmentLaneDragCancelled = false;
-        sourceElement.GiveFeedback += EquipmentLaneDragSource_GiveFeedback;
-        sourceElement.QueryContinueDrag +=
-            EquipmentLaneDragSource_QueryContinueDrag;
-        preview.Show();
-        try
-        {
-            DragDrop.DoDragDrop(
-                sourceElement,
-                new System.Windows.DataObject(typeof(EquipmentLane), lane),
-                System.Windows.DragDropEffects.Move);
-            if (!_equipmentLaneDropHandled
-                && !_equipmentLaneDragCancelled)
+            if (Math.Abs(currentPosition.X - _equipmentLaneDragStartPoint.X)
+                    < SystemParameters.MinimumHorizontalDragDistance
+                && Math.Abs(currentPosition.Y - _equipmentLaneDragStartPoint.Y)
+                    < SystemParameters.MinimumVerticalDragDistance)
             {
-                TryReorderEquipmentLaneAtCurrentPointer(lane);
+                return;
             }
-        }
-        finally
-        {
-            sourceElement.GiveFeedback -= EquipmentLaneDragSource_GiveFeedback;
-            sourceElement.QueryContinueDrag -=
-                EquipmentLaneDragSource_QueryContinueDrag;
-            _equipmentLaneDragPreview = null;
-        }
-    }
 
-    private void EquipmentLaneDragSource_GiveFeedback(
-        object sender,
-        System.Windows.GiveFeedbackEventArgs e)
-    {
+            if (_equipmentLaneDragSourceElement is not { } sourceElement)
+            {
+                EndEquipmentLaneDrag();
+                return;
+            }
+
+            _equipmentLaneDragStarted = true;
+            _equipmentLaneDragPreview =
+                new EquipmentLaneDragPreview(sourceElement);
+            _equipmentLaneDragPreview.Show();
+        }
+
         _equipmentLaneDragPreview?.UpdatePosition();
-        e.UseDefaultCursors = true;
+        UpdateEquipmentLaneDragTarget();
         e.Handled = true;
     }
 
-    private void EquipmentLaneDragSource_QueryContinueDrag(
+    private void EquipmentLaneHeader_PreviewMouseLeftButtonUp(
         object sender,
-        System.Windows.QueryContinueDragEventArgs e)
+        MouseButtonEventArgs e)
     {
-        if (e.EscapePressed
-            || e.Action == System.Windows.DragAction.Cancel)
+        var sourceLane = _pendingEquipmentLaneDrag;
+        var targetLane =
+            _equipmentLaneDragTargetElement?.DataContext as EquipmentLane;
+        var viewModel = DataContext as MainWindowViewModel;
+        if (_equipmentLaneDragStarted
+            && sourceLane is not null
+            && targetLane is null
+            && viewModel is not null)
         {
-            _equipmentLaneDragCancelled = true;
+            targetLane = ResolveEquipmentLaneDragTarget(
+                viewModel,
+                sourceLane,
+                e);
+        }
+
+        var shouldReorder =
+            _equipmentLaneDragStarted
+            && sourceLane is not null
+            && targetLane is not null
+            && !string.Equals(
+                sourceLane.AssignedToLoginName,
+                targetLane.AssignedToLoginName,
+                StringComparison.OrdinalIgnoreCase);
+
+        EndEquipmentLaneDrag();
+        if (shouldReorder
+            && viewModel is not null)
+        {
+            viewModel.ReorderEquipmentTechnicianLane(
+                sourceLane!,
+                targetLane!);
+            e.Handled = true;
         }
     }
 
-    private void TryReorderEquipmentLaneAtCurrentPointer(
-        EquipmentLane sourceLane)
+    private EquipmentLane? ResolveEquipmentLaneDragTarget(
+        MainWindowViewModel viewModel,
+        EquipmentLane sourceLane,
+        MouseButtonEventArgs e)
+    {
+        var sourceWorkLane = viewModel.EquipmentLanes.FirstOrDefault(lane =>
+            string.Equals(
+                lane.AssignedToLoginName,
+                sourceLane.AssignedToLoginName,
+                StringComparison.OrdinalIgnoreCase));
+        if (sourceWorkLane is null)
+        {
+            return null;
+        }
+
+        var sourceIndex =
+            viewModel.EquipmentLanes.IndexOf(sourceWorkLane);
+        var targetIndex = _equipmentLaneDragScrollViewer is { } scrollViewer
+            ? EquipmentLaneDragPlacement.ResolveTargetIndexFromBoardPosition(
+                e.GetPosition(scrollViewer).X
+                    + scrollViewer.HorizontalOffset,
+                viewModel.EquipmentLanes.Count)
+            : EquipmentLaneDragPlacement.ResolveTargetIndex(
+                sourceIndex,
+                e.GetPosition(null).X
+                    - _equipmentLaneDragStartPoint.X,
+                viewModel.EquipmentLanes.Count);
+        return targetIndex == sourceIndex
+            ? null
+            : viewModel.EquipmentLanes[targetIndex];
+    }
+
+    private void UpdateEquipmentLaneDragTarget()
     {
         var hit = InputHitTest(
             System.Windows.Input.Mouse.GetPosition(this))
             as DependencyObject;
-        var targetLane = FindEquipmentLaneAncestor(hit);
+        var targetElement = FindEquipmentLaneElementAncestor(hit);
+        var targetLane = targetElement?.DataContext as EquipmentLane;
         if (targetLane is null
-            || DataContext is not MainWindowViewModel viewModel)
-        {
-            return;
-        }
-
-        viewModel.ReorderEquipmentTechnicianLane(
-            sourceLane,
-            targetLane);
-    }
-
-    private void EquipmentLaneHeader_DragOver(
-        object sender,
-        System.Windows.DragEventArgs e)
-    {
-        if (sender is FrameworkElement
-            {
-                DataContext: EquipmentLane { IsReorderable: true } targetLane
-            } element
-            && e.Data.GetData(typeof(EquipmentLane)) is EquipmentLane sourceLane
-            && sourceLane.IsReorderable
-            && !string.Equals(
+            || _pendingEquipmentLaneDrag is not { } sourceLane
+            || string.Equals(
                 sourceLane.AssignedToLoginName,
                 targetLane.AssignedToLoginName,
                 StringComparison.OrdinalIgnoreCase))
         {
-            e.Effects = System.Windows.DragDropEffects.Move;
-            element.Opacity = 0.62;
-        }
-        else
-        {
-            e.Effects = System.Windows.DragDropEffects.None;
+            targetElement = null;
         }
 
-        e.Handled = true;
-    }
-
-    private void EquipmentLaneHeader_DragLeave(
-        object sender,
-        System.Windows.DragEventArgs e)
-    {
-        if (sender is FrameworkElement element)
-        {
-            element.Opacity = 1;
-        }
-    }
-
-    private void EquipmentLaneHeader_Drop(
-        object sender,
-        System.Windows.DragEventArgs e)
-    {
-        if (sender is FrameworkElement dropElement)
-        {
-            dropElement.Opacity = 1;
-        }
-
-        if (sender is not FrameworkElement
-            {
-                DataContext: EquipmentLane { IsReorderable: true } targetLane
-            }
-            || e.Data.GetData(typeof(EquipmentLane)) is not EquipmentLane sourceLane
-            || DataContext is not MainWindowViewModel viewModel)
+        if (ReferenceEquals(
+                targetElement,
+                _equipmentLaneDragTargetElement))
         {
             return;
         }
 
-        viewModel.ReorderEquipmentTechnicianLane(
-            sourceLane,
-            targetLane);
-        _equipmentLaneDropHandled = true;
-        e.Handled = true;
+        if (_equipmentLaneDragTargetElement is not null)
+        {
+            _equipmentLaneDragTargetElement.Opacity = 1;
+        }
+
+        _equipmentLaneDragTargetElement = targetElement;
+        if (_equipmentLaneDragTargetElement is not null)
+        {
+            _equipmentLaneDragTargetElement.Opacity = 0.62;
+        }
+    }
+
+    private void EndEquipmentLaneDrag()
+    {
+        if (_equipmentLaneDragTargetElement is not null)
+        {
+            _equipmentLaneDragTargetElement.Opacity = 1;
+        }
+
+        _equipmentLaneDragPreview?.Dispose();
+        _equipmentLaneDragPreview = null;
+        _equipmentLaneDragTargetElement = null;
+        _equipmentLaneDragScrollViewer = null;
+        _pendingEquipmentLaneDrag = null;
+        _equipmentLaneDragStarted = false;
+
+        var sourceElement = _equipmentLaneDragSourceElement;
+        _equipmentLaneDragSourceElement = null;
+        if (sourceElement?.IsMouseCaptured == true)
+        {
+            sourceElement.ReleaseMouseCapture();
+        }
+    }
+
+    private static FrameworkElement? FindEquipmentLaneElementAncestor(
+        DependencyObject? source)
+    {
+        FrameworkElement? match = null;
+        while (source is not null)
+        {
+            if (source is FrameworkElement
+            {
+                DataContext:
+                    EquipmentLane { IsReorderable: true }
+            } element)
+            {
+                match = element;
+            }
+
+            source = System.Windows.Media.VisualTreeHelper.GetParent(source);
+        }
+
+        return match;
     }
 
     private void EquipmentDeploymentExpander_Collapsed(
@@ -458,26 +507,6 @@ public partial class MainWindow : Window
             if (source is T match)
             {
                 return match;
-            }
-
-            source = System.Windows.Media.VisualTreeHelper.GetParent(source);
-        }
-
-        return null;
-    }
-
-    private static EquipmentLane? FindEquipmentLaneAncestor(
-        DependencyObject? source)
-    {
-        while (source is not null)
-        {
-            if (source is FrameworkElement
-                {
-                    DataContext:
-                        EquipmentLane { IsReorderable: true } lane
-                })
-            {
-                return lane;
             }
 
             source = System.Windows.Media.VisualTreeHelper.GetParent(source);

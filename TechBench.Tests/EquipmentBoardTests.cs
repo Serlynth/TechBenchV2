@@ -1,3 +1,4 @@
+using TechBench.Controls;
 using TechBench.Models;
 using TechBench.ViewModels;
 
@@ -38,7 +39,7 @@ public sealed class EquipmentBoardTests
             "Data=\"M1,8 C3.8,3.5 12.2,3.5 15,8 C12.2,12.5 3.8,12.5 1,8 Z\"",
             mainWindowXaml);
         Assert.Contains(
-            "AllowDrop=\"{Binding IsReorderable}\"",
+            "PreviewMouseLeftButtonUp=\"EquipmentLaneHeader_PreviewMouseLeftButtonUp\"",
             mainWindowXaml);
         Assert.DoesNotContain(
             "Click=\"MoveEquipmentLaneLeft_Click\"",
@@ -51,12 +52,23 @@ public sealed class EquipmentBoardTests
         Assert.DoesNotContain("Content=\"&#xE890;\"", mainWindowXaml);
         Assert.Contains("EquipmentLaneDragPreview", mainWindowCode);
         Assert.Contains(
-            "TryReorderEquipmentLaneAtCurrentPointer(lane);",
+            "sourceElement.CaptureMouse();",
             mainWindowCode);
         Assert.Contains(
-            "FindEquipmentLaneAncestor(hit)",
+            "UpdateEquipmentLaneDragTarget();",
             mainWindowCode);
-        Assert.DoesNotContain("e.GetPosition(element)", mainWindowCode);
+        Assert.Contains(
+            "FindEquipmentLaneElementAncestor(hit)",
+            mainWindowCode);
+        Assert.Contains(
+            "EquipmentLaneDragPlacement.ResolveTargetIndex",
+            mainWindowCode);
+        Assert.DoesNotContain(
+            "EquipmentLaneHeader_DragOver",
+            mainWindowCode);
+        Assert.DoesNotContain(
+            "typeof(EquipmentLane), lane",
+            mainWindowCode);
         Assert.Contains(
             "EquipmentLanes.Move(sourceIndex, targetIndex);",
             equipmentViewModel);
@@ -74,6 +86,46 @@ public sealed class EquipmentBoardTests
 
         Assert.NotNull(directory);
         return File.ReadAllText(Path.Combine(directory.FullName, relativePath));
+    }
+
+    [Theory]
+    [InlineData(1, 336, 5, 2)]
+    [InlineData(2, -336, 5, 1)]
+    [InlineData(1, 672, 5, 3)]
+    [InlineData(3, -672, 5, 1)]
+    [InlineData(1, 120, 5, 1)]
+    [InlineData(3, 900, 5, 4)]
+    public void TechnicianDragDistanceResolvesAStableDestination(
+        int sourceIndex,
+        double horizontalDelta,
+        int laneCount,
+        int expectedTargetIndex)
+    {
+        Assert.Equal(
+            expectedTargetIndex,
+            EquipmentLaneDragPlacement.ResolveTargetIndex(
+                sourceIndex,
+                horizontalDelta,
+                laneCount));
+    }
+
+    [Theory]
+    [InlineData(350, 5, 1)]
+    [InlineData(500, 5, 1)]
+    [InlineData(700, 5, 2)]
+    [InlineData(1050, 5, 3)]
+    [InlineData(1600, 5, 4)]
+    public void TechnicianBoardPositionResolvesTheColumnUnderThePointer(
+        double boardPositionX,
+        int laneCount,
+        int expectedTargetIndex)
+    {
+        Assert.Equal(
+            expectedTargetIndex,
+            EquipmentLaneDragPlacement
+                .ResolveTargetIndexFromBoardPosition(
+                    boardPositionX,
+                    laneCount));
     }
 
     [Fact]
