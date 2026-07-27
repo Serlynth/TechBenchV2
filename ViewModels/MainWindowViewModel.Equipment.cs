@@ -478,8 +478,7 @@ public sealed partial class MainWindowViewModel
 
     public void ReorderEquipmentTechnicianLane(
         EquipmentLane sourceLane,
-        EquipmentLane targetLane,
-        bool insertAfterTarget)
+        EquipmentLane targetLane)
     {
         ArgumentNullException.ThrowIfNull(sourceLane);
         ArgumentNullException.ThrowIfNull(targetLane);
@@ -516,22 +515,7 @@ public sealed partial class MainWindowViewModel
             return;
         }
 
-        var insertionIndex = targetIndex + (insertAfterTarget ? 1 : 0);
-        if (sourceIndex < insertionIndex)
-        {
-            insertionIndex--;
-        }
-
-        insertionIndex = Math.Clamp(
-            insertionIndex,
-            1,
-            EquipmentLanes.Count - 1);
-        if (sourceIndex == insertionIndex)
-        {
-            return;
-        }
-
-        EquipmentLanes.Move(sourceIndex, insertionIndex);
+        EquipmentLanes.Move(sourceIndex, targetIndex);
         SynchronizeDeploymentTechnicianOrder();
         _localPreferences.EquipmentTechnicianOrder = EquipmentLanes
             .Where(static lane => lane.IsReorderable)
@@ -539,42 +523,7 @@ public sealed partial class MainWindowViewModel
             .ToList();
         LocalPreferenceStore.Save(_localPreferences);
         EquipmentBoardStatus =
-            $"Moved {sourceWorkLane.Title} to technician position {insertionIndex}.";
-    }
-
-    public void MoveEquipmentTechnicianLane(
-        EquipmentLane lane,
-        int offset)
-    {
-        ArgumentNullException.ThrowIfNull(lane);
-        if (!lane.IsReorderable || offset == 0)
-        {
-            return;
-        }
-
-        var sourceLane = EquipmentLanes.FirstOrDefault(candidate =>
-            string.Equals(
-                candidate.AssignedToLoginName,
-                lane.AssignedToLoginName,
-                StringComparison.OrdinalIgnoreCase));
-        if (sourceLane is null)
-        {
-            return;
-        }
-
-        var sourceIndex = EquipmentLanes.IndexOf(sourceLane);
-        var targetIndex = sourceIndex + Math.Sign(offset);
-        if (sourceIndex < 1
-            || targetIndex < 1
-            || targetIndex >= EquipmentLanes.Count)
-        {
-            return;
-        }
-
-        ReorderEquipmentTechnicianLane(
-            sourceLane,
-            EquipmentLanes[targetIndex],
-            insertAfterTarget: offset > 0);
+            $"Moved {sourceWorkLane.Title} to technician position {targetIndex}.";
     }
 
     public void HideEquipmentTechnicianLane(EquipmentLane lane)

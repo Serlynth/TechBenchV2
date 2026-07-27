@@ -26,11 +26,20 @@ public sealed class EquipmentBoardTests
     {
         var mainWindowXaml = ReadRepositoryFile("MainWindow.xaml");
         var mainWindowCode = ReadRepositoryFile("MainWindow.xaml.cs");
+        var equipmentViewModel = ReadRepositoryFile(
+            Path.Combine(
+                "ViewModels",
+                "MainWindowViewModel.Equipment.cs"));
 
         Assert.Contains(
             "Visibility=\"{Binding IsEquipmentEditorVisible, Converter={StaticResource BooleanToVisibilityConverter}}\"",
             mainWindowXaml);
-        Assert.Contains("Content=\"&#xE890;\"", mainWindowXaml);
+        Assert.Contains(
+            "Data=\"M1,8 C3.8,3.5 12.2,3.5 15,8 C12.2,12.5 3.8,12.5 1,8 Z\"",
+            mainWindowXaml);
+        Assert.Contains(
+            "AllowDrop=\"{Binding IsReorderable}\"",
+            mainWindowXaml);
         Assert.DoesNotContain(
             "Click=\"MoveEquipmentLaneLeft_Click\"",
             mainWindowXaml);
@@ -39,7 +48,19 @@ public sealed class EquipmentBoardTests
             mainWindowXaml);
         Assert.DoesNotContain("EquipmentDetailsRailButton", mainWindowXaml);
         Assert.DoesNotContain("ToggleEquipmentDetailsButton", mainWindowXaml);
+        Assert.DoesNotContain("Content=\"&#xE890;\"", mainWindowXaml);
         Assert.Contains("EquipmentLaneDragPreview", mainWindowCode);
+        Assert.Contains(
+            "TryReorderEquipmentLaneAtCurrentPointer(lane);",
+            mainWindowCode);
+        Assert.Contains(
+            "FindEquipmentLaneAncestor(hit)",
+            mainWindowCode);
+        Assert.DoesNotContain("e.GetPosition(element)", mainWindowCode);
+        Assert.Contains(
+            "EquipmentLanes.Move(sourceIndex, targetIndex);",
+            equipmentViewModel);
+        Assert.DoesNotContain("insertAfterTarget", equipmentViewModel);
     }
 
     private static string ReadRepositoryFile(string relativePath)

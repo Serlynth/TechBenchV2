@@ -3349,7 +3349,12 @@
                                         <DataTemplate>
                                             <Grid Width="320"
                                                   Height="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType={x:Type ScrollViewer}}}"
-                                                  Margin="0,0,16,0">
+                                                  Margin="0,0,16,0"
+                                                  Background="Transparent"
+                                                  AllowDrop="{Binding IsReorderable}"
+                                                  DragOver="EquipmentLaneHeader_DragOver"
+                                                  DragLeave="EquipmentLaneHeader_DragLeave"
+                                                  Drop="EquipmentLaneHeader_Drop">
                                                 <Grid.RowDefinitions>
                                                     <RowDefinition Height="Auto" />
                                                     <RowDefinition Height="*" />
@@ -3359,17 +3364,12 @@
                                                       Background="Transparent"
                                                       PreviewMouseLeftButtonDown="EquipmentLaneHeader_PreviewMouseLeftButtonDown"
                                                       PreviewMouseMove="EquipmentLaneHeader_PreviewMouseMove"
-                                                      DragOver="EquipmentLaneHeader_DragOver"
-                                                      DragLeave="EquipmentLaneHeader_DragLeave"
-                                                      Drop="EquipmentLaneHeader_Drop"
-                                                      ToolTip="Drag a technician header left or right to rearrange the columns.">
+                                                      ToolTip="Drag this technician and drop anywhere on another technician column to rearrange it.">
                                                     <Grid.Style>
                                                         <Style TargetType="{x:Type Grid}">
-                                                            <Setter Property="AllowDrop" Value="False" />
                                                             <Setter Property="Cursor" Value="Arrow" />
                                                             <Style.Triggers>
                                                                 <DataTrigger Binding="{Binding IsReorderable}" Value="True">
-                                                                    <Setter Property="AllowDrop" Value="True" />
                                                                     <Setter Property="Cursor" Value="SizeWE" />
                                                                 </DataTrigger>
                                                             </Style.Triggers>
@@ -3425,15 +3425,27 @@
                                                                    Margin="0,0,5,0"
                                                                    Cursor="SizeWE"
                                                                    ToolTip="Drag this technician left or right" />
-                                                        <Button Content="&#xE890;"
-                                                                FontFamily="Segoe MDL2 Assets"
-                                                                FontSize="14"
-                                                                Width="27"
+                                                        <Button Width="27"
                                                                 Height="27"
                                                                 Padding="0"
                                                                 Click="HideEquipmentLane_Click"
                                                                 Style="{StaticResource SecondaryButtonStyle}"
-                                                                ToolTip="Hide this visible technician column on this workstation" />
+                                                                ToolTip="Hide this visible technician column on this workstation">
+                                                            <Viewbox Width="15" Height="15">
+                                                                <Grid Width="16" Height="16">
+                                                                    <Path Data="M1,8 C3.8,3.5 12.2,3.5 15,8 C12.2,12.5 3.8,12.5 1,8 Z"
+                                                                          Fill="Transparent"
+                                                                          Stroke="{DynamicResource SecondaryTextBrush}"
+                                                                          StrokeThickness="1.6"
+                                                                          StrokeLineJoin="Round" />
+                                                                    <Ellipse Width="5"
+                                                                             Height="5"
+                                                                             Fill="{DynamicResource SecondaryTextBrush}"
+                                                                             HorizontalAlignment="Center"
+                                                                             VerticalAlignment="Center" />
+                                                                </Grid>
+                                                            </Viewbox>
+                                                        </Button>
                                                     </StackPanel>
                                                     <Border Grid.Column="3"
                                                             Background="{DynamicResource PanelAltBackgroundBrush}"
@@ -3550,7 +3562,12 @@
                                                 <DataTemplate>
                                                     <Grid Width="320"
                                                           Height="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType={x:Type ScrollViewer}}}"
-                                                          Margin="0,0,16,0">
+                                                          Margin="0,0,16,0"
+                                                          Background="Transparent"
+                                                          AllowDrop="{Binding IsReorderable}"
+                                                          DragOver="EquipmentLaneHeader_DragOver"
+                                                          DragLeave="EquipmentLaneHeader_DragLeave"
+                                                          Drop="EquipmentLaneHeader_Drop">
                                                         <Grid.RowDefinitions>
                                                             <RowDefinition Height="Auto" />
                                                             <RowDefinition Height="*" />
@@ -3560,17 +3577,12 @@
                                                               Background="Transparent"
                                                               PreviewMouseLeftButtonDown="EquipmentLaneHeader_PreviewMouseLeftButtonDown"
                                                               PreviewMouseMove="EquipmentLaneHeader_PreviewMouseMove"
-                                                              DragOver="EquipmentLaneHeader_DragOver"
-                                                              DragLeave="EquipmentLaneHeader_DragLeave"
-                                                              Drop="EquipmentLaneHeader_Drop"
-                                                              ToolTip="Drag a technician header left or right to rearrange the columns.">
+                                                              ToolTip="Drag this technician and drop anywhere on another technician column to rearrange it.">
                                                             <Grid.Style>
                                                                 <Style TargetType="{x:Type Grid}">
-                                                                    <Setter Property="AllowDrop" Value="False" />
                                                                     <Setter Property="Cursor" Value="Arrow" />
                                                                     <Style.Triggers>
                                                                         <DataTrigger Binding="{Binding IsReorderable}" Value="True">
-                                                                            <Setter Property="AllowDrop" Value="True" />
                                                                             <Setter Property="Cursor" Value="SizeWE" />
                                                                         </DataTrigger>
                                                                     </Style.Triggers>
@@ -3626,15 +3638,27 @@
                                                                            Margin="0,0,5,0"
                                                                            Cursor="SizeWE"
                                                                            ToolTip="Drag this technician left or right" />
-                                                                <Button Content="&#xE890;"
-                                                                        FontFamily="Segoe MDL2 Assets"
-                                                                        FontSize="13"
-                                                                        Width="25"
+                                                                <Button Width="25"
                                                                         Height="25"
                                                                         Padding="0"
                                                                         Click="HideEquipmentLane_Click"
                                                                         Style="{StaticResource SecondaryButtonStyle}"
-                                                                        ToolTip="Hide this visible technician column on this workstation" />
+                                                                        ToolTip="Hide this visible technician column on this workstation">
+                                                                    <Viewbox Width="14" Height="14">
+                                                                        <Grid Width="16" Height="16">
+                                                                            <Path Data="M1,8 C3.8,3.5 12.2,3.5 15,8 C12.2,12.5 3.8,12.5 1,8 Z"
+                                                                                  Fill="Transparent"
+                                                                                  Stroke="{DynamicResource SecondaryTextBrush}"
+                                                                                  StrokeThickness="1.6"
+                                                                                  StrokeLineJoin="Round" />
+                                                                            <Ellipse Width="5"
+                                                                                     Height="5"
+                                                                                     Fill="{DynamicResource SecondaryTextBrush}"
+                                                                                     HorizontalAlignment="Center"
+                                                                                     VerticalAlignment="Center" />
+                                                                        </Grid>
+                                                                    </Viewbox>
+                                                                </Button>
                                                             </StackPanel>
                                                             <Border Grid.Column="3"
                                                                     Background="#2438D996"

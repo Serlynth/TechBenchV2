@@ -26,6 +26,8 @@ public partial class MainWindow : Window
     private System.Windows.Point _equipmentLaneDragStartPoint;
     private EquipmentLane? _pendingEquipmentLaneDrag;
     private EquipmentLaneDragPreview? _equipmentLaneDragPreview;
+    private bool _equipmentLaneDropHandled;
+    private bool _equipmentLaneDragCancelled;
     private GridLength _expandedEquipmentDeploymentHeight =
         new(230, GridUnitType.Pixel);
 
@@ -97,7 +99,11 @@ public partial class MainWindow : Window
 
         using var preview = new EquipmentLaneDragPreview(sourceElement);
         _equipmentLaneDragPreview = preview;
+        _equipmentLaneDropHandled = false;
+        _equipmentLaneDragCancelled = false;
         sourceElement.GiveFeedback += EquipmentLaneDragSource_GiveFeedback;
+        sourceElement.QueryContinueDrag +=
+            EquipmentLaneDragSource_QueryContinueDrag;
         preview.Show();
         try
         {
@@ -105,10 +111,17 @@ public partial class MainWindow : Window
                 sourceElement,
                 new System.Windows.DataObject(typeof(EquipmentLane), lane),
                 System.Windows.DragDropEffects.Move);
+            if (!_equipmentLaneDropHandled
+                && !_equipmentLaneDragCancelled)
+            {
+                TryReorderEquipmentLaneAtCurrentPointer(lane);
+            }
         }
         finally
         {
             sourceElement.GiveFeedback -= EquipmentLaneDragSource_GiveFeedback;
+            sourceElement.QueryContinueDrag -=
+                EquipmentLaneDragSource_QueryContinueDrag;
             _equipmentLaneDragPreview = null;
         }
     }
@@ -120,6 +133,35 @@ public partial class MainWindow : Window
         _equipmentLaneDragPreview?.UpdatePosition();
         e.UseDefaultCursors = true;
         e.Handled = true;
+    }
+
+    private void EquipmentLaneDragSource_QueryContinueDrag(
+        object sender,
+        System.Windows.QueryContinueDragEventArgs e)
+    {
+        if (e.EscapePressed
+            || e.Action == System.Windows.DragAction.Cancel)
+        {
+            _equipmentLaneDragCancelled = true;
+        }
+    }
+
+    private void TryReorderEquipmentLaneAtCurrentPointer(
+        EquipmentLane sourceLane)
+    {
+        var hit = InputHitTest(
+            System.Windows.Input.Mouse.GetPosition(this))
+            as DependencyObject;
+        var targetLane = FindEquipmentLaneAncestor(hit);
+        if (targetLane is null
+            || DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        viewModel.ReorderEquipmentTechnicianLane(
+            sourceLane,
+            targetLane);
     }
 
     private void EquipmentLaneHeader_DragOver(
@@ -170,7 +212,7 @@ public partial class MainWindow : Window
         if (sender is not FrameworkElement
             {
                 DataContext: EquipmentLane { IsReorderable: true } targetLane
-            } element
+            }
             || e.Data.GetData(typeof(EquipmentLane)) is not EquipmentLane sourceLane
             || DataContext is not MainWindowViewModel viewModel)
         {
@@ -179,8 +221,8 @@ public partial class MainWindow : Window
 
         viewModel.ReorderEquipmentTechnicianLane(
             sourceLane,
-            targetLane,
-            e.GetPosition(element).X > element.ActualWidth / 2);
+            targetLane);
+        _equipmentLaneDropHandled = true;
         e.Handled = true;
     }
 
@@ -416,6 +458,26 @@ public partial class MainWindow : Window
             if (source is T match)
             {
                 return match;
+            }
+
+            source = System.Windows.Media.VisualTreeHelper.GetParent(source);
+        }
+
+        return null;
+    }
+
+    private static EquipmentLane? FindEquipmentLaneAncestor(
+        DependencyObject? source)
+    {
+        while (source is not null)
+        {
+            if (source is FrameworkElement
+                {
+                    DataContext:
+                        EquipmentLane { IsReorderable: true } lane
+                })
+            {
+                return lane;
             }
 
             source = System.Windows.Media.VisualTreeHelper.GetParent(source);
