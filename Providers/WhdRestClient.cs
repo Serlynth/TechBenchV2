@@ -391,7 +391,7 @@ public sealed class WhdRestClient
                 technicians.Add(new WhdSyncedTechnician
                 {
                     ExternalId = ConfiguredOrganizationAccountExternalId,
-                    DisplayName = "Helpdesk Manager (organization-wide account)",
+                    DisplayName = $"Helpdesk Manager ({settings.Username.Trim()}, organization-wide account)",
                     Username = settings.Username.Trim(),
                     IsActive = true
                 });
@@ -932,7 +932,10 @@ public sealed class WhdRestClient
             ["page"] = page.ToString(CultureInfo.InvariantCulture)
         });
 
-        return GetTicketsPageAsync(requestUri, cancellationToken);
+        return GetTicketsPageAsync(
+            requestUri,
+            settings.Username,
+            cancellationToken);
     }
 
     private static string BuildOrganizationTicketQualifier(DateTimeOffset? changedSinceUtc)
@@ -954,6 +957,7 @@ public sealed class WhdRestClient
 
     private async Task<IReadOnlyList<WhdSyncedTicket>> GetTicketsPageAsync(
         Uri requestUri,
+        string configuredOrganizationUsername,
         CancellationToken cancellationToken)
     {
         using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
@@ -968,7 +972,9 @@ public sealed class WhdRestClient
         }
 
         using var document = JsonDocument.Parse(content);
-        return ParseTickets(document.RootElement);
+        return ParseTickets(
+            document.RootElement,
+            configuredOrganizationUsername);
     }
 
     private async Task<IReadOnlyList<WhdSyncedClient>> GetLocationsPageAsync(
@@ -1746,7 +1752,9 @@ public sealed class WhdRestClient
         return JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
     }
 
-    private static IReadOnlyList<WhdSyncedTicket> ParseTickets(JsonElement root)
+    private static IReadOnlyList<WhdSyncedTicket> ParseTickets(
+        JsonElement root,
+        string? configuredOrganizationUsername = null)
     {
         var tickets = new List<WhdSyncedTicket>();
 
@@ -1754,19 +1762,19 @@ public sealed class WhdRestClient
         {
             foreach (var ticketElement in root.EnumerateArray())
             {
-                AddTicket(tickets, ticketElement);
+                AddTicket(tickets, ticketElement, configuredOrganizationUsername);
             }
         }
         else if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("records", out var records) && records.ValueKind == JsonValueKind.Array)
         {
             foreach (var ticketElement in records.EnumerateArray())
             {
-                AddTicket(tickets, ticketElement);
+                AddTicket(tickets, ticketElement, configuredOrganizationUsername);
             }
         }
         else if (root.ValueKind == JsonValueKind.Object)
         {
-            AddTicket(tickets, root);
+            AddTicket(tickets, root, configuredOrganizationUsername);
         }
 
         return tickets;
@@ -2135,7 +2143,10 @@ public sealed class WhdRestClient
         });
     }
 
-    private static void AddTicket(List<WhdSyncedTicket> tickets, JsonElement ticketElement)
+    private static void AddTicket(
+        List<WhdSyncedTicket> tickets,
+        JsonElement ticketElement,
+        string? configuredOrganizationUsername)
     {
         if (ticketElement.ValueKind != JsonValueKind.Object)
         {
@@ -2208,9 +2219,11 @@ public sealed class WhdRestClient
                 "updatedAt",
                 "dateModified",
                 "modified"),
-            AssignedTechnicianExternalId = string.IsNullOrWhiteSpace(assignedTechnicianId)
-                ? null
-                : FormatWhdTechnicianId(assignedTechnicianId),
+            AssignedTechnicianExternalId = ResolveAssignedTechnicianExternalId(
+                assignedTechnicianId,
+                assignedTechnician,
+                ticketElement,
+                configuredOrganizationUsername),
             AssignedTechnicianName = assignedTechnician.HasValue
                 ? ReadStringAny(assignedTechnician.Value, "displayName", "fullName", "name", "username")
                 : ReadStringAny(ticketElement, "assignedTechName", "assignedTechnicianName"),
@@ -2223,6 +2236,98 @@ public sealed class WhdRestClient
             Client = ReadClient(ticketElement)
         });
     }
+
+    private static string? ResolveAssignedTechnicianExternalId(
+        string? assignedTechnicianId,
+        JsonElement? assignedTechnician,
+        JsonElement ticketElement,
+        string? configuredOrganizationUsername)
+    {
+        if (string.IsNullOrWhiteSpace(assignedTechnicianId))
+        {
+            return null;
+        }
+
+        if (IsConfiguredOrganizationAccountAssignment(
+                assignedTechnician,
+                ticketElement,
+                configuredOrganizationUsername))
+        {
+            return ConfiguredOrganizationAccountExternalId;
+        }
+
+        return FormatWhdTechnicianId(assignedTechnicianId);
+    }
+
+    private static bool IsConfiguredOrganizationAccountAssignment(
+        JsonElement? assignedTechnician,
+        JsonElement ticketElement,
+        string? configuredOrganizationUsername)
+    {
+        if (string.IsNullOrWhiteSpace(configuredOrganizationUsername))
+        {
+            return false;
+        }
+
+        var assignedUsername = assignedTechnician.HasValue
+            ? ReadStringAny(
+                assignedTechnician.Value,
+                "username",
+                "userName",
+                "loginName",
+                "login")
+            : null;
+        assignedUsername ??= ReadStringAny(
+            ticketElement,
+            "assignedTechUsername",
+            "assignedTechnicianUsername",
+            "techUsername");
+        if (string.Equals(
+                assignedUsername?.Trim(),
+                configuredOrganizationUsername.Trim(),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // WHD 12.x omits its built-in Helpdesk Manager account from /Techs
+        // when an application API key is used. Ticket payloads still identify
+        // that account as "H. Manager", but may omit its whdmgr login name.
+        // Recognize those equivalent labels so ticket ownership uses the same
+        // stable mapping identity exposed by GetTechniciansAsync.
+        var assignedName = assignedTechnician.HasValue
+            ? ReadStringAny(
+                assignedTechnician.Value,
+                "displayName",
+                "fullName",
+                "name")
+            : ReadStringAny(
+                ticketElement,
+                "assignedTechName",
+                "assignedTechnicianName");
+        return IsHelpdeskManagerUsername(configuredOrganizationUsername)
+            && IsHelpdeskManagerDisplayName(assignedName);
+    }
+
+    private static bool IsHelpdeskManagerUsername(string value)
+    {
+        var normalized = NormalizeIdentityLabel(value);
+        return normalized is "whdmgr" or "helpdeskmanager";
+    }
+
+    private static bool IsHelpdeskManagerDisplayName(string? value)
+    {
+        var normalized = NormalizeIdentityLabel(value);
+        return normalized is "hmanager" or "helpdeskmanager" or "whdmanager";
+    }
+
+    private static string NormalizeIdentityLabel(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : new string(value
+                .Where(char.IsLetterOrDigit)
+                .Select(char.ToLowerInvariant)
+                .ToArray());
 
     private static WhdSyncedClient ReadClient(JsonElement ticketElement)
     {

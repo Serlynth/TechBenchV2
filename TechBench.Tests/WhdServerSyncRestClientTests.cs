@@ -576,9 +576,75 @@ public sealed class WhdServerSyncRestClientTests
         var manager = Assert.Single(
             result.Technicians,
             technician => technician.ExternalId == "WHD-CONFIGURED-ORGANIZATION-ACCOUNT");
-        Assert.Equal("Helpdesk Manager (organization-wide account)", manager.DisplayName);
+        Assert.Equal("Helpdesk Manager (WHDMgr, organization-wide account)", manager.DisplayName);
         Assert.Equal("WHDMgr", manager.Username);
         Assert.True(manager.IsActive);
+    }
+
+    [Fact]
+    public async Task OrganizationTicketSyncMapsHiddenHelpdeskManagerAssignmentsToConfiguredAccount()
+    {
+        var handler = new RecordingHandler(_ => Json(HttpStatusCode.OK, """
+            [
+              {
+                "id": 31698,
+                "subject": "Manager ticket",
+                "statustype": { "id": 2, "statusTypeName": "In Progress" },
+                "assignedTech": {
+                  "id": 99,
+                  "displayName": "H. Manager"
+                },
+                "clientReporter": {
+                  "id": 15,
+                  "displayName": "Test Client"
+                }
+              }
+            ]
+            """));
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetOrganizationTicketsAsync(ExplicitSettings("whdmgr"));
+
+        Assert.True(result.Success, result.Message);
+        var ticket = Assert.Single(result.Tickets);
+        Assert.Equal("H. Manager", ticket.AssignedTechnicianName);
+        Assert.Equal(
+            "WHD-CONFIGURED-ORGANIZATION-ACCOUNT",
+            ticket.AssignedTechnicianExternalId);
+    }
+
+    [Fact]
+    public async Task OrganizationTicketSyncMapsConfiguredUsernameEvenWhenDisplayNameDiffers()
+    {
+        var handler = new RecordingHandler(_ => Json(HttpStatusCode.OK, """
+            [
+              {
+                "id": 31701,
+                "subject": "Manager ticket",
+                "statustype": { "id": 2, "statusTypeName": "Assigned" },
+                "assignedTech": {
+                  "id": 99,
+                  "displayName": "Built-in Administrator",
+                  "username": "WHDMgr"
+                },
+                "clientReporter": {
+                  "id": 16,
+                  "displayName": "Second Test Client"
+                }
+              }
+            ]
+            """));
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetOrganizationTicketsAsync(ExplicitSettings("whdmgr"));
+
+        Assert.True(result.Success, result.Message);
+        var ticket = Assert.Single(result.Tickets);
+        Assert.Equal(
+            "WHD-CONFIGURED-ORGANIZATION-ACCOUNT",
+            ticket.AssignedTechnicianExternalId);
     }
 
     [Fact]
