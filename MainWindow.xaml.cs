@@ -23,8 +23,141 @@ public partial class MainWindow : Window
     private EquipmentItem? _pendingEquipmentDragItem;
     private bool _equipmentDragStarted;
     private EquipmentDragPreview? _equipmentDragPreview;
+    private System.Windows.Point _equipmentLaneDragStartPoint;
+    private EquipmentLane? _pendingEquipmentLaneDrag;
     private GridLength _expandedEquipmentDeploymentHeight =
         new(230, GridUnitType.Pixel);
+
+    private void ToggleEquipmentDetails_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        SetEquipmentDetailsPanelVisible(
+            EquipmentDetailsPanel.Visibility != Visibility.Visible);
+        _localPreferences.EquipmentDetailsPanelVisible =
+            EquipmentDetailsPanel.Visibility == Visibility.Visible;
+        LocalPreferenceStore.Save(_localPreferences);
+    }
+
+    private void SetEquipmentDetailsPanelVisible(bool visible)
+    {
+        EquipmentDetailsPanel.Visibility = visible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        EquipmentDetailsGapColumn.Width = visible
+            ? new GridLength(14, GridUnitType.Pixel)
+            : new GridLength(0, GridUnitType.Pixel);
+        EquipmentDetailsColumn.Width = visible
+            ? new GridLength(390, GridUnitType.Pixel)
+            : new GridLength(0, GridUnitType.Pixel);
+        ToggleEquipmentDetailsButton.Content = visible
+            ? "Hide details"
+            : "Show details";
+        ToggleEquipmentDetailsButton.ToolTip = visible
+            ? "Hide the equipment details panel and give the board the full window width."
+            : "Show the equipment details panel.";
+    }
+
+    private void EquipmentLaneHeader_PreviewMouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        _pendingEquipmentLaneDrag = sender is FrameworkElement
+            {
+                DataContext: EquipmentLane { IsReorderable: true } lane
+            }
+            ? lane
+            : null;
+        _equipmentLaneDragStartPoint = e.GetPosition(null);
+    }
+
+    private void EquipmentLaneHeader_PreviewMouseMove(
+        object sender,
+        System.Windows.Input.MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed
+            || _pendingEquipmentLaneDrag is not { } lane)
+        {
+            return;
+        }
+
+        var currentPosition = e.GetPosition(null);
+        if (Math.Abs(currentPosition.X - _equipmentLaneDragStartPoint.X)
+                < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(currentPosition.Y - _equipmentLaneDragStartPoint.Y)
+                < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        _pendingEquipmentLaneDrag = null;
+        DragDrop.DoDragDrop(
+            sender as DependencyObject ?? this,
+            new System.Windows.DataObject(typeof(EquipmentLane), lane),
+            System.Windows.DragDropEffects.Move);
+    }
+
+    private void EquipmentLaneHeader_DragOver(
+        object sender,
+        System.Windows.DragEventArgs e)
+    {
+        if (sender is FrameworkElement
+            {
+                DataContext: EquipmentLane { IsReorderable: true } targetLane
+            } element
+            && e.Data.GetData(typeof(EquipmentLane)) is EquipmentLane sourceLane
+            && sourceLane.IsReorderable
+            && !string.Equals(
+                sourceLane.AssignedToLoginName,
+                targetLane.AssignedToLoginName,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            e.Effects = System.Windows.DragDropEffects.Move;
+            element.Opacity = 0.62;
+        }
+        else
+        {
+            e.Effects = System.Windows.DragDropEffects.None;
+        }
+
+        e.Handled = true;
+    }
+
+    private void EquipmentLaneHeader_DragLeave(
+        object sender,
+        System.Windows.DragEventArgs e)
+    {
+        if (sender is FrameworkElement element)
+        {
+            element.Opacity = 1;
+        }
+    }
+
+    private void EquipmentLaneHeader_Drop(
+        object sender,
+        System.Windows.DragEventArgs e)
+    {
+        if (sender is FrameworkElement dropElement)
+        {
+            dropElement.Opacity = 1;
+        }
+
+        if (sender is not FrameworkElement
+            {
+                DataContext: EquipmentLane { IsReorderable: true } targetLane
+            } element
+            || e.Data.GetData(typeof(EquipmentLane)) is not EquipmentLane sourceLane
+            || DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        viewModel.ReorderEquipmentTechnicianLane(
+            sourceLane,
+            targetLane,
+            e.GetPosition(element).X > element.ActualWidth / 2);
+        e.Handled = true;
+    }
 
     private void EquipmentDeploymentExpander_Collapsed(
         object sender,
@@ -298,6 +431,8 @@ public partial class MainWindow : Window
         InitializeComponent();
         _localPreferences = LocalPreferenceStore.LoadOrCreate();
         ApplyWindowPreferences();
+        SetEquipmentDetailsPanelVisible(
+            _localPreferences.EquipmentDetailsPanelVisible);
         EditorClientComboBox.AddHandler(
             System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent,
             new TextChangedEventHandler(EditorClientComboBox_TextChanged));

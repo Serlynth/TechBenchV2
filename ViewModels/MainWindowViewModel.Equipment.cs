@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Windows.Data;
 using Microsoft.Data.SqlClient;
 using TechBench.Models;
+using TechBench.Services;
 
 namespace TechBench.ViewModels;
 
@@ -332,9 +333,20 @@ public sealed partial class MainWindowViewModel
             StringComparer.OrdinalIgnoreCase);
         var deploymentLanesByLogin = new Dictionary<string, EquipmentLane>(
             StringComparer.OrdinalIgnoreCase);
+        var technicianOrder = _localPreferences.EquipmentTechnicianOrder
+            .Select(static (loginName, index) => (loginName, index))
+            .ToDictionary(
+                static entry => entry.loginName,
+                static entry => entry.index,
+                StringComparer.OrdinalIgnoreCase);
         foreach (var mapping in mappings
                      .Where(static mapping => !string.IsNullOrWhiteSpace(mapping.LoginName))
-                     .OrderBy(static mapping => mapping.DisplayName)
+                     .OrderBy(mapping => technicianOrder.TryGetValue(
+                         mapping.LoginName,
+                         out var index)
+                         ? index
+                         : int.MaxValue)
+                     .ThenBy(static mapping => mapping.DisplayName)
                      .ThenBy(static mapping => mapping.LoginName))
         {
             var title = string.IsNullOrWhiteSpace(mapping.DisplayName)
@@ -405,6 +417,96 @@ public sealed partial class MainWindowViewModel
         OnPropertyChanged(nameof(EquipmentDeviceCountLabel));
         OnPropertyChanged(nameof(EquipmentDeploymentCountLabel));
         RefreshEquipmentSearch();
+    }
+
+    public void ReorderEquipmentTechnicianLane(
+        EquipmentLane sourceLane,
+        EquipmentLane targetLane,
+        bool insertAfterTarget)
+    {
+        ArgumentNullException.ThrowIfNull(sourceLane);
+        ArgumentNullException.ThrowIfNull(targetLane);
+
+        if (!sourceLane.IsReorderable
+            || !targetLane.IsReorderable
+            || string.Equals(
+                sourceLane.AssignedToLoginName,
+                targetLane.AssignedToLoginName,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var sourceWorkLane = EquipmentLanes.FirstOrDefault(lane =>
+            string.Equals(
+                lane.AssignedToLoginName,
+                sourceLane.AssignedToLoginName,
+                StringComparison.OrdinalIgnoreCase));
+        var targetWorkLane = EquipmentLanes.FirstOrDefault(lane =>
+            string.Equals(
+                lane.AssignedToLoginName,
+                targetLane.AssignedToLoginName,
+                StringComparison.OrdinalIgnoreCase));
+        if (sourceWorkLane is null || targetWorkLane is null)
+        {
+            return;
+        }
+
+        var sourceIndex = EquipmentLanes.IndexOf(sourceWorkLane);
+        var targetIndex = EquipmentLanes.IndexOf(targetWorkLane);
+        if (sourceIndex < 1 || targetIndex < 1)
+        {
+            return;
+        }
+
+        var insertionIndex = targetIndex + (insertAfterTarget ? 1 : 0);
+        if (sourceIndex < insertionIndex)
+        {
+            insertionIndex--;
+        }
+
+        insertionIndex = Math.Clamp(
+            insertionIndex,
+            1,
+            EquipmentLanes.Count - 1);
+        if (sourceIndex == insertionIndex)
+        {
+            return;
+        }
+
+        EquipmentLanes.Move(sourceIndex, insertionIndex);
+        SynchronizeDeploymentTechnicianOrder();
+        _localPreferences.EquipmentTechnicianOrder = EquipmentLanes
+            .Where(static lane => lane.IsReorderable)
+            .Select(static lane => lane.AssignedToLoginName)
+            .ToList();
+        LocalPreferenceStore.Save(_localPreferences);
+        EquipmentBoardStatus =
+            $"Moved {sourceWorkLane.Title} to technician position {insertionIndex}.";
+    }
+
+    private void SynchronizeDeploymentTechnicianOrder()
+    {
+        var desiredLogins = EquipmentLanes
+            .Where(static lane => lane.IsReorderable)
+            .Select(static lane => lane.AssignedToLoginName)
+            .ToList();
+        for (var desiredIndex = 0; desiredIndex < desiredLogins.Count; desiredIndex++)
+        {
+            var currentIndex = DeploymentLanes
+                .Select(static (lane, index) => (lane, index))
+                .FirstOrDefault(entry => string.Equals(
+                    entry.lane.AssignedToLoginName,
+                    desiredLogins[desiredIndex],
+                    StringComparison.OrdinalIgnoreCase))
+                .index;
+            var destinationIndex = desiredIndex + 1;
+            if (currentIndex > 0
+                && currentIndex != destinationIndex)
+            {
+                DeploymentLanes.Move(currentIndex, destinationIndex);
+            }
+        }
     }
 
     private void BeginNewEquipment()

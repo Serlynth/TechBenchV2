@@ -34,6 +34,12 @@ public sealed class LocalPreferenceStoreTests
             created.SkippedUpdateVersion = "2.0.0-alpha.2";
             created.UpdateChannel =
                 V2AppUpdateService.InventoryBetaReleaseChannel;
+            created.EquipmentDetailsPanelVisible = false;
+            created.EquipmentTechnicianOrder =
+            [
+                "CSRI\\rskoog",
+                "CSRI\\kallen"
+            ];
 
             LocalPreferenceStore.Save(created, path);
             var loaded = LocalPreferenceStore.LoadOrCreate(path);
@@ -52,6 +58,10 @@ public sealed class LocalPreferenceStoreTests
             Assert.Equal(
                 V2AppUpdateService.InventoryBetaReleaseChannel,
                 loaded.UpdateChannel);
+            Assert.False(loaded.EquipmentDetailsPanelVisible);
+            Assert.Equal(
+                ["CSRI\\rskoog", "CSRI\\kallen"],
+                loaded.EquipmentTechnicianOrder);
         }
         finally
         {
@@ -71,7 +81,14 @@ public sealed class LocalPreferenceStoreTests
                 WindowState = "Fullscreen",
                 RefreshIntervalMinutes = -10,
                 SkippedUpdateVersion = "   ",
-                UpdateChannel = "unexpected"
+                UpdateChannel = "unexpected",
+                EquipmentTechnicianOrder =
+                [
+                    " CSRI\\rskoog ",
+                    "",
+                    "csri\\RSKOOG",
+                    "CSRI\\kallen"
+                ]
             }, path);
 
             var loaded = LocalPreferenceStore.LoadOrCreate(path);
@@ -80,6 +97,9 @@ public sealed class LocalPreferenceStoreTests
             Assert.Equal(1, loaded.RefreshIntervalMinutes);
             Assert.Null(loaded.SkippedUpdateVersion);
             Assert.Equal(string.Empty, loaded.UpdateChannel);
+            Assert.Equal(
+                ["CSRI\\rskoog", "CSRI\\kallen"],
+                loaded.EquipmentTechnicianOrder);
 
             using var document = JsonDocument.Parse(File.ReadAllText(path));
             var propertyNames = document.RootElement

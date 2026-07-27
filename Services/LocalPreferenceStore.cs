@@ -166,6 +166,10 @@ public sealed class LocalPreferences
 
     public bool MicrosoftAdminOpenInChromeIncognito { get; set; }
 
+    public bool EquipmentDetailsPanelVisible { get; set; } = true;
+
+    public List<string> EquipmentTechnicianOrder { get; set; } = [];
+
     internal LocalPreferences Normalize()
     {
         if (DeviceId == Guid.Empty)
@@ -191,6 +195,11 @@ public sealed class LocalPreferences
                 V2AppUpdateService.InventoryBetaReleaseChannel,
             _ => string.Empty
         };
+        EquipmentTechnicianOrder = (EquipmentTechnicianOrder ?? [])
+            .Where(static loginName => !string.IsNullOrWhiteSpace(loginName))
+            .Select(static loginName => loginName.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
         return this;
     }
 }

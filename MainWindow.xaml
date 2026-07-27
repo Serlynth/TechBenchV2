@@ -3300,6 +3300,12 @@
                                                FontSize="11"
                                                FontWeight="SemiBold" />
                                 </Border>
+                                <Button x:Name="ToggleEquipmentDetailsButton"
+                                        Content="Hide details"
+                                        Click="ToggleEquipmentDetails_Click"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        ToolTip="Hide the equipment details panel and give the board the full window width."
+                                        Margin="0,0,10,0" />
                                 <Button Content="Open Demo Mode"
                                         Click="OpenEquipmentBoardDemo_Click"
                                         Style="{StaticResource SecondaryButtonStyle}"
@@ -3318,9 +3324,12 @@
 
                     <Grid Grid.Row="1">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="14" />
-                            <ColumnDefinition Width="390" />
+                            <ColumnDefinition x:Name="EquipmentBoardColumn"
+                                              Width="*" />
+                            <ColumnDefinition x:Name="EquipmentDetailsGapColumn"
+                                              Width="14" />
+                            <ColumnDefinition x:Name="EquipmentDetailsColumn"
+                                              Width="390" />
                         </Grid.ColumnDefinitions>
 
                         <Border Grid.Column="0"
@@ -3355,7 +3364,27 @@
                                                     <RowDefinition Height="Auto" />
                                                     <RowDefinition Height="*" />
                                                 </Grid.RowDefinitions>
-                                                <Grid Grid.Row="0" Margin="2,0,2,10">
+                                                <Grid Grid.Row="0"
+                                                      Margin="2,0,2,10"
+                                                      Background="Transparent"
+                                                      PreviewMouseLeftButtonDown="EquipmentLaneHeader_PreviewMouseLeftButtonDown"
+                                                      PreviewMouseMove="EquipmentLaneHeader_PreviewMouseMove"
+                                                      DragOver="EquipmentLaneHeader_DragOver"
+                                                      DragLeave="EquipmentLaneHeader_DragLeave"
+                                                      Drop="EquipmentLaneHeader_Drop"
+                                                      ToolTip="Drag a technician header left or right to rearrange the columns.">
+                                                    <Grid.Style>
+                                                        <Style TargetType="{x:Type Grid}">
+                                                            <Setter Property="AllowDrop" Value="False" />
+                                                            <Setter Property="Cursor" Value="Arrow" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsReorderable}" Value="True">
+                                                                    <Setter Property="AllowDrop" Value="True" />
+                                                                    <Setter Property="Cursor" Value="SizeWE" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Grid.Style>
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="Auto" />
                                                         <ColumnDefinition Width="*" />
@@ -3503,7 +3532,27 @@
                                                             <RowDefinition Height="Auto" />
                                                             <RowDefinition Height="*" />
                                                         </Grid.RowDefinitions>
-                                                        <Grid Grid.Row="0" Margin="2,0,2,8">
+                                                        <Grid Grid.Row="0"
+                                                              Margin="2,0,2,8"
+                                                              Background="Transparent"
+                                                              PreviewMouseLeftButtonDown="EquipmentLaneHeader_PreviewMouseLeftButtonDown"
+                                                              PreviewMouseMove="EquipmentLaneHeader_PreviewMouseMove"
+                                                              DragOver="EquipmentLaneHeader_DragOver"
+                                                              DragLeave="EquipmentLaneHeader_DragLeave"
+                                                              Drop="EquipmentLaneHeader_Drop"
+                                                              ToolTip="Drag a technician header left or right to rearrange the columns.">
+                                                            <Grid.Style>
+                                                                <Style TargetType="{x:Type Grid}">
+                                                                    <Setter Property="AllowDrop" Value="False" />
+                                                                    <Setter Property="Cursor" Value="Arrow" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsReorderable}" Value="True">
+                                                                            <Setter Property="AllowDrop" Value="True" />
+                                                                            <Setter Property="Cursor" Value="SizeWE" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Grid.Style>
                                                             <Grid.ColumnDefinitions>
                                                                 <ColumnDefinition Width="Auto" />
                                                                 <ColumnDefinition Width="*" />
@@ -3575,7 +3624,8 @@
                             </Grid>
                         </Border>
 
-                        <Border Grid.Column="2"
+                        <Border x:Name="EquipmentDetailsPanel"
+                                Grid.Column="2"
                                 Style="{StaticResource CardStyle}">
                             <Grid>
                                 <TextBlock Text="Select an equipment card to view its details, or add a new item to Stock."

@@ -259,6 +259,7 @@ public sealed class EquipmentLane : INotifyPropertyChanged
     public string WorkflowStage { get; }
     public bool IsStock => EquipmentWorkflowStages.IsStock(WorkflowStage);
     public bool IsDeployment => EquipmentWorkflowStages.IsDeployment(WorkflowStage);
+    public bool IsReorderable => !string.IsNullOrWhiteSpace(AssignedToLoginName);
     public string Subtitle => IsDeployment
         ? string.IsNullOrWhiteSpace(AssignedToLoginName)
             ? "Awaiting deployment owner"
