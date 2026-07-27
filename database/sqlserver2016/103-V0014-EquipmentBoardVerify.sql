@@ -138,7 +138,8 @@ END;
 DECLARE @ClientUserReadProcedures TABLE ([ObjectName] nvarchar(256) NOT NULL PRIMARY KEY);
 INSERT INTO @ClientUserReadProcedures([ObjectName]) VALUES
     (N'tb_app.SearchClientUsers'),
-    (N'tb_app.RevealClientUser');
+    (N'tb_app.RevealClientUser'),
+    (N'tb_app.GetEquipmentInventory');
 
 IF EXISTS
 (
@@ -197,6 +198,18 @@ IF CHARINDEX(
     COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientUser', N'P')), N''))=0
 BEGIN
     PRINT N'FAIL: client-user reveal does not decrypt account fields with their account authenticator.';
+    SET @FailureCount+=1;
+END;
+
+DECLARE @EquipmentInventoryDefinition nvarchar(max)=
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetEquipmentInventory', N'P')), N'');
+
+IF CHARINDEX(N'@ClientId', @EquipmentInventoryDefinition)=0
+   OR CHARINDEX(N'@ClientUserId', @EquipmentInventoryDefinition)=0
+   OR CHARINDEX(N'@ClientName', @EquipmentInventoryDefinition)=0
+   OR CHARINDEX(N'equipment.[IsArchived] = 0', @EquipmentInventoryDefinition)=0
+BEGIN
+    PRINT N'FAIL: the shared equipment inventory read is not client-scoped and archive-safe.';
     SET @FailureCount+=1;
 END;
 

@@ -155,8 +155,11 @@ public sealed class SqlServerTechBenchRepositoryContractTests
     }
 
     [Fact]
-    public void EquipmentBoardUsesOnlyAdminStoredProcedures()
+    public void EquipmentBoardWritesRemainAdminOnlyAndProfilesUseSharedInventoryRead()
     {
+        Assert.Equal(
+            "[tb_app].[GetEquipmentInventory]",
+            SqlServerTechBenchRepository.Procedures.GetEquipmentInventory);
         Assert.Equal(
             "[tb_app].[AdminGetEquipmentBoard]",
             SqlServerTechBenchRepository.Procedures.GetEquipmentBoard);
