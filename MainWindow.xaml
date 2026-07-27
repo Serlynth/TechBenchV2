@@ -3327,7 +3327,7 @@
                             <ColumnDefinition x:Name="EquipmentBoardColumn"
                                               Width="*" />
                             <ColumnDefinition x:Name="EquipmentDetailsGapColumn"
-                                              Width="14" />
+                                              Width="42" />
                             <ColumnDefinition x:Name="EquipmentDetailsColumn"
                                               Width="390" />
                         </Grid.ColumnDefinitions>
@@ -3389,6 +3389,7 @@
                                                         <ColumnDefinition Width="Auto" />
                                                         <ColumnDefinition Width="*" />
                                                         <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="Auto" />
                                                     </Grid.ColumnDefinitions>
                                                     <Border Width="38"
                                                             Height="38"
@@ -3412,7 +3413,37 @@
                                                                    FontSize="10"
                                                                    Margin="0,2,0,0" />
                                                     </StackPanel>
-                                                    <Border Grid.Column="2"
+                                                    <StackPanel Grid.Column="2"
+                                                                Orientation="Horizontal"
+                                                                Margin="4,0,8,0"
+                                                                VerticalAlignment="Center">
+                                                        <StackPanel.Style>
+                                                            <Style TargetType="{x:Type StackPanel}">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsReorderable}" Value="True">
+                                                                        <Setter Property="Visibility" Value="Visible" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </StackPanel.Style>
+                                                        <Button Content="&#x2039;"
+                                                                Width="27"
+                                                                Height="27"
+                                                                Padding="0"
+                                                                Margin="0,0,4,0"
+                                                                Click="MoveEquipmentLaneLeft_Click"
+                                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                                ToolTip="Move this technician one column left" />
+                                                        <Button Content="&#x203A;"
+                                                                Width="27"
+                                                                Height="27"
+                                                                Padding="0"
+                                                                Click="MoveEquipmentLaneRight_Click"
+                                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                                ToolTip="Move this technician one column right" />
+                                                    </StackPanel>
+                                                    <Border Grid.Column="3"
                                                             Background="{DynamicResource PanelAltBackgroundBrush}"
                                                             BorderBrush="{DynamicResource BorderBrush}"
                                                             BorderThickness="1"
@@ -3557,6 +3588,7 @@
                                                                 <ColumnDefinition Width="Auto" />
                                                                 <ColumnDefinition Width="*" />
                                                                 <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="Auto" />
                                                             </Grid.ColumnDefinitions>
                                                             <Border Width="32"
                                                                     Height="32"
@@ -3580,7 +3612,37 @@
                                                                            FontSize="9"
                                                                            Margin="0,1,0,0" />
                                                             </StackPanel>
-                                                            <Border Grid.Column="2"
+                                                            <StackPanel Grid.Column="2"
+                                                                        Orientation="Horizontal"
+                                                                        Margin="4,0,8,0"
+                                                                        VerticalAlignment="Center">
+                                                                <StackPanel.Style>
+                                                                    <Style TargetType="{x:Type StackPanel}">
+                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding IsReorderable}" Value="True">
+                                                                                <Setter Property="Visibility" Value="Visible" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </StackPanel.Style>
+                                                                <Button Content="&#x2039;"
+                                                                        Width="25"
+                                                                        Height="25"
+                                                                        Padding="0"
+                                                                        Margin="0,0,4,0"
+                                                                        Click="MoveEquipmentLaneLeft_Click"
+                                                                        Style="{StaticResource SecondaryButtonStyle}"
+                                                                        ToolTip="Move this technician one column left" />
+                                                                <Button Content="&#x203A;"
+                                                                        Width="25"
+                                                                        Height="25"
+                                                                        Padding="0"
+                                                                        Click="MoveEquipmentLaneRight_Click"
+                                                                        Style="{StaticResource SecondaryButtonStyle}"
+                                                                        ToolTip="Move this technician one column right" />
+                                                            </StackPanel>
+                                                            <Border Grid.Column="3"
                                                                     Background="#2438D996"
                                                                     BorderBrush="#6638D996"
                                                                     BorderThickness="1"
@@ -3623,6 +3685,19 @@
                                 </Expander>
                             </Grid>
                         </Border>
+
+                        <Button x:Name="EquipmentDetailsRailButton"
+                                Grid.Column="1"
+                                Content="&#x203A;"
+                                Width="34"
+                                Height="74"
+                                Padding="0"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Click="ToggleEquipmentDetails_Click"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                ToolTip="Hide equipment details"
+                                Panel.ZIndex="5" />
 
                         <Border x:Name="EquipmentDetailsPanel"
                                 Grid.Column="2"

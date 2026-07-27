@@ -230,7 +230,8 @@ try {
             'download', 'github',
             '--outputDir', $releaseDirectory,
             '--channel', $releaseChannel,
-            '--repoUrl', $RepositoryUrl
+            '--repoUrl', $RepositoryUrl,
+            '--pre', ($releaseChannel -eq 'inventory-beta').ToString().ToLowerInvariant()
         )
     }
 

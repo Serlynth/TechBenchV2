@@ -485,6 +485,41 @@ public sealed partial class MainWindowViewModel
             $"Moved {sourceWorkLane.Title} to technician position {insertionIndex}.";
     }
 
+    public void MoveEquipmentTechnicianLane(
+        EquipmentLane lane,
+        int offset)
+    {
+        ArgumentNullException.ThrowIfNull(lane);
+        if (!lane.IsReorderable || offset == 0)
+        {
+            return;
+        }
+
+        var sourceLane = EquipmentLanes.FirstOrDefault(candidate =>
+            string.Equals(
+                candidate.AssignedToLoginName,
+                lane.AssignedToLoginName,
+                StringComparison.OrdinalIgnoreCase));
+        if (sourceLane is null)
+        {
+            return;
+        }
+
+        var sourceIndex = EquipmentLanes.IndexOf(sourceLane);
+        var targetIndex = sourceIndex + Math.Sign(offset);
+        if (sourceIndex < 1
+            || targetIndex < 1
+            || targetIndex >= EquipmentLanes.Count)
+        {
+            return;
+        }
+
+        ReorderEquipmentTechnicianLane(
+            sourceLane,
+            EquipmentLanes[targetIndex],
+            insertAfterTarget: offset > 0);
+    }
+
     private void SynchronizeDeploymentTechnicianOrder()
     {
         var desiredLogins = EquipmentLanes

@@ -44,9 +44,8 @@ public partial class MainWindow : Window
         EquipmentDetailsPanel.Visibility = visible
             ? Visibility.Visible
             : Visibility.Collapsed;
-        EquipmentDetailsGapColumn.Width = visible
-            ? new GridLength(14, GridUnitType.Pixel)
-            : new GridLength(0, GridUnitType.Pixel);
+        EquipmentDetailsGapColumn.Width =
+            new GridLength(42, GridUnitType.Pixel);
         EquipmentDetailsColumn.Width = visible
             ? new GridLength(390, GridUnitType.Pixel)
             : new GridLength(0, GridUnitType.Pixel);
@@ -56,12 +55,45 @@ public partial class MainWindow : Window
         ToggleEquipmentDetailsButton.ToolTip = visible
             ? "Hide the equipment details panel and give the board the full window width."
             : "Show the equipment details panel.";
+        EquipmentDetailsRailButton.Content = visible ? "›" : "‹";
+        EquipmentDetailsRailButton.ToolTip = visible
+            ? "Hide equipment details"
+            : "Show equipment details";
+    }
+
+    private void MoveEquipmentLaneLeft_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: EquipmentLane lane }
+            && DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.MoveEquipmentTechnicianLane(lane, -1);
+        }
+    }
+
+    private void MoveEquipmentLaneRight_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: EquipmentLane lane }
+            && DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.MoveEquipmentTechnicianLane(lane, 1);
+        }
     }
 
     private void EquipmentLaneHeader_PreviewMouseLeftButtonDown(
         object sender,
         MouseButtonEventArgs e)
     {
+        if (e.OriginalSource is DependencyObject source
+            && FindVisualAncestor<System.Windows.Controls.Button>(source) is not null)
+        {
+            _pendingEquipmentLaneDrag = null;
+            return;
+        }
+
         _pendingEquipmentLaneDrag = sender is FrameworkElement
             {
                 DataContext: EquipmentLane { IsReorderable: true } lane
