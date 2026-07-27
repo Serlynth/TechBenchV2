@@ -44,6 +44,48 @@ internal sealed class ActiveDirectoryUserProvider
             .ToList();
     }
 
+    internal static IReadOnlyList<Technician> RestoreMappedTechnicianLabels(
+        IEnumerable<Technician> technicians,
+        IEnumerable<UserMapping> mappings)
+    {
+        var mappedNames = mappings
+            .Where(static mapping =>
+                !string.IsNullOrWhiteSpace(mapping.TechnicianExternalId)
+                && !string.IsNullOrWhiteSpace(mapping.DisplayName))
+            .GroupBy(
+                static mapping => mapping.TechnicianExternalId,
+                StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                static group => group.Key,
+                static group => group
+                    .Select(static mapping => mapping.DisplayName.Trim())
+                    .First(),
+                StringComparer.OrdinalIgnoreCase);
+
+        return technicians
+            .Select(technician =>
+                IsPlaceholderTechnicianLabel(technician)
+                && mappedNames.TryGetValue(technician.ExternalId, out var mappedName)
+                    ? technician with { Label = mappedName }
+                    : technician)
+            .ToList();
+    }
+
+    private static bool IsPlaceholderTechnicianLabel(Technician technician)
+    {
+        var label = technician.Label.Trim();
+        var externalId = technician.ExternalId.Trim();
+        var rawId = externalId.StartsWith("WHD-TECH-", StringComparison.OrdinalIgnoreCase)
+            ? externalId["WHD-TECH-".Length..]
+            : externalId;
+
+        return string.IsNullOrWhiteSpace(label)
+            || label.Equals(externalId, StringComparison.OrdinalIgnoreCase)
+            || label.Equals(rawId, StringComparison.OrdinalIgnoreCase)
+            || label.Equals($"Technician {rawId}", StringComparison.OrdinalIgnoreCase)
+            || label.StartsWith("WHD-TECH-", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static void AddGroupMembers(
         PrincipalContext context,
         string groupName,

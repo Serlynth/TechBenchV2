@@ -112,6 +112,42 @@ public sealed class CompiledServerManagerTests
             });
     }
 
+    [Fact]
+    public void MappedDirectoryNamesReplaceOnlyPlaceholderWhdTechnicianLabels()
+    {
+        var technicians = new[]
+        {
+            new Technician(string.Empty, "No WHD technician (remove mapping)"),
+            new Technician("WHD-TECH-6", "WHD-TECH-6"),
+            new Technician("WHD-TECH-12", "Ken Allen"),
+            new Technician(
+                "WHD-CONFIGURED-ORGANIZATION-ACCOUNT",
+                "Helpdesk Manager (whdmgr, organization-wide account)",
+                "whdmgr")
+        };
+        var mappings = new[]
+        {
+            new UserMapping("CSRI\\cgoemans", "Craig Goemans", false, "WHD-TECH-6"),
+            new UserMapping("CSRI\\kallen", "Kenneth Allen", true, "WHD-TECH-12"),
+            new UserMapping(
+                "CSRI\\dhallen",
+                "David H. Allen",
+                true,
+                "WHD-CONFIGURED-ORGANIZATION-ACCOUNT")
+        };
+
+        var restored = ActiveDirectoryUserProvider.RestoreMappedTechnicianLabels(
+            technicians,
+            mappings);
+
+        Assert.Equal("Craig Goemans", restored.Single(item => item.ExternalId == "WHD-TECH-6").Label);
+        Assert.Equal("Ken Allen", restored.Single(item => item.ExternalId == "WHD-TECH-12").Label);
+        Assert.Equal(
+            "Helpdesk Manager (whdmgr, organization-wide account)",
+            restored.Single(item => item.ExternalId == "WHD-CONFIGURED-ORGANIZATION-ACCOUNT").Label);
+        Assert.Equal("No WHD technician (remove mapping)", restored[0].Label);
+    }
+
     [Theory]
     [InlineData("2.0.0-alpha.9", "2.0.0-alpha.14", -1)]
     [InlineData("2.0.0-alpha.14", "2.0.0-alpha.9", 1)]

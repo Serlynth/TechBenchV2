@@ -848,7 +848,10 @@ internal sealed class ServerManagerForm : Form
     private void PopulateMappingGrid(SynchronizationConfiguration configuration)
     {
         _mappingGrid.Rows.Clear();
-        var technicians = configuration.Technicians.ToList();
+        var technicians = ActiveDirectoryUserProvider.RestoreMappedTechnicianLabels(
+                configuration.Technicians,
+                configuration.UserMappings)
+            .ToList();
         var technicianColumn = (DataGridViewComboBoxColumn)_mappingGrid.Columns["WHD technician"];
         technicianColumn.DataSource = technicians;
         var activeIds = technicians.Select(static technician => technician.ExternalId).ToHashSet(StringComparer.OrdinalIgnoreCase);
