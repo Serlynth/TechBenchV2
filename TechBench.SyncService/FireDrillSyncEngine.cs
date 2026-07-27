@@ -194,8 +194,9 @@ public sealed class FireDrillSyncEngine
                 .ToArray();
             if (!ContainsClientUserIdentityHeaders(headerLabels))
                 throw new InvalidDataException(
-                    "The 'Client Users' worksheet must contain columns named 'Client' and "
-                    + "'User / Contact'. No data was changed.");
+                    "The 'Client Users' worksheet must contain a client column "
+                    + "('Client', 'Customer', 'Company', or 'Organization') and a person column "
+                    + "('User', 'User / Contact', 'Contact', 'Person', or 'Name'). No data was changed.");
             groupLabels = ExpandMergedGroupLabels(firstRow, headerLabels.Length);
         }
 
@@ -238,8 +239,14 @@ public sealed class FireDrillSyncEngine
                 groupLabel));
         }
 
-        var clientColumn = RequiredColumn(columns, "client");
-        var userColumn = RequiredColumn(columns, "user / contact");
+        var clientColumn = RequiredIdentityColumn(
+            columns,
+            "client",
+            "client", "customer", "company", "organization");
+        var userColumn = RequiredIdentityColumn(
+            columns,
+            "person",
+            "user", "user / contact", "contact", "person", "name");
         var locationColumn = OptionalColumn(columns, "location / site");
         var roleColumn = OptionalColumn(columns, "role / department");
         var statusColumn = OptionalColumn(columns, "account status");
@@ -247,15 +254,18 @@ public sealed class FireDrillSyncEngine
             ?? OptionalColumn(columns, "email");
         var legacySystemColumn = OptionalColumn(columns, "account / system");
         var legacyUsernameColumn = OptionalColumn(columns, "username / email");
-        string[] personKeys =
-        [
-            "client", "location / site", "user / contact", "role / department",
-            "account status", "email address", "email"
-        ];
+        var personColumnIndexes = new HashSet<int>
+        {
+            clientColumn.Index,
+            userColumn.Index
+        };
+        foreach (var personColumn in new[]
+                 {
+                     locationColumn, roleColumn, statusColumn, emailColumn
+                 }.OfType<ClientUserWorkbookColumn>())
+            personColumnIndexes.Add(personColumn.Index);
         var valueColumns = columns
-            .Where(column => !personKeys.Contains(
-                column.FieldKey,
-                StringComparer.OrdinalIgnoreCase))
+            .Where(column => !personColumnIndexes.Contains(column.Index))
             .OrderBy(column => column.Index)
             .ToArray();
         var hasGroupedHeaders = groupLabels.Any(label => !string.IsNullOrWhiteSpace(label));
@@ -276,9 +286,9 @@ public sealed class FireDrillSyncEngine
             var displayName = CellText(reader.GetValue(userColumn.Index))?.Trim();
             if (string.IsNullOrWhiteSpace(displayName))
                 throw new InvalidDataException(
-                    $"'Client Users' row {rowNumber} has a Client but no User / Contact. No data was changed.");
+                    $"'Client Users' row {rowNumber} has a Client but no User or Contact value. No data was changed.");
             EnsureLength(client, 240, rowNumber, "Client");
-            EnsureLength(displayName, 240, rowNumber, "User / Contact");
+            EnsureLength(displayName, 240, rowNumber, userColumn.Label);
 
             var location = Cell(reader, locationColumn);
             var role = Cell(reader, roleColumn);
@@ -474,7 +484,8 @@ public sealed class FireDrillSyncEngine
             .Where(header => !string.IsNullOrWhiteSpace(header))
             .Select(NormalizeFieldKey)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return keys.Contains("client") && keys.Contains("user / contact");
+        return ClientIdentityHeaderKeys.Any(keys.Contains)
+               && PersonIdentityHeaderKeys.Any(keys.Contains);
     }
 
     private static string[] ExpandMergedGroupLabels(
@@ -516,12 +527,25 @@ public sealed class FireDrillSyncEngine
     internal static string NormalizeFieldKey(string? value) =>
         NormalizeHeader(value).ToLowerInvariant();
 
-    private static ClientUserWorkbookColumn RequiredColumn(
+    private static readonly string[] ClientIdentityHeaderKeys =
+    [
+        "client", "customer", "company", "organization"
+    ];
+
+    private static readonly string[] PersonIdentityHeaderKeys =
+    [
+        "user", "user / contact", "contact", "person", "name"
+    ];
+
+    private static ClientUserWorkbookColumn RequiredIdentityColumn(
         IReadOnlyList<ClientUserWorkbookColumn> columns,
-        string fieldKey) =>
-        OptionalColumn(columns, fieldKey)
+        string identityName,
+        params string[] fieldKeys) =>
+        fieldKeys
+            .Select(fieldKey => OptionalColumn(columns, fieldKey))
+            .FirstOrDefault(column => column is not null)
         ?? throw new InvalidDataException(
-            $"The 'Client Users' worksheet must contain a column named '{fieldKey}'. No data was changed.");
+            $"The 'Client Users' worksheet must contain a recognized {identityName} column. No data was changed.");
 
     private static ClientUserWorkbookColumn? OptionalColumn(
         IEnumerable<ClientUserWorkbookColumn> columns,
