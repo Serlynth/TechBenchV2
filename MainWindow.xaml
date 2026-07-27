@@ -3306,19 +3306,13 @@
                                         Visibility="{Binding HasHiddenEquipmentTechnicians, Converter={StaticResource BooleanToVisibilityConverter}}"
                                         ToolTip="Restore all technician columns hidden on this workstation."
                                         Margin="0,0,10,0" />
-                                <Button x:Name="ToggleEquipmentDetailsButton"
-                                        Content="Hide details"
-                                        Click="ToggleEquipmentDetails_Click"
-                                        Style="{StaticResource SecondaryButtonStyle}"
-                                        ToolTip="Hide the equipment details panel and give the board the full window width."
-                                        Margin="0,0,10,0" />
                                 <Button Content="Open Demo Mode"
                                         Click="OpenEquipmentBoardDemo_Click"
                                         Style="{StaticResource SecondaryButtonStyle}"
                                         ToolTip="Open an isolated sample inventory board. Demo changes are never written to SQL Server."
                                         Margin="0,0,10,0" />
                                 <Button Content="+  New device"
-                                        Click="NewEquipment_Click"
+                                        Command="{Binding NewEquipmentCommand}"
                                         Style="{StaticResource PrimaryButtonStyle}"
                                         Margin="0,0,10,0" />
                                 <Button Content="Refresh"
@@ -3329,17 +3323,7 @@
                     </Border>
 
                     <Grid Grid.Row="1">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition x:Name="EquipmentBoardColumn"
-                                              Width="*" />
-                            <ColumnDefinition x:Name="EquipmentDetailsGapColumn"
-                                              Width="42" />
-                            <ColumnDefinition x:Name="EquipmentDetailsColumn"
-                                              Width="390" />
-                        </Grid.ColumnDefinitions>
-
-                        <Border Grid.Column="0"
-                                Style="{StaticResource CardStyle}"
+                        <Border Style="{StaticResource CardStyle}"
                                 Padding="14">
                             <Grid>
                                 <Grid.RowDefinitions>
@@ -3441,29 +3425,15 @@
                                                                    Margin="0,0,5,0"
                                                                    Cursor="SizeWE"
                                                                    ToolTip="Drag this technician left or right" />
-                                                        <Button Content="&#x2039;"
-                                                                Width="27"
-                                                                Height="27"
-                                                                Padding="0"
-                                                                Margin="0,0,4,0"
-                                                                Click="MoveEquipmentLaneLeft_Click"
-                                                                Style="{StaticResource SecondaryButtonStyle}"
-                                                                ToolTip="Move this technician one column left" />
-                                                        <Button Content="&#x203A;"
-                                                                Width="27"
-                                                                Height="27"
-                                                                Padding="0"
-                                                                Margin="0,0,4,0"
-                                                                Click="MoveEquipmentLaneRight_Click"
-                                                                Style="{StaticResource SecondaryButtonStyle}"
-                                                                ToolTip="Move this technician one column right" />
-                                                        <Button Content="&#x00D7;"
+                                                        <Button Content="&#xE890;"
+                                                                FontFamily="Segoe MDL2 Assets"
+                                                                FontSize="14"
                                                                 Width="27"
                                                                 Height="27"
                                                                 Padding="0"
                                                                 Click="HideEquipmentLane_Click"
                                                                 Style="{StaticResource SecondaryButtonStyle}"
-                                                                ToolTip="Hide this technician column on this workstation" />
+                                                                ToolTip="Hide this visible technician column on this workstation" />
                                                     </StackPanel>
                                                     <Border Grid.Column="3"
                                                             Background="{DynamicResource PanelAltBackgroundBrush}"
@@ -3656,29 +3626,15 @@
                                                                            Margin="0,0,5,0"
                                                                            Cursor="SizeWE"
                                                                            ToolTip="Drag this technician left or right" />
-                                                                <Button Content="&#x2039;"
-                                                                        Width="25"
-                                                                        Height="25"
-                                                                        Padding="0"
-                                                                        Margin="0,0,4,0"
-                                                                        Click="MoveEquipmentLaneLeft_Click"
-                                                                        Style="{StaticResource SecondaryButtonStyle}"
-                                                                        ToolTip="Move this technician one column left" />
-                                                                <Button Content="&#x203A;"
-                                                                        Width="25"
-                                                                        Height="25"
-                                                                        Padding="0"
-                                                                        Margin="0,0,4,0"
-                                                                        Click="MoveEquipmentLaneRight_Click"
-                                                                        Style="{StaticResource SecondaryButtonStyle}"
-                                                                        ToolTip="Move this technician one column right" />
-                                                                <Button Content="&#x00D7;"
+                                                                <Button Content="&#xE890;"
+                                                                        FontFamily="Segoe MDL2 Assets"
+                                                                        FontSize="13"
                                                                         Width="25"
                                                                         Height="25"
                                                                         Padding="0"
                                                                         Click="HideEquipmentLane_Click"
                                                                         Style="{StaticResource SecondaryButtonStyle}"
-                                                                        ToolTip="Hide this technician column on this workstation" />
+                                                                        ToolTip="Hide this visible technician column on this workstation" />
                                                             </StackPanel>
                                                             <Border Grid.Column="3"
                                                                     Background="#2438D996"
@@ -3724,32 +3680,15 @@
                             </Grid>
                         </Border>
 
-                        <Button x:Name="EquipmentDetailsRailButton"
-                                Grid.Column="1"
-                                Content="&#x203A;"
-                                Width="34"
-                                Height="74"
-                                Padding="0"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                Click="ToggleEquipmentDetails_Click"
-                                Style="{StaticResource SecondaryButtonStyle}"
-                                ToolTip="Hide equipment details"
-                                Panel.ZIndex="5" />
-
                         <Border x:Name="EquipmentDetailsPanel"
-                                Grid.Column="2"
-                                Style="{StaticResource CardStyle}">
+                                Width="410"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Stretch"
+                                Panel.ZIndex="10"
+                                Style="{StaticResource CardStyle}"
+                                Visibility="{Binding IsEquipmentEditorVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <Grid>
-                                <TextBlock Text="Select an equipment card to view its details, or add a new item to Stock."
-                                           Foreground="{DynamicResource MutedTextBrush}"
-                                           TextWrapping="Wrap"
-                                           HorizontalAlignment="Center"
-                                           VerticalAlignment="Center"
-                                           MaxWidth="250"
-                                           TextAlignment="Center"
-                                           Visibility="{Binding IsEquipmentEditorVisible, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
-                                <Grid Visibility="{Binding IsEquipmentEditorVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <Grid>
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="*" />

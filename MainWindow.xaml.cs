@@ -25,65 +25,9 @@ public partial class MainWindow : Window
     private EquipmentDragPreview? _equipmentDragPreview;
     private System.Windows.Point _equipmentLaneDragStartPoint;
     private EquipmentLane? _pendingEquipmentLaneDrag;
+    private EquipmentLaneDragPreview? _equipmentLaneDragPreview;
     private GridLength _expandedEquipmentDeploymentHeight =
         new(230, GridUnitType.Pixel);
-
-    private void ToggleEquipmentDetails_Click(
-        object sender,
-        RoutedEventArgs e)
-    {
-        SetEquipmentDetailsPanelVisible(
-            EquipmentDetailsPanel.Visibility != Visibility.Visible);
-        _localPreferences.EquipmentDetailsPanelVisible =
-            EquipmentDetailsPanel.Visibility == Visibility.Visible;
-        LocalPreferenceStore.Save(_localPreferences);
-    }
-
-    private void SetEquipmentDetailsPanelVisible(bool visible)
-    {
-        EquipmentDetailsPanel.Visibility = visible
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        EquipmentDetailsGapColumn.Width =
-            new GridLength(42, GridUnitType.Pixel);
-        EquipmentDetailsColumn.Width = visible
-            ? new GridLength(390, GridUnitType.Pixel)
-            : new GridLength(0, GridUnitType.Pixel);
-        ToggleEquipmentDetailsButton.Content = visible
-            ? "Hide details"
-            : "Show details";
-        ToggleEquipmentDetailsButton.ToolTip = visible
-            ? "Hide the equipment details panel and give the board the full window width."
-            : "Show the equipment details panel.";
-        EquipmentDetailsRailButton.Content = visible ? "›" : "‹";
-        EquipmentDetailsRailButton.ToolTip = visible
-            ? "Hide equipment details"
-            : "Show equipment details";
-    }
-
-    private void ShowEquipmentDetailsPanelForEditing()
-    {
-        if (EquipmentDetailsPanel.Visibility == Visibility.Visible)
-        {
-            return;
-        }
-
-        SetEquipmentDetailsPanelVisible(true);
-        _localPreferences.EquipmentDetailsPanelVisible = true;
-        LocalPreferenceStore.Save(_localPreferences);
-    }
-
-    private void NewEquipment_Click(
-        object sender,
-        RoutedEventArgs e)
-    {
-        if (DataContext is MainWindowViewModel viewModel
-            && viewModel.NewEquipmentCommand.CanExecute(null))
-        {
-            viewModel.NewEquipmentCommand.Execute(null);
-            ShowEquipmentDetailsPanelForEditing();
-        }
-    }
 
     private void HideEquipmentLane_Click(
         object sender,
@@ -103,28 +47,6 @@ public partial class MainWindow : Window
         if (DataContext is MainWindowViewModel viewModel)
         {
             viewModel.ShowAllHiddenEquipmentTechnicians();
-        }
-    }
-
-    private void MoveEquipmentLaneLeft_Click(
-        object sender,
-        RoutedEventArgs e)
-    {
-        if (sender is FrameworkElement { DataContext: EquipmentLane lane }
-            && DataContext is MainWindowViewModel viewModel)
-        {
-            viewModel.MoveEquipmentTechnicianLane(lane, -1);
-        }
-    }
-
-    private void MoveEquipmentLaneRight_Click(
-        object sender,
-        RoutedEventArgs e)
-    {
-        if (sender is FrameworkElement { DataContext: EquipmentLane lane }
-            && DataContext is MainWindowViewModel viewModel)
-        {
-            viewModel.MoveEquipmentTechnicianLane(lane, 1);
         }
     }
 
@@ -168,10 +90,36 @@ public partial class MainWindow : Window
         }
 
         _pendingEquipmentLaneDrag = null;
-        DragDrop.DoDragDrop(
-            sender as DependencyObject ?? this,
-            new System.Windows.DataObject(typeof(EquipmentLane), lane),
-            System.Windows.DragDropEffects.Move);
+        if (sender is not FrameworkElement sourceElement)
+        {
+            return;
+        }
+
+        using var preview = new EquipmentLaneDragPreview(sourceElement);
+        _equipmentLaneDragPreview = preview;
+        sourceElement.GiveFeedback += EquipmentLaneDragSource_GiveFeedback;
+        preview.Show();
+        try
+        {
+            DragDrop.DoDragDrop(
+                sourceElement,
+                new System.Windows.DataObject(typeof(EquipmentLane), lane),
+                System.Windows.DragDropEffects.Move);
+        }
+        finally
+        {
+            sourceElement.GiveFeedback -= EquipmentLaneDragSource_GiveFeedback;
+            _equipmentLaneDragPreview = null;
+        }
+    }
+
+    private void EquipmentLaneDragSource_GiveFeedback(
+        object sender,
+        System.Windows.GiveFeedbackEventArgs e)
+    {
+        _equipmentLaneDragPreview?.UpdatePosition();
+        e.UseDefaultCursors = true;
+        e.Handled = true;
     }
 
     private void EquipmentLaneHeader_DragOver(
@@ -303,7 +251,6 @@ public partial class MainWindow : Window
             && DataContext is MainWindowViewModel viewModel)
         {
             viewModel.SelectedEquipment = equipment;
-            ShowEquipmentDetailsPanelForEditing();
         }
 
         _pendingEquipmentDragItem = null;
@@ -509,8 +456,6 @@ public partial class MainWindow : Window
         InitializeComponent();
         _localPreferences = LocalPreferenceStore.LoadOrCreate();
         ApplyWindowPreferences();
-        SetEquipmentDetailsPanelVisible(
-            _localPreferences.EquipmentDetailsPanelVisible);
         EditorClientComboBox.AddHandler(
             System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent,
             new TextChangedEventHandler(EditorClientComboBox_TextChanged));

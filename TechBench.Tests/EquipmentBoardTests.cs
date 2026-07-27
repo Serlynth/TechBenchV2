@@ -21,6 +21,27 @@ public sealed class EquipmentBoardTests
         Assert.Contains("demoWindow.ShowDialog();", mainWindowCode);
     }
 
+    [Fact]
+    public void LiveInventoryBoardUsesTransientEditorAndDragOnlyTechnicianControls()
+    {
+        var mainWindowXaml = ReadRepositoryFile("MainWindow.xaml");
+        var mainWindowCode = ReadRepositoryFile("MainWindow.xaml.cs");
+
+        Assert.Contains(
+            "Visibility=\"{Binding IsEquipmentEditorVisible, Converter={StaticResource BooleanToVisibilityConverter}}\"",
+            mainWindowXaml);
+        Assert.Contains("Content=\"&#xE890;\"", mainWindowXaml);
+        Assert.DoesNotContain(
+            "Click=\"MoveEquipmentLaneLeft_Click\"",
+            mainWindowXaml);
+        Assert.DoesNotContain(
+            "Click=\"MoveEquipmentLaneRight_Click\"",
+            mainWindowXaml);
+        Assert.DoesNotContain("EquipmentDetailsRailButton", mainWindowXaml);
+        Assert.DoesNotContain("ToggleEquipmentDetailsButton", mainWindowXaml);
+        Assert.Contains("EquipmentLaneDragPreview", mainWindowCode);
+    }
+
     private static string ReadRepositoryFile(string relativePath)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
