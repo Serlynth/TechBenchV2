@@ -79,7 +79,7 @@ public partial class MainWindow : Window
             credentialStore,
             currentUser,
             _localPreferences,
-            new V2AppUpdateService(),
+            new V2AppUpdateService(_localPreferences.UpdateChannel),
             () => System.Windows.Application.Current.Shutdown());
 
         viewModel.ActiveClientSessionSelectionRestoreRequested +=

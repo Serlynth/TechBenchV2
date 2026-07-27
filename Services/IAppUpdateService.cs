@@ -18,3 +18,10 @@ public interface IAppUpdateService
 
     void BeginApplyAndRestart();
 }
+
+public interface IAppUpdateChannelService
+{
+    string SelectedReleaseChannel { get; }
+
+    void SelectReleaseChannel(string releaseChannel);
+}
