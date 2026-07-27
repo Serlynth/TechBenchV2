@@ -1,5 +1,6 @@
 using System.Data;
 using System.Security.Principal;
+using System.Text.Json;
 using Microsoft.Data.SqlClient;
 
 namespace TechBench.ServerManager;
@@ -146,6 +147,42 @@ internal sealed class SqlAdminRepository(AppPaths paths)
             }
             throw;
         }
+    }
+
+    public int ReconcileAuthorizedUsers(IReadOnlyCollection<DirectoryUser> users)
+    {
+        ArgumentNullException.ThrowIfNull(users);
+        if (users.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "Active Directory returned no authorized TechBench users. "
+                + "No SQL users were changed.");
+        }
+
+        var snapshot = users
+            .OrderBy(static user => user.LoginName, StringComparer.OrdinalIgnoreCase)
+            .Select(static user => new
+            {
+                loginName = user.LoginName,
+                displayName = user.DisplayName,
+                isAdmin = user.IsAdmin
+            })
+            .ToArray();
+        var json = JsonSerializer.Serialize(snapshot);
+
+        using var connection = OpenAdminConnection();
+        using var command = StoredProcedure(
+            connection,
+            "tb_app.AdminReconcileWhdAuthorizedUsers");
+        command.Parameters.Add("@AuthorizedUsersJson", SqlDbType.NVarChar, -1).Value = json;
+        using var reader = command.ExecuteReader();
+        if (!reader.Read())
+        {
+            throw new InvalidOperationException(
+                "SQL Server did not return the authorized-user reconciliation result.");
+        }
+
+        return ReadInt(reader, "RetiredCount");
     }
 
     public int VerifyRequiredSchema(int requiredVersion)

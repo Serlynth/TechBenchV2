@@ -59,6 +59,7 @@ INSERT INTO @RequiredObjects([ObjectName], [ObjectType]) VALUES
     (N'tb_app.AdminRequestWhdSync', N'P'),
     (N'tb_app.GetWhdSyncStatus', N'P'),
     (N'tb_app.AdminGetWhdUserMappings', N'P'),
+    (N'tb_app.AdminReconcileWhdAuthorizedUsers', N'P'),
     (N'tb_app.AdminSaveWhdUserMapping', N'P'),
     (N'tb_app.AdminGetWhdTechnicians', N'P');
 
@@ -164,6 +165,7 @@ INSERT INTO @RequiredParameters([ProcedureName], [ParameterName]) VALUES
     (N'tb_service.CompleteWhdSyncWork', N'@Succeeded'),
     (N'tb_app.AdminRequestWhdSync', N'@RequestType'),
     (N'tb_app.AdminRequestWhdSync', N'@RequestId'),
+    (N'tb_app.AdminReconcileWhdAuthorizedUsers', N'@AuthorizedUsersJson'),
     (N'tb_app.AdminSaveWhdUserMapping', N'@WindowsLoginName'),
     (N'tb_app.AdminSaveWhdUserMapping', N'@DisplayName'),
     (N'tb_app.AdminSaveWhdUserMapping', N'@IsAdmin'),
@@ -396,6 +398,7 @@ END;
 
 DECLARE @ClaimDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ClaimWhdSyncWork'));
 DECLARE @CompleteDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_service.CompleteWhdSyncWork'));
+DECLARE @UserReconciliationDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminReconcileWhdAuthorizedUsers'));
 DECLARE @MappingDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminSaveWhdUserMapping'));
 DECLARE @TechnicianListDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminGetWhdTechnicians'));
 DECLARE @SearchDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SearchTickets'));
@@ -404,6 +407,7 @@ DECLARE @TicketApplyDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_
 
 SELECT @ClaimDefinition = REPLACE(REPLACE(REPLACE(@ClaimDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @CompleteDefinition = REPLACE(REPLACE(REPLACE(@CompleteDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @UserReconciliationDefinition = REPLACE(REPLACE(REPLACE(@UserReconciliationDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @MappingDefinition = REPLACE(REPLACE(REPLACE(@MappingDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @TechnicianListDefinition = REPLACE(REPLACE(REPLACE(@TechnicianListDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @SearchDefinition = REPLACE(REPLACE(REPLACE(@SearchDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
@@ -424,6 +428,15 @@ IF CHARINDEX(N'@WorkType<>N''Tickets''', @CompleteDefinition) = 0
    OR CHARINDEX(N'@HasPendingWork=0', @CompleteDefinition) = 0
 BEGIN
     PRINT N'FAIL: CompleteWhdSyncWork lacks ticket-only valid cursor or request-level health protection.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'OPENJSON(@AuthorizedUsersJson)', @UserReconciliationDefinition) = 0
+   OR CHARINDEX(N'IFNOTEXISTS(SELECT1FROM@RawUsers)', @UserReconciliationDefinition) = 0
+   OR CHARINDEX(N'DELETEmapping_row', @UserReconciliationDefinition) = 0
+   OR CHARINDEX(N'[IsTechnician]=0', @UserReconciliationDefinition) = 0
+BEGIN
+    PRINT N'FAIL: authorized-user reconciliation is not fail-closed or does not retire stale mappings and roles.';
     SET @FailureCount += 1;
 END;
 

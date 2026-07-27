@@ -1378,6 +1378,221 @@ BEGIN
  SET NOCOUNT ON; IF IS_ROLEMEMBER(N'tb_role_admin')<>1 THROW 51823,N'Only a TechBench Admin may manage WHD user mappings.',1; SELECT COALESCE(m.[Id],0) [Id],CONVERT(varchar(170),u.[WindowsSid],1) [UserSid],u.[LoginName],u.[DisplayName],u.[IsAdmin],m.[TechnicianExternalId],t.[DisplayName] [TechnicianDisplayName],m.[UpdatedAtUtc] FROM [tb_security].[Users] u LEFT JOIN [tb_whd].[UserTechnicianMappings] m ON m.[WindowsSid]=u.[WindowsSid] LEFT JOIN [tb_whd].[Technicians] t ON t.[ExternalId]=m.[TechnicianExternalId] WHERE u.[IsTechnician]=1 ORDER BY u.[DisplayName],u.[LoginName]; END;
 GO
 
+IF OBJECT_ID(N'tb_app.AdminReconcileWhdAuthorizedUsers', N'P') IS NOT NULL DROP PROCEDURE [tb_app].[AdminReconcileWhdAuthorizedUsers];
+GO
+CREATE PROCEDURE [tb_app].[AdminReconcileWhdAuthorizedUsers]
+    @AuthorizedUsersJson nvarchar(max)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @Actor varbinary(85), @ActorLogin nvarchar(256), @ActorName nvarchar(160);
+    DECLARE @ActorIsTechnician bit, @ActorIsManager bit, @ActorIsAdmin bit, @ActorIsSyncOperator bit;
+    EXEC [tb_security].[EnsureCurrentUser]
+        @UserSid = @Actor OUTPUT,
+        @LoginName = @ActorLogin OUTPUT,
+        @DisplayName = @ActorName OUTPUT,
+        @IsTechnician = @ActorIsTechnician OUTPUT,
+        @IsManager = @ActorIsManager OUTPUT,
+        @IsAdmin = @ActorIsAdmin OUTPUT,
+        @IsSyncOperator = @ActorIsSyncOperator OUTPUT;
+
+    IF @ActorIsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 51827, N'Only a TechBench Admin may reconcile authorized users.', 1;
+
+    SET @AuthorizedUsersJson = NULLIF(LTRIM(RTRIM(@AuthorizedUsersJson)), N'');
+    IF @AuthorizedUsersJson IS NULL
+       OR ISJSON(@AuthorizedUsersJson) <> 1
+       OR LEFT(@AuthorizedUsersJson, 1) <> N'['
+        THROW 51828, N'The authorized-user snapshot must be a JSON array.', 1;
+
+    DECLARE @RawUsers TABLE
+    (
+        [LoginName] nvarchar(256) NULL,
+        [DisplayName] nvarchar(160) NULL,
+        [IsAdmin] bit NULL
+    );
+
+    INSERT INTO @RawUsers([LoginName], [DisplayName], [IsAdmin])
+    SELECT
+        NULLIF(LTRIM(RTRIM([LoginName])), N''),
+        NULLIF(LTRIM(RTRIM([DisplayName])), N''),
+        COALESCE([IsAdmin], 0)
+    FROM OPENJSON(@AuthorizedUsersJson)
+    WITH
+    (
+        [LoginName] nvarchar(256) N'$.loginName',
+        [DisplayName] nvarchar(160) N'$.displayName',
+        [IsAdmin] bit N'$.isAdmin'
+    );
+
+    IF NOT EXISTS (SELECT 1 FROM @RawUsers)
+        THROW 51829, N'An empty authorized-user snapshot cannot be applied.', 1;
+
+    IF EXISTS (SELECT 1 FROM @RawUsers WHERE [LoginName] IS NULL)
+        THROW 51830, N'Every authorized user must have a Windows login name.', 1;
+
+    IF EXISTS
+    (
+        SELECT [LoginName]
+        FROM @RawUsers
+        GROUP BY [LoginName]
+        HAVING COUNT(*) > 1
+    )
+        THROW 51831, N'The authorized-user snapshot contains a duplicate login name.', 1;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM @RawUsers
+        WHERE SUSER_SID([LoginName], 0) IS NULL
+           OR DATALENGTH(SUSER_SID([LoginName], 0)) NOT BETWEEN 8 AND 85
+    )
+        THROW 51832, N'An authorized Windows user could not be resolved in Active Directory.', 1;
+
+    DECLARE @AuthorizedUsers TABLE
+    (
+        [WindowsSid] varbinary(85) NOT NULL PRIMARY KEY,
+        [LoginName] nvarchar(256) NOT NULL UNIQUE,
+        [DisplayName] nvarchar(160) NOT NULL,
+        [IsAdmin] bit NOT NULL
+    );
+
+    INSERT INTO @AuthorizedUsers([WindowsSid], [LoginName], [DisplayName], [IsAdmin])
+    SELECT
+        SUSER_SID(raw_user.[LoginName], 0),
+        raw_user.[LoginName],
+        LEFT
+        (
+            COALESCE
+            (
+                raw_user.[DisplayName],
+                CASE
+                    WHEN CHARINDEX(N'\', raw_user.[LoginName]) > 0
+                        THEN RIGHT
+                        (
+                            raw_user.[LoginName],
+                            LEN(raw_user.[LoginName]) - CHARINDEX(N'\', raw_user.[LoginName])
+                        )
+                    ELSE raw_user.[LoginName]
+                END
+            ),
+            160
+        ),
+        raw_user.[IsAdmin]
+    FROM @RawUsers AS raw_user;
+
+    DECLARE @RetiredUsers TABLE
+    (
+        [WindowsSid] varbinary(85) NOT NULL PRIMARY KEY,
+        [LoginName] nvarchar(256) NOT NULL,
+        [DisplayName] nvarchar(160) NOT NULL
+    );
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        /* Release a reused login name before its current AD SID is registered. */
+        UPDATE existing_user
+        SET [LoginName] = LEFT
+            (
+                N'Retired:' + CONVERT(nvarchar(170), existing_user.[WindowsSid], 1)
+                    + N':' + existing_user.[LoginName],
+                256
+            )
+        FROM [tb_security].[Users] AS existing_user
+        INNER JOIN @AuthorizedUsers AS authorized_user
+            ON authorized_user.[LoginName] = existing_user.[LoginName]
+           AND authorized_user.[WindowsSid] <> existing_user.[WindowsSid];
+
+        MERGE [tb_security].[Users] AS target
+        USING @AuthorizedUsers AS source
+            ON target.[WindowsSid] = source.[WindowsSid]
+        WHEN MATCHED THEN
+            UPDATE SET
+                [LoginName] = source.[LoginName],
+                [DisplayName] = source.[DisplayName],
+                [IsTechnician] = 1,
+                [IsManager] = source.[IsAdmin],
+                [IsAdmin] = source.[IsAdmin],
+                [IsSyncOperator] = source.[IsAdmin]
+        WHEN NOT MATCHED THEN
+            INSERT
+            (
+                [WindowsSid], [LoginName], [DisplayName], [IsTechnician],
+                [IsManager], [IsAdmin], [IsSyncOperator]
+            )
+            VALUES
+            (
+                source.[WindowsSid], source.[LoginName], source.[DisplayName], 1,
+                source.[IsAdmin], source.[IsAdmin], source.[IsAdmin]
+            );
+
+        INSERT INTO @RetiredUsers([WindowsSid], [LoginName], [DisplayName])
+        SELECT [WindowsSid], [LoginName], [DisplayName]
+        FROM [tb_security].[Users] AS registered_user
+        WHERE registered_user.[IsTechnician] = 1
+          AND NOT EXISTS
+          (
+              SELECT 1
+              FROM @AuthorizedUsers AS authorized_user
+              WHERE authorized_user.[WindowsSid] = registered_user.[WindowsSid]
+          );
+
+        DELETE mapping_row
+        FROM [tb_whd].[UserTechnicianMappings] AS mapping_row
+        INNER JOIN @RetiredUsers AS retired_user
+            ON retired_user.[WindowsSid] = mapping_row.[WindowsSid];
+
+        UPDATE registered_user
+        SET
+            [IsTechnician] = 0,
+            [IsManager] = 0,
+            [IsAdmin] = 0,
+            [IsSyncOperator] = 0
+        FROM [tb_security].[Users] AS registered_user
+        INNER JOIN @RetiredUsers AS retired_user
+            ON retired_user.[WindowsSid] = registered_user.[WindowsSid];
+
+        DECLARE @ActiveCount int = (SELECT COUNT(*) FROM @AuthorizedUsers);
+        DECLARE @RetiredCount int = (SELECT COUNT(*) FROM @RetiredUsers);
+        DECLARE @AuditJson nvarchar(max) =
+        (
+            SELECT
+                @ActiveCount AS [activeCount],
+                @RetiredCount AS [retiredCount],
+                JSON_QUERY
+                (
+                    (
+                        SELECT [LoginName] AS [loginName], [DisplayName] AS [displayName]
+                        FROM @RetiredUsers
+                        ORDER BY [DisplayName], [LoginName]
+                        FOR JSON PATH
+                    )
+                ) AS [retiredUsers]
+            FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+        );
+
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action = N'AuthorizedUserSnapshotApplied',
+            @EntityType = N'TechBenchUsers',
+            @EntityId = N'ActiveDirectory',
+            @RequestId = NULL,
+            @DataJson = @AuditJson;
+
+        COMMIT TRANSACTION;
+
+        SELECT @ActiveCount AS [ActiveCount], @RetiredCount AS [RetiredCount];
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+GO
+
 IF OBJECT_ID(N'tb_app.AdminSaveWhdUserMapping', N'P') IS NOT NULL DROP PROCEDURE [tb_app].[AdminSaveWhdUserMapping];
 GO
 CREATE PROCEDURE [tb_app].[AdminSaveWhdUserMapping]
