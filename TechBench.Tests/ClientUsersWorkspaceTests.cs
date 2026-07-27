@@ -6,22 +6,42 @@ namespace TechBench.Tests;
 public sealed class ClientUsersWorkspaceTests
 {
     [Fact]
-    public void SidebarPlacesUsersDirectlyUnderClients()
+    public void SidebarPlacesUsersUnderClientInfoAndClientMatchUnderSystem()
     {
         var xaml = ReadRepositoryFile("MainWindow.xaml");
-        var clients = xaml.IndexOf(
-            "CommandParameter=\"Client List\"",
+        var directory = xaml.IndexOf(
+            "Text=\"DIRECTORY\"",
+            StringComparison.Ordinal);
+        var clientInfo = xaml.IndexOf(
+            "CommandParameter=\"Client Info\"",
             StringComparison.Ordinal);
         var users = xaml.IndexOf(
             "CommandParameter=\"Client Users\"",
             StringComparison.Ordinal);
-        var tickets = xaml.IndexOf(
-            "CommandParameter=\"Ticket List\"",
+        var clientWifi = xaml.IndexOf(
+            "CommandParameter=\"Client WiFi\"",
+            StringComparison.Ordinal);
+        var system = xaml.IndexOf(
+            "Text=\"SYSTEM\"",
+            StringComparison.Ordinal);
+        var clientMatch = xaml.IndexOf(
+            "Content=\"Client Match\" Command=\"{Binding NavigateCommand}\" CommandParameter=\"Client Match\"",
+            StringComparison.Ordinal);
+        var postingHistory = xaml.IndexOf(
+            "CommandParameter=\"Posting History\"",
             StringComparison.Ordinal);
 
-        Assert.True(clients >= 0);
-        Assert.True(users > clients);
-        Assert.True(tickets > users);
+        Assert.True(directory >= 0);
+        Assert.True(clientInfo > directory);
+        Assert.True(users > clientInfo);
+        Assert.True(clientWifi > users);
+        Assert.True(system > clientWifi);
+        Assert.True(clientMatch > system);
+        Assert.True(postingHistory > clientMatch);
+        Assert.DoesNotContain(
+            "CommandParameter=\"Client List\"",
+            xaml,
+            StringComparison.Ordinal);
         Assert.Contains(
             "Visibility=\"{Binding CanAccessClientUsers, Converter={StaticResource BooleanToVisibilityConverter}}\"",
             xaml,
