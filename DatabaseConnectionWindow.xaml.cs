@@ -64,9 +64,12 @@ public partial class DatabaseConnectionWindow : Window
             && status.Contains(
                 "database schema is version",
                 StringComparison.OrdinalIgnoreCase)
-            && status.Contains(
-                "client requires version",
-                StringComparison.OrdinalIgnoreCase);
+            && (status.Contains(
+                    "client requires version",
+                    StringComparison.OrdinalIgnoreCase)
+                || status.Contains(
+                    "client supports versions",
+                    StringComparison.OrdinalIgnoreCase));
     }
 
     private async void DatabaseConnectionWindow_Loaded(object sender, RoutedEventArgs e)

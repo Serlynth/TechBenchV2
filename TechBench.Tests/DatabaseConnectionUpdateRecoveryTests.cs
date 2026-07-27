@@ -7,6 +7,8 @@ public sealed class DatabaseConnectionUpdateRecoveryTests
         "The TechBench database schema is version 8, but this client requires version 7. Contact the TechBench administrator.")]
     [InlineData(
         "the techbench DATABASE SCHEMA IS VERSION 9, BUT THIS CLIENT REQUIRES VERSION 8.")]
+    [InlineData(
+        "The TechBench database schema is version 15, but this client supports versions 13 through 14.")]
     public void SchemaMismatch_IsRecognizedForAutomaticUpdateRecovery(string status)
     {
         Assert.True(DatabaseConnectionWindow.IsSchemaVersionMismatch(status));
