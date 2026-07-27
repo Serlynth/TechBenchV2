@@ -32,6 +32,8 @@ public sealed class LocalPreferenceStoreTests
                 0,
                 DateTimeKind.Utc);
             created.SkippedUpdateVersion = "2.0.0-alpha.2";
+            created.UpdateChannel =
+                V2AppUpdateService.InventoryBetaReleaseChannel;
 
             LocalPreferenceStore.Save(created, path);
             var loaded = LocalPreferenceStore.LoadOrCreate(path);
@@ -47,6 +49,9 @@ public sealed class LocalPreferenceStoreTests
             Assert.True(loaded.MicrosoftAdminOpenInChromeIncognito);
             Assert.Equal(created.LastUpdateCheckAtUtc, loaded.LastUpdateCheckAtUtc);
             Assert.Equal("2.0.0-alpha.2", loaded.SkippedUpdateVersion);
+            Assert.Equal(
+                V2AppUpdateService.InventoryBetaReleaseChannel,
+                loaded.UpdateChannel);
         }
         finally
         {
@@ -65,7 +70,8 @@ public sealed class LocalPreferenceStoreTests
                 Theme = "unexpected",
                 WindowState = "Fullscreen",
                 RefreshIntervalMinutes = -10,
-                SkippedUpdateVersion = "   "
+                SkippedUpdateVersion = "   ",
+                UpdateChannel = "unexpected"
             }, path);
 
             var loaded = LocalPreferenceStore.LoadOrCreate(path);
@@ -73,6 +79,7 @@ public sealed class LocalPreferenceStoreTests
             Assert.Equal("Normal", loaded.WindowState);
             Assert.Equal(1, loaded.RefreshIntervalMinutes);
             Assert.Null(loaded.SkippedUpdateVersion);
+            Assert.Equal(string.Empty, loaded.UpdateChannel);
 
             using var document = JsonDocument.Parse(File.ReadAllText(path));
             var propertyNames = document.RootElement

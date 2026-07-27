@@ -14,7 +14,29 @@ public sealed class V2AppUpdateServiceTests
             "/TechBench-Releases",
             V2AppUpdateService.ReleaseRepositoryUrl,
             StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("v2", V2AppUpdateService.ReleaseChannel);
+        Assert.Equal("v2", V2AppUpdateService.StableReleaseChannel);
+        Assert.Equal(
+            "inventory-beta",
+            V2AppUpdateService.InventoryBetaReleaseChannel);
+        Assert.Equal("v2", V2AppUpdateService.CompiledReleaseChannel);
+    }
+
+    [Fact]
+    public void ResolvesStableOrInventoryBetaAtRuntime()
+    {
+        Assert.Equal(
+            V2AppUpdateService.InventoryBetaReleaseChannel,
+            V2AppUpdateService.ResolveReleaseChannel(
+                V2AppUpdateService.InventoryBetaReleaseChannel));
+        Assert.Equal(
+            V2AppUpdateService.StableReleaseChannel,
+            V2AppUpdateService.ResolveReleaseChannel(
+                V2AppUpdateService.StableReleaseChannel));
+        Assert.Equal(
+            V2AppUpdateService.StableReleaseChannel,
+            V2AppUpdateService.ResolveReleaseChannel(
+                "invalid",
+                V2AppUpdateService.StableReleaseChannel));
     }
 
     [Fact]
@@ -53,7 +75,11 @@ public sealed class V2AppUpdateServiceTests
             project,
             StringComparison.Ordinal);
         Assert.Contains(
-            "public const string ReleaseChannel = \"inventory-beta\";",
+            "public const string CompiledReleaseChannel = InventoryBetaReleaseChannel;",
+            service,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "AllowVersionDowngrade = true",
             service,
             StringComparison.Ordinal);
     }

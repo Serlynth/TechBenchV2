@@ -29,6 +29,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly ICredentialStore _credentialStore;
     private readonly CurrentUserContext _currentUser;
     private readonly LocalPreferences _localPreferences;
+    private readonly IAppUpdateChannelService? _appUpdateChannelService;
     private readonly Action _shutdownApplication;
     private readonly string _clientVersion;
     private readonly PostingExecutionCoordinator _postingCoordinator = new();
@@ -92,6 +93,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private string _sageEmployeeId = string.Empty;
     private string _sageActivityItemId = string.Empty;
     private bool _isLightTheme;
+    private bool _isInventoryBetaUpdateChannel;
     private string _refreshIntervalMinutesText =
         DefaultSharedDataRefreshMinutes.ToString();
     private bool _isLoadingSettings;
@@ -130,6 +132,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _credentialStore = credentialStore;
         _currentUser = currentUser;
         _localPreferences = localPreferences;
+        _appUpdateChannelService =
+            appUpdateService as IAppUpdateChannelService;
         _shutdownApplication = shutdownApplication;
         _clientVersion = appUpdateService.CurrentVersion;
         Updates = new AppUpdateViewModel(
@@ -851,6 +855,44 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
         }
     }
+
+    public bool IsInventoryBetaUpdateChannel
+    {
+        get => _isInventoryBetaUpdateChannel;
+        set
+        {
+            if (!SetProperty(ref _isInventoryBetaUpdateChannel, value))
+            {
+                return;
+            }
+
+            MarkSettingsDirty();
+            var channel = value
+                ? V2AppUpdateService.InventoryBetaReleaseChannel
+                : V2AppUpdateService.StableReleaseChannel;
+            _appUpdateChannelService?.SelectReleaseChannel(channel);
+            _localPreferences.UpdateChannel = channel;
+            try
+            {
+                LocalPreferenceStore.Save(_localPreferences);
+            }
+            catch (Exception ex) when (
+                ex is IOException
+                    or UnauthorizedAccessException
+                    or InvalidOperationException)
+            {
+                StatusMessage =
+                    $"The update channel changed for this session, but the local preference could not be saved: {ex.Message}";
+            }
+            Updates.HandleReleaseChannelChanged(channel);
+            OnPropertyChanged(nameof(UpdateChannelDescription));
+        }
+    }
+
+    public string UpdateChannelDescription =>
+        IsInventoryBetaUpdateChannel
+            ? "Inventory Beta selected. Update checks use the beta channel; switch this off to return to Stable."
+            : "Stable selected. Turn this on to check for Inventory Beta builds.";
 
     public string RefreshIntervalMinutesText
     {
@@ -3052,6 +3094,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
             RefreshIntervalMinutesText =
                 _localPreferences.RefreshIntervalMinutes.ToString();
+            var selectedUpdateChannel =
+                V2AppUpdateService.ResolveReleaseChannel(
+                    _localPreferences.UpdateChannel,
+                    V2AppUpdateService.CompiledReleaseChannel);
+            _appUpdateChannelService?.SelectReleaseChannel(
+                selectedUpdateChannel);
+            IsInventoryBetaUpdateChannel =
+                selectedUpdateChannel.Equals(
+                    V2AppUpdateService.InventoryBetaReleaseChannel,
+                    StringComparison.OrdinalIgnoreCase);
             IsLightTheme = _localPreferences.Theme.Equals(
                 "Light",
                 StringComparison.OrdinalIgnoreCase);
@@ -3072,6 +3124,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _repository.DeleteSetting("Sage.DefaultCustomerId");
 
         _localPreferences.Theme = IsLightTheme ? "Light" : "Dark";
+        _localPreferences.UpdateChannel = IsInventoryBetaUpdateChannel
+            ? V2AppUpdateService.InventoryBetaReleaseChannel
+            : V2AppUpdateService.StableReleaseChannel;
         _localPreferences.RefreshIntervalMinutes =
             ResolveSharedDataRefreshIntervalMinutes();
         _isLoadingSettings = true;

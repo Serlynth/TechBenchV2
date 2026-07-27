@@ -162,6 +162,8 @@ public sealed class LocalPreferences
 
     public string? SkippedUpdateVersion { get; set; }
 
+    public string UpdateChannel { get; set; } = string.Empty;
+
     public bool MicrosoftAdminOpenInChromeIncognito { get; set; }
 
     internal LocalPreferences Normalize()
@@ -181,6 +183,14 @@ public sealed class LocalPreferences
         SkippedUpdateVersion = string.IsNullOrWhiteSpace(SkippedUpdateVersion)
             ? null
             : SkippedUpdateVersion.Trim();
+        UpdateChannel = UpdateChannel?.Trim() switch
+        {
+            V2AppUpdateService.StableReleaseChannel =>
+                V2AppUpdateService.StableReleaseChannel,
+            V2AppUpdateService.InventoryBetaReleaseChannel =>
+                V2AppUpdateService.InventoryBetaReleaseChannel,
+            _ => string.Empty
+        };
         return this;
     }
 }
