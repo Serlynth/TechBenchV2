@@ -18,6 +18,7 @@ public sealed class WhdRestClient
     private const int PageSize = 100;
     private const int MaximumPageCount = 10_000;
     private const int MaximumConcurrentClientDetailRequests = 6;
+    private const int MaximumConcurrentTechnicianDetailRequests = 6;
     internal static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(90);
     private static readonly TimeSpan PostReconciliationWindow = TimeSpan.FromSeconds(20);
     private readonly HttpClient _httpClient;
@@ -343,6 +344,14 @@ public sealed class WhdRestClient
                     break;
                 }
             }
+
+            technicians = (await EnrichTechnicianDetailsAsync(
+                    settings,
+                    auth,
+                    technicians,
+                    cancellationToken)
+                .ConfigureAwait(false))
+                .ToList();
 
             // WHD 12.x can omit the authenticated administrator from the
             // Techs collection. The documented currentTech resource requires
@@ -1316,6 +1325,96 @@ public sealed class WhdRestClient
         return ParseTechnicians(document.RootElement).FirstOrDefault();
     }
 
+    private async Task<IReadOnlyList<WhdSyncedTechnician>> EnrichTechnicianDetailsAsync(
+        WhdConnectionSettings settings,
+        WhdAuthParameters auth,
+        IReadOnlyList<WhdSyncedTechnician> technicians,
+        CancellationToken cancellationToken)
+    {
+        using var detailGate = new SemaphoreSlim(MaximumConcurrentTechnicianDetailRequests);
+        var detailTasks = technicians.Select(async technician =>
+        {
+            if (!IsPlaceholderTechnicianName(technician))
+            {
+                return technician;
+            }
+
+            var rawId = GetRawTechnicianId(technician.ExternalId);
+            if (string.IsNullOrWhiteSpace(rawId))
+            {
+                return technician;
+            }
+
+            await detailGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var detailed = await TryGetTechnicianAsync(
+                        settings,
+                        auth,
+                        $"Techs/{Uri.EscapeDataString(rawId)}",
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (detailed is null
+                    || !string.Equals(
+                        detailed.ExternalId,
+                        technician.ExternalId,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return technician;
+                }
+
+                return new WhdSyncedTechnician
+                {
+                    ExternalId = technician.ExternalId,
+                    DisplayName = IsPlaceholderTechnicianName(detailed)
+                        ? technician.DisplayName
+                        : detailed.DisplayName,
+                    Username = detailed.Username ?? technician.Username,
+                    Email = detailed.Email ?? technician.Email,
+                    IsActive = detailed.IsActive
+                };
+            }
+            catch (Exception ex) when (
+                ex is HttpRequestException
+                    or JsonException
+                    or InvalidOperationException
+                    or UriFormatException
+                || ex is TaskCanceledException && !cancellationToken.IsCancellationRequested)
+            {
+                // A weak list result is still usable for mapping by ID. Do
+                // not fail the complete technician snapshot when one optional
+                // detail resource is unavailable.
+                return technician;
+            }
+            finally
+            {
+                detailGate.Release();
+            }
+        });
+
+        return await Task.WhenAll(detailTasks).ConfigureAwait(false);
+    }
+
+    private static bool IsPlaceholderTechnicianName(WhdSyncedTechnician technician)
+    {
+        var displayName = technician.DisplayName?.Trim();
+        var rawId = GetRawTechnicianId(technician.ExternalId);
+        return string.IsNullOrWhiteSpace(displayName)
+            || displayName.Equals(technician.ExternalId, StringComparison.OrdinalIgnoreCase)
+            || displayName.Equals(rawId, StringComparison.OrdinalIgnoreCase)
+            || displayName.Equals($"Technician {rawId}", StringComparison.OrdinalIgnoreCase)
+            || displayName.StartsWith("WHD-TECH-", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetRawTechnicianId(string externalId)
+    {
+        const string prefix = "WHD-TECH-";
+        var trimmed = externalId.Trim();
+        return trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            ? trimmed[prefix.Length..]
+            : trimmed;
+    }
+
     private async Task<IReadOnlyList<WhdSyncedTechnicianGroup>> GetTechnicianGroupsPageAsync(
         WhdConnectionSettings settings,
         WhdAuthParameters auth,
@@ -1779,8 +1878,9 @@ public sealed class WhdRestClient
 
             var username = ReadStringAny(element, "username", "userName", "loginName");
             var email = ReadStringAny(element, "email", "emailAddress");
-            var displayName = ReadStringAny(element, "displayName", "fullName", "name")
+            var displayName = ReadStringAny(element, "displayName", "fullName")
                 ?? BuildName(element)
+                ?? ReadStringAny(element, "name")
                 ?? username
                 ?? email
                 ?? $"Technician {id}";

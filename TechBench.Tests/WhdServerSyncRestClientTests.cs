@@ -163,6 +163,54 @@ public sealed class WhdServerSyncRestClientTests
     }
 
     [Fact]
+    public async Task TechnicianSyncReplacesInternalListNameWithDetailedTechnicianName()
+    {
+        var handler = new RecordingHandler(request =>
+        {
+            if (request.RequestUri?.AbsolutePath.EndsWith("/Techs/6", StringComparison.Ordinal) == true)
+            {
+                return Json(HttpStatusCode.OK, """
+                    {
+                      "id": 6,
+                      "name": "WHD-TECH-6",
+                      "firstName": "Craig",
+                      "lastName": "Goemans",
+                      "username": "cgoemans",
+                      "email": "craig@example.test",
+                      "activeAccount": true
+                    }
+                    """);
+            }
+
+            return Json(HttpStatusCode.OK, """
+                [
+                  {
+                    "id": 6,
+                    "name": "WHD-TECH-6",
+                    "activeAccount": true
+                  }
+                ]
+                """);
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetTechniciansAsync(ExplicitSettings("cgoemans"));
+
+        Assert.True(result.Success, result.Message);
+        Assert.True(result.IsComplete);
+        var technician = Assert.Single(result.Technicians);
+        Assert.Equal("WHD-TECH-6", technician.ExternalId);
+        Assert.Equal("Craig Goemans", technician.DisplayName);
+        Assert.Equal("cgoemans", technician.Username);
+        Assert.Equal("craig@example.test", technician.Email);
+        Assert.Collection(
+            handler.Requests,
+            request => Assert.EndsWith("/Techs", request.Uri?.AbsolutePath),
+            request => Assert.EndsWith("/Techs/6", request.Uri?.AbsolutePath));
+    }
+
+    [Fact]
     public async Task TechnicianSyncUsesTemporarySessionToIncludeAdministratorOmittedByTechList()
     {
         var handler = new RecordingHandler(request =>
