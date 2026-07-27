@@ -170,6 +170,11 @@ public sealed class LocalPreferences
 
     public List<string> EquipmentTechnicianOrder { get; set; } = [];
 
+    public List<string> HiddenEquipmentTechnicians { get; set; } = [];
+
+    public string EquipmentTechnicianPriorityLoginName { get; set; } =
+        string.Empty;
+
     internal LocalPreferences Normalize()
     {
         if (DeviceId == Guid.Empty)
@@ -200,6 +205,13 @@ public sealed class LocalPreferences
             .Select(static loginName => loginName.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+        HiddenEquipmentTechnicians = (HiddenEquipmentTechnicians ?? [])
+            .Where(static loginName => !string.IsNullOrWhiteSpace(loginName))
+            .Select(static loginName => loginName.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        EquipmentTechnicianPriorityLoginName =
+            EquipmentTechnicianPriorityLoginName?.Trim() ?? string.Empty;
         return this;
     }
 }

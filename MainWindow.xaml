@@ -3300,6 +3300,12 @@
                                                FontSize="11"
                                                FontWeight="SemiBold" />
                                 </Border>
+                                <Button Content="{Binding HiddenEquipmentTechnicianLabel}"
+                                        Click="ShowHiddenEquipmentLanes_Click"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        Visibility="{Binding HasHiddenEquipmentTechnicians, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                        ToolTip="Restore all technician columns hidden on this workstation."
+                                        Margin="0,0,10,0" />
                                 <Button x:Name="ToggleEquipmentDetailsButton"
                                         Content="Hide details"
                                         Click="ToggleEquipmentDetails_Click"
@@ -3312,7 +3318,7 @@
                                         ToolTip="Open an isolated sample inventory board. Demo changes are never written to SQL Server."
                                         Margin="0,0,10,0" />
                                 <Button Content="+  New device"
-                                        Command="{Binding NewEquipmentCommand}"
+                                        Click="NewEquipment_Click"
                                         Style="{StaticResource PrimaryButtonStyle}"
                                         Margin="0,0,10,0" />
                                 <Button Content="Refresh"
@@ -3427,6 +3433,14 @@
                                                                 </Style.Triggers>
                                                             </Style>
                                                         </StackPanel.Style>
+                                                        <TextBlock Text="&#x2194;"
+                                                                   Foreground="{DynamicResource MutedTextBrush}"
+                                                                   FontSize="15"
+                                                                   FontWeight="SemiBold"
+                                                                   VerticalAlignment="Center"
+                                                                   Margin="0,0,5,0"
+                                                                   Cursor="SizeWE"
+                                                                   ToolTip="Drag this technician left or right" />
                                                         <Button Content="&#x2039;"
                                                                 Width="27"
                                                                 Height="27"
@@ -3439,9 +3453,17 @@
                                                                 Width="27"
                                                                 Height="27"
                                                                 Padding="0"
+                                                                Margin="0,0,4,0"
                                                                 Click="MoveEquipmentLaneRight_Click"
                                                                 Style="{StaticResource SecondaryButtonStyle}"
                                                                 ToolTip="Move this technician one column right" />
+                                                        <Button Content="&#x00D7;"
+                                                                Width="27"
+                                                                Height="27"
+                                                                Padding="0"
+                                                                Click="HideEquipmentLane_Click"
+                                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                                ToolTip="Hide this technician column on this workstation" />
                                                     </StackPanel>
                                                     <Border Grid.Column="3"
                                                             Background="{DynamicResource PanelAltBackgroundBrush}"
@@ -3626,6 +3648,14 @@
                                                                         </Style.Triggers>
                                                                     </Style>
                                                                 </StackPanel.Style>
+                                                                <TextBlock Text="&#x2194;"
+                                                                           Foreground="{DynamicResource MutedTextBrush}"
+                                                                           FontSize="14"
+                                                                           FontWeight="SemiBold"
+                                                                           VerticalAlignment="Center"
+                                                                           Margin="0,0,5,0"
+                                                                           Cursor="SizeWE"
+                                                                           ToolTip="Drag this technician left or right" />
                                                                 <Button Content="&#x2039;"
                                                                         Width="25"
                                                                         Height="25"
@@ -3638,9 +3668,17 @@
                                                                         Width="25"
                                                                         Height="25"
                                                                         Padding="0"
+                                                                        Margin="0,0,4,0"
                                                                         Click="MoveEquipmentLaneRight_Click"
                                                                         Style="{StaticResource SecondaryButtonStyle}"
                                                                         ToolTip="Move this technician one column right" />
+                                                                <Button Content="&#x00D7;"
+                                                                        Width="25"
+                                                                        Height="25"
+                                                                        Padding="0"
+                                                                        Click="HideEquipmentLane_Click"
+                                                                        Style="{StaticResource SecondaryButtonStyle}"
+                                                                        ToolTip="Hide this technician column on this workstation" />
                                                             </StackPanel>
                                                             <Border Grid.Column="3"
                                                                     Background="#2438D996"

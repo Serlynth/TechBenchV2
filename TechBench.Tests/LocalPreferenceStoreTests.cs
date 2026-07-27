@@ -40,6 +40,12 @@ public sealed class LocalPreferenceStoreTests
                 "CSRI\\rskoog",
                 "CSRI\\kallen"
             ];
+            created.HiddenEquipmentTechnicians =
+            [
+                "CSRI\\swunderlin"
+            ];
+            created.EquipmentTechnicianPriorityLoginName =
+                "CSRI\\rskoog";
 
             LocalPreferenceStore.Save(created, path);
             var loaded = LocalPreferenceStore.LoadOrCreate(path);
@@ -62,6 +68,12 @@ public sealed class LocalPreferenceStoreTests
             Assert.Equal(
                 ["CSRI\\rskoog", "CSRI\\kallen"],
                 loaded.EquipmentTechnicianOrder);
+            Assert.Equal(
+                ["CSRI\\swunderlin"],
+                loaded.HiddenEquipmentTechnicians);
+            Assert.Equal(
+                "CSRI\\rskoog",
+                loaded.EquipmentTechnicianPriorityLoginName);
         }
         finally
         {
@@ -88,7 +100,15 @@ public sealed class LocalPreferenceStoreTests
                     "",
                     "csri\\RSKOOG",
                     "CSRI\\kallen"
-                ]
+                ],
+                HiddenEquipmentTechnicians =
+                [
+                    " CSRI\\swunderlin ",
+                    "",
+                    "csri\\SWUNDERLIN"
+                ],
+                EquipmentTechnicianPriorityLoginName =
+                    " CSRI\\rskoog "
             }, path);
 
             var loaded = LocalPreferenceStore.LoadOrCreate(path);
@@ -100,6 +120,12 @@ public sealed class LocalPreferenceStoreTests
             Assert.Equal(
                 ["CSRI\\rskoog", "CSRI\\kallen"],
                 loaded.EquipmentTechnicianOrder);
+            Assert.Equal(
+                ["CSRI\\swunderlin"],
+                loaded.HiddenEquipmentTechnicians);
+            Assert.Equal(
+                "CSRI\\rskoog",
+                loaded.EquipmentTechnicianPriorityLoginName);
 
             using var document = JsonDocument.Parse(File.ReadAllText(path));
             var propertyNames = document.RootElement

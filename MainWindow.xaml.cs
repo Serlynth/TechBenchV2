@@ -61,6 +61,51 @@ public partial class MainWindow : Window
             : "Show equipment details";
     }
 
+    private void ShowEquipmentDetailsPanelForEditing()
+    {
+        if (EquipmentDetailsPanel.Visibility == Visibility.Visible)
+        {
+            return;
+        }
+
+        SetEquipmentDetailsPanelVisible(true);
+        _localPreferences.EquipmentDetailsPanelVisible = true;
+        LocalPreferenceStore.Save(_localPreferences);
+    }
+
+    private void NewEquipment_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel viewModel
+            && viewModel.NewEquipmentCommand.CanExecute(null))
+        {
+            viewModel.NewEquipmentCommand.Execute(null);
+            ShowEquipmentDetailsPanelForEditing();
+        }
+    }
+
+    private void HideEquipmentLane_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: EquipmentLane lane }
+            && DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.HideEquipmentTechnicianLane(lane);
+        }
+    }
+
+    private void ShowHiddenEquipmentLanes_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.ShowAllHiddenEquipmentTechnicians();
+        }
+    }
+
     private void MoveEquipmentLaneLeft_Click(
         object sender,
         RoutedEventArgs e)
@@ -258,6 +303,7 @@ public partial class MainWindow : Window
             && DataContext is MainWindowViewModel viewModel)
         {
             viewModel.SelectedEquipment = equipment;
+            ShowEquipmentDetailsPanelForEditing();
         }
 
         _pendingEquipmentDragItem = null;

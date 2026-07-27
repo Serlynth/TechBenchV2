@@ -27,6 +27,7 @@ public sealed partial class MainWindowViewModel
     private string _equipmentBoardStatus =
         "Drag equipment from Stock to a technician, then into Deployment when work is complete.";
     private string _equipmentSearchText = string.Empty;
+    private int _equipmentBoardItemCount;
 
     public ObservableCollection<EquipmentLane> EquipmentLanes { get; } = new();
     public ObservableCollection<EquipmentLane> DeploymentLanes { get; } = new();
@@ -228,10 +229,21 @@ public sealed partial class MainWindowViewModel
     {
         get
         {
-            var count = AllEquipmentLanes.Sum(static lane => lane.Items.Count);
+            var count = _equipmentBoardItemCount;
             return $"{count} device{(count == 1 ? string.Empty : "s")}";
         }
     }
+
+    public int HiddenEquipmentTechnicianCount =>
+        _localPreferences.HiddenEquipmentTechnicians.Count;
+
+    public bool HasHiddenEquipmentTechnicians =>
+        HiddenEquipmentTechnicianCount > 0;
+
+    public string HiddenEquipmentTechnicianLabel =>
+        HiddenEquipmentTechnicianCount == 1
+            ? "Show 1 hidden tech"
+            : $"Show {HiddenEquipmentTechnicianCount} hidden techs";
 
     public string EquipmentDeploymentCountLabel
     {
@@ -316,6 +328,8 @@ public sealed partial class MainWindowViewModel
         IReadOnlyList<WhdUserMapping> mappings,
         IReadOnlyList<EquipmentItem> equipment)
     {
+        _equipmentBoardItemCount = equipment.Count;
+        EnsureSignedInTechnicianIsInitiallyFirst(mappings);
         EquipmentLanes.Clear();
         DeploymentLanes.Clear();
         var stockLane = new EquipmentLane(
@@ -333,6 +347,8 @@ public sealed partial class MainWindowViewModel
             StringComparer.OrdinalIgnoreCase);
         var deploymentLanesByLogin = new Dictionary<string, EquipmentLane>(
             StringComparer.OrdinalIgnoreCase);
+        var hiddenTechnicians = _localPreferences.HiddenEquipmentTechnicians
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var technicianOrder = _localPreferences.EquipmentTechnicianOrder
             .Select(static (loginName, index) => (loginName, index))
             .ToDictionary(
@@ -341,6 +357,7 @@ public sealed partial class MainWindowViewModel
                 StringComparer.OrdinalIgnoreCase);
         foreach (var mapping in mappings
                      .Where(static mapping => !string.IsNullOrWhiteSpace(mapping.LoginName))
+                     .Where(mapping => !hiddenTechnicians.Contains(mapping.LoginName))
                      .OrderBy(mapping => technicianOrder.TryGetValue(
                          mapping.LoginName,
                          out var index)
@@ -379,6 +396,11 @@ public sealed partial class MainWindowViewModel
                         item.AssignedToLoginName,
                         out var deploymentLane))
                 {
+                    if (hiddenTechnicians.Contains(item.AssignedToLoginName))
+                    {
+                        continue;
+                    }
+
                     deploymentLane = new EquipmentLane(
                         string.IsNullOrWhiteSpace(item.AssignedToDisplayName)
                             ? item.AssignedToLoginName
@@ -402,6 +424,11 @@ public sealed partial class MainWindowViewModel
 
             if (!lanesByLogin.TryGetValue(item.AssignedToLoginName, out var lane))
             {
+                if (hiddenTechnicians.Contains(item.AssignedToLoginName))
+                {
+                    continue;
+                }
+
                 lane = new EquipmentLane(
                     string.IsNullOrWhiteSpace(item.AssignedToDisplayName)
                         ? item.AssignedToLoginName
@@ -417,6 +444,36 @@ public sealed partial class MainWindowViewModel
         OnPropertyChanged(nameof(EquipmentDeviceCountLabel));
         OnPropertyChanged(nameof(EquipmentDeploymentCountLabel));
         RefreshEquipmentSearch();
+    }
+
+    private void EnsureSignedInTechnicianIsInitiallyFirst(
+        IReadOnlyList<WhdUserMapping> mappings)
+    {
+        var currentLoginName = _currentUser.LoginName?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(currentLoginName)
+            || string.Equals(
+                _localPreferences.EquipmentTechnicianPriorityLoginName,
+                currentLoginName,
+                StringComparison.OrdinalIgnoreCase)
+            || !mappings.Any(mapping => string.Equals(
+                mapping.LoginName,
+                currentLoginName,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        var order = _localPreferences.EquipmentTechnicianOrder
+            .Where(loginName => !string.Equals(
+                loginName,
+                currentLoginName,
+                StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        order.Insert(0, currentLoginName);
+        _localPreferences.EquipmentTechnicianOrder = order;
+        _localPreferences.EquipmentTechnicianPriorityLoginName =
+            currentLoginName;
+        LocalPreferenceStore.Save(_localPreferences);
     }
 
     public void ReorderEquipmentTechnicianLane(
@@ -518,6 +575,71 @@ public sealed partial class MainWindowViewModel
             sourceLane,
             EquipmentLanes[targetIndex],
             insertAfterTarget: offset > 0);
+    }
+
+    public void HideEquipmentTechnicianLane(EquipmentLane lane)
+    {
+        ArgumentNullException.ThrowIfNull(lane);
+        if (!lane.IsReorderable)
+        {
+            return;
+        }
+
+        var loginName = lane.AssignedToLoginName;
+        if (!_localPreferences.HiddenEquipmentTechnicians.Contains(
+                loginName,
+                StringComparer.OrdinalIgnoreCase))
+        {
+            _localPreferences.HiddenEquipmentTechnicians.Add(loginName);
+            LocalPreferenceStore.Save(_localPreferences);
+        }
+
+        var workLane = EquipmentLanes.FirstOrDefault(candidate =>
+            string.Equals(
+                candidate.AssignedToLoginName,
+                loginName,
+                StringComparison.OrdinalIgnoreCase));
+        if (workLane is not null)
+        {
+            EquipmentLanes.Remove(workLane);
+        }
+
+        var deploymentLane = DeploymentLanes.FirstOrDefault(candidate =>
+            string.Equals(
+                candidate.AssignedToLoginName,
+                loginName,
+                StringComparison.OrdinalIgnoreCase));
+        if (deploymentLane is not null)
+        {
+            DeploymentLanes.Remove(deploymentLane);
+        }
+
+        NotifyHiddenEquipmentTechniciansChanged();
+        OnPropertyChanged(nameof(EquipmentDeploymentCountLabel));
+        RefreshEquipmentSearch();
+        EquipmentBoardStatus =
+            $"Hidden {lane.Title} from this workstation's equipment board.";
+    }
+
+    public void ShowAllHiddenEquipmentTechnicians()
+    {
+        if (_localPreferences.HiddenEquipmentTechnicians.Count == 0)
+        {
+            return;
+        }
+
+        _localPreferences.HiddenEquipmentTechnicians.Clear();
+        LocalPreferenceStore.Save(_localPreferences);
+        NotifyHiddenEquipmentTechniciansChanged();
+        EquipmentBoardStatus = "Restoring hidden technician columns…";
+        _ = RefreshEquipmentBoardAsync();
+    }
+
+    private void NotifyHiddenEquipmentTechniciansChanged()
+    {
+        OnPropertyChanged(nameof(HiddenEquipmentTechnicianCount));
+        OnPropertyChanged(nameof(HasHiddenEquipmentTechnicians));
+        OnPropertyChanged(nameof(HiddenEquipmentTechnicianLabel));
     }
 
     private void SynchronizeDeploymentTechnicianOrder()
