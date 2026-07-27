@@ -97,6 +97,8 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         public const string GetCommonLinks = "[tb_app].[GetCommonLinks]";
         public const string SearchFireDrillCredentials = "[tb_app].[SearchFireDrillCredentials]";
         public const string RevealFireDrillCredential = "[tb_app].[RevealFireDrillCredential]";
+        public const string SearchClientUsers = "[tb_app].[SearchClientUsers]";
+        public const string RevealClientUser = "[tb_app].[RevealClientUser]";
         public const string GetCredentialsSyncStatus = "[tb_app].[GetFireDrillSyncStatus]";
         public const string RequestCredentialsSync = "[tb_app].[AdminRequestFireDrillSync]";
         public const string SaveCommonLink = "[tb_app].[SaveCommonLink]";

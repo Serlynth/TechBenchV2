@@ -491,6 +491,10 @@
         <Style x:Key="NavSearchStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Search"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavQueueStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Posting Queue"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavClientsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Client List"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+        <Style x:Key="NavClientUsersStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}">
+            <Setter Property="Padding" Value="28,9" />
+            <Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Client Users"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers>
+        </Style>
         <Style x:Key="NavTicketsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Ticket List"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavLinksStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Common Links"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavClientInfoStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarGroupButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Client Info"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
@@ -694,6 +698,8 @@
                         <TextBlock Text="DIRECTORY" Style="{StaticResource SidebarGroupLabelStyle}" />
                     </Border>
                     <Button Content="Clients" Command="{Binding NavigateCommand}" CommandParameter="Client List" Style="{StaticResource NavClientsStyle}" />
+                    <Button Content="Users" Command="{Binding NavigateCommand}" CommandParameter="Client Users" Style="{StaticResource NavClientUsersStyle}"
+                            Visibility="{Binding CanAccessClientUsers, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <Button Content="Tickets" Command="{Binding NavigateCommand}" CommandParameter="Ticket List" Style="{StaticResource NavTicketsStyle}" />
                     <Button Content="Links" Command="{Binding NavigateCommand}" CommandParameter="Common Links" Style="{StaticResource NavLinksStyle}" />
                     <Button Content="CLIENT INFO" Command="{Binding NavigateCommand}" CommandParameter="Client Info" Style="{StaticResource NavClientInfoStyle}"
@@ -2258,6 +2264,193 @@
                                 </ListBox.ItemTemplate>
                             </ListBox>
                         </DockPanel>
+                    </Border>
+                </Grid>
+
+                <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Client Users}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="0.9*" />
+                        <ColumnDefinition Width="14" />
+                        <ColumnDefinition Width="1.1*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Style="{StaticResource CardStyle}">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                                <TextBlock Text="Client Users" Style="{StaticResource SectionHeadingStyle}" />
+                                <TextBlock Text="Search synchronized contacts and accounts from the Client Users workbook sheet."
+                                           Style="{StaticResource MutedTextStyle}" TextWrapping="Wrap" Margin="0,0,0,12" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0"
+                                             Text="{Binding ClientUserSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="Search client, user, email, role, or location"
+                                             Margin="0,0,8,0" />
+                                    <Button Grid.Column="1" Content="Search"
+                                            Command="{Binding SearchClientUsersCommand}"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Padding="14,7" Margin="0,0,8,0" />
+                                    <Button Grid.Column="2" Content="Clear"
+                                            Command="{Binding ClearClientUserSearchCommand}"
+                                            Padding="14,7" />
+                                </Grid>
+                            </StackPanel>
+
+                            <TextBlock Text="No synchronized client users match this search."
+                                       Style="{StaticResource MutedTextStyle}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Visibility="{Binding HasClientUsers, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+
+                            <ListBox ItemsSource="{Binding ClientUsers}"
+                                     SelectedItem="{Binding SelectedClientUser}"
+                                     Style="{StaticResource ListBoxChromeLessStyle}"
+                                     ItemContainerStyle="{StaticResource ListBoxItemCardStyle}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource CardStyle}">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="14" />
+                                                <TextBlock Text="{Binding ClientName}" Style="{StaticResource MutedTextStyle}" />
+                                                <TextBlock Text="{Binding RoleDepartment}" Style="{StaticResource MutedTextStyle}" />
+                                                <TextBlock Text="{Binding Email}" Style="{StaticResource MutedTextStyle}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                    </Border>
+
+                    <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0" Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding SelectedClientUser.DisplayName, TargetNullValue=Select a user}"
+                                               Style="{StaticResource SectionHeadingStyle}" Margin="0" />
+                                    <TextBlock Text="{Binding SelectedClientUser.ClientName}"
+                                               Style="{StaticResource MutedTextStyle}" />
+                                </StackPanel>
+                                <WrapPanel Grid.Column="1">
+                                    <Button Content="Hide" Command="{Binding HideClientUserCommand}" Margin="0,0,8,0" />
+                                    <Button Content="Reveal Accounts" Command="{Binding RevealClientUserCommand}"
+                                            Style="{StaticResource PrimaryButtonStyle}" />
+                                </WrapPanel>
+                            </Grid>
+
+                            <Border Grid.Row="1"
+                                    Background="{DynamicResource PanelAltBackgroundBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="8"
+                                    Padding="12"
+                                    Margin="0,0,0,12"
+                                    Visibility="{Binding HasSelectedClientUser, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="1.1*" />
+                                        <ColumnDefinition Width="1.1*" />
+                                        <ColumnDefinition Width="1.2*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="Role / Department" Style="{StaticResource FieldLabelStyle}" />
+                                        <TextBlock Text="{Binding SelectedClientUser.RoleDepartment, TargetNullValue=-}"
+                                                   Style="{StaticResource DetailValueStyle}" TextWrapping="Wrap" />
+                                        <TextBlock Text="Location / Site" Style="{StaticResource FieldLabelStyle}" Margin="0,10,0,0" />
+                                        <TextBlock Text="{Binding SelectedClientUser.LocationName, TargetNullValue=-}"
+                                                   Style="{StaticResource DetailValueStyle}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Margin="16,0">
+                                        <TextBlock Text="Email" Style="{StaticResource FieldLabelStyle}" />
+                                        <TextBlock Text="{Binding SelectedClientUser.Email, TargetNullValue=-}"
+                                                   Style="{StaticResource DetailValueStyle}" TextWrapping="Wrap" />
+                                        <TextBlock Text="Phone" Style="{StaticResource FieldLabelStyle}" Margin="0,10,0,0" />
+                                        <TextBlock Text="{Binding SelectedClientUser.Phone, TargetNullValue=-}"
+                                                   Style="{StaticResource DetailValueStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="Accounts" Style="{StaticResource FieldLabelStyle}" />
+                                        <TextBlock Text="{Binding SelectedClientUser.AccountCount}"
+                                                   Style="{StaticResource DetailValueStyle}" />
+                                        <TextBlock Text="Last synchronized" Style="{StaticResource FieldLabelStyle}" Margin="0,10,0,0" />
+                                        <TextBlock Text="{Binding SelectedClientUser.LastSyncedLabel}"
+                                                   Style="{StaticResource DetailValueStyle}" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <Grid Grid.Row="2">
+                                <TextBlock Text="Select a user to view contact and account information."
+                                           Style="{StaticResource MutedTextStyle}" TextWrapping="Wrap"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Visibility="{Binding HasSelectedClientUser, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                              Visibility="{Binding HasSelectedClientUser, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <ItemsControl ItemsSource="{Binding ClientUserAccountGroups}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Margin="0,0,0,20">
+                                                    <Grid Margin="2,0,2,9">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="*" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="{Binding Name}" FontSize="17" FontWeight="SemiBold"
+                                                                   Foreground="{DynamicResource PrimaryTextBrush}" />
+                                                        <Border Grid.Column="1" Height="1" Margin="12,0,0,0"
+                                                                VerticalAlignment="Center"
+                                                                Background="{DynamicResource BorderBrush}" />
+                                                    </Grid>
+                                                    <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                            BorderBrush="{DynamicResource BorderBrush}"
+                                                            BorderThickness="1" CornerRadius="10" Padding="4">
+                                                        <ItemsControl ItemsSource="{Binding Fields}">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <Border Padding="10,9" BorderBrush="{DynamicResource BorderBrush}"
+                                                                            BorderThickness="0,0,0,1">
+                                                                        <Grid>
+                                                                            <Grid.ColumnDefinitions>
+                                                                                <ColumnDefinition Width="170" />
+                                                                                <ColumnDefinition Width="*" />
+                                                                                <ColumnDefinition Width="Auto" />
+                                                                            </Grid.ColumnDefinitions>
+                                                                            <TextBlock Text="{Binding Label}" Style="{StaticResource FieldLabelStyle}"
+                                                                                       VerticalAlignment="Center" />
+                                                                            <TextBox Grid.Column="1" Text="{Binding Value}" IsReadOnly="True"
+                                                                                     Margin="8,0" FontFamily="Consolas"
+                                                                                     VerticalContentAlignment="Center" />
+                                                                            <Button Grid.Column="2" Content="Copy"
+                                                                                    Command="{Binding DataContext.CopyClientUserFieldCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                    CommandParameter="{Binding FieldName}"
+                                                                                    Padding="12,6"
+                                                                                    Visibility="{Binding DataContext.IsClientUserRevealed, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                                        </Grid>
+                                                                    </Border>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </Border>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Grid>
+                        </Grid>
                     </Border>
                 </Grid>
 

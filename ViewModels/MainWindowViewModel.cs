@@ -182,6 +182,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         InitializeV1DatabaseImport();
         InitializeCommonLinks();
         InitializeFireDrillCredentials();
+        InitializeClientUsers();
         InitializeEquipmentBoard();
 
         StatusFilterOptions.Add("Any");
@@ -925,6 +926,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         if (!section.Equals(CurrentSection, StringComparison.Ordinal))
         {
             ClearRevealedFireDrillCredential();
+            ClearRevealedClientUser();
         }
         if (section == "Today")
         {
@@ -941,6 +943,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Posting Queue" => "Showing entries still pending WHD or Sage posting",
             "Posting History" => "Showing WHD and Sage posting history",
             "Client List" => "Showing synced/imported clients",
+            "Client Users" => "Showing synchronized users and accounts for each client",
             "Ticket List" => "Showing my assigned and group non-closed tickets",
             "Common Links" => "Showing commonly used websites",
             "Client Info" => "Showing all synchronized client information",
@@ -979,6 +982,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             case "Client List":
                 RefreshClients();
                 break;
+            case "Client Users":
+                RefreshClientUsers();
+                break;
             case "Ticket List":
                 RefreshTicketList();
                 break;
@@ -1008,6 +1014,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         RefreshTicketList();
         RefreshCommonLinks();
         RefreshFireDrillCredentials();
+        RefreshClientUsers();
         RefreshTagSuggestions();
         RefreshTodayEntries();
         RefreshWeek();

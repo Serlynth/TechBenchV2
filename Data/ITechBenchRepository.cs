@@ -126,6 +126,12 @@ public interface ITechBenchRepository
 
     FireDrillCredential? RevealFireDrillCredential(long credentialId) => null;
 
+    IReadOnlyList<ClientUserSummary> SearchClientUsers(
+        int? clientId = null,
+        string? searchTerm = null) => [];
+
+    ClientUserSummary? RevealClientUser(long clientUserId) => null;
+
     CredentialsSyncServiceStatus GetCredentialsSyncStatus() => new();
 
     CredentialsSyncRequestResult RequestCredentialsSync() =>
