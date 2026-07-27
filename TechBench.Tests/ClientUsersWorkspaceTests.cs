@@ -82,6 +82,14 @@ public sealed class ClientUsersWorkspaceTests
             xaml,
             StringComparison.Ordinal);
         Assert.Contains(
+            "ItemsSource=\"{Binding SelectedClientUserEquipment}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Text=\"Assigned Equipment\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "ItemsSource=\"{Binding Fields}\"",
             xaml,
             StringComparison.Ordinal);
@@ -118,6 +126,10 @@ public sealed class ClientUsersWorkspaceTests
             viewModel,
             StringComparison.Ordinal);
         Assert.Contains(
+            "GetEquipmentInventory(clientUserId: clientUserId)",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "record ClientUserClientSummary",
             models,
             StringComparison.Ordinal);
@@ -140,10 +152,14 @@ public sealed class ClientUsersWorkspaceTests
         Assert.Equal(
             "[tb_app].[RevealClientUser]",
             SqlServerTechBenchRepository.Procedures.RevealClientUser);
+        Assert.Equal(
+            "[tb_app].[GetEquipmentInventory]",
+            SqlServerTechBenchRepository.Procedures.GetEquipmentInventory);
 
         var contract = typeof(ITechBenchRepository);
         Assert.NotNull(contract.GetMethod(nameof(ITechBenchRepository.SearchClientUsers)));
         Assert.NotNull(contract.GetMethod(nameof(ITechBenchRepository.RevealClientUser)));
+        Assert.NotNull(contract.GetMethod(nameof(ITechBenchRepository.GetEquipmentInventory)));
 
         var model = new ClientUserSummary(
             1,
@@ -183,8 +199,12 @@ public sealed class ClientUsersWorkspaceTests
         var revealStart = procedures.IndexOf(
             "CREATE PROCEDURE [tb_app].[RevealClientUser]",
             StringComparison.OrdinalIgnoreCase);
+        var inventoryStart = procedures.IndexOf(
+            "CREATE PROCEDURE [tb_app].[GetEquipmentInventory]",
+            StringComparison.OrdinalIgnoreCase);
         Assert.True(searchStart >= 0);
         Assert.True(revealStart > searchStart);
+        Assert.True(inventoryStart >= 0);
 
         var search = procedures[searchStart..revealStart];
         var reveal = procedures[revealStart..];
@@ -223,6 +243,18 @@ public sealed class ClientUsersWorkspaceTests
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
             "preview or Sync Service can execute a client-user read procedure",
+            verifier,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "GRANT EXECUTE ON OBJECT::[tb_app].[GetEquipmentInventory] TO [tb_role_user]",
+            grants,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "GRANT EXECUTE ON OBJECT::[tb_app].[GetEquipmentInventory] TO [tb_role_admin]",
+            grants,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "shared equipment inventory read is not client-scoped and archive-safe",
             verifier,
             StringComparison.OrdinalIgnoreCase);
     }

@@ -75,6 +75,42 @@ public sealed class ClientInfoProfileWindowTests
         Assert.Contains("WEB HELP DESK MATCH", profileXaml, StringComparison.Ordinal);
         Assert.Contains("MAIN CONTACT", profileXaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"ADDRESS\"", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"CLIENT INVENTORY\"", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding Equipment}\"", profileXaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FullProfileDisplaysTheClientsAssignedInventory()
+    {
+        var summary = new FireDrillCredentialSummary(
+            42,
+            "Acme Test",
+            string.Empty,
+            string.Empty,
+            DateTime.UtcNow,
+            []);
+        var equipment = new EquipmentItem
+        {
+            EquipmentId = 7,
+            Name = "Reception PC",
+            DeviceType = "Desktop",
+            AssetTag = "TB-0007",
+            ClientId = 12,
+            ClientName = "Acme Test",
+            ClientUserId = 99,
+            ClientUserDisplayName = "Jamie Rivera"
+        };
+
+        var profile = new ClientInfoProfileViewModel(
+            summary,
+            _ => null,
+            equipment: [equipment]);
+
+        Assert.True(profile.HasEquipment);
+        Assert.True(profile.HasProfileContent);
+        Assert.False(profile.HasFields);
+        Assert.Equal("1 inventory item", profile.EquipmentCountLabel);
+        Assert.Same(equipment, Assert.Single(profile.Equipment));
     }
 
     [Fact]

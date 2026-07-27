@@ -204,6 +204,11 @@ public interface ITechBenchRepository
 
     IReadOnlyList<EquipmentItem> GetEquipmentBoard() => [];
 
+    IReadOnlyList<EquipmentItem> GetEquipmentInventory(
+        int? clientId = null,
+        long? clientUserId = null,
+        string? clientName = null) => [];
+
     IReadOnlyList<InventoryClient> GetInventoryClients() => [];
 
     IReadOnlyList<EquipmentAssignmentHistoryEntry> GetEquipmentAssignmentHistory(

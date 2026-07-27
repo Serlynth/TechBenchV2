@@ -122,6 +122,7 @@ public sealed partial class MainWindowViewModel
         FireDrillCredentialSummary summary)
     {
         Client? whdMatch = null;
+        IReadOnlyList<EquipmentItem> equipment = [];
         try
         {
             whdMatch = ClientProfileWhdMatcher.FindConfidentMatch(
@@ -134,10 +135,30 @@ public sealed partial class MainWindowViewModel
             // must never prevent the synchronized profile from opening.
         }
 
+        try
+        {
+            if (whdMatch is not null)
+            {
+                equipment = _repository.GetEquipmentInventory(clientId: whdMatch.Id);
+            }
+
+            if (equipment.Count == 0)
+            {
+                equipment = _repository.GetEquipmentInventory(clientName: summary.ClientName);
+            }
+        }
+        catch
+        {
+            // Inventory enrichment is best-effort. The profile remains useful
+            // while the matching SQL installer is being applied.
+            equipment = [];
+        }
+
         return new ClientInfoProfileViewModel(
             summary,
             _repository.RevealFireDrillCredential,
-            whdMatch);
+            whdMatch,
+            equipment);
     }
 
     private void RefreshFireDrillCredentials()

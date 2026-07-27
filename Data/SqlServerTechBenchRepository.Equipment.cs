@@ -11,6 +11,21 @@ public sealed partial class SqlServerTechBenchRepository
             (reader, token) => ReadListAsync(reader, token, ReadEquipmentItem),
             CancellationToken.None).GetAwaiter().GetResult();
 
+    public IReadOnlyList<EquipmentItem> GetEquipmentInventory(
+        int? clientId = null,
+        long? clientUserId = null,
+        string? clientName = null) =>
+        QueryAsync(
+            Procedures.GetEquipmentInventory,
+            command =>
+            {
+                AddInt(command, "@ClientId", clientId);
+                AddBigInt(command, "@ClientUserId", clientUserId);
+                AddText(command, "@ClientName", 240, clientName);
+            },
+            (reader, token) => ReadListAsync(reader, token, ReadEquipmentItem),
+            CancellationToken.None).GetAwaiter().GetResult();
+
     public IReadOnlyList<InventoryClient> GetInventoryClients() =>
         QueryAsync(
             Procedures.GetInventoryClients,

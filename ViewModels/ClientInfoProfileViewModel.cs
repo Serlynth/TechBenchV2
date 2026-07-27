@@ -15,7 +15,8 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
     public ClientInfoProfileViewModel(
         FireDrillCredentialSummary summary,
         Func<long, FireDrillCredential?> revealCredential,
-        Client? whdClient = null)
+        Client? whdClient = null,
+        IReadOnlyList<EquipmentItem>? equipment = null)
     {
         ArgumentNullException.ThrowIfNull(summary);
         ArgumentNullException.ThrowIfNull(revealCredential);
@@ -28,10 +29,13 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
         CopyFieldCommand = new RelayCommand(
             CopyField,
             parameter => IsRevealed && !_isCopying && parameter is FireDrillCredentialField);
+        foreach (var item in equipment ?? [])
+            Equipment.Add(item);
         PopulateGroups(Mask(summary.Fields));
     }
 
     public ObservableCollection<FireDrillCredentialFieldGroup> CredentialGroups { get; } = new();
+    public ObservableCollection<EquipmentItem> Equipment { get; } = new();
     public RelayCommand RevealCommand { get; }
     public RelayCommand HideCommand { get; }
     public RelayCommand CopyFieldCommand { get; }
@@ -58,6 +62,10 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
         : $"Synchronized {_summary.LastSyncedAtUtc.ToLocalTime():g}";
     public string VisibilityLabel => IsRevealed ? "Values revealed" : "Values protected";
     public bool HasFields => CredentialGroups.Count > 0;
+    public bool HasEquipment => Equipment.Count > 0;
+    public bool HasProfileContent => HasFields || HasEquipment;
+    public string EquipmentCountLabel =>
+        $"{Equipment.Count} inventory item{(Equipment.Count == 1 ? string.Empty : "s")}";
 
     public bool IsRevealed
     {
@@ -115,6 +123,7 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
             CredentialGroups.Add(group);
         OnPropertyChanged(nameof(GroupCountLabel));
         OnPropertyChanged(nameof(HasFields));
+        OnPropertyChanged(nameof(HasProfileContent));
     }
 
     private async void CopyField(object? parameter)

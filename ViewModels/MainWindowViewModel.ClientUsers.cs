@@ -15,6 +15,7 @@ public sealed partial class MainWindowViewModel
 
     public ObservableCollection<ClientUserClientSummary> ClientUserClients { get; } = new();
     public ObservableCollection<ClientUserSummary> ClientUsers { get; } = new();
+    public ObservableCollection<EquipmentItem> SelectedClientUserEquipment { get; } = new();
     public ObservableCollection<ClientUserAccountGroup> ClientUserAccountGroups { get; } = new();
     public RelayCommand SearchClientUsersCommand { get; private set; } = null!;
     public RelayCommand ClearClientUserSearchCommand { get; private set; } = null!;
@@ -28,7 +29,10 @@ public sealed partial class MainWindowViewModel
     public bool HasClientUsers => ClientUsers.Count > 0;
     public bool HasSelectedClientUserClient => SelectedClientUserClient is not null;
     public bool HasSelectedClientUser => SelectedClientUser is not null;
+    public bool HasSelectedClientUserEquipment => SelectedClientUserEquipment.Count > 0;
     public bool IsClientUserRevealed => RevealedClientUser is not null;
+    public string SelectedClientUserEquipmentLabel =>
+        $"{SelectedClientUserEquipment.Count} assigned device{(SelectedClientUserEquipment.Count == 1 ? string.Empty : "s")}";
 
     public string ClientUserSearchText
     {
@@ -55,6 +59,7 @@ public sealed partial class MainWindowViewModel
             if (!SetProperty(ref _selectedClientUser, value)) return;
             RevealedClientUser = null;
             PopulateClientUserGroups(value?.Accounts, masked: true);
+            PopulateSelectedClientUserEquipment(value?.ClientUserId);
             OnPropertyChanged(nameof(HasSelectedClientUser));
             CloseClientUserDetailsCommand.RaiseCanExecuteChanged();
             RevealClientUserCommand.RaiseCanExecuteChanged();
@@ -179,6 +184,35 @@ public sealed partial class MainWindowViewModel
     {
         RevealedClientUser = null;
         ClientUserAccountGroups.Clear();
+        SelectedClientUserEquipment.Clear();
+        OnPropertyChanged(nameof(HasSelectedClientUserEquipment));
+        OnPropertyChanged(nameof(SelectedClientUserEquipmentLabel));
+    }
+
+    private void PopulateSelectedClientUserEquipment(long? clientUserId)
+    {
+        SelectedClientUserEquipment.Clear();
+        if (clientUserId is > 0)
+        {
+            try
+            {
+                foreach (var equipment in _repository
+                             .GetEquipmentInventory(clientUserId: clientUserId)
+                             .OrderBy(item => item.DeviceType, StringComparer.OrdinalIgnoreCase)
+                             .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    SelectedClientUserEquipment.Add(equipment);
+                }
+            }
+            catch
+            {
+                // Inventory enrichment is best-effort so an older database
+                // installer cannot prevent Client Users from opening.
+            }
+        }
+
+        OnPropertyChanged(nameof(HasSelectedClientUserEquipment));
+        OnPropertyChanged(nameof(SelectedClientUserEquipmentLabel));
     }
 
     private void PopulateClientUserGroups(

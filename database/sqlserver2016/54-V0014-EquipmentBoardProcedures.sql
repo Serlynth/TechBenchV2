@@ -83,6 +83,82 @@ BEGIN
 END;
 GO
 
+IF OBJECT_ID(N'tb_app.GetEquipmentInventory', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[GetEquipmentInventory];
+GO
+
+CREATE PROCEDURE [tb_app].[GetEquipmentInventory]
+    @ClientId int = NULL,
+    @ClientUserId bigint = NULL,
+    @ClientName nvarchar(240) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF USER_NAME() = N'tb_preview_reader'
+        THROW 52250, N'Equipment inventory is unavailable in Admin user-preview mode.', 1;
+
+    DECLARE @Sid varbinary(85), @Login nvarchar(256), @Display nvarchar(160),
+            @Tech bit, @Manager bit, @Admin bit, @Sync bit;
+    EXEC [tb_security].[EnsureCurrentUser] @Sid OUTPUT, @Login OUTPUT, @Display OUTPUT,
+        @Tech OUTPUT, @Manager OUTPUT, @Admin OUTPUT, @Sync OUTPUT;
+
+    SET @ClientId = NULLIF(@ClientId, 0);
+    SET @ClientUserId = NULLIF(@ClientUserId, 0);
+    SET @ClientName = NULLIF(LTRIM(RTRIM(@ClientName)), N'');
+
+    IF @ClientId IS NULL AND @ClientUserId IS NULL AND @ClientName IS NULL
+        THROW 52251, N'A client or client user is required to read equipment inventory.', 1;
+
+    SELECT
+        equipment.[EquipmentId],
+        equipment.[AssetTag],
+        equipment.[DeviceType],
+        equipment.[Name],
+        equipment.[SerialNumber],
+        equipment.[PartNumber],
+        equipment.[IpAddress],
+        equipment.[Manufacturer],
+        equipment.[Model],
+        equipment.[ClientId],
+        COALESCE(client.[Name], equipment.[ClientName]) AS [ClientName],
+        equipment.[ClientUserId],
+        client_user.[DisplayName] AS [ClientUserDisplayName],
+        client_user.[Email] AS [ClientUserEmail],
+        equipment.[LocationName],
+        equipment.[Notes],
+        equipment.[WorkflowStage],
+        user_row.[LoginName] AS [AssignedToLoginName],
+        user_row.[DisplayName] AS [AssignedToDisplayName],
+        equipment.[SortOrder],
+        equipment.[AssignedAtUtc],
+        equipment.[CreatedAtUtc],
+        equipment.[UpdatedAtUtc],
+        equipment.[RowVersion]
+    FROM [tb_inventory].[Equipment] AS equipment
+    LEFT JOIN [tb_security].[Users] AS user_row
+        ON user_row.[WindowsSid] = equipment.[AssignedToWindowsSid]
+    LEFT JOIN [tb_data].[Clients] AS client
+        ON client.[Id] = equipment.[ClientId]
+    LEFT JOIN [tb_inventory].[ClientUsers] AS client_user
+        ON client_user.[ClientUserId] = equipment.[ClientUserId]
+    WHERE equipment.[IsArchived] = 0
+      AND (@ClientId IS NULL OR equipment.[ClientId] = @ClientId)
+      AND (@ClientUserId IS NULL OR equipment.[ClientUserId] = @ClientUserId)
+      AND
+      (
+          @ClientName IS NULL
+          OR COALESCE(client.[Name], equipment.[ClientName]) = @ClientName
+      )
+    ORDER BY
+        equipment.[DeviceType],
+        equipment.[Name],
+        equipment.[AssetTag],
+        equipment.[EquipmentId];
+END;
+GO
+
 IF OBJECT_ID(N'tb_app.AdminGetEquipmentBoard', N'P') IS NOT NULL
     DROP PROCEDURE [tb_app].[AdminGetEquipmentBoard];
 GO
