@@ -523,15 +523,26 @@ internal sealed class ServerManagerForm : Form
             try
             {
                 var directoryUsers = await Task.Run(_directoryUsers.LoadAuthorizedUsers);
+                var retiredCount = await Task.Run(
+                    () => _repository.ReconcileAuthorizedUsers(directoryUsers));
                 var mergedMappings = ActiveDirectoryUserProvider.MergeMappings(
                     directoryUsers,
                     _configuration.UserMappings);
                 _configuration.UserMappings.Clear();
                 _configuration.UserMappings.AddRange(mergedMappings);
+                if (retiredCount > 0)
+                {
+                    AddLog(
+                        $"Retired {retiredCount} SQL technician user(s) "
+                        + "that are no longer in the authorized Active Directory groups.");
+                }
             }
             catch (Exception directoryError)
             {
-                AddLog("WARNING: Active Directory users could not be refreshed; showing registered SQL users only. " + directoryError.Message);
+                AddLog(
+                    "WARNING: Active Directory users could not be refreshed or reconciled; "
+                    + "showing registered SQL users only. No users were retired. "
+                    + directoryError.Message);
             }
             ApplyConfiguration(_configuration);
             AddLog("Shared WHD and Sage settings refreshed from SQL Server.");

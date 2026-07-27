@@ -57,6 +57,10 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("TechBench_Admins", directory, StringComparison.Ordinal);
         Assert.Contains("GetMembers(recursive: true)", directory, StringComparison.Ordinal);
         Assert.Contains("SaveMappings", sql, StringComparison.Ordinal);
+        Assert.Contains("ReconcileAuthorizedUsers", sql, StringComparison.Ordinal);
+        Assert.Contains("AdminReconcileWhdAuthorizedUsers", sql, StringComparison.Ordinal);
+        Assert.Contains("ReconcileAuthorizedUsers(directoryUsers)", form, StringComparison.Ordinal);
+        Assert.Contains("No users were retired", form, StringComparison.Ordinal);
         Assert.Contains("MinimumSupportedSchemaVersion = 13", sql, StringComparison.Ordinal);
         Assert.Contains("MaximumSupportedSchemaVersion = 14", sql, StringComparison.Ordinal);
         Assert.Contains("supports database schemas", sql, StringComparison.Ordinal);
