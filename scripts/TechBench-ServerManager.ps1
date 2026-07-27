@@ -2492,8 +2492,8 @@ function Open-TechBenchAdminDatabaseConnection {
             $command.Dispose()
         }
 
-        if ($schemaVersion -ne 13) {
-            throw "Server Manager requires TechBench database schema 13; the installed schema is $schemaVersion."
+        if ($schemaVersion -lt 13 -or $schemaVersion -gt 14) {
+            throw "Server Manager supports TechBench database schemas 13 through 14; the installed schema is $schemaVersion."
         }
         if (-not $isAdmin) {
             throw "'$loginName' is not a member of the TechBench Admin role. Sign in with an account in CSRI\TechBench_Admins."

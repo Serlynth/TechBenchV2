@@ -7,9 +7,10 @@ namespace TechBench.Tests;
 public sealed class SqlServerTechBenchRepositoryContractTests
 {
     [Fact]
-    public void ClientTargetsV0012Schema()
+    public void ClientAcceptsStableAndInventoryBetaSchemas()
     {
-        Assert.Equal(13, SqlServerConnectionFactory.SupportedSchemaVersion);
+        Assert.Equal(13, SqlServerConnectionFactory.MinimumSupportedSchemaVersion);
+        Assert.Equal(14, SqlServerConnectionFactory.SupportedSchemaVersion);
     }
 
     [Fact]
