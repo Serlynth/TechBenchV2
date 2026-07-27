@@ -942,7 +942,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "History" => "Showing historical worklog",
             "Posting Queue" => "Showing entries still pending WHD or Sage posting",
             "Posting History" => "Showing WHD and Sage posting history",
-            "Client List" => "Showing synced/imported clients",
+            "Client Match" => "Showing synchronized WHD and Sage client matches",
             "Client Users" => "Showing synchronized users and accounts for each client",
             "Ticket List" => "Showing my assigned and group non-closed tickets",
             "Common Links" => "Showing commonly used websites",
@@ -979,7 +979,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             case "Posting History":
                 RefreshPostingLogs();
                 break;
-            case "Client List":
+            case "Client Match":
                 RefreshClients();
                 break;
             case "Client Users":

@@ -490,16 +490,15 @@
         <Style x:Key="NavHistoryStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="History"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavSearchStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Search"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavQueueStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Posting Queue"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavClientsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Client List"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavClientUsersStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}">
-            <Setter Property="Padding" Value="28,9" />
-            <Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Client Users"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers>
-        </Style>
+        <Style x:Key="NavClientMatchStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Client Match"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavTicketsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Ticket List"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavLinksStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Common Links"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavClientInfoStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarGroupButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Client Info"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavClientInfoChildStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}">
             <Setter Property="Padding" Value="28,9" />
+        </Style>
+        <Style x:Key="NavClientUsersStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource NavClientInfoChildStyle}">
+            <Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Client Users"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers>
         </Style>
         <Style x:Key="NavClientWifiStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource NavClientInfoChildStyle}">
             <Style.Triggers>
@@ -697,13 +696,12 @@
                     <Border Style="{StaticResource SidebarGroupHeaderStyle}">
                         <TextBlock Text="DIRECTORY" Style="{StaticResource SidebarGroupLabelStyle}" />
                     </Border>
-                    <Button Content="Clients" Command="{Binding NavigateCommand}" CommandParameter="Client List" Style="{StaticResource NavClientsStyle}" />
-                    <Button Content="Users" Command="{Binding NavigateCommand}" CommandParameter="Client Users" Style="{StaticResource NavClientUsersStyle}"
-                            Visibility="{Binding CanAccessClientUsers, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <Button Content="Tickets" Command="{Binding NavigateCommand}" CommandParameter="Ticket List" Style="{StaticResource NavTicketsStyle}" />
                     <Button Content="Links" Command="{Binding NavigateCommand}" CommandParameter="Common Links" Style="{StaticResource NavLinksStyle}" />
                     <Button Content="CLIENT INFO" Command="{Binding NavigateCommand}" CommandParameter="Client Info" Style="{StaticResource NavClientInfoStyle}"
                             Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <Button Content="Users" Command="{Binding NavigateCommand}" CommandParameter="Client Users" Style="{StaticResource NavClientUsersStyle}"
+                            Visibility="{Binding CanAccessClientUsers, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <Button Content="Client WiFi" Command="{Binding NavigateCommand}" CommandParameter="Client WiFi" Style="{StaticResource NavClientWifiStyle}"
                             Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <Button Content="Domain/AD" Command="{Binding NavigateCommand}" CommandParameter="Domain/AD" Style="{StaticResource NavDomainAdStyle}"
@@ -716,6 +714,7 @@
                     <Border Style="{StaticResource SidebarGroupHeaderStyle}">
                         <TextBlock Text="SYSTEM" Style="{StaticResource SidebarGroupLabelStyle}" />
                     </Border>
+                    <Button Content="Client Match" Command="{Binding NavigateCommand}" CommandParameter="Client Match" Style="{StaticResource NavClientMatchStyle}" />
                     <Button Content="Posting History" Command="{Binding NavigateCommand}" CommandParameter="Posting History" Style="{StaticResource NavPostingHistoryStyle}" />
                     <Button Content="Equipment Board"
                             Command="{Binding NavigateCommand}"
@@ -2124,7 +2123,7 @@
                     </StackPanel>
                 </ScrollViewer>
 
-                <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Client List}">
+                <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Client Match}">
                     <Border Style="{StaticResource CardStyle}">
                         <DockPanel>
                             <StackPanel DockPanel.Dock="Top">
@@ -2134,7 +2133,7 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel>
-                                        <TextBlock Text="Client Matching" Style="{StaticResource SectionHeadingStyle}" />
+                                        <TextBlock Text="Client Match" Style="{StaticResource SectionHeadingStyle}" />
                                         <TextBlock Text="One TechBench client per customer, linked to its WHD location and Sage customer."
                                                    Style="{StaticResource MutedTextStyle}"
                                                    Margin="0,0,0,10" />
