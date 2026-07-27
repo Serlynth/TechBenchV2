@@ -210,6 +210,89 @@ public sealed class CredentialsWorkbookHeaderTests
             });
     }
 
+    [Fact]
+    public void ClientUsersWorksheetAcceptsUserHeaderAndDiscoversEveryOtherColumnDynamically()
+    {
+        var workbook = FireDrillSyncEngine.ReadWorkbookContents(
+            CreateClientUsersWorkbook(
+                [
+                    "Client",
+                    "Location / Site",
+                    "User",
+                    "Role / Department",
+                    "Account Status",
+                    "AD Username",
+                    "Email Address",
+                    "365",
+                    "Password",
+                    "PIN",
+                    "MFA / Recovery",
+                    "Notes",
+                    "Last Verified",
+                    "New Portal Field"
+                ],
+                [
+                    "CSRI",
+                    "",
+                    "Ryan Skoog",
+                    "IT",
+                    "Active",
+                    "rskoog",
+                    "rskoog@csri-qt.com",
+                    "yes",
+                    "test",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "dynamic value"
+                ]),
+            string.Empty);
+
+        var person = Assert.Single(Assert.IsAssignableFrom<
+            IReadOnlyList<CredentialsClientUserRow>>(workbook.ClientUsers));
+        Assert.Equal("CSRI", person.ClientName);
+        Assert.Equal("Ryan Skoog", person.DisplayName);
+        Assert.Equal("IT", person.RoleDepartment);
+        Assert.Equal("rskoog@csri-qt.com", person.Email);
+
+        var account = Assert.Single(person.Accounts);
+        Assert.Equal("General", account.AccountSystem);
+        Assert.DoesNotContain(account.Fields, field => field.FieldKey == "user");
+        Assert.Contains(account.Fields, field =>
+            field.FieldKey == "ad username" && field.Value == "rskoog");
+        Assert.Contains(account.Fields, field =>
+            field.FieldKey == "365" && field.Value == "yes");
+        Assert.Contains(account.Fields, field =>
+            field.FieldKey == "new portal field" && field.Value == "dynamic value");
+    }
+
+    [Theory]
+    [InlineData("Client", "User")]
+    [InlineData("Customer", "User / Contact")]
+    [InlineData("Company", "Contact")]
+    [InlineData("Organization", "Person")]
+    [InlineData("Client", "Name")]
+    public void ClientUsersWorksheetAcceptsFlexibleIdentityHeaderNames(
+        string clientHeader,
+        string personHeader)
+    {
+        var workbook = FireDrillSyncEngine.ReadWorkbookContents(
+            CreateClientUsersWorkbook(
+                [clientHeader, personHeader, "Any Added Column"],
+                ["Example Client", "Dana Brooks", "dynamic value"]),
+            string.Empty);
+
+        var person = Assert.Single(Assert.IsAssignableFrom<
+            IReadOnlyList<CredentialsClientUserRow>>(workbook.ClientUsers));
+        Assert.Equal("Example Client", person.ClientName);
+        Assert.Equal("Dana Brooks", person.DisplayName);
+        var account = Assert.Single(person.Accounts);
+        Assert.Single(account.Fields);
+        Assert.Equal("any added column", account.Fields[0].FieldKey);
+        Assert.Equal("dynamic value", account.Fields[0].Value);
+    }
+
     private static byte[] CreateClientUsersWorkbook(params string[][] clientUsersRows)
     {
         if (clientUsersRows.Length == 0)
