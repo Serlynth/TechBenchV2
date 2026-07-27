@@ -135,6 +135,71 @@ BEGIN
     SET @FailureCount+=1;
 END;
 
+DECLARE @ClientUserReadProcedures TABLE ([ObjectName] nvarchar(256) NOT NULL PRIMARY KEY);
+INSERT INTO @ClientUserReadProcedures([ObjectName]) VALUES
+    (N'tb_app.SearchClientUsers'),
+    (N'tb_app.RevealClientUser');
+
+IF EXISTS
+(
+    SELECT 1 FROM @ClientUserReadProcedures
+    WHERE OBJECT_ID([ObjectName], N'P') IS NULL
+)
+BEGIN
+    PRINT N'FAIL: one or more client-user read procedures are missing.';
+    SET @FailureCount+=1;
+END;
+
+IF EXISTS
+(
+    SELECT role_name.[RoleName], required.[ObjectName]
+    FROM (VALUES (N'tb_role_user'), (N'tb_role_admin')) role_name([RoleName])
+    CROSS JOIN @ClientUserReadProcedures required
+    WHERE NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.database_permissions
+        WHERE [grantee_principal_id]=DATABASE_PRINCIPAL_ID(role_name.[RoleName])
+          AND [major_id]=OBJECT_ID(required.[ObjectName])
+          AND [permission_name]=N'EXECUTE'
+          AND [state] IN (N'G',N'W')
+    )
+)
+BEGIN
+    PRINT N'FAIL: one or more client-user read grants are missing.';
+    SET @FailureCount+=1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions permission_row
+    INNER JOIN @ClientUserReadProcedures required
+        ON OBJECT_ID(required.[ObjectName])=permission_row.[major_id]
+    WHERE permission_row.[grantee_principal_id] IN
+    (
+        DATABASE_PRINCIPAL_ID(N'tb_preview_reader'),
+        DATABASE_PRINCIPAL_ID(N'tb_role_sync_service')
+    )
+      AND permission_row.[permission_name]=N'EXECUTE'
+      AND permission_row.[state] IN (N'G',N'W')
+)
+BEGIN
+    PRINT N'FAIL: preview or Sync Service can execute a client-user read procedure.';
+    SET @FailureCount+=1;
+END;
+
+IF CHARINDEX(
+    N'DecryptByKeyAutoCert',
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientUser', N'P')), N''))=0
+   OR CHARINDEX(
+    N'ClientUserAccountId',
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientUser', N'P')), N''))=0
+BEGIN
+    PRINT N'FAIL: client-user reveal does not decrypt account fields with their account authenticator.';
+    SET @FailureCount+=1;
+END;
+
 DECLARE @RepositoryCapabilitiesDefinition nvarchar(max)=
     COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P')), N'');
 

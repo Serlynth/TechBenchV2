@@ -1162,5 +1162,202 @@ BEGIN
 END;
 GO
 
+IF OBJECT_ID(N'tb_app.SearchClientUsers', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SearchClientUsers];
+GO
+
+CREATE PROCEDURE [tb_app].[SearchClientUsers]
+    @ClientId int = NULL,
+    @Search nvarchar(240) = NULL,
+    @Limit int = 500
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF USER_NAME() = N'tb_preview_reader'
+        THROW 52240, N'Client users are unavailable in Admin user-preview mode.', 1;
+
+    DECLARE @Sid varbinary(85), @Login nvarchar(256), @Display nvarchar(160),
+            @Tech bit, @Manager bit, @Admin bit, @Sync bit;
+    EXEC [tb_security].[EnsureCurrentUser] @Sid OUTPUT, @Login OUTPUT, @Display OUTPUT,
+        @Tech OUTPUT, @Manager OUTPUT, @Admin OUTPUT, @Sync OUTPUT;
+
+    SET @Search=NULLIF(LTRIM(RTRIM(@Search)), N'');
+    SET @Limit=CASE WHEN @Limit IS NULL OR @Limit<1 THEN 500
+                    WHEN @Limit>1000 THEN 1000 ELSE @Limit END;
+
+    SELECT TOP (@Limit)
+        client_user.[ClientUserId],
+        client_user.[ClientId],
+        client.[Name] AS [ClientName],
+        client_user.[DisplayName],
+        COALESCE(client_user.[RoleDepartment], N'') AS [RoleDepartment],
+        COALESCE(client_user.[Email], N'') AS [Email],
+        COALESCE(client_user.[Phone], N'') AS [Phone],
+        COALESCE(client_user.[LocationName], N'') AS [LocationName],
+        COALESCE(client_user.[LastSyncedAtUtc], client_user.[UpdatedAtUtc]) AS [LastSyncedAtUtc],
+        (
+            SELECT COUNT(*)
+            FROM [tb_inventory].[ClientUserAccounts] account
+            WHERE account.[ClientUserId]=client_user.[ClientUserId]
+              AND account.[IsCurrent]=1
+        ) AS [AccountCount],
+        COALESCE
+        (
+            (
+                SELECT account.[AccountSystem] AS [name],
+                    CONVERT(int, ROW_NUMBER() OVER
+                        (ORDER BY account.[AccountSystem], account.[ClientUserAccountId]))
+                        AS [sortOrder],
+                    JSON_QUERY
+                    (
+                        COALESCE
+                        (
+                            (
+                                SELECT field.[FieldLabel] AS [label],
+                                    field.[FieldKey] AS [fieldName],
+                                    field.[SortOrder] AS [sortOrder],
+                                    CONVERT(nvarchar(1), N'') AS [value]
+                                FROM [tb_inventory].[ClientUserAccountFields] field
+                                WHERE field.[ClientUserAccountId]=account.[ClientUserAccountId]
+                                ORDER BY field.[SortOrder], field.[FieldKey]
+                                FOR JSON PATH
+                            ),
+                            N'[]'
+                        )
+                    ) AS [fields]
+                FROM [tb_inventory].[ClientUserAccounts] account
+                WHERE account.[ClientUserId]=client_user.[ClientUserId]
+                  AND account.[IsCurrent]=1
+                ORDER BY account.[AccountSystem], account.[ClientUserAccountId]
+                FOR JSON PATH
+            ),
+            N'[]'
+        ) AS [AccountsJson]
+    FROM [tb_inventory].[ClientUsers] client_user
+    INNER JOIN [tb_data].[Clients] client
+        ON client.[Id]=client_user.[ClientId]
+       AND client.[IsActive]=1
+    WHERE client_user.[IsActive]=1
+      AND (@ClientId IS NULL OR client_user.[ClientId]=@ClientId)
+      AND
+      (
+          @Search IS NULL
+          OR client.[Name] LIKE N'%' + @Search + N'%'
+          OR client_user.[DisplayName] LIKE N'%' + @Search + N'%'
+          OR client_user.[Email] LIKE N'%' + @Search + N'%'
+          OR client_user.[RoleDepartment] LIKE N'%' + @Search + N'%'
+          OR client_user.[LocationName] LIKE N'%' + @Search + N'%'
+      )
+    ORDER BY client.[Name], client_user.[DisplayName], client_user.[ClientUserId];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.RevealClientUser', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[RevealClientUser];
+GO
+
+CREATE PROCEDURE [tb_app].[RevealClientUser]
+    @ClientUserId bigint
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    IF SESSION_CONTEXT(N'TechBench.PreviewSessionId') IS NOT NULL
+        THROW 52241, N'Client users are unavailable in Admin user-preview mode.', 1;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_inventory].[ClientUsers]
+        WHERE [ClientUserId]=@ClientUserId AND [IsActive]=1
+    )
+        THROW 52242, N'The client user was not found or is no longer current.', 1;
+
+    SELECT client_user.[ClientUserId],
+        client_user.[ClientId],
+        client.[Name] AS [ClientName],
+        client_user.[DisplayName],
+        COALESCE(client_user.[RoleDepartment], N'') AS [RoleDepartment],
+        COALESCE(client_user.[Email], N'') AS [Email],
+        COALESCE(client_user.[Phone], N'') AS [Phone],
+        COALESCE(client_user.[LocationName], N'') AS [LocationName],
+        COALESCE(client_user.[LastSyncedAtUtc], client_user.[UpdatedAtUtc]) AS [LastSyncedAtUtc],
+        (
+            SELECT COUNT(*)
+            FROM [tb_inventory].[ClientUserAccounts] account
+            WHERE account.[ClientUserId]=client_user.[ClientUserId]
+              AND account.[IsCurrent]=1
+        ) AS [AccountCount],
+        COALESCE
+        (
+            (
+                SELECT account.[AccountSystem] AS [name],
+                    CONVERT(int, ROW_NUMBER() OVER
+                        (ORDER BY account.[AccountSystem], account.[ClientUserAccountId]))
+                        AS [sortOrder],
+                    JSON_QUERY
+                    (
+                        COALESCE
+                        (
+                            (
+                                SELECT field.[FieldLabel] AS [label],
+                                    field.[FieldKey] AS [fieldName],
+                                    field.[SortOrder] AS [sortOrder],
+                                    COALESCE
+                                    (
+                                        CONVERT
+                                        (
+                                            nvarchar(max),
+                                            DecryptByKeyAutoCert
+                                            (
+                                                CERT_ID(N'tb_FireDrillCredentialCertificate'),
+                                                NULL,
+                                                field.[ValueEncrypted],
+                                                1,
+                                                CONVERT
+                                                (
+                                                    nvarchar(64),
+                                                    HASHBYTES
+                                                    (
+                                                        'SHA2_256',
+                                                        CONVERT
+                                                        (
+                                                            varbinary(max),
+                                                            CONVERT(nvarchar(30),account.[ClientUserAccountId])
+                                                                + N'|' + field.[FieldKey]
+                                                        )
+                                                    ),
+                                                    2
+                                                )
+                                            )
+                                        ),
+                                        N''
+                                    ) AS [value]
+                                FROM [tb_inventory].[ClientUserAccountFields] field
+                                WHERE field.[ClientUserAccountId]=account.[ClientUserAccountId]
+                                ORDER BY field.[SortOrder], field.[FieldKey]
+                                FOR JSON PATH
+                            ),
+                            N'[]'
+                        )
+                    ) AS [fields]
+                FROM [tb_inventory].[ClientUserAccounts] account
+                WHERE account.[ClientUserId]=client_user.[ClientUserId]
+                  AND account.[IsCurrent]=1
+                ORDER BY account.[AccountSystem], account.[ClientUserAccountId]
+                FOR JSON PATH
+            ),
+            N'[]'
+        ) AS [AccountsJson]
+    FROM [tb_inventory].[ClientUsers] client_user
+    INNER JOIN [tb_data].[Clients] client
+        ON client.[Id]=client_user.[ClientId]
+       AND client.[IsActive]=1
+    WHERE client_user.[ClientUserId]=@ClientUserId
+      AND client_user.[IsActive]=1;
+END;
+GO
+
 PRINT N'TechBench V0014 equipment-board procedures created.';
 GO
