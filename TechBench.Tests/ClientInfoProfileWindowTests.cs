@@ -77,6 +77,11 @@ public sealed class ClientInfoProfileWindowTests
         Assert.Contains("Text=\"ADDRESS\"", profileXaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"CLIENT INVENTORY\"", profileXaml, StringComparison.Ordinal);
         Assert.Contains("ItemsSource=\"{Binding Equipment}\"", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"EquipmentCard_Click\"", profileXaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "EquipmentOpenRequested += async",
+            mainWindowCode,
+            StringComparison.Ordinal);
     }
 
     [Fact]

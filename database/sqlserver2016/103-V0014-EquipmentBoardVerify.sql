@@ -217,6 +217,7 @@ DECLARE @RepositoryCapabilitiesDefinition nvarchar(max)=
     COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P')), N'');
 
 IF CHARINDEX(N'CONVERT(int, 14) AS [SchemaVersion]', @RepositoryCapabilitiesDefinition)=0
+   AND CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]', @RepositoryCapabilitiesDefinition)=0
 BEGIN
     PRINT N'FAIL: repository capabilities do not report schema version 14.';
     SET @FailureCount+=1;

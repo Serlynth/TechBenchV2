@@ -21,7 +21,7 @@ BEGIN
         @IsSyncOperator=@IsSyncOperator OUTPUT;
 
     SELECT
-        CONVERT(int, 14) AS [SchemaVersion],
+        CONVERT(int, 15) AS [SchemaVersion],
         CONVERT(bit, 0) AS [FullTextSearchAvailable],
         CONVERT(bit, 1) AS [SupportsTickets],
         CONVERT(bit, 1) AS [SupportsWorkEntries],
@@ -121,6 +121,8 @@ BEGIN
         equipment.[IpAddress],
         equipment.[Manufacturer],
         equipment.[Model],
+        equipment.[AnyDeskNumber],
+        CAST(N'' AS nvarchar(max)) AS [AnyDeskPassword],
         equipment.[ClientId],
         COALESCE(client.[Name], equipment.[ClientName]) AS [ClientName],
         equipment.[ClientUserId],
@@ -189,6 +191,13 @@ BEGIN
         equipment.[IpAddress],
         equipment.[Manufacturer],
         equipment.[Model],
+        equipment.[AnyDeskNumber],
+        CONVERT(nvarchar(max), DecryptByKeyAutoCert(
+            CERT_ID(N'tb_FireDrillCredentialCertificate'),
+            NULL,
+            equipment.[AnyDeskPasswordEncrypted],
+            1,
+            CONVERT(nvarchar(20), equipment.[EquipmentId]))) AS [AnyDeskPassword],
         equipment.[ClientId],
         COALESCE(client.[Name], equipment.[ClientName]) AS [ClientName],
         equipment.[ClientUserId],
@@ -239,6 +248,8 @@ CREATE PROCEDURE [tb_app].[AdminSaveEquipment]
     @IpAddress nvarchar(80) = NULL,
     @Manufacturer nvarchar(120) = NULL,
     @Model nvarchar(120) = NULL,
+    @AnyDeskNumber nvarchar(80) = NULL,
+    @AnyDeskPassword nvarchar(max) = NULL,
     @ClientId int = NULL,
     @ClientUserId bigint = NULL,
     @LocationName nvarchar(240) = NULL,
@@ -268,6 +279,8 @@ BEGIN
     SET @IpAddress = NULLIF(LTRIM(RTRIM(@IpAddress)), N'');
     SET @Manufacturer = NULLIF(LTRIM(RTRIM(@Manufacturer)), N'');
     SET @Model = NULLIF(LTRIM(RTRIM(@Model)), N'');
+    SET @AnyDeskNumber = NULLIF(LTRIM(RTRIM(@AnyDeskNumber)), N'');
+    SET @AnyDeskPassword = NULLIF(@AnyDeskPassword, N'');
     SET @ClientId = NULLIF(@ClientId, 0);
     SET @ClientUserId = NULLIF(@ClientUserId, 0);
     SET @LocationName = NULLIF(LTRIM(RTRIM(@LocationName)), N'');
@@ -303,6 +316,9 @@ BEGIN
         WHERE [Id] = @ClientId
     );
 
+    OPEN SYMMETRIC KEY [tb_FireDrillCredentialKey]
+        DECRYPTION BY CERTIFICATE [tb_FireDrillCredentialCertificate];
+
     IF @EquipmentId IS NULL
     BEGIN
         DECLARE @NextStockOrder int =
@@ -329,6 +345,20 @@ BEGIN
         );
 
         SET @EquipmentId = SCOPE_IDENTITY();
+
+        UPDATE [tb_inventory].[Equipment]
+        SET
+            [AnyDeskNumber] = @AnyDeskNumber,
+            [AnyDeskPasswordEncrypted] =
+                CASE
+                    WHEN @AnyDeskPassword IS NULL THEN NULL
+                    ELSE EncryptByKey(
+                        Key_GUID(N'tb_FireDrillCredentialKey'),
+                        CONVERT(varbinary(max), @AnyDeskPassword),
+                        1,
+                        CONVERT(nvarchar(20), @EquipmentId))
+                END
+        WHERE [EquipmentId] = @EquipmentId;
 
         INSERT INTO [tb_inventory].[EquipmentAssignmentHistory]
         (
@@ -372,6 +402,16 @@ BEGIN
             [IpAddress]=@IpAddress,
             [Manufacturer]=@Manufacturer,
             [Model]=@Model,
+            [AnyDeskNumber]=@AnyDeskNumber,
+            [AnyDeskPasswordEncrypted]=
+                CASE
+                    WHEN @AnyDeskPassword IS NULL THEN NULL
+                    ELSE EncryptByKey(
+                        Key_GUID(N'tb_FireDrillCredentialKey'),
+                        CONVERT(varbinary(max), @AnyDeskPassword),
+                        1,
+                        CONVERT(nvarchar(20), @EquipmentId))
+                END,
             [ClientId]=@ClientId,
             [ClientName]=@ClientName,
             [ClientUserId]=@ClientUserId,
@@ -424,6 +464,13 @@ BEGIN
         equipment.[IpAddress],
         equipment.[Manufacturer],
         equipment.[Model],
+        equipment.[AnyDeskNumber],
+        CONVERT(nvarchar(max), DecryptByKeyAutoCert(
+            CERT_ID(N'tb_FireDrillCredentialCertificate'),
+            NULL,
+            equipment.[AnyDeskPasswordEncrypted],
+            1,
+            CONVERT(nvarchar(20), equipment.[EquipmentId]))) AS [AnyDeskPassword],
         equipment.[ClientId],
         COALESCE(client.[Name], equipment.[ClientName]) AS [ClientName],
         equipment.[ClientUserId],
@@ -447,6 +494,8 @@ BEGIN
     LEFT JOIN [tb_inventory].[ClientUsers] AS client_user
         ON client_user.[ClientUserId] = equipment.[ClientUserId]
     WHERE equipment.[EquipmentId] = @EquipmentId;
+
+    CLOSE SYMMETRIC KEY [tb_FireDrillCredentialKey];
 END;
 GO
 

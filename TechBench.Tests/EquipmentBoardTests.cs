@@ -189,4 +189,37 @@ public sealed class EquipmentBoardTests
             "Sample Client \u00B7 Dana Brooks \u00B7 Main office",
             history.ClientChipLabel);
     }
+
+    [Fact]
+    public void DesktopAndLaptopEditorSupportsProtectedAnyDeskDetails()
+    {
+        var xaml = ReadRepositoryFile("MainWindow.xaml");
+        var equipmentViewModel = ReadRepositoryFile(Path.Combine(
+            "ViewModels",
+            "MainWindowViewModel.Equipment.cs"));
+        var repository = ReadRepositoryFile(Path.Combine(
+            "Data",
+            "SqlServerTechBenchRepository.Equipment.cs"));
+
+        Assert.Contains("Text=\"AnyDesk remote access\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"AnyDesk number\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"AnyDesk password\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"••••••••\"", xaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "Content=\"Show and edit AnyDesk password\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "EquipmentDeviceType.Equals(\"Desktop\"",
+            equipmentViewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "EquipmentDeviceType.Equals(\"Laptop\"",
+            equipmentViewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "AddMaxText(command, \"@AnyDeskPassword\", equipment.AnyDeskPassword)",
+            repository,
+            StringComparison.Ordinal);
+    }
 }

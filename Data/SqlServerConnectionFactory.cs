@@ -19,7 +19,7 @@ public sealed class SqlServerConnectionFactory
     public const string PreviewReaderExecutionStatement =
         "EXECUTE AS USER = N'tb_preview_reader';";
     public const int MinimumSupportedSchemaVersion = 13;
-    public const int SupportedSchemaVersion = 14;
+    public const int SupportedSchemaVersion = 15;
 
     private const string PreviewApplicationName =
         "TechBench V2 Read-only User Preview";

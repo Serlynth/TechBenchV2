@@ -15,6 +15,8 @@ public sealed class EquipmentItem
     public string IpAddress { get; init; } = string.Empty;
     public string Manufacturer { get; init; } = string.Empty;
     public string Model { get; init; } = string.Empty;
+    public string AnyDeskNumber { get; init; } = string.Empty;
+    public string AnyDeskPassword { get; init; } = string.Empty;
     public int? ClientId { get; init; }
     public string ClientName { get; init; } = string.Empty;
     public long? ClientUserId { get; init; }

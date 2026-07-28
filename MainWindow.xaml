@@ -2517,12 +2517,18 @@
                                             <ItemsControl ItemsSource="{Binding SelectedClientUserEquipment}">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <Border Margin="0,0,0,8"
-                                                                Background="{DynamicResource PanelAltBackgroundBrush}"
-                                                                BorderBrush="{DynamicResource BorderBrush}"
-                                                                BorderThickness="1"
-                                                                CornerRadius="10"
-                                                                Padding="13,11">
+                                                        <Button Margin="0,0,0,8"
+                                                                Padding="0"
+                                                                Background="Transparent"
+                                                                BorderThickness="0"
+                                                                Cursor="Hand"
+                                                                ToolTip="Open this device in Equipment Board"
+                                                                Click="OpenEquipmentFromInventory_Click">
+                                                          <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                                  BorderBrush="{DynamicResource BorderBrush}"
+                                                                  BorderThickness="1"
+                                                                  CornerRadius="10"
+                                                                  Padding="13,11">
                                                             <Grid>
                                                                 <Grid.ColumnDefinitions>
                                                                     <ColumnDefinition Width="46" />
@@ -2585,7 +2591,8 @@
                                                                                HorizontalAlignment="Right" />
                                                                 </StackPanel>
                                                             </Grid>
-                                                        </Border>
+                                                          </Border>
+                                                        </Button>
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
@@ -4043,6 +4050,43 @@
                                             <TextBox Text="{Binding EquipmentIpAddress, UpdateSourceTrigger=PropertyChanged}"
                                                      MaxLength="80"
                                                      Margin="0,0,0,12" />
+
+                                            <StackPanel Visibility="{Binding EquipmentSupportsAnyDesk, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <Border Background="{DynamicResource AccentSoftBrush}"
+                                                        BorderBrush="{DynamicResource AccentBrush}"
+                                                        BorderThickness="1"
+                                                        CornerRadius="8"
+                                                        Padding="12"
+                                                        Margin="0,4,0,12">
+                                                    <StackPanel>
+                                                        <TextBlock Text="AnyDesk remote access"
+                                                                   Foreground="{DynamicResource PrimaryTextBrush}"
+                                                                   FontWeight="SemiBold" />
+                                                        <TextBlock Text="Available for desktop and laptop records. The password is encrypted in SQL Server and is never shown on board cards."
+                                                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                                                   TextWrapping="Wrap"
+                                                                   FontSize="10"
+                                                                   Margin="0,4,0,0" />
+                                                    </StackPanel>
+                                                </Border>
+
+                                                <TextBlock Text="AnyDesk number" Style="{StaticResource FieldLabelStyle}" />
+                                                <TextBox Text="{Binding EquipmentAnyDeskNumber, UpdateSourceTrigger=PropertyChanged}"
+                                                         MaxLength="80"
+                                                         Margin="0,0,0,12" />
+
+                                                <TextBlock Text="AnyDesk password" Style="{StaticResource FieldLabelStyle}" />
+                                                <TextBox Text="••••••••"
+                                                         IsReadOnly="True"
+                                                         Visibility="{Binding ShowEquipmentAnyDeskPassword, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                                                         Margin="0,0,0,8" />
+                                                <TextBox Text="{Binding EquipmentAnyDeskPassword, UpdateSourceTrigger=PropertyChanged}"
+                                                         Visibility="{Binding ShowEquipmentAnyDeskPassword, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                         Margin="0,0,0,8" />
+                                                <CheckBox Content="Show and edit AnyDesk password"
+                                                          IsChecked="{Binding ShowEquipmentAnyDeskPassword}"
+                                                          Margin="0,0,0,12" />
+                                            </StackPanel>
 
                                             <Border Background="{DynamicResource AccentSoftBrush}"
                                                     BorderBrush="{DynamicResource AccentBrush}"

@@ -92,7 +92,7 @@ public sealed partial class SqlServer2016SyntaxTests
         var source = File.ReadAllText(path);
 
         Assert.Contains(
-            "@InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)",
+            "@InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)",
             source,
             StringComparison.OrdinalIgnoreCase);
 
@@ -147,13 +147,13 @@ public sealed partial class SqlServer2016SyntaxTests
     [Theory]
     [InlineData(
         "92-V0003-SharedReferenceVerify.sql",
-        "@InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)")]
+        "@InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)")]
     [InlineData(
         "93-V0004-AdminSharedVerify.sql",
-        "@InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)")]
+        "@InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)")]
     [InlineData(
         "94-V0005-TechBenchV1ImportVerify.sql",
-        "@InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10, 11, 12, 13, 14)")]
+        "@InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)")]
     public void EarlierSchemaVerifiersAcceptTheFinalSchemaVersion(
         string fileName,
         string expectedVersionCheck)
@@ -825,7 +825,7 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("@ResponseMessage nvarchar(500) = NULL", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("[AdminGetRecentClientSessionResponses]", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetRecentClientSessionResponses]", grantSource, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("NOT IN (11, 12, 13, 14)", verifySource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("NOT IN (11, 12, 13, 14, 15)", verifySource, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) <> 11", verifySource, StringComparison.OrdinalIgnoreCase);
 
         var root = Directory.GetParent(sqlDirectory)!.Parent!.FullName;
@@ -975,7 +975,7 @@ public sealed partial class SqlServer2016SyntaxTests
             "103-V0014-EquipmentBoardVerify.sql"));
 
         Assert.Contains(
-            "CONVERT(int, 14) AS [SchemaVersion]",
+            "CONVERT(int, 15) AS [SchemaVersion]",
             capabilityBody,
             StringComparison.OrdinalIgnoreCase);
 
@@ -1005,6 +1005,49 @@ public sealed partial class SqlServer2016SyntaxTests
             "capabilities dropped one or more capabilities introduced by an earlier schema version",
             verificationSource,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void V0015EncryptsEquipmentAnyDeskPasswordsAndOrdersDeployment()
+    {
+        var sqlDirectory = FindSqlDirectory();
+        var schemaSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "34-V0015-EquipmentAnyDeskSchema.sql"));
+        var procedureSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "54-V0014-EquipmentBoardProcedures.sql"));
+        var verifySource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "104-V0015-EquipmentAnyDeskVerify.sql"));
+
+        Assert.Contains("[AnyDeskNumber] nvarchar(80)", schemaSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[AnyDeskPasswordEncrypted] varbinary(max)", schemaSource, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("[AnyDeskPassword] nvarchar", schemaSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("@AnyDeskNumber nvarchar(80)", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("@AnyDeskPassword nvarchar(max)", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("EncryptByKey", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("DecryptByKeyAutoCert", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "CAST(N'' AS nvarchar(max)) AS [AnyDeskPassword]",
+            procedureSource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "shared inventory reads do not expose the number while keeping the AnyDesk password private",
+            verifySource,
+            StringComparison.OrdinalIgnoreCase);
+
+        var root = Directory.GetParent(sqlDirectory)!.Parent!.FullName;
+        var builder = File.ReadAllText(Path.Combine(
+            root,
+            "scripts",
+            "Build-StandaloneSqlDeployment.ps1"));
+        var schema = builder.IndexOf("34-V0015-EquipmentAnyDeskSchema.sql", StringComparison.Ordinal);
+        var procedures = builder.IndexOf("54-V0014-EquipmentBoardProcedures.sql", StringComparison.Ordinal);
+        var grants = builder.IndexOf("60-V0014-EquipmentBoardGrants.sql", StringComparison.Ordinal);
+        var verify = builder.IndexOf("104-V0015-EquipmentAnyDeskVerify.sql", StringComparison.Ordinal);
+
+        Assert.True(schema >= 0 && procedures > schema && grants > procedures && verify > grants);
     }
 
     [Fact]

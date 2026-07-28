@@ -21,7 +21,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (7, 8, 9, 10, 11, 12, 13, 14)
+IF @InstalledSchemaVersion NOT IN (7, 8, 9, 10, 11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: V0007 verification supports installed schema version 7, 8, or 9.';
     SET @FailureCount += 1;

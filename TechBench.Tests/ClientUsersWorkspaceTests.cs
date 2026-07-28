@@ -86,6 +86,10 @@ public sealed class ClientUsersWorkspaceTests
             xaml,
             StringComparison.Ordinal);
         Assert.Contains(
+            "Click=\"OpenEquipmentFromInventory_Click\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "Text=\"Assigned Equipment\"",
             xaml,
             StringComparison.Ordinal);
@@ -140,6 +144,12 @@ public sealed class ClientUsersWorkspaceTests
         Assert.DoesNotContain(
             "System.Windows.Clipboard",
             viewModel,
+            StringComparison.Ordinal);
+
+        var mainWindowCode = ReadRepositoryFile("MainWindow.xaml.cs");
+        Assert.Contains(
+            "OpenEquipmentFromInventoryAsync(equipment)",
+            mainWindowCode,
             StringComparison.Ordinal);
     }
 

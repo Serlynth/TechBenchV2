@@ -36,6 +36,7 @@ DECLARE @RevealDefinition nvarchar(max)=
 IF CHARINDEX(N'CONVERT(int, 12) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition,N''))=0
    AND CHARINDEX(N'CONVERT(int, 13) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition,N''))=0
    AND CHARINDEX(N'CONVERT(int, 14) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition,N''))=0
+   AND CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition,N''))=0
 BEGIN
     PRINT N'FAIL: repository capabilities do not report a supported final schema version.';
     SET @FailureCount+=1;

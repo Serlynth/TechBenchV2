@@ -19,6 +19,9 @@ public sealed partial class MainWindowViewModel
     private string _equipmentIpAddress = string.Empty;
     private string _equipmentManufacturer = string.Empty;
     private string _equipmentModel = string.Empty;
+    private string _equipmentAnyDeskNumber = string.Empty;
+    private string _equipmentAnyDeskPassword = string.Empty;
+    private bool _showEquipmentAnyDeskPassword;
     private InventoryClient? _equipmentClient;
     private InventoryClientUser? _equipmentClientUser;
     private string _equipmentLocationName = string.Empty;
@@ -105,7 +108,17 @@ public sealed partial class MainWindowViewModel
     public string EquipmentDeviceType
     {
         get => _equipmentDeviceType;
-        set => SetEquipmentEditorProperty(ref _equipmentDeviceType, value);
+        set
+        {
+            if (SetEquipmentEditorProperty(ref _equipmentDeviceType, value))
+            {
+                OnPropertyChanged(nameof(EquipmentSupportsAnyDesk));
+                if (!EquipmentSupportsAnyDesk)
+                {
+                    ShowEquipmentAnyDeskPassword = false;
+                }
+            }
+        }
     }
 
     public string EquipmentAssetTag
@@ -230,6 +243,28 @@ public sealed partial class MainWindowViewModel
             var count = AllEquipmentLanes.Sum(static lane => lane.Items.Count);
             return $"{count} device{(count == 1 ? string.Empty : "s")}";
         }
+    }
+
+    public bool EquipmentSupportsAnyDesk =>
+        EquipmentDeviceType.Equals("Desktop", StringComparison.OrdinalIgnoreCase)
+        || EquipmentDeviceType.Equals("Laptop", StringComparison.OrdinalIgnoreCase);
+
+    public string EquipmentAnyDeskNumber
+    {
+        get => _equipmentAnyDeskNumber;
+        set => SetEquipmentEditorProperty(ref _equipmentAnyDeskNumber, value);
+    }
+
+    public string EquipmentAnyDeskPassword
+    {
+        get => _equipmentAnyDeskPassword;
+        set => SetEquipmentEditorProperty(ref _equipmentAnyDeskPassword, value);
+    }
+
+    public bool ShowEquipmentAnyDeskPassword
+    {
+        get => _showEquipmentAnyDeskPassword;
+        set => SetProperty(ref _showEquipmentAnyDeskPassword, value);
     }
 
     public string EquipmentDeploymentCountLabel
@@ -407,6 +442,24 @@ public sealed partial class MainWindowViewModel
         RefreshEquipmentSearch();
     }
 
+    public async Task OpenEquipmentFromInventoryAsync(EquipmentItem equipment)
+    {
+        ArgumentNullException.ThrowIfNull(equipment);
+        if (!CanAccessEquipmentBoard)
+        {
+            _dialogService.Error(
+                "Equipment Board",
+                CanAccessAdminCenter
+                    ? "The equipment board is not installed in this TechBench database yet."
+                    : "Only TechBench Admins can open the equipment board.");
+            return;
+        }
+
+        CurrentSection = "Equipment Board";
+        await RefreshEquipmentBoardAsync(equipment.EquipmentId);
+        StatusMessage = $"Opened {equipment.Name} in Equipment Board.";
+    }
+
     private void BeginNewEquipment()
     {
         SelectedEquipment = null;
@@ -419,6 +472,9 @@ public sealed partial class MainWindowViewModel
         EquipmentIpAddress = string.Empty;
         EquipmentManufacturer = string.Empty;
         EquipmentModel = string.Empty;
+        EquipmentAnyDeskNumber = string.Empty;
+        EquipmentAnyDeskPassword = string.Empty;
+        ShowEquipmentAnyDeskPassword = false;
         EquipmentClient = null;
         EquipmentClientUser = null;
         EquipmentLocationName = string.Empty;
@@ -442,6 +498,9 @@ public sealed partial class MainWindowViewModel
         EquipmentIpAddress = item.IpAddress;
         EquipmentManufacturer = item.Manufacturer;
         EquipmentModel = item.Model;
+        EquipmentAnyDeskNumber = item.AnyDeskNumber;
+        EquipmentAnyDeskPassword = item.AnyDeskPassword;
+        ShowEquipmentAnyDeskPassword = false;
         EquipmentClient = InventoryClientOptions.FirstOrDefault(client =>
             client.ClientId == item.ClientId);
         EquipmentClientUser = InventoryClientUserOptions.FirstOrDefault(user =>
@@ -459,6 +518,7 @@ public sealed partial class MainWindowViewModel
     private void CloseEquipmentEditor()
     {
         _isNewEquipment = false;
+        ShowEquipmentAnyDeskPassword = false;
         SelectedEquipment = null;
         IsEquipmentEditorVisible = false;
         OnPropertyChanged(nameof(EquipmentEditorTitle));
@@ -499,6 +559,12 @@ public sealed partial class MainWindowViewModel
                 IpAddress = EquipmentIpAddress.Trim(),
                 Manufacturer = EquipmentManufacturer.Trim(),
                 Model = EquipmentModel.Trim(),
+                AnyDeskNumber = EquipmentSupportsAnyDesk
+                    ? EquipmentAnyDeskNumber.Trim()
+                    : string.Empty,
+                AnyDeskPassword = EquipmentSupportsAnyDesk
+                    ? EquipmentAnyDeskPassword
+                    : string.Empty,
                 ClientId = EquipmentClient?.ClientId,
                 ClientName = EquipmentClient?.Name ?? string.Empty,
                 ClientUserId = EquipmentClientUser?.ClientUserId,
@@ -626,7 +692,7 @@ public sealed partial class MainWindowViewModel
         }
     }
 
-    private void SetEquipmentEditorProperty(
+    private bool SetEquipmentEditorProperty(
         ref string field,
         string? value,
         [System.Runtime.CompilerServices.CallerMemberName] string? propertyName = null)
@@ -634,7 +700,10 @@ public sealed partial class MainWindowViewModel
         if (SetProperty(ref field, value ?? string.Empty, propertyName))
         {
             SaveEquipmentCommand?.RaiseCanExecuteChanged();
+            return true;
         }
+
+        return false;
     }
 
     private void RefreshEquipmentSearch()

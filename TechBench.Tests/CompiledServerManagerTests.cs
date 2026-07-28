@@ -64,7 +64,7 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("windowsSid = user.WindowsSidHex", sql, StringComparison.Ordinal);
         Assert.Contains("ToSqlSidHex(user.Sid)", directory, StringComparison.Ordinal);
         Assert.Contains("MinimumSupportedSchemaVersion = 13", sql, StringComparison.Ordinal);
-        Assert.Contains("MaximumSupportedSchemaVersion = 14", sql, StringComparison.Ordinal);
+        Assert.Contains("MaximumSupportedSchemaVersion = 15", sql, StringComparison.Ordinal);
         Assert.Contains("supports database schemas", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("requires database schema 8", sql, StringComparison.Ordinal);
         Assert.Contains("RequestWhdSync(\"Full\")", sql, StringComparison.Ordinal);
