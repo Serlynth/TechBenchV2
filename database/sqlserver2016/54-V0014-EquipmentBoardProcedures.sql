@@ -165,23 +165,16 @@ IF OBJECT_ID(N'tb_app.AdminGetEquipmentBoard', N'P') IS NOT NULL
     DROP PROCEDURE [tb_app].[AdminGetEquipmentBoard];
 GO
 
-CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoard]
+IF OBJECT_ID(N'tb_app.AdminGetEquipmentBoardSecure', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminGetEquipmentBoardSecure];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoardSecure]
 WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
-
-    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
-    EXEC [tb_security].[GetCurrentAccess]
-        @UserSid=@ActorSid OUTPUT,
-        @IsManager=@IsManager OUTPUT,
-        @IsAdmin=@IsAdmin OUTPUT,
-        @IsSyncOperator=@IsSyncOperator OUTPUT;
-
-    IF @IsAdmin <> 1
-       OR IS_ROLEMEMBER(N'tb_role_admin', ORIGINAL_LOGIN()) <> 1
-        THROW 52200, N'Only a TechBench Admin may view the equipment board.', 1;
 
     SELECT
         equipment.[EquipmentId],
@@ -236,6 +229,81 @@ BEGIN
 END;
 GO
 
+CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoard]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 52200, N'Only a TechBench Admin may view the equipment board.', 1;
+
+    EXEC [tb_app].[AdminGetEquipmentBoardSecure];
+END;
+GO
+
+IF OBJECT_ID(N'tb_security.EncryptEquipmentAnyDeskPassword', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_security].[EncryptEquipmentAnyDeskPassword];
+GO
+
+CREATE PROCEDURE [tb_security].[EncryptEquipmentAnyDeskPassword]
+    @EquipmentId bigint,
+    @PlainText nvarchar(max),
+    @EncryptedValue varbinary(max) OUTPUT
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    SET @EncryptedValue = NULL;
+    IF @PlainText IS NULL
+        RETURN;
+
+    DECLARE @OpenedHere bit = CONVERT(bit, CASE WHEN EXISTS
+    (
+        SELECT 1
+        FROM sys.openkeys
+        WHERE [key_name] = N'tb_FireDrillCredentialKey'
+    ) THEN 0 ELSE 1 END);
+
+    BEGIN TRY
+        IF @OpenedHere = 1
+            OPEN SYMMETRIC KEY [tb_FireDrillCredentialKey]
+                DECRYPTION BY CERTIFICATE [tb_FireDrillCredentialCertificate];
+
+        SET @EncryptedValue = EncryptByKey(
+            Key_GUID(N'tb_FireDrillCredentialKey'),
+            CONVERT(varbinary(max), @PlainText),
+            1,
+            CONVERT(nvarchar(20), @EquipmentId));
+
+        IF @OpenedHere = 1
+            CLOSE SYMMETRIC KEY [tb_FireDrillCredentialKey];
+    END TRY
+    BEGIN CATCH
+        IF EXISTS
+        (
+            SELECT 1
+            FROM sys.openkeys
+            WHERE [key_name] = N'tb_FireDrillCredentialKey'
+        ) AND @OpenedHere = 1
+            CLOSE SYMMETRIC KEY [tb_FireDrillCredentialKey];
+        THROW;
+    END CATCH;
+
+    IF @EncryptedValue IS NULL
+        THROW 52219, N'The AnyDesk password could not be encrypted.', 1;
+END;
+GO
+
 IF OBJECT_ID(N'tb_app.AdminSaveEquipment', N'P') IS NOT NULL
     DROP PROCEDURE [tb_app].[AdminSaveEquipment];
 GO
@@ -257,7 +325,6 @@ CREATE PROCEDURE [tb_app].[AdminSaveEquipment]
     @LocationName nvarchar(240) = NULL,
     @Notes nvarchar(max) = NULL,
     @ExpectedRowVersion binary(8) = NULL
-WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -270,8 +337,7 @@ BEGIN
         @IsAdmin=@IsAdmin OUTPUT,
         @IsSyncOperator=@IsSyncOperator OUTPUT;
 
-    IF @IsAdmin <> 1
-       OR IS_ROLEMEMBER(N'tb_role_admin', ORIGINAL_LOGIN()) <> 1
+    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
         THROW 52201, N'Only a TechBench Admin may save equipment.', 1;
 
     SET @EquipmentId = NULLIF(@EquipmentId, 0);
@@ -319,9 +385,10 @@ BEGIN
         FROM [tb_data].[Clients]
         WHERE [Id] = @ClientId
     );
+    DECLARE @AnyDeskPasswordEncrypted varbinary(max);
 
-    OPEN SYMMETRIC KEY [tb_FireDrillCredentialKey]
-        DECRYPTION BY CERTIFICATE [tb_FireDrillCredentialCertificate];
+    BEGIN TRY
+    BEGIN TRANSACTION;
 
     IF @EquipmentId IS NULL
     BEGIN
@@ -350,18 +417,15 @@ BEGIN
 
         SET @EquipmentId = SCOPE_IDENTITY();
 
+        EXEC [tb_security].[EncryptEquipmentAnyDeskPassword]
+            @EquipmentId=@EquipmentId,
+            @PlainText=@AnyDeskPassword,
+            @EncryptedValue=@AnyDeskPasswordEncrypted OUTPUT;
+
         UPDATE [tb_inventory].[Equipment]
         SET
             [AnyDeskNumber] = @AnyDeskNumber,
-            [AnyDeskPasswordEncrypted] =
-                CASE
-                    WHEN @AnyDeskPassword IS NULL THEN NULL
-                    ELSE EncryptByKey(
-                        Key_GUID(N'tb_FireDrillCredentialKey'),
-                        CONVERT(varbinary(max), @AnyDeskPassword),
-                        1,
-                        CONVERT(nvarchar(20), @EquipmentId))
-                END
+            [AnyDeskPasswordEncrypted] = @AnyDeskPasswordEncrypted
         WHERE [EquipmentId] = @EquipmentId;
 
         INSERT INTO [tb_inventory].[EquipmentAssignmentHistory]
@@ -396,6 +460,11 @@ BEGIN
         WHERE [EquipmentId] = @EquipmentId
           AND [IsArchived] = 0;
 
+        EXEC [tb_security].[EncryptEquipmentAnyDeskPassword]
+            @EquipmentId=@EquipmentId,
+            @PlainText=@AnyDeskPassword,
+            @EncryptedValue=@AnyDeskPasswordEncrypted OUTPUT;
+
         UPDATE [tb_inventory].[Equipment]
         SET
             [AssetTag]=@AssetTag,
@@ -407,15 +476,7 @@ BEGIN
             [Manufacturer]=@Manufacturer,
             [Model]=@Model,
             [AnyDeskNumber]=@AnyDeskNumber,
-            [AnyDeskPasswordEncrypted]=
-                CASE
-                    WHEN @AnyDeskPassword IS NULL THEN NULL
-                    ELSE EncryptByKey(
-                        Key_GUID(N'tb_FireDrillCredentialKey'),
-                        CONVERT(varbinary(max), @AnyDeskPassword),
-                        1,
-                        CONVERT(nvarchar(20), @EquipmentId))
-                END,
+            [AnyDeskPasswordEncrypted]=@AnyDeskPasswordEncrypted,
             [ClientId]=@ClientId,
             [ClientName]=@ClientName,
             [ClientUserId]=@ClientUserId,
@@ -458,6 +519,14 @@ BEGIN
         END;
     END;
 
+    COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
     SELECT
         equipment.[EquipmentId],
         equipment.[AssetTag],
@@ -469,12 +538,7 @@ BEGIN
         equipment.[Manufacturer],
         equipment.[Model],
         equipment.[AnyDeskNumber],
-        CONVERT(nvarchar(max), DecryptByKeyAutoCert(
-            CERT_ID(N'tb_FireDrillCredentialCertificate'),
-            NULL,
-            equipment.[AnyDeskPasswordEncrypted],
-            1,
-            CONVERT(nvarchar(20), equipment.[EquipmentId]))) AS [AnyDeskPassword],
+        @AnyDeskPassword AS [AnyDeskPassword],
         equipment.[ClientId],
         COALESCE(client.[Name], equipment.[ClientName]) AS [ClientName],
         equipment.[ClientUserId],
@@ -498,8 +562,6 @@ BEGIN
     LEFT JOIN [tb_inventory].[ClientUsers] AS client_user
         ON client_user.[ClientUserId] = equipment.[ClientUserId]
     WHERE equipment.[EquipmentId] = @EquipmentId;
-
-    CLOSE SYMMETRIC KEY [tb_FireDrillCredentialKey];
 END;
 GO
 
