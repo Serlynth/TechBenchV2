@@ -36,6 +36,7 @@ public sealed partial class MainWindowViewModel
 
     public ObservableCollection<EquipmentLane> EquipmentLanes { get; } = new();
     public ObservableCollection<EquipmentLane> DeploymentLanes { get; } = new();
+    public ObservableCollection<EquipmentItem> StockInventoryItems { get; } = new();
     public ObservableCollection<InventoryClient> InventoryClientOptions { get; } = new();
     public ObservableCollection<InventoryClientUser> InventoryClientUserOptions { get; } = new();
     public ObservableCollection<EquipmentAssignmentHistoryEntry>
@@ -251,6 +252,17 @@ public sealed partial class MainWindowViewModel
         }
     }
 
+    public string StockInventoryCountLabel
+    {
+        get
+        {
+            var count = StockInventoryItems.Count;
+            return count == 1 ? "1 item in stock" : $"{count} items in stock";
+        }
+    }
+
+    public bool HasStockInventoryItems => StockInventoryItems.Count > 0;
+
     public bool EquipmentSupportsAnyDesk =>
         EquipmentDeviceType.Equals("Desktop", StringComparison.OrdinalIgnoreCase)
         || EquipmentDeviceType.Equals("Laptop", StringComparison.OrdinalIgnoreCase);
@@ -357,8 +369,8 @@ public sealed partial class MainWindowViewModel
                 or InvalidOperationException
                 or TimeoutException)
         {
-            EquipmentBoardStatus = $"Inventory refresh failed: {ex.Message}";
-            _dialogService.Error("Inventory", EquipmentBoardStatus);
+            EquipmentBoardStatus = $"Equipment Board refresh failed: {ex.Message}";
+            _dialogService.Error("Equipment Board", EquipmentBoardStatus);
         }
         finally
         {
@@ -374,6 +386,7 @@ public sealed partial class MainWindowViewModel
         EnsureSignedInTechnicianIsInitiallyFirst(mappings);
         EquipmentLanes.Clear();
         DeploymentLanes.Clear();
+        StockInventoryItems.Clear();
         var stockLane = new EquipmentLane(
             "Stock Room",
             null,
@@ -483,8 +496,19 @@ public sealed partial class MainWindowViewModel
             lane.Items.Add(item);
         }
 
+        foreach (var item in equipment
+                     .Where(static item => item.IsInStock)
+                     .OrderBy(static item => item.SortOrder)
+                     .ThenBy(static item => item.Name)
+                     .ThenBy(static item => item.EquipmentId))
+        {
+            StockInventoryItems.Add(item);
+        }
+
         OnPropertyChanged(nameof(EquipmentDeviceCountLabel));
         OnPropertyChanged(nameof(EquipmentDeploymentCountLabel));
+        OnPropertyChanged(nameof(StockInventoryCountLabel));
+        OnPropertyChanged(nameof(HasStockInventoryItems));
         RefreshEquipmentSearch();
     }
 
@@ -663,16 +687,16 @@ public sealed partial class MainWindowViewModel
         if (!CanAccessEquipmentBoard)
         {
             _dialogService.Error(
-                "Inventory",
+                "Equipment Board",
                 CanAccessAdminCenter
-                    ? "Inventory is not installed in this TechBench database yet."
-                    : "Only TechBench Admins can open Inventory.");
+                    ? "Equipment Board is not installed in this TechBench database yet."
+                    : "Only TechBench Admins can open Equipment Board.");
             return;
         }
 
-        CurrentSection = "Inventory";
+        CurrentSection = "Equipment Board";
         await RefreshEquipmentBoardAsync(equipment.EquipmentId);
-        StatusMessage = $"Opened {equipment.Name} in Inventory.";
+        StatusMessage = $"Opened {equipment.Name} in Equipment Board.";
     }
 
     private async Task ImportEquipmentBuildSheetAsync()

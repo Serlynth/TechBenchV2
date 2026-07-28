@@ -183,6 +183,47 @@
             </StackPanel>
         </DataTemplate>
 
+        <Style x:Key="InventoryStockCardButtonStyle"
+               TargetType="{x:Type Button}">
+            <Setter Property="Width" Value="310" />
+            <Setter Property="MinHeight" Value="126" />
+            <Setter Property="Margin" Value="0,0,12,12" />
+            <Setter Property="Padding" Value="14,12" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Background" Value="{DynamicResource PanelBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border x:Name="InventoryStockCard"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="11"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="InventoryStockCard"
+                                        Property="BorderBrush"
+                                        Value="{DynamicResource AccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="InventoryStockCard"
+                                        Property="Opacity"
+                                        Value="0.78" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="MutedTextStyle" TargetType="{x:Type TextBlock}">
             <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
             <Setter Property="FontSize" Value="12" />
@@ -510,8 +551,12 @@
         <Style x:Key="NavDomainAdStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource NavClientInfoChildStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Domain/AD"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavConnectionStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource NavClientInfoChildStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Connection"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavMiscInfoStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource NavClientInfoChildStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Misc Info"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+        <Style x:Key="NavInventoryStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarGroupButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Inventory"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+        <Style x:Key="NavInventoryChildStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}">
+            <Setter Property="Padding" Value="28,9" />
+        </Style>
+        <Style x:Key="NavEquipmentBoardStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource NavInventoryChildStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Equipment Board"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavPostingHistoryStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Posting History"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavEquipmentBoardStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Inventory"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavAdminCenterStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Admin Center"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavSettingsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Settings"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
 
@@ -706,17 +751,23 @@
                     <Button Content="Misc Info" Command="{Binding NavigateCommand}" CommandParameter="Misc Info" Style="{StaticResource NavMiscInfoStyle}"
                             Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
+                    <Button Content="INVENTORY"
+                            Command="{Binding NavigateCommand}"
+                            CommandParameter="Inventory"
+                            Style="{StaticResource NavInventoryStyle}"
+                            Visibility="{Binding CanAccessEquipmentBoard, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <Button Content="Equipment Board"
+                            Command="{Binding NavigateCommand}"
+                            CommandParameter="Equipment Board"
+                            Style="{StaticResource NavEquipmentBoardStyle}"
+                            Visibility="{Binding CanAccessEquipmentBoard, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
                     <Border Style="{StaticResource SidebarGroupHeaderStyle}">
                         <TextBlock Text="SYSTEM" Style="{StaticResource SidebarGroupLabelStyle}" />
                     </Border>
                     <Button Content="Tickets" Command="{Binding NavigateCommand}" CommandParameter="Ticket List" Style="{StaticResource NavTicketsStyle}" />
                     <Button Content="Client Match" Command="{Binding NavigateCommand}" CommandParameter="Client Match" Style="{StaticResource NavClientMatchStyle}" />
                     <Button Content="Posting History" Command="{Binding NavigateCommand}" CommandParameter="Posting History" Style="{StaticResource NavPostingHistoryStyle}" />
-                    <Button Content="Inventory"
-                            Command="{Binding NavigateCommand}"
-                            CommandParameter="Inventory"
-                            Style="{StaticResource NavEquipmentBoardStyle}"
-                            Visibility="{Binding CanAccessEquipmentBoard, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <Button Content="Admin Center"
                             Command="{Binding NavigateCommand}"
                             CommandParameter="Admin Center"
@@ -2522,7 +2573,7 @@
                                                                 Background="Transparent"
                                                                 BorderThickness="0"
                                                                 Cursor="Hand"
-                                                                ToolTip="Open this device in Inventory"
+                                                                ToolTip="Open this device in Equipment Board"
                                                                 Click="OpenEquipmentFromInventory_Click">
                                                           <Border Background="{DynamicResource PanelAltBackgroundBrush}"
                                                                   BorderBrush="{DynamicResource BorderBrush}"
@@ -3619,7 +3670,112 @@
                     </Grid>
                 </Grid>
 
-                <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Inventory}">
+                <ScrollViewer Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Inventory}"
+                              VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <Border Style="{StaticResource CardStyle}"
+                                Margin="0,0,0,14">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="Stock Room"
+                                               Style="{StaticResource SectionHeadingStyle}"
+                                               Margin="0,0,0,5" />
+                                    <TextBlock Text="Equipment currently in stock and available for technician assignment."
+                                               Style="{StaticResource MutedTextStyle}" />
+                                </StackPanel>
+                                <Border Grid.Column="1"
+                                        Background="{DynamicResource AccentSoftBrush}"
+                                        BorderBrush="{DynamicResource AccentBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="12"
+                                        Padding="11,6"
+                                        Margin="16,0"
+                                        VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding StockInventoryCountLabel}"
+                                               Foreground="{DynamicResource AccentHoverBrush}"
+                                               FontSize="11"
+                                               FontWeight="SemiBold" />
+                                </Border>
+                                <StackPanel Grid.Column="2"
+                                            Orientation="Horizontal"
+                                            VerticalAlignment="Center">
+                                    <Button Content="Open Equipment Board"
+                                            Command="{Binding NavigateCommand}"
+                                            CommandParameter="Equipment Board"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Margin="0,0,10,0" />
+                                    <Button Content="Refresh"
+                                            Command="{Binding RefreshEquipmentBoardCommand}"
+                                            Style="{StaticResource SecondaryButtonStyle}" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <Border Style="{StaticResource CardStyle}"
+                                Padding="18">
+                            <Grid>
+                                <ItemsControl ItemsSource="{Binding StockInventoryItems}"
+                                              Visibility="{Binding HasStockInventoryItems, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Content="{Binding}"
+                                                    ContentTemplate="{StaticResource EquipmentCardTemplate}"
+                                                    Style="{StaticResource InventoryStockCardButtonStyle}"
+                                                    ToolTip="Open this device in Equipment Board"
+                                                    Click="OpenEquipmentFromInventory_Click" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <Border MinHeight="270"
+                                        Background="{DynamicResource PanelAltBackgroundBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="12"
+                                        Visibility="{Binding HasStockInventoryItems, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                    <StackPanel HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                MaxWidth="420">
+                                        <Border Width="54"
+                                                Height="54"
+                                                CornerRadius="27"
+                                                Background="{DynamicResource AccentSoftBrush}"
+                                                Margin="0,0,0,14">
+                                            <TextBlock Text="&#xE7B8;"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       Foreground="{DynamicResource AccentHoverBrush}"
+                                                       FontSize="23"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center" />
+                                        </Border>
+                                        <TextBlock Text="No equipment is currently in stock."
+                                                   Foreground="{DynamicResource PrimaryTextBrush}"
+                                                   FontSize="16"
+                                                   FontWeight="SemiBold"
+                                                   TextAlignment="Center" />
+                                        <TextBlock Text="Items assigned to technicians or awaiting deployment remain available on Equipment Board."
+                                                   Style="{StaticResource MutedTextStyle}"
+                                                   TextWrapping="Wrap"
+                                                   TextAlignment="Center"
+                                                   Margin="0,6,0,0" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Equipment Board}">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
@@ -3637,7 +3793,7 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="Inventory"
+                                <TextBlock Text="Equipment Board"
                                            Style="{StaticResource SectionHeadingStyle}" />
                                 <TextBlock Text="{Binding EquipmentBoardStatus}"
                                            Style="{StaticResource MutedTextStyle}"

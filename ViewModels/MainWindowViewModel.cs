@@ -914,12 +914,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void Navigate(string section)
     {
-        if (section.Equals("Inventory", StringComparison.Ordinal)
+        if ((section.Equals("Inventory", StringComparison.Ordinal)
+             || section.Equals("Equipment Board", StringComparison.Ordinal))
             && !CanAccessEquipmentBoard)
         {
             StatusMessage = CanAccessAdminCenter
                 ? "Inventory is not installed in this TechBench database yet."
-                : "Only TechBench Admins can open Inventory.";
+                : "Only TechBench Admins can open Inventory and Equipment Board.";
             return;
         }
 
@@ -951,7 +952,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Domain/AD" => "Showing synchronized local domain and Active Directory information",
             "Connection" => "Showing synchronized WatchGuard connection information",
             "Misc Info" => "Showing remaining synchronized client information",
-            "Inventory" => "Showing shared stock and technician equipment assignments",
+            "Inventory" => "Showing equipment currently available in Stock Room",
+            "Equipment Board" => "Showing stock, technician assignments, and deployment order",
             "Admin Center" => "Showing server synchronization and active TechBench clients",
             _ => $"Showing {section}"
         };
@@ -999,6 +1001,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 RefreshFireDrillCredentials();
                 break;
             case "Inventory":
+            case "Equipment Board":
                 _ = RefreshEquipmentBoardAsync();
                 break;
             case "Admin Center":

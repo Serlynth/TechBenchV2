@@ -293,12 +293,25 @@ public sealed class EquipmentBuildSheetImporterTests
     }
 
     [Fact]
-    public void InventoryWorkspaceUsesTheNewNameAndReviewFirstImport()
+    public void InventoryNavigationSeparatesStockOverviewAndEquipmentBoard()
     {
         var mainWindowXaml = ReadRepositoryFile("MainWindow.xaml");
+        var equipmentViewModel = ReadRepositoryFile(
+            "ViewModels/MainWindowViewModel.Equipment.cs");
 
-        Assert.Contains("Content=\"Inventory\"", mainWindowXaml);
+        Assert.Contains("Content=\"INVENTORY\"", mainWindowXaml);
         Assert.Contains("CommandParameter=\"Inventory\"", mainWindowXaml);
+        Assert.Contains("Style=\"{StaticResource NavInventoryStyle}\"", mainWindowXaml);
+        Assert.Contains("Content=\"Equipment Board\"", mainWindowXaml);
+        Assert.Contains("CommandParameter=\"Equipment Board\"", mainWindowXaml);
+        Assert.Contains("ConverterParameter=Inventory", mainWindowXaml);
+        Assert.Contains("ConverterParameter=Equipment Board", mainWindowXaml);
+        Assert.Contains("ItemsSource=\"{Binding StockInventoryItems}\"", mainWindowXaml);
+        Assert.Contains("CurrentSection = \"Equipment Board\";", equipmentViewModel);
+        Assert.Contains(
+            ".Where(static item => item.IsInStock)",
+            equipmentViewModel);
+        Assert.Contains("StockInventoryItems.Add(item);", equipmentViewModel);
         Assert.Contains("Content=\"Import build sheet\"", mainWindowXaml);
         Assert.Contains(
             "Command=\"{Binding ImportEquipmentBuildSheetCommand}\"",
