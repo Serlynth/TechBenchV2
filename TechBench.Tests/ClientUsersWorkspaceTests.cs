@@ -118,6 +118,10 @@ public sealed class ClientUsersWorkspaceTests
             xaml,
             StringComparison.Ordinal);
         Assert.Contains(
+            "<KeyBinding Key=\"Enter\" Command=\"{Binding SearchClientUsersCommand}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "field with { Value = \"***\" }",
             viewModel,
             StringComparison.Ordinal);
