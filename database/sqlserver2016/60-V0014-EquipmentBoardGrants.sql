@@ -46,5 +46,24 @@ REVOKE EXECUTE ON OBJECT::[tb_service].[ApplyCredentialsClientUserSnapshot]
 REVOKE EXECUTE ON OBJECT::[tb_service].[ApplyCredentialsClientUserSnapshot]
     FROM [tb_preview_reader];
 
+/* Encryption helpers are reachable only through their caller-authorized
+   public procedures and never receive a direct application-role grant. */
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentBoardSecure]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentBoardSecure]
+    FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentBoardSecure]
+    FROM [tb_role_sync_service];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentBoardSecure]
+    FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_security].[EncryptEquipmentAnyDeskPassword]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_security].[EncryptEquipmentAnyDeskPassword]
+    FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_security].[EncryptEquipmentAnyDeskPassword]
+    FROM [tb_role_sync_service];
+REVOKE EXECUTE ON OBJECT::[tb_security].[EncryptEquipmentAnyDeskPassword]
+    FROM [tb_preview_reader];
+
 PRINT N'TechBench V0014 equipment-board grants applied.';
 GO

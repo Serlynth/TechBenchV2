@@ -1021,6 +1021,12 @@ public sealed partial class SqlServer2016SyntaxTests
         var verifySource = File.ReadAllText(Path.Combine(
             sqlDirectory,
             "104-V0015-EquipmentAnyDeskVerify.sql"));
+        var currentUserSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "40-StoredProcedures.sql"));
+        var grantSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "60-V0014-EquipmentBoardGrants.sql"));
 
         Assert.Contains("[AnyDeskNumber] nvarchar(80)", schemaSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("[AnyDeskPasswordEncrypted] varbinary(max)", schemaSource, StringComparison.OrdinalIgnoreCase);
@@ -1028,25 +1034,31 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("@AnyDeskNumber nvarchar(80)", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("@AnyDeskPassword nvarchar(max)", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
-            "CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoard]\nWITH EXECUTE AS OWNER",
+            "CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoardSecure]\nWITH EXECUTE AS OWNER",
             normalizedProcedureSource,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
-            "@ExpectedRowVersion binary(8) = NULL\nWITH EXECUTE AS OWNER",
+            "CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoard]\nAS",
             normalizedProcedureSource,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
-            "IS_ROLEMEMBER(N'tb_role_admin', ORIGINAL_LOGIN())",
-            procedureSource,
+            "@EncryptedValue varbinary(max) OUTPUT\nWITH EXECUTE AS OWNER",
+            normalizedProcedureSource,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
-            "IS_ROLEMEMBER(N'tb_role_admin', ORIGINAL_LOGIN())",
-            File.ReadAllText(Path.Combine(
-                sqlDirectory,
-                "40-StoredProcedures.sql")),
+            "@ExpectedRowVersion binary(8) = NULL\nAS",
+            normalizedProcedureSource,
             StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("EXEC [tb_app].[AdminGetEquipmentBoardSecure]", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("EXEC [tb_security].[EncryptEquipmentAnyDeskPassword]", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("IS_ROLEMEMBER(N'tb_role_admin')", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("IS_ROLEMEMBER(N'tb_role_admin', ORIGINAL_LOGIN())", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("IS_ROLEMEMBER(N'tb_role_admin')", currentUserSource, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("IS_ROLEMEMBER(N'tb_role_admin', ORIGINAL_LOGIN())", currentUserSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("EncryptByKey", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("DecryptByKeyAutoCert", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("AdminGetEquipmentBoardSecure", grantSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("EncryptEquipmentAnyDeskPassword", grantSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
             "CAST(N'' AS nvarchar(max)) AS [AnyDeskPassword]",
             procedureSource,
@@ -1056,7 +1068,11 @@ public sealed partial class SqlServer2016SyntaxTests
             verifySource,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
-            "current-user role detection does not preserve the authenticated caller",
+            "current-user role detection is not running in the authenticated caller context",
+            verifySource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "encryption helper has a direct application-role grant",
             verifySource,
             StringComparison.OrdinalIgnoreCase);
 

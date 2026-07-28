@@ -48,35 +48,67 @@ END;
 
 DECLARE @AdminReadDefinition nvarchar(max)=
     COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminGetEquipmentBoard', N'P')), N'');
+DECLARE @SecureReadDefinition nvarchar(max)=
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminGetEquipmentBoardSecure', N'P')), N'');
 DECLARE @AdminSaveDefinition nvarchar(max)=
     COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminSaveEquipment', N'P')), N'');
+DECLARE @EncryptDefinition nvarchar(max)=
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_security.EncryptEquipmentAnyDeskPassword', N'P')), N'');
 DECLARE @EnsureCurrentUserDefinition nvarchar(max)=
     COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_security.EnsureCurrentUser', N'P')), N'');
 
-IF CHARINDEX(N'equipment.[AnyDeskNumber]', @AdminReadDefinition)=0
-   OR CHARINDEX(N'DecryptByKeyAutoCert', @AdminReadDefinition)=0
-   OR CHARINDEX(N'WITH EXECUTE AS OWNER', @AdminReadDefinition)=0
-   OR CHARINDEX(
-        N'IS_ROLEMEMBER(N''tb_role_admin'', ORIGINAL_LOGIN())',
-        @AdminReadDefinition)=0
+IF CHARINDEX(N'IS_ROLEMEMBER(N''tb_role_admin'')', @AdminReadDefinition)=0
+   OR CHARINDEX(N'AdminGetEquipmentBoardSecure', @AdminReadDefinition)=0
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER', @AdminReadDefinition)>0
+   OR CHARINDEX(N'equipment.[AnyDeskNumber]', @SecureReadDefinition)=0
+   OR CHARINDEX(N'DecryptByKeyAutoCert', @SecureReadDefinition)=0
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER', @SecureReadDefinition)=0
    OR CHARINDEX(N'@AnyDeskNumber nvarchar(80)', @AdminSaveDefinition)=0
    OR CHARINDEX(N'@AnyDeskPassword nvarchar(max)', @AdminSaveDefinition)=0
-   OR CHARINDEX(N'WITH EXECUTE AS OWNER', @AdminSaveDefinition)=0
-   OR CHARINDEX(
-        N'IS_ROLEMEMBER(N''tb_role_admin'', ORIGINAL_LOGIN())',
-        @AdminSaveDefinition)=0
-   OR CHARINDEX(N'EncryptByKey', @AdminSaveDefinition)=0
+   OR CHARINDEX(N'IS_ROLEMEMBER(N''tb_role_admin'')', @AdminSaveDefinition)=0
+   OR CHARINDEX(N'EncryptEquipmentAnyDeskPassword', @AdminSaveDefinition)=0
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER', @AdminSaveDefinition)>0
    OR CHARINDEX(N'[AnyDeskPasswordEncrypted]', @AdminSaveDefinition)=0
+   OR CHARINDEX(N'EncryptByKey', @EncryptDefinition)=0
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER', @EncryptDefinition)=0
 BEGIN
-    PRINT N'FAIL: Admin equipment reads/saves do not securely round-trip AnyDesk details under the procedure owner while preserving caller authorization.';
+    PRINT N'FAIL: caller-authorized Admin equipment procedures do not securely delegate AnyDesk cryptography to owner-executed helpers.';
     SET @FailureCount+=1;
 END;
 
 IF CHARINDEX(
-    N'IS_ROLEMEMBER(N''tb_role_admin'', ORIGINAL_LOGIN())',
+    N'IS_ROLEMEMBER(N''tb_role_admin'')',
     @EnsureCurrentUserDefinition)=0
+   OR CHARINDEX(
+        N'IS_ROLEMEMBER(N''tb_role_admin'', ORIGINAL_LOGIN())',
+        @EnsureCurrentUserDefinition)>0
 BEGIN
-    PRINT N'FAIL: current-user role detection does not preserve the authenticated caller under owner-executed encryption procedures.';
+    PRINT N'FAIL: current-user role detection is not running in the authenticated caller context required for Windows group membership.';
+    SET @FailureCount+=1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions AS permission
+    WHERE permission.[class]=1
+      AND permission.[major_id] IN
+      (
+          OBJECT_ID(N'tb_app.AdminGetEquipmentBoardSecure', N'P'),
+          OBJECT_ID(N'tb_security.EncryptEquipmentAnyDeskPassword', N'P')
+      )
+      AND permission.[permission_name]=N'EXECUTE'
+      AND permission.[state] IN (N'G', N'W')
+      AND permission.[grantee_principal_id] IN
+      (
+          USER_ID(N'tb_role_user'),
+          USER_ID(N'tb_role_admin'),
+          USER_ID(N'tb_role_sync_service'),
+          USER_ID(N'tb_preview_reader')
+      )
+)
+BEGIN
+    PRINT N'FAIL: an owner-executed equipment encryption helper has a direct application-role grant.';
     SET @FailureCount+=1;
 END;
 
