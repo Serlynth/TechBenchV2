@@ -1017,6 +1017,7 @@ public sealed partial class SqlServer2016SyntaxTests
         var procedureSource = File.ReadAllText(Path.Combine(
             sqlDirectory,
             "54-V0014-EquipmentBoardProcedures.sql"));
+        var normalizedProcedureSource = procedureSource.Replace("\r\n", "\n");
         var verifySource = File.ReadAllText(Path.Combine(
             sqlDirectory,
             "104-V0015-EquipmentAnyDeskVerify.sql"));
@@ -1028,11 +1029,11 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("@AnyDeskPassword nvarchar(max)", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
             "CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoard]\nWITH EXECUTE AS OWNER",
-            procedureSource,
+            normalizedProcedureSource,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
             "@ExpectedRowVersion binary(8) = NULL\nWITH EXECUTE AS OWNER",
-            procedureSource,
+            normalizedProcedureSource,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
             "IS_ROLEMEMBER(N'tb_role_admin', ORIGINAL_LOGIN())",
