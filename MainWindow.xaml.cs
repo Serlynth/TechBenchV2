@@ -535,9 +535,23 @@ public partial class MainWindow : Window
             Owner = this,
             DataContext = viewModel.CreateClientInfoProfile(summary)
         };
+        profileWindow.EquipmentOpenRequested += async (_, equipment) =>
+            await viewModel.OpenEquipmentFromInventoryAsync(equipment);
         profileWindow.Show();
         profileWindow.Activate();
         e.Handled = true;
+    }
+
+    private async void OpenEquipmentFromInventory_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button { DataContext: EquipmentItem equipment }
+            && DataContext is MainWindowViewModel viewModel)
+        {
+            await viewModel.OpenEquipmentFromInventoryAsync(equipment);
+            e.Handled = true;
+        }
     }
 
     public MainWindow(

@@ -71,6 +71,8 @@ public sealed partial class SqlServerTechBenchRepository
                 AddText(command, "@IpAddress", 80, equipment.IpAddress);
                 AddText(command, "@Manufacturer", 120, equipment.Manufacturer);
                 AddText(command, "@Model", 120, equipment.Model);
+                AddText(command, "@AnyDeskNumber", 80, equipment.AnyDeskNumber);
+                AddMaxText(command, "@AnyDeskPassword", equipment.AnyDeskPassword);
                 AddInt(command, "@ClientId", equipment.ClientId);
                 AddBigInt(command, "@ClientUserId", equipment.ClientUserId);
                 AddText(command, "@LocationName", 240, equipment.LocationName);
@@ -149,6 +151,8 @@ public sealed partial class SqlServerTechBenchRepository
         IpAddress = GetString(reader, "IpAddress"),
         Manufacturer = GetString(reader, "Manufacturer"),
         Model = GetString(reader, "Model"),
+        AnyDeskNumber = GetString(reader, "AnyDeskNumber"),
+        AnyDeskPassword = GetString(reader, "AnyDeskPassword"),
         ClientId = GetNullableInt32(reader, "ClientId"),
         ClientName = GetString(reader, "ClientName"),
         ClientUserId = GetNullableInt64(reader, "ClientUserId"),

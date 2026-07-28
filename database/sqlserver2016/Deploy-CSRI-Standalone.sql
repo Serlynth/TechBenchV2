@@ -3642,6 +3642,66 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 34-V0015-EquipmentAnyDeskSchema.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.EquipmentBoard.0014'
+      AND [SchemaVersion] = 14
+)
+BEGIN
+    RAISERROR(N'V0014 must be installed before equipment AnyDesk schema version 15.', 16, 1);
+    RETURN;
+END;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF COL_LENGTH(N'tb_inventory.Equipment', N'AnyDeskNumber') IS NULL
+        ALTER TABLE [tb_inventory].[Equipment]
+            ADD [AnyDeskNumber] nvarchar(80) NULL;
+
+    IF COL_LENGTH(N'tb_inventory.Equipment', N'AnyDeskPasswordEncrypted') IS NULL
+        ALTER TABLE [tb_inventory].[Equipment]
+            ADD [AnyDeskPasswordEncrypted] varbinary(max) NULL;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_deploy].[SchemaMigrations]
+        WHERE [MigrationId] = N'SqlServer2016.EquipmentAnyDesk.0015'
+    )
+        INSERT INTO [tb_deploy].[SchemaMigrations]
+            ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+        VALUES
+            (N'SqlServer2016.EquipmentAnyDesk.0015', 15, N'0.5.76', NULL);
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+PRINT N'SqlServer2016.EquipmentAnyDesk.0015 installed.';
+GO
+
+-- ============================================================================
+-- END 34-V0015-EquipmentAnyDeskSchema.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 30-Security.sql
 -- ============================================================================
 
@@ -21447,7 +21507,7 @@ BEGIN
         @IsSyncOperator=@IsSyncOperator OUTPUT;
 
     SELECT
-        CONVERT(int, 14) AS [SchemaVersion],
+        CONVERT(int, 15) AS [SchemaVersion],
         CONVERT(bit, 0) AS [FullTextSearchAvailable],
         CONVERT(bit, 1) AS [SupportsTickets],
         CONVERT(bit, 1) AS [SupportsWorkEntries],
@@ -21547,6 +21607,8 @@ BEGIN
         equipment.[IpAddress],
         equipment.[Manufacturer],
         equipment.[Model],
+        equipment.[AnyDeskNumber],
+        CAST(N'' AS nvarchar(max)) AS [AnyDeskPassword],
         equipment.[ClientId],
         COALESCE(client.[Name], equipment.[ClientName]) AS [ClientName],
         equipment.[ClientUserId],
@@ -21615,6 +21677,13 @@ BEGIN
         equipment.[IpAddress],
         equipment.[Manufacturer],
         equipment.[Model],
+        equipment.[AnyDeskNumber],
+        CONVERT(nvarchar(max), DecryptByKeyAutoCert(
+            CERT_ID(N'tb_FireDrillCredentialCertificate'),
+            NULL,
+            equipment.[AnyDeskPasswordEncrypted],
+            1,
+            CONVERT(nvarchar(20), equipment.[EquipmentId]))) AS [AnyDeskPassword],
         equipment.[ClientId],
         COALESCE(client.[Name], equipment.[ClientName]) AS [ClientName],
         equipment.[ClientUserId],
@@ -21665,6 +21734,8 @@ CREATE PROCEDURE [tb_app].[AdminSaveEquipment]
     @IpAddress nvarchar(80) = NULL,
     @Manufacturer nvarchar(120) = NULL,
     @Model nvarchar(120) = NULL,
+    @AnyDeskNumber nvarchar(80) = NULL,
+    @AnyDeskPassword nvarchar(max) = NULL,
     @ClientId int = NULL,
     @ClientUserId bigint = NULL,
     @LocationName nvarchar(240) = NULL,
@@ -21694,6 +21765,8 @@ BEGIN
     SET @IpAddress = NULLIF(LTRIM(RTRIM(@IpAddress)), N'');
     SET @Manufacturer = NULLIF(LTRIM(RTRIM(@Manufacturer)), N'');
     SET @Model = NULLIF(LTRIM(RTRIM(@Model)), N'');
+    SET @AnyDeskNumber = NULLIF(LTRIM(RTRIM(@AnyDeskNumber)), N'');
+    SET @AnyDeskPassword = NULLIF(@AnyDeskPassword, N'');
     SET @ClientId = NULLIF(@ClientId, 0);
     SET @ClientUserId = NULLIF(@ClientUserId, 0);
     SET @LocationName = NULLIF(LTRIM(RTRIM(@LocationName)), N'');
@@ -21729,6 +21802,9 @@ BEGIN
         WHERE [Id] = @ClientId
     );
 
+    OPEN SYMMETRIC KEY [tb_FireDrillCredentialKey]
+        DECRYPTION BY CERTIFICATE [tb_FireDrillCredentialCertificate];
+
     IF @EquipmentId IS NULL
     BEGIN
         DECLARE @NextStockOrder int =
@@ -21755,6 +21831,20 @@ BEGIN
         );
 
         SET @EquipmentId = SCOPE_IDENTITY();
+
+        UPDATE [tb_inventory].[Equipment]
+        SET
+            [AnyDeskNumber] = @AnyDeskNumber,
+            [AnyDeskPasswordEncrypted] =
+                CASE
+                    WHEN @AnyDeskPassword IS NULL THEN NULL
+                    ELSE EncryptByKey(
+                        Key_GUID(N'tb_FireDrillCredentialKey'),
+                        CONVERT(varbinary(max), @AnyDeskPassword),
+                        1,
+                        CONVERT(nvarchar(20), @EquipmentId))
+                END
+        WHERE [EquipmentId] = @EquipmentId;
 
         INSERT INTO [tb_inventory].[EquipmentAssignmentHistory]
         (
@@ -21798,6 +21888,16 @@ BEGIN
             [IpAddress]=@IpAddress,
             [Manufacturer]=@Manufacturer,
             [Model]=@Model,
+            [AnyDeskNumber]=@AnyDeskNumber,
+            [AnyDeskPasswordEncrypted]=
+                CASE
+                    WHEN @AnyDeskPassword IS NULL THEN NULL
+                    ELSE EncryptByKey(
+                        Key_GUID(N'tb_FireDrillCredentialKey'),
+                        CONVERT(varbinary(max), @AnyDeskPassword),
+                        1,
+                        CONVERT(nvarchar(20), @EquipmentId))
+                END,
             [ClientId]=@ClientId,
             [ClientName]=@ClientName,
             [ClientUserId]=@ClientUserId,
@@ -21850,6 +21950,13 @@ BEGIN
         equipment.[IpAddress],
         equipment.[Manufacturer],
         equipment.[Model],
+        equipment.[AnyDeskNumber],
+        CONVERT(nvarchar(max), DecryptByKeyAutoCert(
+            CERT_ID(N'tb_FireDrillCredentialCertificate'),
+            NULL,
+            equipment.[AnyDeskPasswordEncrypted],
+            1,
+            CONVERT(nvarchar(20), equipment.[EquipmentId]))) AS [AnyDeskPassword],
         equipment.[ClientId],
         COALESCE(client.[Name], equipment.[ClientName]) AS [ClientName],
         equipment.[ClientUserId],
@@ -21873,6 +21980,8 @@ BEGIN
     LEFT JOIN [tb_inventory].[ClientUsers] AS client_user
         ON client_user.[ClientUserId] = equipment.[ClientUserId]
     WHERE equipment.[EquipmentId] = @EquipmentId;
+
+    CLOSE SYMMETRIC KEY [tb_FireDrillCredentialKey];
 END;
 GO
 
@@ -24132,7 +24241,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)
+IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -24888,7 +24997,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)
+IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: V0003 verification supports installed schema version 3, 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -25372,7 +25481,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)
+IF @InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: V0004 verification supports installed schema version 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -26090,7 +26199,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10, 11, 12, 13, 14)
+IF @InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: V0005 verification supports installed schema version 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -27297,7 +27406,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (6, 7, 8, 9, 10, 11, 12, 13, 14)
+IF @InstalledSchemaVersion NOT IN (6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: V0006 verification supports installed schema version 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -27884,7 +27993,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (7, 8, 9, 10, 11, 12, 13, 14)
+IF @InstalledSchemaVersion NOT IN (7, 8, 9, 10, 11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: V0007 verification supports installed schema version 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -28552,7 +28661,7 @@ IF NOT EXISTS
 )
 BEGIN PRINT N'FAIL: V0008 migration marker is missing or invalid.'; SET @FailureCount+=1; END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (8, 9, 10, 11, 12, 13, 14)
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (8, 9, 10, 11, 12, 13, 14, 15)
 BEGIN PRINT N'FAIL: installed schema version is not supported by V0008 verification.'; SET @FailureCount+=1; END;
 
 DECLARE @Objects TABLE([Name] nvarchar(300) PRIMARY KEY,[Type] char(2));
@@ -28661,7 +28770,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (9, 10, 11, 12, 13, 14)
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (9, 10, 11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: installed schema version is not 9.';
     SET @FailureCount += 1;
@@ -28696,6 +28805,7 @@ IF CHARINDEX(N'CONVERT(int, 11) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID
    AND CHARINDEX(N'CONVERT(int, 12) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
    AND CHARINDEX(N'CONVERT(int, 13) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
    AND CHARINDEX(N'CONVERT(int, 14) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+   AND CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
 BEGIN
     PRINT N'FAIL: GetRepositoryCapabilities does not report the final schema version.';
     SET @FailureCount += 1;
@@ -28741,7 +28851,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (10, 11, 12, 13, 14)
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (10, 11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: installed schema version is not 10 or 11.';
     SET @FailureCount += 1;
@@ -28854,7 +28964,9 @@ IF CHARINDEX(N'CONVERT(int, 11) AS [SchemaVersion]',
    AND CHARINDEX(N'CONVERT(int, 13) AS [SchemaVersion]',
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
    AND CHARINDEX(N'CONVERT(int, 14) AS [SchemaVersion]',
-    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+   AND CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
 BEGIN
     PRINT N'FAIL: GetRepositoryCapabilities does not report a supported final schema version.';
     SET @FailureCount += 1;
@@ -28900,7 +29012,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (11, 12, 13, 14)
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: installed schema version is not 11 or 12.';
     SET @FailureCount += 1;
@@ -28974,7 +29086,9 @@ IF CHARINDEX(N'CONVERT(int, 11) AS [SchemaVersion]',
    AND CHARINDEX(N'CONVERT(int, 13) AS [SchemaVersion]',
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
    AND CHARINDEX(N'CONVERT(int, 14) AS [SchemaVersion]',
-    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+   AND CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
 BEGIN
     PRINT N'FAIL: GetRepositoryCapabilities does not report a supported final schema version.';
     SET @FailureCount += 1;
@@ -29036,6 +29150,7 @@ DECLARE @RevealDefinition nvarchar(max)=
 IF CHARINDEX(N'CONVERT(int, 12) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition,N''))=0
    AND CHARINDEX(N'CONVERT(int, 13) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition,N''))=0
    AND CHARINDEX(N'CONVERT(int, 14) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition,N''))=0
+   AND CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition,N''))=0
 BEGIN
     PRINT N'FAIL: repository capabilities do not report a supported final schema version.';
     SET @FailureCount+=1;
@@ -29151,6 +29266,7 @@ DECLARE @ApplyDefinition nvarchar(max) =
 
 IF CHARINDEX(N'CONVERT(int, 13) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition, N'')) = 0
    AND CHARINDEX(N'CONVERT(int, 14) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition, N'')) = 0
+   AND CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition, N'')) = 0
 BEGIN
     PRINT N'FAIL: repository capabilities do not report schema version 13 or 14.';
     SET @FailureCount += 1;
@@ -29407,6 +29523,7 @@ DECLARE @RepositoryCapabilitiesDefinition nvarchar(max)=
     COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P')), N'');
 
 IF CHARINDEX(N'CONVERT(int, 14) AS [SchemaVersion]', @RepositoryCapabilitiesDefinition)=0
+   AND CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]', @RepositoryCapabilitiesDefinition)=0
 BEGIN
     PRINT N'FAIL: repository capabilities do not report schema version 14.';
     SET @FailureCount+=1;
@@ -29549,6 +29666,91 @@ GO
 
 -- ============================================================================
 -- END 103-V0014-EquipmentBoardVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 104-V0015-EquipmentAnyDeskVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @FailureCount int=0;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId]=N'SqlServer2016.EquipmentAnyDesk.0015'
+      AND [SchemaVersion]=15
+)
+BEGIN
+    PRINT N'FAIL: V0015 equipment AnyDesk migration is not installed.';
+    SET @FailureCount+=1;
+END;
+
+IF COL_LENGTH(N'tb_inventory.Equipment', N'AnyDeskNumber') IS NULL
+   OR COL_LENGTH(N'tb_inventory.Equipment', N'AnyDeskPasswordEncrypted') IS NULL
+BEGIN
+    PRINT N'FAIL: one or more equipment AnyDesk columns are missing.';
+    SET @FailureCount+=1;
+END;
+
+DECLARE @CapabilitiesDefinition nvarchar(max)=
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P')), N'');
+IF CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]', @CapabilitiesDefinition)=0
+BEGIN
+    PRINT N'FAIL: repository capabilities do not report schema version 15.';
+    SET @FailureCount+=1;
+END;
+
+DECLARE @InventoryDefinition nvarchar(max)=
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetEquipmentInventory', N'P')), N'');
+IF CHARINDEX(N'equipment.[AnyDeskNumber]', @InventoryDefinition)=0
+   OR CHARINDEX(N'CAST(N'''' AS nvarchar(max)) AS [AnyDeskPassword]', @InventoryDefinition)=0
+   OR CHARINDEX(N'DecryptByKey', @InventoryDefinition)>0
+   OR CHARINDEX(N'[AnyDeskPasswordEncrypted]', @InventoryDefinition)>0
+BEGIN
+    PRINT N'FAIL: shared inventory reads do not expose the number while keeping the AnyDesk password private.';
+    SET @FailureCount+=1;
+END;
+
+DECLARE @AdminReadDefinition nvarchar(max)=
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminGetEquipmentBoard', N'P')), N'');
+DECLARE @AdminSaveDefinition nvarchar(max)=
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminSaveEquipment', N'P')), N'');
+
+IF CHARINDEX(N'equipment.[AnyDeskNumber]', @AdminReadDefinition)=0
+   OR CHARINDEX(N'DecryptByKeyAutoCert', @AdminReadDefinition)=0
+   OR CHARINDEX(N'@AnyDeskNumber nvarchar(80)', @AdminSaveDefinition)=0
+   OR CHARINDEX(N'@AnyDeskPassword nvarchar(max)', @AdminSaveDefinition)=0
+   OR CHARINDEX(N'EncryptByKey', @AdminSaveDefinition)=0
+   OR CHARINDEX(N'[AnyDeskPasswordEncrypted]', @AdminSaveDefinition)=0
+BEGIN
+    PRINT N'FAIL: Admin equipment reads/saves do not securely round-trip AnyDesk details.';
+    SET @FailureCount+=1;
+END;
+
+IF CHARINDEX(N'[AnyDeskPassword] nvarchar', @AdminSaveDefinition)>0
+   OR COL_LENGTH(N'tb_inventory.Equipment', N'AnyDeskPassword') IS NOT NULL
+BEGIN
+    PRINT N'FAIL: an AnyDesk password can be persisted as plaintext.';
+    SET @FailureCount+=1;
+END;
+
+IF @FailureCount>0
+    THROW 52221, N'TechBench V0015 equipment AnyDesk verification failed.', 1;
+
+PRINT N'TechBench V0015 equipment AnyDesk verification passed.';
+GO
+
+-- ============================================================================
+-- END 104-V0015-EquipmentAnyDeskVerify.sql
 -- ============================================================================
 
 PRINT N'TechBench deployment completed successfully on CSRI-SQL.';

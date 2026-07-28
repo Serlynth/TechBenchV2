@@ -30,6 +30,7 @@ $orderedScripts = @(
     '31-V0012-FlexibleCredentialFieldsSchema.sql'
     '32-V0013-WhdClientContactDetailsSchema.sql'
     '33-V0014-EquipmentBoardSchema.sql'
+    '34-V0015-EquipmentAnyDeskSchema.sql'
     '30-Security.sql'
     '40-StoredProcedures.sql'
     '41-V0002-WorkProcedures.sql'
@@ -71,6 +72,7 @@ $orderedScripts = @(
     '101-V0012-FlexibleCredentialFieldsVerify.sql'
     '102-V0013-WhdClientContactDetailsVerify.sql'
     '103-V0014-EquipmentBoardVerify.sql'
+    '104-V0015-EquipmentAnyDeskVerify.sql'
 )
 
 $sections = [System.Collections.Generic.List[string]]::new()

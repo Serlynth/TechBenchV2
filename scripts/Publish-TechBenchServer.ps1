@@ -13,7 +13,7 @@ param(
     [string]$RepositoryUrl = 'https://github.com/Serlynth/TechBenchV2-Releases',
 
     [ValidateRange(1, 2147483647)]
-    [int]$RequiredDatabaseSchemaVersion = 14,
+    [int]$RequiredDatabaseSchemaVersion = 15,
 
     [switch]$Publish,
 

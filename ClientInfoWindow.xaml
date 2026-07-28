@@ -257,14 +257,20 @@
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Border Width="344"
+                                    <Button Width="344"
                                             MinHeight="150"
                                             Margin="0,0,16,16"
-                                            Background="{DynamicResource PanelBackgroundBrush}"
-                                            BorderBrush="{DynamicResource BorderBrush}"
-                                            BorderThickness="1"
-                                            CornerRadius="12"
-                                            Padding="16,14">
+                                            Padding="0"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            Cursor="Hand"
+                                            ToolTip="Open this device in Equipment Board"
+                                            Click="EquipmentCard_Click">
+                                      <Border Background="{DynamicResource PanelBackgroundBrush}"
+                                              BorderBrush="{DynamicResource BorderBrush}"
+                                              BorderThickness="1"
+                                              CornerRadius="12"
+                                              Padding="16,14">
                                         <Grid>
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="Auto" />
@@ -348,7 +354,8 @@
                                                            Margin="10,0,0,0" />
                                             </Grid>
                                         </Grid>
-                                    </Border>
+                                      </Border>
+                                    </Button>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>

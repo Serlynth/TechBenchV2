@@ -8,7 +8,7 @@ namespace TechBench.ServerManager;
 internal sealed class SqlAdminRepository(AppPaths paths)
 {
     internal const int MinimumSupportedSchemaVersion = 13;
-    internal const int MaximumSupportedSchemaVersion = 14;
+    internal const int MaximumSupportedSchemaVersion = 15;
     public SynchronizationConfiguration Load()
     {
         using var connection = OpenAdminConnection();
