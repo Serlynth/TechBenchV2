@@ -738,7 +738,6 @@ public sealed partial class MainWindowViewModel
         EquipmentModel = import.Model;
 
         var warnings = new List<string>();
-        var retainedDetails = new List<string>();
         var client = EquipmentBuildSheetImporter.FindClient(
             import.Customer,
             InventoryClientOptions);
@@ -746,7 +745,6 @@ public sealed partial class MainWindowViewModel
         if (!string.IsNullOrWhiteSpace(import.Customer) && client is null)
         {
             warnings.Add($"customer “{import.Customer}”");
-            retainedDetails.Add($"Build sheet customer: {import.Customer}");
         }
 
         var clientUser = EquipmentBuildSheetImporter.FindClientUser(
@@ -758,14 +756,9 @@ public sealed partial class MainWindowViewModel
             && clientUser is null)
         {
             warnings.Add("end user");
-            var endUserLine = string.Join(
-                " · ",
-                new[] { import.EndUser, import.EmailAddress }
-                    .Where(static value => !string.IsNullOrWhiteSpace(value)));
-            retainedDetails.Add($"Build sheet end user: {endUserLine}");
         }
 
-        EquipmentNotes = string.Join(Environment.NewLine, retainedDetails);
+        EquipmentNotes = string.Empty;
         var warningText = warnings.Count == 0
             ? string.Empty
             : $" Unmatched: {string.Join("; ", warnings)}. You can choose them before saving.";

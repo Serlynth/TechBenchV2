@@ -27,6 +27,11 @@ public sealed class EquipmentBuildSheetImporter
         "LLC", "LLP", "LTD", "LIMITED", "PC", "PLLC"
     ];
 
+    private static readonly HashSet<string> OrganizationConnectorWords =
+    [
+        "AND"
+    ];
+
     private static readonly Regex FieldPattern = new(
         @"^\s*(?<label>customer(?:\s+name)?|machine\s+name|machine|s\s*/?\s*n|serial\s+number|end\s+user|email\s+address)\s*(?:(?:[:\-–—])\s*(?<value>.*))?\s*$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
@@ -137,13 +142,14 @@ public sealed class EquipmentBuildSheetImporter
         IEnumerable<InventoryClient> clients)
     {
         ArgumentNullException.ThrowIfNull(clients);
+        var clientList = clients.ToList();
         var normalizedCustomer = NormalizeIdentity(customer);
         if (normalizedCustomer.Length == 0)
         {
             return null;
         }
 
-        var matches = clients
+        var matches = clientList
             .Where(client =>
                 NormalizeIdentity(client.Name) == normalizedCustomer)
             .Take(2)
@@ -159,14 +165,14 @@ public sealed class EquipmentBuildSheetImporter
         }
 
         var organization = NormalizeOrganization(customer);
-        var organizationMatches = clients
+        var organizationMatches = clientList
             .Where(client =>
                 NormalizeOrganization(client.Name) == organization)
             .Take(2)
             .ToList();
         return organization.Length > 0 && organizationMatches.Count == 1
             ? organizationMatches[0]
-            : null;
+            : FindFuzzyClient(customer, clientList);
     }
 
     internal static InventoryClientUser? FindClientUser(
@@ -323,9 +329,14 @@ public sealed class EquipmentBuildSheetImporter
 
     private static string NormalizeOrganization(string? value)
     {
+        return string.Join(' ', GetOrganizationWords(value));
+    }
+
+    private static IReadOnlyList<string> GetOrganizationWords(string? value)
+    {
         if (string.IsNullOrWhiteSpace(value))
         {
-            return string.Empty;
+            return [];
         }
 
         var builder = new StringBuilder(value.Length);
@@ -362,7 +373,59 @@ public sealed class EquipmentBuildSheetImporter
             words.RemoveAt(words.Count - 1);
         }
 
-        return string.Join(' ', words);
+        words.RemoveAll(OrganizationConnectorWords.Contains);
+        return words;
+    }
+
+    private static InventoryClient? FindFuzzyClient(
+        string customer,
+        IEnumerable<InventoryClient> clients)
+    {
+        var customerWords = GetOrganizationWords(customer)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (customerWords.Count < 2)
+        {
+            return null;
+        }
+
+        var candidates = clients
+            .Select(client =>
+            {
+                var clientWords = GetOrganizationWords(client.Name)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var sharedWordCount = customerWords.Count(
+                    clientWords.Contains);
+                var customerCoverage =
+                    (double)sharedWordCount / customerWords.Count;
+                var clientCoverage = clientWords.Count == 0
+                    ? 0d
+                    : (double)sharedWordCount / clientWords.Count;
+                return new
+                {
+                    Client = client,
+                    SharedWordCount = sharedWordCount,
+                    CustomerCoverage = customerCoverage,
+                    Score = (customerCoverage * 0.70d)
+                        + (clientCoverage * 0.30d)
+                };
+            })
+            .Where(candidate =>
+                candidate.SharedWordCount >= 2
+                && candidate.CustomerCoverage >= 0.75d
+                && candidate.Score >= 0.78d)
+            .OrderByDescending(static candidate => candidate.Score)
+            .ThenByDescending(static candidate => candidate.SharedWordCount)
+            .Take(2)
+            .ToList();
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        return candidates.Count == 1
+               || candidates[0].Score - candidates[1].Score >= 0.05d
+            ? candidates[0].Client
+            : null;
     }
 
     private static string DisplayLabel(string key) =>

@@ -139,6 +139,59 @@ public sealed class EquipmentBuildSheetImporterTests
     }
 
     [Fact]
+    public void CustomerMatchIgnoresConnectorsAndPrefersTheClosestClientName()
+    {
+        var directClient = new InventoryClient
+        {
+            ClientId = 7,
+            Name = "Marrone O'Rourke"
+        };
+        var expandedClient = new InventoryClient
+        {
+            ClientId = 8,
+            Name = "Teeters Harvey Marrone & O'Rourke LLP"
+        };
+
+        var match = EquipmentBuildSheetImporter.FindClient(
+            "Marrone and O'Rourke",
+            [expandedClient, directClient]);
+
+        Assert.Same(directClient, match);
+    }
+
+    [Fact]
+    public void CustomerMatchUsesConfidentSharedWordsInLongerClientName()
+    {
+        var expectedClient = new InventoryClient
+        {
+            ClientId = 8,
+            Name = "Teeters Harvey Marrone & O'Rourke LLP"
+        };
+        var unrelatedClient = new InventoryClient
+        {
+            ClientId = 9,
+            Name = "Teeters Harvey Smith & Jones LLP"
+        };
+
+        var match = EquipmentBuildSheetImporter.FindClient(
+            "Marrone & O'Rourke",
+            [unrelatedClient, expectedClient]);
+
+        Assert.Same(expectedClient, match);
+    }
+
+    [Fact]
+    public void BuildSheetImportNeverAddsUnmatchedValuesToEquipmentNotes()
+    {
+        var source = ReadRepositoryFile(
+            "ViewModels/MainWindowViewModel.Equipment.cs");
+
+        Assert.Contains("EquipmentNotes = string.Empty;", source);
+        Assert.DoesNotContain("Build sheet customer:", source);
+        Assert.DoesNotContain("Build sheet end user:", source);
+    }
+
+    [Fact]
     public void ConflictingLabeledValuesAreRejected()
     {
         IReadOnlyList<string>[] rows =
