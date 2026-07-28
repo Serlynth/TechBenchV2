@@ -78,6 +78,11 @@ public sealed class ClientInfoProfileWindowTests
         Assert.Contains("Text=\"CLIENT INVENTORY\"", profileXaml, StringComparison.Ordinal);
         Assert.Contains("ItemsSource=\"{Binding Equipment}\"", profileXaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"EquipmentCard_Click\"", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"CLIENT USERS\"", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding ClientUsers}\"", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("SelectedItem=\"{Binding SelectedClientUser}\"", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Reveal Accounts\"", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding ClientUserAccountGroups}\"", profileXaml, StringComparison.Ordinal);
         Assert.Contains(
             "EquipmentOpenRequested += async",
             mainWindowCode,
@@ -116,6 +121,76 @@ public sealed class ClientInfoProfileWindowTests
         Assert.False(profile.HasFields);
         Assert.Equal("1 inventory item", profile.EquipmentCountLabel);
         Assert.Same(equipment, Assert.Single(profile.Equipment));
+    }
+
+    [Fact]
+    public void FullProfileListsClientUsersAndProtectsTheirAccountDetails()
+    {
+        var summary = new FireDrillCredentialSummary(
+            42,
+            "Acme Test",
+            string.Empty,
+            string.Empty,
+            DateTime.UtcNow,
+            []);
+        var maskedUser = new ClientUserSummary(
+            88,
+            12,
+            "Acme Test",
+            "Jamie Rivera",
+            "Operations",
+            "jamie@example.test",
+            "610-555-0188",
+            "Headquarters",
+            DateTime.UtcNow,
+            1,
+            [
+                new ClientUserAccountGroup(
+                    "Microsoft 365",
+                    0,
+                    [Field("Password", 0, string.Empty)])
+            ]);
+        var revealedUser = maskedUser with
+        {
+            Accounts =
+            [
+                new ClientUserAccountGroup(
+                    "Microsoft 365",
+                    0,
+                    [Field("Password", 0, "private-value")])
+            ]
+        };
+        var profile = new ClientInfoProfileViewModel(
+            summary,
+            _ => null,
+            clientUsers: [maskedUser],
+            revealClientUser: _ => revealedUser);
+
+        Assert.True(profile.HasClientUsers);
+        Assert.True(profile.HasProfileContent);
+        Assert.Equal("1 synchronized user", profile.ClientUserCountLabel);
+
+        profile.SelectedClientUser = maskedUser;
+
+        Assert.True(profile.HasSelectedClientUser);
+        Assert.False(profile.IsClientUserRevealed);
+        Assert.All(
+            profile.ClientUserAccountGroups.SelectMany(group => group.Fields),
+            field => Assert.Equal("***", field.Value));
+
+        profile.RevealClientUserCommand.Execute(null);
+
+        Assert.True(profile.IsClientUserRevealed);
+        Assert.Contains(
+            profile.ClientUserAccountGroups.SelectMany(group => group.Fields),
+            field => field.Value == "private-value");
+
+        profile.HideClientUserCommand.Execute(null);
+
+        Assert.False(profile.IsClientUserRevealed);
+        Assert.All(
+            profile.ClientUserAccountGroups.SelectMany(group => group.Fields),
+            field => Assert.Equal("***", field.Value));
     }
 
     [Fact]

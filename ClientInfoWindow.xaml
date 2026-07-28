@@ -107,6 +107,10 @@
                             <Border Style="{StaticResource ProfileBadgeStyle}">
                                 <TextBlock Text="{Binding GroupCountLabel}" Foreground="#EAF3FF" FontSize="12" />
                             </Border>
+                            <Border Style="{StaticResource ProfileBadgeStyle}"
+                                    Visibility="{Binding HasClientUsers, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <TextBlock Text="{Binding ClientUserCountLabel}" Foreground="#EAF3FF" FontSize="12" />
+                            </Border>
                             <Border Style="{StaticResource ProfileBadgeStyle}">
                                 <TextBlock Text="{Binding LastSyncedLabel}" Foreground="#EAF3FF" FontSize="12" />
                             </Border>
@@ -359,6 +363,283 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
+                    </StackPanel>
+
+                    <StackPanel Margin="0,0,0,24"
+                                Visibility="{Binding HasClientUsers, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Grid Margin="2,0,18,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="CLIENT USERS"
+                                           Foreground="{DynamicResource AccentHoverBrush}"
+                                           FontSize="11"
+                                           FontWeight="Bold" />
+                                <TextBlock Text="Select a user to view their synchronized contact and account details"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           FontSize="13"
+                                           Margin="0,3,0,0" />
+                            </StackPanel>
+                            <Border Grid.Column="1"
+                                    Height="1"
+                                    Margin="16,0"
+                                    VerticalAlignment="Center"
+                                    Background="{DynamicResource BorderBrush}" />
+                            <Border Grid.Column="2"
+                                    Background="{DynamicResource AccentSoftBrush}"
+                                    CornerRadius="12"
+                                    Padding="11,5"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="{Binding ClientUserCountLabel}"
+                                           Foreground="{DynamicResource AccentHoverBrush}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold" />
+                            </Border>
+                        </Grid>
+
+                        <Grid Height="430" Margin="0,0,16,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="350" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0"
+                                    Background="{DynamicResource PanelBackgroundBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="12"
+                                    Padding="10">
+                                <ListBox ItemsSource="{Binding ClientUsers}"
+                                         SelectedItem="{Binding SelectedClientUser}"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="{x:Type ListBoxItem}">
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                            <Setter Property="Padding" Value="0" />
+                                            <Setter Property="Margin" Value="0,0,0,8" />
+                                            <Setter Property="Background" Value="Transparent" />
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                    BorderBrush="{DynamicResource BorderBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="9"
+                                                    Padding="13,11">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding DisplayName}"
+                                                                   Foreground="{DynamicResource PrimaryTextBrush}"
+                                                                   FontWeight="SemiBold"
+                                                                   FontSize="14"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Text="{Binding RoleDepartment}"
+                                                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                                                   FontSize="12"
+                                                                   Margin="0,3,0,0"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Text="{Binding Email}"
+                                                                   Foreground="{DynamicResource MutedTextBrush}"
+                                                                   FontSize="11"
+                                                                   Margin="0,2,0,0"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+                                                    <Border Grid.Column="1"
+                                                            Background="{DynamicResource AccentSoftBrush}"
+                                                            CornerRadius="10"
+                                                            Padding="9,3"
+                                                            Margin="10,0,0,0"
+                                                            VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding AccountCount, StringFormat={}{0} accounts}"
+                                                                   Foreground="{DynamicResource AccentHoverBrush}"
+                                                                   FontSize="10"
+                                                                   FontWeight="SemiBold" />
+                                                    </Border>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Border>
+
+                            <Border Grid.Column="2"
+                                    Background="{DynamicResource PanelBackgroundBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="12"
+                                    Padding="16">
+                                <Grid>
+                                    <TextBlock Text="Select a user on the left to view their details."
+                                               Foreground="{DynamicResource MutedTextBrush}"
+                                               FontSize="13"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"
+                                               Visibility="{Binding HasSelectedClientUser, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+
+                                    <Grid Visibility="{Binding HasSelectedClientUser, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding SelectedClientUser.DisplayName}"
+                                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                                           FontSize="21"
+                                                           FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding SelectedClientUser.LocationName}"
+                                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                                           FontSize="12"
+                                                           Margin="0,3,0,0" />
+                                            </StackPanel>
+                                            <WrapPanel Grid.Column="1">
+                                                <Button Content="Hide Values"
+                                                        Command="{Binding HideClientUserCommand}"
+                                                        Margin="0,0,8,0" />
+                                                <Button Content="Reveal Accounts"
+                                                        Command="{Binding RevealClientUserCommand}"
+                                                        Style="{StaticResource PrimaryButtonStyle}" />
+                                            </WrapPanel>
+                                        </Grid>
+
+                                        <Border Grid.Row="1"
+                                                Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                BorderBrush="{DynamicResource BorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="9"
+                                                Padding="12"
+                                                Margin="0,12,0,12">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="1.2*" />
+                                                    <ColumnDefinition Width="1.35*" />
+                                                    <ColumnDefinition Width="0.8*" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="ROLE / DEPARTMENT"
+                                                               Foreground="{DynamicResource MutedTextBrush}"
+                                                               FontSize="10"
+                                                               FontWeight="Bold" />
+                                                    <TextBlock Text="{Binding SelectedClientUser.RoleDepartment}"
+                                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                                               FontSize="13"
+                                                               Margin="0,3,12,0" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock Text="EMAIL"
+                                                               Foreground="{DynamicResource MutedTextBrush}"
+                                                               FontSize="10"
+                                                               FontWeight="Bold" />
+                                                    <TextBlock Text="{Binding SelectedClientUser.Email}"
+                                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                                               FontSize="13"
+                                                               Margin="0,3,12,0"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2">
+                                                    <TextBlock Text="PHONE"
+                                                               Foreground="{DynamicResource MutedTextBrush}"
+                                                               FontSize="10"
+                                                               FontWeight="Bold" />
+                                                    <TextBlock Text="{Binding SelectedClientUser.Phone}"
+                                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                                               FontSize="13"
+                                                               Margin="0,3,0,0" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+
+                                        <ScrollViewer Grid.Row="2"
+                                                      VerticalScrollBarVisibility="Auto"
+                                                      HorizontalScrollBarVisibility="Disabled">
+                                            <ItemsControl ItemsSource="{Binding ClientUserAccountGroups}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Margin="0,0,0,15">
+                                                            <Grid Margin="2,0,2,7">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="{Binding Name}"
+                                                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                                                           FontSize="15"
+                                                                           FontWeight="SemiBold" />
+                                                                <Border Grid.Column="1"
+                                                                        Height="1"
+                                                                        Margin="12,0,0,0"
+                                                                        VerticalAlignment="Center"
+                                                                        Background="{DynamicResource BorderBrush}" />
+                                                            </Grid>
+                                                            <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                                    BorderBrush="{DynamicResource BorderBrush}"
+                                                                    BorderThickness="1"
+                                                                    CornerRadius="9"
+                                                                    Padding="4">
+                                                                <ItemsControl ItemsSource="{Binding Fields}">
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate>
+                                                                            <Border Padding="9,7"
+                                                                                    BorderBrush="{DynamicResource BorderBrush}"
+                                                                                    BorderThickness="0,0,0,1">
+                                                                                <Grid>
+                                                                                    <Grid.ColumnDefinitions>
+                                                                                        <ColumnDefinition Width="145" />
+                                                                                        <ColumnDefinition Width="*" />
+                                                                                        <ColumnDefinition Width="Auto" />
+                                                                                    </Grid.ColumnDefinitions>
+                                                                                    <TextBlock Text="{Binding Label}"
+                                                                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                                                                               FontSize="11"
+                                                                                               FontWeight="SemiBold"
+                                                                                               VerticalAlignment="Center"
+                                                                                               TextWrapping="Wrap"
+                                                                                               Margin="0,0,9,0" />
+                                                                                    <TextBox Grid.Column="1"
+                                                                                             Text="{Binding Value}"
+                                                                                             Style="{StaticResource ProfileFieldValueStyle}"
+                                                                                             MinHeight="34"
+                                                                                             Padding="9,5" />
+                                                                                    <Button Grid.Column="2"
+                                                                                            Content="Copy"
+                                                                                            Command="{Binding DataContext.CopyClientUserFieldCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                            CommandParameter="{Binding}"
+                                                                                            Padding="10,5"
+                                                                                            MinWidth="54"
+                                                                                            Margin="7,0,0,0"
+                                                                                            Visibility="{Binding DataContext.IsClientUserRevealed, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                                                </Grid>
+                                                                            </Border>
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
+                                                            </Border>
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+                        </Grid>
                     </StackPanel>
 
                     <ItemsControl ItemsSource="{Binding CredentialGroups}">
