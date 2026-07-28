@@ -50,15 +50,33 @@ DECLARE @AdminReadDefinition nvarchar(max)=
     COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminGetEquipmentBoard', N'P')), N'');
 DECLARE @AdminSaveDefinition nvarchar(max)=
     COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminSaveEquipment', N'P')), N'');
+DECLARE @EnsureCurrentUserDefinition nvarchar(max)=
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_security.EnsureCurrentUser', N'P')), N'');
 
 IF CHARINDEX(N'equipment.[AnyDeskNumber]', @AdminReadDefinition)=0
    OR CHARINDEX(N'DecryptByKeyAutoCert', @AdminReadDefinition)=0
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER', @AdminReadDefinition)=0
+   OR CHARINDEX(
+        N'IS_ROLEMEMBER(N''tb_role_admin'', ORIGINAL_LOGIN())',
+        @AdminReadDefinition)=0
    OR CHARINDEX(N'@AnyDeskNumber nvarchar(80)', @AdminSaveDefinition)=0
    OR CHARINDEX(N'@AnyDeskPassword nvarchar(max)', @AdminSaveDefinition)=0
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER', @AdminSaveDefinition)=0
+   OR CHARINDEX(
+        N'IS_ROLEMEMBER(N''tb_role_admin'', ORIGINAL_LOGIN())',
+        @AdminSaveDefinition)=0
    OR CHARINDEX(N'EncryptByKey', @AdminSaveDefinition)=0
    OR CHARINDEX(N'[AnyDeskPasswordEncrypted]', @AdminSaveDefinition)=0
 BEGIN
-    PRINT N'FAIL: Admin equipment reads/saves do not securely round-trip AnyDesk details.';
+    PRINT N'FAIL: Admin equipment reads/saves do not securely round-trip AnyDesk details under the procedure owner while preserving caller authorization.';
+    SET @FailureCount+=1;
+END;
+
+IF CHARINDEX(
+    N'IS_ROLEMEMBER(N''tb_role_admin'', ORIGINAL_LOGIN())',
+    @EnsureCurrentUserDefinition)=0
+BEGIN
+    PRINT N'FAIL: current-user role detection does not preserve the authenticated caller under owner-executed encryption procedures.';
     SET @FailureCount+=1;
 END;
 

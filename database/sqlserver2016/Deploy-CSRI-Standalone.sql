@@ -4003,15 +4003,15 @@ BEGIN
     SET @UserSid = SUSER_SID(ORIGINAL_LOGIN());
     SET @LoginName = CONVERT(nvarchar(256), ORIGINAL_LOGIN());
     SET @IsTechnician =
-        CONVERT(bit, CASE WHEN IS_ROLEMEMBER(N'tb_role_user') = 1 THEN 1 ELSE 0 END);
+        CONVERT(bit, CASE WHEN IS_ROLEMEMBER(N'tb_role_user', ORIGINAL_LOGIN()) = 1 THEN 1 ELSE 0 END);
     SET @IsManager =
-        CONVERT(bit, CASE WHEN IS_ROLEMEMBER(N'tb_role_manager') = 1 THEN 1 ELSE 0 END);
+        CONVERT(bit, CASE WHEN IS_ROLEMEMBER(N'tb_role_manager', ORIGINAL_LOGIN()) = 1 THEN 1 ELSE 0 END);
     SET @IsAdmin =
-        CONVERT(bit, CASE WHEN IS_ROLEMEMBER(N'tb_role_admin') = 1 THEN 1 ELSE 0 END);
+        CONVERT(bit, CASE WHEN IS_ROLEMEMBER(N'tb_role_admin', ORIGINAL_LOGIN()) = 1 THEN 1 ELSE 0 END);
     SET @IsSyncOperator =
         CONVERT(
             bit,
-            CASE WHEN IS_ROLEMEMBER(N'tb_role_sync_operator') = 1 THEN 1 ELSE 0 END);
+            CASE WHEN IS_ROLEMEMBER(N'tb_role_sync_operator', ORIGINAL_LOGIN()) = 1 THEN 1 ELSE 0 END);
 
     IF @UserSid IS NULL
        OR DATALENGTH(@UserSid) NOT BETWEEN 8 AND 85
@@ -21652,6 +21652,7 @@ IF OBJECT_ID(N'tb_app.AdminGetEquipmentBoard', N'P') IS NOT NULL
 GO
 
 CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoard]
+WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -21664,7 +21665,8 @@ BEGIN
         @IsAdmin=@IsAdmin OUTPUT,
         @IsSyncOperator=@IsSyncOperator OUTPUT;
 
-    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+    IF @IsAdmin <> 1
+       OR IS_ROLEMEMBER(N'tb_role_admin', ORIGINAL_LOGIN()) <> 1
         THROW 52200, N'Only a TechBench Admin may view the equipment board.', 1;
 
     SELECT
@@ -21741,6 +21743,7 @@ CREATE PROCEDURE [tb_app].[AdminSaveEquipment]
     @LocationName nvarchar(240) = NULL,
     @Notes nvarchar(max) = NULL,
     @ExpectedRowVersion binary(8) = NULL
+WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -21753,7 +21756,8 @@ BEGIN
         @IsAdmin=@IsAdmin OUTPUT,
         @IsSyncOperator=@IsSyncOperator OUTPUT;
 
-    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+    IF @IsAdmin <> 1
+       OR IS_ROLEMEMBER(N'tb_role_admin', ORIGINAL_LOGIN()) <> 1
         THROW 52201, N'Only a TechBench Admin may save equipment.', 1;
 
     SET @EquipmentId = NULLIF(@EquipmentId, 0);
@@ -29724,15 +29728,33 @@ DECLARE @AdminReadDefinition nvarchar(max)=
     COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminGetEquipmentBoard', N'P')), N'');
 DECLARE @AdminSaveDefinition nvarchar(max)=
     COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminSaveEquipment', N'P')), N'');
+DECLARE @EnsureCurrentUserDefinition nvarchar(max)=
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_security.EnsureCurrentUser', N'P')), N'');
 
 IF CHARINDEX(N'equipment.[AnyDeskNumber]', @AdminReadDefinition)=0
    OR CHARINDEX(N'DecryptByKeyAutoCert', @AdminReadDefinition)=0
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER', @AdminReadDefinition)=0
+   OR CHARINDEX(
+        N'IS_ROLEMEMBER(N''tb_role_admin'', ORIGINAL_LOGIN())',
+        @AdminReadDefinition)=0
    OR CHARINDEX(N'@AnyDeskNumber nvarchar(80)', @AdminSaveDefinition)=0
    OR CHARINDEX(N'@AnyDeskPassword nvarchar(max)', @AdminSaveDefinition)=0
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER', @AdminSaveDefinition)=0
+   OR CHARINDEX(
+        N'IS_ROLEMEMBER(N''tb_role_admin'', ORIGINAL_LOGIN())',
+        @AdminSaveDefinition)=0
    OR CHARINDEX(N'EncryptByKey', @AdminSaveDefinition)=0
    OR CHARINDEX(N'[AnyDeskPasswordEncrypted]', @AdminSaveDefinition)=0
 BEGIN
-    PRINT N'FAIL: Admin equipment reads/saves do not securely round-trip AnyDesk details.';
+    PRINT N'FAIL: Admin equipment reads/saves do not securely round-trip AnyDesk details under the procedure owner while preserving caller authorization.';
+    SET @FailureCount+=1;
+END;
+
+IF CHARINDEX(
+    N'IS_ROLEMEMBER(N''tb_role_admin'', ORIGINAL_LOGIN())',
+    @EnsureCurrentUserDefinition)=0
+BEGIN
+    PRINT N'FAIL: current-user role detection does not preserve the authenticated caller under owner-executed encryption procedures.';
     SET @FailureCount+=1;
 END;
 
