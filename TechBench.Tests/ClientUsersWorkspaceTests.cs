@@ -6,11 +6,14 @@ namespace TechBench.Tests;
 public sealed class ClientUsersWorkspaceTests
 {
     [Fact]
-    public void SidebarPlacesUsersUnderClientInfoAndClientMatchUnderSystem()
+    public void SidebarPlacesLinksUnderNotesAndTicketsUnderSystem()
     {
         var xaml = ReadRepositoryFile("MainWindow.xaml");
-        var directory = xaml.IndexOf(
-            "Text=\"DIRECTORY\"",
+        var notes = xaml.IndexOf(
+            "Text=\"NOTES\"",
+            StringComparison.Ordinal);
+        var links = xaml.IndexOf(
+            "CommandParameter=\"Common Links\"",
             StringComparison.Ordinal);
         var clientInfo = xaml.IndexOf(
             "CommandParameter=\"Client Info\"",
@@ -24,6 +27,9 @@ public sealed class ClientUsersWorkspaceTests
         var system = xaml.IndexOf(
             "Text=\"SYSTEM\"",
             StringComparison.Ordinal);
+        var tickets = xaml.IndexOf(
+            "CommandParameter=\"Ticket List\"",
+            StringComparison.Ordinal);
         var clientMatch = xaml.IndexOf(
             "Content=\"Client Match\" Command=\"{Binding NavigateCommand}\" CommandParameter=\"Client Match\"",
             StringComparison.Ordinal);
@@ -31,13 +37,19 @@ public sealed class ClientUsersWorkspaceTests
             "CommandParameter=\"Posting History\"",
             StringComparison.Ordinal);
 
-        Assert.True(directory >= 0);
-        Assert.True(clientInfo > directory);
+        Assert.True(notes >= 0);
+        Assert.True(links > notes);
+        Assert.True(clientInfo > links);
         Assert.True(users > clientInfo);
         Assert.True(clientWifi > users);
         Assert.True(system > clientWifi);
-        Assert.True(clientMatch > system);
+        Assert.True(tickets > system);
+        Assert.True(clientMatch > tickets);
         Assert.True(postingHistory > clientMatch);
+        Assert.DoesNotContain(
+            "Text=\"DIRECTORY\"",
+            xaml,
+            StringComparison.Ordinal);
         Assert.DoesNotContain(
             "CommandParameter=\"Client List\"",
             xaml,

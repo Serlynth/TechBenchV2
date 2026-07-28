@@ -692,11 +692,6 @@
                     <Button Content="History" Command="{Binding NavigateCommand}" CommandParameter="History" Style="{StaticResource NavHistoryStyle}" />
                     <Button Content="Search" Command="{Binding NavigateCommand}" CommandParameter="Search" Style="{StaticResource NavSearchStyle}" />
                     <Button Content="Posting Queue" Command="{Binding NavigateCommand}" CommandParameter="Posting Queue" Style="{StaticResource NavQueueStyle}" />
-
-                    <Border Style="{StaticResource SidebarGroupHeaderStyle}">
-                        <TextBlock Text="DIRECTORY" Style="{StaticResource SidebarGroupLabelStyle}" />
-                    </Border>
-                    <Button Content="Tickets" Command="{Binding NavigateCommand}" CommandParameter="Ticket List" Style="{StaticResource NavTicketsStyle}" />
                     <Button Content="Links" Command="{Binding NavigateCommand}" CommandParameter="Common Links" Style="{StaticResource NavLinksStyle}" />
                     <Button Content="CLIENT INFO" Command="{Binding NavigateCommand}" CommandParameter="Client Info" Style="{StaticResource NavClientInfoStyle}"
                             Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
@@ -714,6 +709,7 @@
                     <Border Style="{StaticResource SidebarGroupHeaderStyle}">
                         <TextBlock Text="SYSTEM" Style="{StaticResource SidebarGroupLabelStyle}" />
                     </Border>
+                    <Button Content="Tickets" Command="{Binding NavigateCommand}" CommandParameter="Ticket List" Style="{StaticResource NavTicketsStyle}" />
                     <Button Content="Client Match" Command="{Binding NavigateCommand}" CommandParameter="Client Match" Style="{StaticResource NavClientMatchStyle}" />
                     <Button Content="Posting History" Command="{Binding NavigateCommand}" CommandParameter="Posting History" Style="{StaticResource NavPostingHistoryStyle}" />
                     <Button Content="Equipment Board"
