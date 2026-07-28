@@ -511,7 +511,7 @@
         <Style x:Key="NavConnectionStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource NavClientInfoChildStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Connection"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavMiscInfoStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource NavClientInfoChildStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Misc Info"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavPostingHistoryStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Posting History"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavEquipmentBoardStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Equipment Board"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
+        <Style x:Key="NavEquipmentBoardStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Inventory"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavAdminCenterStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Admin Center"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
         <Style x:Key="NavSettingsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Settings"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
 
@@ -716,9 +716,9 @@
                     </Border>
                     <Button Content="Client Match" Command="{Binding NavigateCommand}" CommandParameter="Client Match" Style="{StaticResource NavClientMatchStyle}" />
                     <Button Content="Posting History" Command="{Binding NavigateCommand}" CommandParameter="Posting History" Style="{StaticResource NavPostingHistoryStyle}" />
-                    <Button Content="Equipment Board"
+                    <Button Content="Inventory"
                             Command="{Binding NavigateCommand}"
-                            CommandParameter="Equipment Board"
+                            CommandParameter="Inventory"
                             Style="{StaticResource NavEquipmentBoardStyle}"
                             Visibility="{Binding CanAccessEquipmentBoard, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <Button Content="Admin Center"
@@ -2526,7 +2526,7 @@
                                                                 Background="Transparent"
                                                                 BorderThickness="0"
                                                                 Cursor="Hand"
-                                                                ToolTip="Open this device in Equipment Board"
+                                                                ToolTip="Open this device in Inventory"
                                                                 Click="OpenEquipmentFromInventory_Click">
                                                           <Border Background="{DynamicResource PanelAltBackgroundBrush}"
                                                                   BorderBrush="{DynamicResource BorderBrush}"
@@ -3623,7 +3623,7 @@
                     </Grid>
                 </Grid>
 
-                <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Equipment Board}">
+                <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Inventory}">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
@@ -3641,7 +3641,7 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="Inventory Board"
+                                <TextBlock Text="Inventory"
                                            Style="{StaticResource SectionHeadingStyle}" />
                                 <TextBlock Text="{Binding EquipmentBoardStatus}"
                                            Style="{StaticResource MutedTextStyle}"
@@ -3711,6 +3711,11 @@
                                         Click="OpenEquipmentBoardDemo_Click"
                                         Style="{StaticResource SecondaryButtonStyle}"
                                         ToolTip="Open an isolated sample inventory board. Demo changes are never written to SQL Server."
+                                        Margin="0,0,10,0" />
+                                <Button Content="Import build sheet"
+                                        Command="{Binding ImportEquipmentBuildSheetCommand}"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        ToolTip="Read Customer, Machine, S/N, Machine Name, End User, and Email Address from a PC configuration workbook. The imported device opens for review before it is saved."
                                         Margin="0,0,10,0" />
                                 <Button Content="+  New device"
                                         Command="{Binding NewEquipmentCommand}"

@@ -268,7 +268,7 @@
                                             Background="Transparent"
                                             BorderThickness="0"
                                             Cursor="Hand"
-                                            ToolTip="Open this device in Equipment Board"
+                                            ToolTip="Open this device in Inventory"
                                             Click="EquipmentCard_Click">
                                       <Border Background="{DynamicResource PanelBackgroundBrush}"
                                               BorderBrush="{DynamicResource BorderBrush}"

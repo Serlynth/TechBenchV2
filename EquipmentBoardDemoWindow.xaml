@@ -1,7 +1,7 @@
 <Window x:Class="TechBench.EquipmentBoardDemoWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="TechBench Equipment Board - Local Demo"
+        Title="TechBench Inventory - Local Demo"
         Width="1500"
         Height="900"
         MinWidth="1100"
@@ -271,7 +271,7 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                    <TextBlock Text="Inventory Board"
+                    <TextBlock Text="Inventory"
                                Foreground="{DynamicResource PrimaryTextBrush}"
                                FontSize="28"
                                FontWeight="SemiBold" />

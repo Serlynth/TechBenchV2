@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Windows.Data;
+using ExcelDataReader.Exceptions;
 using Microsoft.Data.SqlClient;
 using TechBench.Models;
 using TechBench.Services;
@@ -53,6 +55,7 @@ public sealed partial class MainWindowViewModel
     ];
 
     public AsyncRelayCommand RefreshEquipmentBoardCommand { get; private set; } = null!;
+    public AsyncRelayCommand ImportEquipmentBuildSheetCommand { get; private set; } = null!;
     public RelayCommand NewEquipmentCommand { get; private set; } = null!;
     public AsyncRelayCommand SaveEquipmentCommand { get; private set; } = null!;
     public AsyncRelayCommand ArchiveEquipmentCommand { get; private set; } = null!;
@@ -91,6 +94,7 @@ public sealed partial class MainWindowViewModel
             if (SetProperty(ref _isEquipmentBoardBusy, value))
             {
                 RefreshEquipmentBoardCommand?.RaiseCanExecuteChanged();
+                ImportEquipmentBuildSheetCommand?.RaiseCanExecuteChanged();
                 NewEquipmentCommand?.RaiseCanExecuteChanged();
                 SaveEquipmentCommand?.RaiseCanExecuteChanged();
                 ArchiveEquipmentCommand?.RaiseCanExecuteChanged();
@@ -294,6 +298,9 @@ public sealed partial class MainWindowViewModel
         RefreshEquipmentBoardCommand = new AsyncRelayCommand(
             _ => RefreshEquipmentBoardAsync(),
             _ => CanAccessEquipmentBoard && !IsEquipmentBoardBusy);
+        ImportEquipmentBuildSheetCommand = new AsyncRelayCommand(
+            _ => ImportEquipmentBuildSheetAsync(),
+            _ => CanAccessEquipmentBoard && !IsEquipmentBoardBusy);
         NewEquipmentCommand = new RelayCommand(
             _ => BeginNewEquipment(),
             _ => CanAccessEquipmentBoard && !IsEquipmentBoardBusy);
@@ -350,8 +357,8 @@ public sealed partial class MainWindowViewModel
                 or InvalidOperationException
                 or TimeoutException)
         {
-            EquipmentBoardStatus = $"Equipment board refresh failed: {ex.Message}";
-            _dialogService.Error("Equipment Board", EquipmentBoardStatus);
+            EquipmentBoardStatus = $"Inventory refresh failed: {ex.Message}";
+            _dialogService.Error("Inventory", EquipmentBoardStatus);
         }
         finally
         {
@@ -656,16 +663,115 @@ public sealed partial class MainWindowViewModel
         if (!CanAccessEquipmentBoard)
         {
             _dialogService.Error(
-                "Equipment Board",
+                "Inventory",
                 CanAccessAdminCenter
-                    ? "The equipment board is not installed in this TechBench database yet."
-                    : "Only TechBench Admins can open the equipment board.");
+                    ? "Inventory is not installed in this TechBench database yet."
+                    : "Only TechBench Admins can open Inventory.");
             return;
         }
 
-        CurrentSection = "Equipment Board";
+        CurrentSection = "Inventory";
         await RefreshEquipmentBoardAsync(equipment.EquipmentId);
-        StatusMessage = $"Opened {equipment.Name} in Equipment Board.";
+        StatusMessage = $"Opened {equipment.Name} in Inventory.";
+    }
+
+    private async Task ImportEquipmentBuildSheetAsync()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Import a PC configuration build sheet",
+            Filter = "Excel workbooks (*.xlsx;*.xls)|*.xlsx;*.xls|All files (*.*)|*.*",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        IsEquipmentBoardBusy = true;
+        EquipmentBoardStatus = "Reading build sheet…";
+        try
+        {
+            var import = await Task.Run(
+                () => new EquipmentBuildSheetImporter().Read(dialog.FileName));
+            if (InventoryClientOptions.Count == 0)
+            {
+                var clients = await Task.Run(
+                    () => _repository.GetInventoryClients());
+                RefreshInventoryClientOptions(clients);
+            }
+
+            ApplyEquipmentBuildSheetImport(import);
+        }
+        catch (Exception ex) when (
+            ex is IOException
+                or UnauthorizedAccessException
+                or InvalidDataException
+                or ExcelReaderException
+                or NotSupportedException
+                or ArgumentException)
+        {
+            EquipmentBoardStatus = $"Build sheet import failed: {ex.Message}";
+            _dialogService.Error("Import build sheet", EquipmentBoardStatus);
+        }
+        finally
+        {
+            IsEquipmentBoardBusy = false;
+        }
+    }
+
+    internal void ApplyEquipmentBuildSheetImport(
+        EquipmentBuildSheetImport import)
+    {
+        ArgumentNullException.ThrowIfNull(import);
+
+        BeginNewEquipment();
+        EquipmentDeviceType = import.DeviceType;
+        EquipmentName = string.IsNullOrWhiteSpace(import.MachineName)
+            ? string.IsNullOrWhiteSpace(import.Model)
+                ? import.Machine
+                : import.Model
+            : import.MachineName;
+        EquipmentSerialNumber = import.SerialNumber;
+        EquipmentPartNumber = import.PartNumber;
+        EquipmentModel = import.Model;
+
+        var warnings = new List<string>();
+        var retainedDetails = new List<string>();
+        var client = EquipmentBuildSheetImporter.FindClient(
+            import.Customer,
+            InventoryClientOptions);
+        EquipmentClient = client;
+        if (!string.IsNullOrWhiteSpace(import.Customer) && client is null)
+        {
+            warnings.Add($"customer “{import.Customer}”");
+            retainedDetails.Add($"Build sheet customer: {import.Customer}");
+        }
+
+        var clientUser = EquipmentBuildSheetImporter.FindClientUser(
+            import,
+            client);
+        EquipmentClientUser = clientUser;
+        if ((!string.IsNullOrWhiteSpace(import.EndUser)
+             || !string.IsNullOrWhiteSpace(import.EmailAddress))
+            && clientUser is null)
+        {
+            warnings.Add("end user");
+            var endUserLine = string.Join(
+                " · ",
+                new[] { import.EndUser, import.EmailAddress }
+                    .Where(static value => !string.IsNullOrWhiteSpace(value)));
+            retainedDetails.Add($"Build sheet end user: {endUserLine}");
+        }
+
+        EquipmentNotes = string.Join(Environment.NewLine, retainedDetails);
+        var warningText = warnings.Count == 0
+            ? string.Empty
+            : $" Unmatched: {string.Join("; ", warnings)}. You can choose them before saving.";
+        EquipmentBoardStatus =
+            $"Imported {import.SourceFileName}. Review the new device, then save when ready."
+            + warningText;
     }
 
     private void BeginNewEquipment()
@@ -799,7 +905,7 @@ public sealed partial class MainWindowViewModel
                 or ArgumentException)
         {
             EquipmentBoardStatus = $"Equipment save failed: {ex.Message}";
-            _dialogService.Error("Equipment Board", EquipmentBoardStatus);
+            _dialogService.Error("Inventory", EquipmentBoardStatus);
         }
         finally
         {
@@ -837,7 +943,7 @@ public sealed partial class MainWindowViewModel
                 or TimeoutException)
         {
             EquipmentBoardStatus = $"Equipment archive failed: {ex.Message}";
-            _dialogService.Error("Equipment Board", EquipmentBoardStatus);
+            _dialogService.Error("Inventory", EquipmentBoardStatus);
         }
         finally
         {
@@ -890,7 +996,7 @@ public sealed partial class MainWindowViewModel
                 or ArgumentException)
         {
             EquipmentBoardStatus = $"Equipment assignment failed: {ex.Message}";
-            _dialogService.Error("Equipment Board", EquipmentBoardStatus);
+            _dialogService.Error("Inventory", EquipmentBoardStatus);
             IsEquipmentBoardBusy = false;
             await RefreshEquipmentBoardAsync(equipment.EquipmentId);
         }
