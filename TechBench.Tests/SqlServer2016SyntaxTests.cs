@@ -1026,6 +1026,24 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.DoesNotContain("[AnyDeskPassword] nvarchar", schemaSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("@AnyDeskNumber nvarchar(80)", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("@AnyDeskPassword nvarchar(max)", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoard]\nWITH EXECUTE AS OWNER",
+            procedureSource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "@ExpectedRowVersion binary(8) = NULL\nWITH EXECUTE AS OWNER",
+            procedureSource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "IS_ROLEMEMBER(N'tb_role_admin', ORIGINAL_LOGIN())",
+            procedureSource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "IS_ROLEMEMBER(N'tb_role_admin', ORIGINAL_LOGIN())",
+            File.ReadAllText(Path.Combine(
+                sqlDirectory,
+                "40-StoredProcedures.sql")),
+            StringComparison.OrdinalIgnoreCase);
         Assert.Contains("EncryptByKey", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("DecryptByKeyAutoCert", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
@@ -1034,6 +1052,10 @@ public sealed partial class SqlServer2016SyntaxTests
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
             "shared inventory reads do not expose the number while keeping the AnyDesk password private",
+            verifySource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "current-user role detection does not preserve the authenticated caller",
             verifySource,
             StringComparison.OrdinalIgnoreCase);
 

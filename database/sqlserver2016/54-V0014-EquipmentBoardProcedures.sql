@@ -166,6 +166,7 @@ IF OBJECT_ID(N'tb_app.AdminGetEquipmentBoard', N'P') IS NOT NULL
 GO
 
 CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoard]
+WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -178,7 +179,8 @@ BEGIN
         @IsAdmin=@IsAdmin OUTPUT,
         @IsSyncOperator=@IsSyncOperator OUTPUT;
 
-    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+    IF @IsAdmin <> 1
+       OR IS_ROLEMEMBER(N'tb_role_admin', ORIGINAL_LOGIN()) <> 1
         THROW 52200, N'Only a TechBench Admin may view the equipment board.', 1;
 
     SELECT
@@ -255,6 +257,7 @@ CREATE PROCEDURE [tb_app].[AdminSaveEquipment]
     @LocationName nvarchar(240) = NULL,
     @Notes nvarchar(max) = NULL,
     @ExpectedRowVersion binary(8) = NULL
+WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -267,7 +270,8 @@ BEGIN
         @IsAdmin=@IsAdmin OUTPUT,
         @IsSyncOperator=@IsSyncOperator OUTPUT;
 
-    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+    IF @IsAdmin <> 1
+       OR IS_ROLEMEMBER(N'tb_role_admin', ORIGINAL_LOGIN()) <> 1
         THROW 52201, N'Only a TechBench Admin may save equipment.', 1;
 
     SET @EquipmentId = NULLIF(@EquipmentId, 0);

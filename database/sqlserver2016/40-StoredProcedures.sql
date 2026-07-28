@@ -27,15 +27,15 @@ BEGIN
     SET @UserSid = SUSER_SID(ORIGINAL_LOGIN());
     SET @LoginName = CONVERT(nvarchar(256), ORIGINAL_LOGIN());
     SET @IsTechnician =
-        CONVERT(bit, CASE WHEN IS_ROLEMEMBER(N'tb_role_user') = 1 THEN 1 ELSE 0 END);
+        CONVERT(bit, CASE WHEN IS_ROLEMEMBER(N'tb_role_user', ORIGINAL_LOGIN()) = 1 THEN 1 ELSE 0 END);
     SET @IsManager =
-        CONVERT(bit, CASE WHEN IS_ROLEMEMBER(N'tb_role_manager') = 1 THEN 1 ELSE 0 END);
+        CONVERT(bit, CASE WHEN IS_ROLEMEMBER(N'tb_role_manager', ORIGINAL_LOGIN()) = 1 THEN 1 ELSE 0 END);
     SET @IsAdmin =
-        CONVERT(bit, CASE WHEN IS_ROLEMEMBER(N'tb_role_admin') = 1 THEN 1 ELSE 0 END);
+        CONVERT(bit, CASE WHEN IS_ROLEMEMBER(N'tb_role_admin', ORIGINAL_LOGIN()) = 1 THEN 1 ELSE 0 END);
     SET @IsSyncOperator =
         CONVERT(
             bit,
-            CASE WHEN IS_ROLEMEMBER(N'tb_role_sync_operator') = 1 THEN 1 ELSE 0 END);
+            CASE WHEN IS_ROLEMEMBER(N'tb_role_sync_operator', ORIGINAL_LOGIN()) = 1 THEN 1 ELSE 0 END);
 
     IF @UserSid IS NULL
        OR DATALENGTH(@UserSid) NOT BETWEEN 8 AND 85
