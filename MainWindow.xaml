@@ -2288,7 +2288,11 @@
                                     <TextBox Grid.Column="0"
                                              Text="{Binding ClientUserSearchText, UpdateSourceTrigger=PropertyChanged}"
                                              ToolTip="Search clients or their users"
-                                             Margin="0,0,8,0" />
+                                             Margin="0,0,8,0">
+                                        <TextBox.InputBindings>
+                                            <KeyBinding Key="Enter" Command="{Binding SearchClientUsersCommand}" />
+                                        </TextBox.InputBindings>
+                                    </TextBox>
                                     <Button Grid.Column="1" Content="Search"
                                             Command="{Binding SearchClientUsersCommand}"
                                             Style="{StaticResource PrimaryButtonStyle}"
@@ -2764,7 +2768,11 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBox Grid.Column="0" Text="{Binding FireDrillSearchText, UpdateSourceTrigger=PropertyChanged}"
-                                             ToolTip="Search client name" Margin="0,0,8,0" />
+                                             ToolTip="Search client name" Margin="0,0,8,0">
+                                        <TextBox.InputBindings>
+                                            <KeyBinding Key="Enter" Command="{Binding SearchFireDrillCommand}" />
+                                        </TextBox.InputBindings>
+                                    </TextBox>
                                     <Button Grid.Column="1" Content="Search" Command="{Binding SearchFireDrillCommand}"
                                             Style="{StaticResource PrimaryButtonStyle}" Padding="14,7" Margin="0,0,8,0" />
                                     <Button Grid.Column="2" Content="Clear" Command="{Binding ClearFireDrillSearchCommand}"

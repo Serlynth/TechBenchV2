@@ -55,6 +55,10 @@ public sealed class CredentialWorkspaceLayoutTests
         var viewModel = ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.FireDrill.cs"));
 
         Assert.Contains("Command=\"{Binding SearchFireDrillCommand}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "<KeyBinding Key=\"Enter\" Command=\"{Binding SearchFireDrillCommand}\"",
+            xaml,
+            StringComparison.Ordinal);
         Assert.Contains("Content=\"Clear\" Command=\"{Binding ClearFireDrillSearchCommand}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("FireDrillSearchText = string.Empty;", viewModel, StringComparison.Ordinal);
         Assert.Contains("RefreshFireDrillCredentials();", viewModel, StringComparison.Ordinal);
