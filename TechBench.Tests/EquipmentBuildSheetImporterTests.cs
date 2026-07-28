@@ -267,10 +267,14 @@ public sealed class EquipmentBuildSheetImporterTests
     {
         var source = ReadRepositoryFile(
             "ViewModels/MainWindowViewModel.Equipment.cs");
+        var normalizedSource = source.Replace("\r\n", "\n");
 
         Assert.Contains("EquipmentNotes = string.Empty;", source);
         Assert.DoesNotContain("Build sheet customer:", source);
         Assert.DoesNotContain("Build sheet end user:", source);
+        Assert.Contains(
+            "EquipmentClientUser = clientUser;\n        EquipmentLocationName = string.Empty;",
+            normalizedSource);
     }
 
     [Fact]

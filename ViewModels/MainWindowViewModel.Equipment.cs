@@ -751,6 +751,7 @@ public sealed partial class MainWindowViewModel
             import,
             client);
         EquipmentClientUser = clientUser;
+        EquipmentLocationName = string.Empty;
         if ((!string.IsNullOrWhiteSpace(import.EndUser)
              || !string.IsNullOrWhiteSpace(import.EmailAddress))
             && clientUser is null)
