@@ -139,6 +139,88 @@ public sealed class EquipmentBuildSheetImporterTests
     }
 
     [Fact]
+    public void ImportedEndUserFindsTheClosestActiveUserInsideMatchedClient()
+    {
+        IReadOnlyList<string>[] rows =
+        [
+            ["Customer - Marrone & O'Rourke"],
+            ["Machine Name: MO-2026-LM"],
+            ["End User- Licia Marrone"],
+            ["Email Address: licia@marroneorourke.com"]
+        ];
+        var import = EquipmentBuildSheetImporter.ParseRows(rows);
+        var client = new InventoryClient
+        {
+            ClientId = 7,
+            Name = "Teeters Harvey Marrone & O'Rourke LLP"
+        };
+        client.Users.Add(new InventoryClientUser
+        {
+            ClientUserId = 70,
+            ClientId = 7,
+            DisplayName = "Licia Marrone",
+            IsActive = false
+        });
+        client.Users.Add(new InventoryClientUser
+        {
+            ClientUserId = 71,
+            ClientId = 7,
+            DisplayName = "Licia A. Marrone"
+        });
+        client.Users.Add(new InventoryClientUser
+        {
+            ClientUserId = 72,
+            ClientId = 7,
+            DisplayName = "Linda Marrone"
+        });
+
+        var match = EquipmentBuildSheetImporter.FindClientUser(
+            import,
+            client);
+
+        Assert.Equal(71, match?.ClientUserId);
+    }
+
+    [Fact]
+    public void EquallyPlausibleEndUsersRemainUnmatched()
+    {
+        var import = new EquipmentBuildSheetImport(
+            "Marrone & O'Rourke",
+            "D4EB2UT - Elitebook 6",
+            "MO-2026-LM",
+            "5CD6231QB3",
+            "Licia Marrone",
+            string.Empty,
+            "D4EB2UT",
+            "Elitebook 6",
+            "Laptop",
+            "build-sheet.xlsx");
+        var client = new InventoryClient
+        {
+            ClientId = 7,
+            Name = "Teeters Harvey Marrone & O'Rourke LLP"
+        };
+        client.Users.Add(new InventoryClientUser
+        {
+            ClientUserId = 71,
+            ClientId = 7,
+            DisplayName = "Licia A. Marrone"
+        });
+        client.Users.Add(new InventoryClientUser
+        {
+            ClientUserId = 72,
+            ClientId = 7,
+            DisplayName = "Licia B. Marrone"
+        });
+
+        var match = EquipmentBuildSheetImporter.FindClientUser(
+            import,
+            client);
+
+        Assert.Null(match);
+    }
+
+    [Fact]
     public void CustomerMatchIgnoresConnectorsAndPrefersTheClosestClientName()
     {
         var directClient = new InventoryClient

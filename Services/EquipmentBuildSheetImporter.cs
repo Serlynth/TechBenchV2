@@ -32,6 +32,11 @@ public sealed class EquipmentBuildSheetImporter
         "AND"
     ];
 
+    private static readonly HashSet<string> PersonNameNoiseWords =
+    [
+        "DR", "JR", "MISS", "MR", "MRS", "MS", "SR", "II", "III", "IV"
+    ];
+
     private static readonly Regex FieldPattern = new(
         @"^\s*(?<label>customer(?:\s+name)?|machine\s+name|machine|s\s*/?\s*n|serial\s+number|end\s+user|email\s+address)\s*(?:(?:[:\-–—])\s*(?<value>.*))?\s*$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
@@ -185,11 +190,13 @@ public sealed class EquipmentBuildSheetImporter
             return null;
         }
 
+        var activeUsers = client.Users
+            .Where(static user => user.IsActive)
+            .ToList();
         var email = import.EmailAddress.Trim();
         if (email.Length > 0)
         {
-            var emailMatches = client.Users
-                .Where(static user => user.IsActive)
+            var emailMatches = activeUsers
                 .Where(user => string.Equals(
                     user.Email.Trim(),
                     email,
@@ -208,13 +215,19 @@ public sealed class EquipmentBuildSheetImporter
             return null;
         }
 
-        var nameMatches = client.Users
-            .Where(static user => user.IsActive)
+        var nameMatches = activeUsers
             .Where(user =>
                 NormalizeIdentity(user.DisplayName) == normalizedName)
             .Take(2)
             .ToList();
-        return nameMatches.Count == 1 ? nameMatches[0] : null;
+        if (nameMatches.Count == 1)
+        {
+            return nameMatches[0];
+        }
+
+        return nameMatches.Count > 1
+            ? null
+            : FindFuzzyClientUser(import.EndUser, activeUsers);
     }
 
     private static string FormatCell(object? value) =>
@@ -426,6 +439,84 @@ public sealed class EquipmentBuildSheetImporter
                || candidates[0].Score - candidates[1].Score >= 0.05d
             ? candidates[0].Client
             : null;
+    }
+
+    private static InventoryClientUser? FindFuzzyClientUser(
+        string endUser,
+        IEnumerable<InventoryClientUser> users)
+    {
+        var importedWords = GetPersonNameWords(endUser)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (importedWords.Count < 2)
+        {
+            return null;
+        }
+
+        var candidates = users
+            .Select(user =>
+            {
+                var userWords = GetPersonNameWords(user.DisplayName)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var sharedWordCount = importedWords.Count(
+                    userWords.Contains);
+                var importedCoverage =
+                    (double)sharedWordCount / importedWords.Count;
+                var userCoverage = userWords.Count == 0
+                    ? 0d
+                    : (double)sharedWordCount / userWords.Count;
+                return new
+                {
+                    User = user,
+                    SharedWordCount = sharedWordCount,
+                    ImportedCoverage = importedCoverage,
+                    Score = (importedCoverage * 0.70d)
+                        + (userCoverage * 0.30d)
+                };
+            })
+            .Where(candidate =>
+                candidate.SharedWordCount >= 2
+                && candidate.ImportedCoverage >= 0.65d
+                && candidate.Score >= 0.75d)
+            .OrderByDescending(static candidate => candidate.Score)
+            .ThenByDescending(static candidate => candidate.SharedWordCount)
+            .Take(2)
+            .ToList();
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        return candidates.Count == 1
+               || candidates[0].Score - candidates[1].Score >= 0.05d
+            ? candidates[0].User
+            : null;
+    }
+
+    private static IReadOnlyList<string> GetPersonNameWords(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        var builder = new StringBuilder(value.Length);
+        foreach (var character in value.ToUpperInvariant())
+        {
+            if (character is '\'' or '\u2019')
+            {
+                continue;
+            }
+
+            builder.Append(char.IsLetterOrDigit(character) ? character : ' ');
+        }
+
+        return builder.ToString()
+            .Split(
+                ' ',
+                StringSplitOptions.RemoveEmptyEntries
+                | StringSplitOptions.TrimEntries)
+            .Where(word => !PersonNameNoiseWords.Contains(word))
+            .ToList();
     }
 
     private static string DisplayLabel(string key) =>
