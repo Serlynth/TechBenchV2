@@ -123,6 +123,7 @@ public sealed partial class MainWindowViewModel
     {
         Client? whdMatch = null;
         IReadOnlyList<EquipmentItem> equipment = [];
+        IReadOnlyList<ClientUserSummary> clientUsers = [];
         try
         {
             whdMatch = ClientProfileWhdMatcher.FindConfidentMatch(
@@ -154,11 +155,31 @@ public sealed partial class MainWindowViewModel
             equipment = [];
         }
 
+        try
+        {
+            clientUsers = whdMatch is not null
+                ? _repository.SearchClientUsers(clientId: whdMatch.Id)
+                : _repository.SearchClientUsers(searchTerm: summary.ClientName)
+                    .Where(user => string.Equals(
+                        user.ClientName.Trim(),
+                        summary.ClientName.Trim(),
+                        StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+        }
+        catch
+        {
+            // User enrichment is best-effort. The rest of the synchronized
+            // client profile still opens if an older installer is present.
+            clientUsers = [];
+        }
+
         return new ClientInfoProfileViewModel(
             summary,
             _repository.RevealFireDrillCredential,
             whdMatch,
-            equipment);
+            equipment,
+            clientUsers,
+            _repository.RevealClientUser);
     }
 
     private void RefreshFireDrillCredentials()
