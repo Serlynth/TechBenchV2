@@ -17,6 +17,18 @@ public sealed class BenchModuleShellTests
             "Source=\"{Binding ModuleLogoSource}\"",
             navigation,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "Width=\"{Binding ModuleLogoDisplayWidth}\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "BenchModule.SalesBench or BenchModule.AdminBench => 250",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Value=\"5,3\"",
+            navigation,
+            StringComparison.Ordinal);
         Assert.DoesNotContain(
             "Text=\"{Binding ModuleBrandName}\"",
             navigation,

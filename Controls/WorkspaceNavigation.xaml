@@ -117,8 +117,8 @@
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="7,6" />
-            <Setter Property="FontSize" Value="9" />
+            <Setter Property="Padding" Value="5,3" />
+            <Setter Property="FontSize" Value="8" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
@@ -165,34 +165,37 @@
         <DockPanel LastChildFill="True">
             <StackPanel DockPanel.Dock="Top"
                         Margin="2,0,2,10">
-                <Grid Height="68">
+                <Grid Height="92"
+                      ClipToBounds="True">
                     <Image Source="{Binding ModuleLogoSource}"
+                           Width="{Binding ModuleLogoDisplayWidth}"
                            Stretch="Uniform"
-                           HorizontalAlignment="Stretch"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
                            RenderOptions.BitmapScalingMode="HighQuality" />
                 </Grid>
 
                 <UniformGrid Columns="3"
-                             Margin="0,5,0,0"
+                             Margin="0,3,0,0"
                              Visibility="{Binding CanAccessBenchModules, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <Button Content="TECH"
                             Command="{Binding SwitchBenchModuleCommand}"
                             CommandParameter="TechBench"
                             Tag="{Binding ActiveBenchModule, Converter={StaticResource SectionActiveConverter}, ConverterParameter=TechBench}"
                             Style="{StaticResource BenchModuleSwitchButtonStyle}"
-                            Margin="0,0,3,0" />
+                            Margin="0,0,2,0" />
                     <Button Content="SALES"
                             Command="{Binding SwitchBenchModuleCommand}"
                             CommandParameter="SalesBench"
                             Tag="{Binding ActiveBenchModule, Converter={StaticResource SectionActiveConverter}, ConverterParameter=SalesBench}"
                             Style="{StaticResource BenchModuleSwitchButtonStyle}"
-                            Margin="2,0" />
+                            Margin="1,0" />
                     <Button Content="ADMIN"
                             Command="{Binding SwitchBenchModuleCommand}"
                             CommandParameter="AdminBench"
                             Tag="{Binding ActiveBenchModule, Converter={StaticResource SectionActiveConverter}, ConverterParameter=AdminBench}"
                             Style="{StaticResource BenchModuleSwitchButtonStyle}"
-                            Margin="3,0,0,0" />
+                            Margin="2,0,0,0" />
                 </UniformGrid>
             </StackPanel>
 
