@@ -218,6 +218,29 @@ public sealed class EquipmentBoardTests
     }
 
     [Fact]
+    public void DeployedStageIsDistinctFromDeploymentAndRemainsInventoryVisible()
+    {
+        var equipment = new EquipmentItem
+        {
+            EquipmentId = 22,
+            DeviceType = "Laptop",
+            Name = "Installed laptop",
+            WorkflowStage = EquipmentWorkflowStages.Deployed,
+            ClientName = "Sample Client",
+            ClientUserDisplayName = "Dana Brooks"
+        };
+
+        Assert.True(equipment.IsDeployed);
+        Assert.False(equipment.IsDeployment);
+        Assert.False(equipment.IsInStock);
+        Assert.Equal("Deployed", equipment.StatusLabel);
+        Assert.Equal("Deployed", equipment.InventoryStatusLabel);
+        Assert.Equal(
+            "Sample Client \u00B7 Dana Brooks",
+            equipment.AssignmentLabel);
+    }
+
+    [Fact]
     public void DeploymentTechnicianLaneKeepsTechnicianIdentity()
     {
         var lane = new EquipmentLane(
@@ -575,6 +598,7 @@ public sealed class EquipmentBoardTests
     [InlineData(EquipmentWorkflowStages.Stock, EquipmentInventoryFilter.StockStatus)]
     [InlineData(EquipmentWorkflowStages.Assigned, EquipmentInventoryFilter.InProgressStatus)]
     [InlineData(EquipmentWorkflowStages.Deployment, EquipmentInventoryFilter.DeploymentStatus)]
+    [InlineData(EquipmentWorkflowStages.Deployed, EquipmentInventoryFilter.DeployedStatus)]
     public void InventoryStatusFiltersMapToBoardWorkflowStages(
         string workflowStage,
         string statusFilter)
@@ -595,6 +619,28 @@ public sealed class EquipmentBoardTests
             EquipmentInventoryFilter.AllClients,
             EquipmentInventoryFilter.AllTechnicians,
             stockOnly: false));
+    }
+
+    [Fact]
+    public void EquipmentBoardCompletionActionIsVisibleAndKeepsInventoryAsRecordSystem()
+    {
+        var xaml = ReadRepositoryFile("MainWindow.xaml");
+        var viewModel = ReadRepositoryFile(Path.Combine(
+            "ViewModels",
+            "MainWindowViewModel.Equipment.cs"));
+
+        Assert.Contains("Content=\"✓  Mark Deployed\"", xaml);
+        Assert.Contains("MarkEquipmentDeployedCommand", xaml);
+        Assert.Contains("CanMarkSelectedEquipmentDeployed", xaml);
+        Assert.Contains(
+            "EquipmentWorkflowStages.Deployed",
+            viewModel);
+        Assert.Contains(
+            "item.IsDeployed",
+            viewModel);
+        Assert.Contains(
+            "It remains in Inventory",
+            viewModel);
     }
 
     [Fact]

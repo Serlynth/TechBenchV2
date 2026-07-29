@@ -948,7 +948,7 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("@TargetWorkflowStage nvarchar(24)", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("IS_ROLEMEMBER(N'tb_role_admin')", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
-            "@SourceStage NOT IN (N'Assigned', N'Deployment')",
+            "@SourceStage NOT IN (N'Assigned', N'Deployment', N'Deployed')",
             procedureSource,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
@@ -1053,11 +1053,11 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("@AnyDeskNumber nvarchar(80)", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("@AnyDeskPassword nvarchar(max)", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
-            "CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoardSecure]\nWITH EXECUTE AS OWNER",
+            "CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoardSecure]\n    @IncludeDeployed bit = 0\nWITH EXECUTE AS OWNER",
             normalizedProcedureSource,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
-            "CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoard]\nAS",
+            "CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoard]\n    @IncludeDeployed bit = 0\nAS",
             normalizedProcedureSource,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
@@ -1069,6 +1069,10 @@ public sealed partial class SqlServer2016SyntaxTests
             normalizedProcedureSource,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains("EXEC [tb_app].[AdminGetEquipmentBoardSecure]", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "@IncludeDeployed = 1 OR equipment.[WorkflowStage] <> N'Deployed'",
+            procedureSource,
+            StringComparison.OrdinalIgnoreCase);
         Assert.Contains("EXEC [tb_security].[EncryptEquipmentAnyDeskPassword]", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("IS_ROLEMEMBER(N'tb_role_admin')", procedureSource, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("IS_ROLEMEMBER(N'tb_role_admin', ORIGINAL_LOGIN())", procedureSource, StringComparison.OrdinalIgnoreCase);
@@ -1106,6 +1110,63 @@ public sealed partial class SqlServer2016SyntaxTests
         var verify = builder.IndexOf("104-V0015-EquipmentAnyDeskVerify.sql", StringComparison.Ordinal);
 
         Assert.True(schema >= 0 && procedures > schema && grants > procedures && verify > grants);
+    }
+
+    [Fact]
+    public void V0015CompatibleExtensionAddsDeployedLifecycleAndOrdersDeployment()
+    {
+        var sqlDirectory = FindSqlDirectory();
+        var schemaSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "35-V0015-EquipmentDeploymentLifecycle.sql"));
+        var procedureSource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "54-V0014-EquipmentBoardProcedures.sql"));
+        var verifySource = File.ReadAllText(Path.Combine(
+            sqlDirectory,
+            "105-V0015-EquipmentDeploymentLifecycleVerify.sql"));
+
+        Assert.Contains("N'Deployed'", schemaSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "Schema-15-compatible equipment deployment lifecycle extension",
+            schemaSource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "CONVERT(int, 15) AS [SchemaVersion]",
+            procedureSource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "N'Equipment deployment completed.'",
+            procedureSource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "CK_EquipmentAssignmentHistory_WorkflowStage",
+            verifySource,
+            StringComparison.OrdinalIgnoreCase);
+
+        var root = Directory.GetParent(sqlDirectory)!.Parent!.FullName;
+        var builder = File.ReadAllText(Path.Combine(
+            root,
+            "scripts",
+            "Build-StandaloneSqlDeployment.ps1"));
+        var schema = builder.IndexOf(
+            "35-V0015-EquipmentDeploymentLifecycle.sql",
+            StringComparison.Ordinal);
+        var procedures = builder.IndexOf(
+            "54-V0014-EquipmentBoardProcedures.sql",
+            StringComparison.Ordinal);
+        var grants = builder.IndexOf(
+            "60-V0014-EquipmentBoardGrants.sql",
+            StringComparison.Ordinal);
+        var verify = builder.IndexOf(
+            "105-V0015-EquipmentDeploymentLifecycleVerify.sql",
+            StringComparison.Ordinal);
+
+        Assert.True(
+            schema >= 0
+            && procedures > schema
+            && grants > procedures
+            && verify > grants);
     }
 
     [Fact]

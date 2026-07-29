@@ -54,7 +54,8 @@ public sealed partial class MainWindowViewModel
         EquipmentInventoryFilter.AllStatuses,
         EquipmentInventoryFilter.StockStatus,
         EquipmentInventoryFilter.InProgressStatus,
-        EquipmentInventoryFilter.DeploymentStatus
+        EquipmentInventoryFilter.DeploymentStatus,
+        EquipmentInventoryFilter.DeployedStatus
     ];
     public ObservableCollection<string> InventoryDeviceTypeFilterOptions { get; } = new();
     public ObservableCollection<string> InventoryClientFilterOptions { get; } = new();
@@ -82,6 +83,7 @@ public sealed partial class MainWindowViewModel
     public RelayCommand NewEquipmentCommand { get; private set; } = null!;
     public AsyncRelayCommand SaveEquipmentCommand { get; private set; } = null!;
     public AsyncRelayCommand ArchiveEquipmentCommand { get; private set; } = null!;
+    public AsyncRelayCommand MarkEquipmentDeployedCommand { get; private set; } = null!;
     public RelayCommand CancelEquipmentEditCommand { get; private set; } = null!;
     public RelayCommand ClearEquipmentSearchCommand { get; private set; } = null!;
     public RelayCommand ClearInventoryEquipmentFiltersCommand { get; private set; } = null!;
@@ -93,7 +95,14 @@ public sealed partial class MainWindowViewModel
         get => _selectedEquipment;
         set
         {
-            if (SetProperty(ref _selectedEquipment, value) && value is not null)
+            if (!SetProperty(ref _selectedEquipment, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(CanMarkSelectedEquipmentDeployed));
+            MarkEquipmentDeployedCommand?.RaiseCanExecuteChanged();
+            if (value is not null)
             {
                 LoadEquipmentEditor(value);
             }
@@ -140,6 +149,7 @@ public sealed partial class MainWindowViewModel
                 NewEquipmentCommand?.RaiseCanExecuteChanged();
                 SaveEquipmentCommand?.RaiseCanExecuteChanged();
                 ArchiveEquipmentCommand?.RaiseCanExecuteChanged();
+                MarkEquipmentDeployedCommand?.RaiseCanExecuteChanged();
                 CancelEquipmentEditCommand?.RaiseCanExecuteChanged();
             }
         }
@@ -401,6 +411,14 @@ public sealed partial class MainWindowViewModel
 
     public bool HasStockInventoryItems => StockInventoryItems.Count > 0;
 
+    public bool CanMarkSelectedEquipmentDeployed =>
+        CurrentSection.Equals("Equipment Board", StringComparison.Ordinal)
+        && SelectedEquipment is
+        {
+            EquipmentId: > 0,
+            IsDeployment: true
+        };
+
     public bool EquipmentSupportsAnyDesk =>
         EquipmentDeviceType.Equals("Desktop", StringComparison.OrdinalIgnoreCase)
         || EquipmentDeviceType.Equals("Laptop", StringComparison.OrdinalIgnoreCase);
@@ -475,6 +493,11 @@ public sealed partial class MainWindowViewModel
             _ => CanEditEquipmentRecords()
                 && !_isNewEquipment
                 && SelectedEquipment is { EquipmentId: > 0 });
+        MarkEquipmentDeployedCommand = new AsyncRelayCommand(
+            _ => MarkEquipmentDeployedAsync(),
+            _ => CanMarkSelectedEquipmentDeployed
+                && CanAccessEquipmentBoard
+                && !IsEquipmentBoardBusy);
         CancelEquipmentEditCommand = new RelayCommand(
             _ => CloseEquipmentEditor(),
             _ => !IsEquipmentBoardBusy);
@@ -521,7 +544,7 @@ public sealed partial class MainWindowViewModel
                 : null;
 
             EquipmentBoardStatus =
-                $"{result.equipment.Count} active item(s) across "
+                $"{_equipmentBoardItemCount} active item(s) across "
                 + $"{EquipmentLanes.Count} work lane(s) plus Deployment. "
                 + "Drag a card to set ownership, priority, or deployment readiness.";
         }
@@ -543,7 +566,7 @@ public sealed partial class MainWindowViewModel
         IReadOnlyList<WhdUserMapping> mappings,
         IReadOnlyList<EquipmentItem> equipment)
     {
-        _equipmentBoardItemCount = equipment.Count;
+        _equipmentBoardItemCount = equipment.Count(static item => !item.IsDeployed);
         EnsureSignedInTechnicianIsInitiallyFirst(mappings);
         EquipmentLanes.Clear();
         DeploymentLanes.Clear();
@@ -601,6 +624,11 @@ public sealed partial class MainWindowViewModel
                      .OrderBy(static item => item.SortOrder)
                      .ThenBy(static item => item.EquipmentId))
         {
+            if (item.IsDeployed)
+            {
+                continue;
+            }
+
             if (item.IsDeployment)
             {
                 if (string.IsNullOrWhiteSpace(item.AssignedToLoginName))
@@ -1130,6 +1158,76 @@ public sealed partial class MainWindowViewModel
         {
             EquipmentBoardStatus = $"Equipment archive failed: {ex.Message}";
             _dialogService.Error("Inventory", EquipmentBoardStatus);
+        }
+        finally
+        {
+            IsEquipmentBoardBusy = false;
+        }
+    }
+
+    private async Task MarkEquipmentDeployedAsync()
+    {
+        var equipment = SelectedEquipment;
+        if (equipment is null || !equipment.IsDeployment)
+        {
+            return;
+        }
+
+        if (equipment.ClientId is null
+            && string.IsNullOrWhiteSpace(equipment.ClientName))
+        {
+            _dialogService.Error(
+                "Mark Deployed",
+                "Assign a client in Inventory before marking this device deployed.");
+            return;
+        }
+
+        var clientUser = string.IsNullOrWhiteSpace(equipment.ClientUserDisplayName)
+            ? "No client user selected"
+            : equipment.ClientUserDisplayName;
+        var location = string.IsNullOrWhiteSpace(equipment.LocationName)
+            ? "No site / room selected"
+            : equipment.LocationName;
+        if (!_dialogService.Confirm(
+                "Mark Equipment Deployed",
+                $"Mark {equipment.Name} as deployed?\n\n"
+                + $"Client: {equipment.ClientName}\n"
+                + $"User: {clientUser}\n"
+                + $"Location: {location}\n\n"
+                + "It will leave the Equipment Board but remain available in "
+                + "Inventory, the client profile, and assignment history.",
+                "Mark Deployed",
+                "Cancel"))
+        {
+            return;
+        }
+
+        IsEquipmentBoardBusy = true;
+        EquipmentBoardStatus = $"Marking {equipment.Name} deployed…";
+        try
+        {
+            await Task.Run(() => _repository.MoveEquipment(
+                equipment,
+                string.IsNullOrWhiteSpace(equipment.AssignedToLoginName)
+                    ? null
+                    : equipment.AssignedToLoginName,
+                EquipmentWorkflowStages.Deployed,
+                0));
+            CloseEquipmentEditor();
+            IsEquipmentBoardBusy = false;
+            await RefreshEquipmentBoardAsync();
+            EquipmentBoardStatus =
+                $"Marked {equipment.Name} deployed. It remains in Inventory.";
+        }
+        catch (Exception ex) when (
+            ex is SqlException
+                or InvalidOperationException
+                or TimeoutException
+                or ArgumentException)
+        {
+            EquipmentBoardStatus =
+                $"Equipment deployment completion failed: {ex.Message}";
+            _dialogService.Error("Mark Deployed", EquipmentBoardStatus);
         }
         finally
         {

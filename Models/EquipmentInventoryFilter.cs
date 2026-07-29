@@ -6,6 +6,7 @@ public static class EquipmentInventoryFilter
     public const string StockStatus = "Stock";
     public const string InProgressStatus = "In progress";
     public const string DeploymentStatus = "Deployment";
+    public const string DeployedStatus = "Deployed";
     public const string AllDeviceTypes = "All device types";
     public const string AllClients = "All clients";
     public const string AllTechnicians = "All technicians";
@@ -51,8 +52,10 @@ public static class EquipmentInventoryFilter
         {
             null or "" or AllStatuses => true,
             StockStatus => item.IsInStock,
-            InProgressStatus => !item.IsInStock && !item.IsDeployment,
+            InProgressStatus =>
+                !item.IsInStock && !item.IsDeployment && !item.IsDeployed,
             DeploymentStatus => item.IsDeployment,
+            DeployedStatus => item.IsDeployed,
             _ => true
         };
 

@@ -461,6 +461,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 NewEquipmentCommand?.RaiseCanExecuteChanged();
                 SaveEquipmentCommand?.RaiseCanExecuteChanged();
                 ArchiveEquipmentCommand?.RaiseCanExecuteChanged();
+                OnPropertyChanged(nameof(CanMarkSelectedEquipmentDeployed));
+                MarkEquipmentDeployedCommand?.RaiseCanExecuteChanged();
             }
         }
     }

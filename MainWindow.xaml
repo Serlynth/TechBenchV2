@@ -4728,13 +4728,21 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <Button Content="Open Inventory"
+                            <Button Content="✓  Mark Deployed"
+                                    Command="{Binding MarkEquipmentDeployedCommand}"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Visibility="{Binding CanMarkSelectedEquipmentDeployed, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                    Margin="0,0,10,0"
+                                    ToolTip="Complete deployment and remove this device from the Equipment Board." />
+                            <Button Grid.Column="1"
+                                    Content="Open Inventory"
                                     Command="{Binding NavigateCommand}"
                                     CommandParameter="Inventory"
                                     Style="{StaticResource PrimaryButtonStyle}"
                                     Margin="0,0,10,0" />
-                            <Button Grid.Column="1"
+                            <Button Grid.Column="2"
                                     Content="Close"
                                     Command="{Binding CancelEquipmentEditCommand}"
                                     Style="{StaticResource SecondaryButtonStyle}" />

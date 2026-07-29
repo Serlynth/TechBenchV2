@@ -7,7 +7,7 @@ public sealed partial class SqlServerTechBenchRepository
     public IReadOnlyList<EquipmentItem> GetEquipmentBoard() =>
         QueryAsync(
             Procedures.GetEquipmentBoard,
-            null,
+            command => AddBit(command, "@IncludeDeployed", true),
             (reader, token) => ReadListAsync(reader, token, ReadEquipmentItem),
             CancellationToken.None).GetAwaiter().GetResult();
 
@@ -115,6 +115,7 @@ public sealed partial class SqlServerTechBenchRepository
                     24,
                     targetWorkflowStage);
                 AddInt(command, "@TargetIndex", Math.Max(0, targetIndex));
+                AddBit(command, "@IncludeDeployed", true);
                 AddBinary(command, "@ExpectedRowVersion", 8, equipment.RowVersion);
             },
             (reader, token) => ReadListAsync(reader, token, ReadEquipmentItem),

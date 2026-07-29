@@ -172,6 +172,14 @@ public sealed class SqlServerTechBenchRepositoryContractTests
         Assert.Equal(
             "[tb_app].[AdminArchiveEquipment]",
             SqlServerTechBenchRepository.Procedures.ArchiveEquipment);
+
+        var repositorySource = File.ReadAllText(FindRepositoryFile(
+            "Data",
+            "SqlServerTechBenchRepository.Equipment.cs"));
+        Assert.Contains(
+            "AddBit(command, \"@IncludeDeployed\", true)",
+            repositorySource,
+            StringComparison.Ordinal);
     }
 
     [Fact]

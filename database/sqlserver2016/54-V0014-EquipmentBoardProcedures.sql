@@ -170,6 +170,7 @@ IF OBJECT_ID(N'tb_app.AdminGetEquipmentBoardSecure', N'P') IS NOT NULL
 GO
 
 CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoardSecure]
+    @IncludeDeployed bit = 0
 WITH EXECUTE AS OWNER
 AS
 BEGIN
@@ -216,6 +217,7 @@ BEGIN
     LEFT JOIN [tb_inventory].[ClientUsers] AS client_user
         ON client_user.[ClientUserId] = equipment.[ClientUserId]
     WHERE equipment.[IsArchived] = 0
+      AND (@IncludeDeployed = 1 OR equipment.[WorkflowStage] <> N'Deployed')
     ORDER BY
         CASE equipment.[WorkflowStage]
             WHEN N'Stock' THEN 0
@@ -230,6 +232,7 @@ END;
 GO
 
 CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoard]
+    @IncludeDeployed bit = 0
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -245,7 +248,8 @@ BEGIN
     IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
         THROW 52200, N'Only a TechBench Admin may view the equipment board.', 1;
 
-    EXEC [tb_app].[AdminGetEquipmentBoardSecure];
+    EXEC [tb_app].[AdminGetEquipmentBoardSecure]
+        @IncludeDeployed=@IncludeDeployed;
 END;
 GO
 
@@ -623,6 +627,7 @@ CREATE PROCEDURE [tb_app].[AdminMoveEquipment]
     @TargetWindowsLoginName nvarchar(256) = NULL,
     @TargetWorkflowStage nvarchar(24),
     @TargetIndex int = NULL,
+    @IncludeDeployed bit = 0,
     @ExpectedRowVersion binary(8) = NULL
 AS
 BEGIN
@@ -645,14 +650,16 @@ BEGIN
         NULLIF(LTRIM(RTRIM(@TargetWorkflowStage)), N'');
 
     IF @TargetWorkflowStage IS NULL
-       OR @TargetWorkflowStage NOT IN (N'Stock', N'Assigned', N'Deployment')
+       OR @TargetWorkflowStage NOT IN
+            (N'Stock', N'Assigned', N'Deployment', N'Deployed')
         THROW 52211, N'The selected equipment workflow stage is invalid.', 1;
 
     SET @TargetWorkflowStage =
         CASE
             WHEN @TargetWorkflowStage = N'Stock' THEN N'Stock'
             WHEN @TargetWorkflowStage = N'Assigned' THEN N'Assigned'
-            ELSE N'Deployment'
+            WHEN @TargetWorkflowStage = N'Deployment' THEN N'Deployment'
+            ELSE N'Deployed'
         END;
 
     IF @TargetWorkflowStage = N'Assigned'
@@ -660,7 +667,7 @@ BEGIN
         THROW 52212, N'A technician is required for the Assigned equipment stage.', 1;
 
     DECLARE @TargetSid varbinary(85) = NULL;
-    IF @TargetWorkflowStage IN (N'Assigned', N'Deployment')
+    IF @TargetWorkflowStage IN (N'Assigned', N'Deployment', N'Deployed')
        AND @TargetWindowsLoginName IS NOT NULL
     BEGIN
         SELECT @TargetSid=[WindowsSid]
@@ -712,7 +719,7 @@ BEGIN
                 WHEN @SourceStage=@TargetWorkflowStage
                  AND
                  (
-                     @SourceStage NOT IN (N'Assigned', N'Deployment')
+                     @SourceStage NOT IN (N'Assigned', N'Deployment', N'Deployed')
                      OR @SourceSid=@TargetSid
                      OR (@SourceSid IS NULL AND @TargetSid IS NULL)
                  )
@@ -729,7 +736,8 @@ BEGIN
               AND [WorkflowStage]=@TargetWorkflowStage
               AND
                   (
-                      @TargetWorkflowStage NOT IN (N'Assigned', N'Deployment')
+                      @TargetWorkflowStage NOT IN
+                        (N'Assigned', N'Deployment', N'Deployed')
                       OR [AssignedToWindowsSid]=@TargetSid
                       OR ([AssignedToWindowsSid] IS NULL AND @TargetSid IS NULL)
                   )
@@ -752,7 +760,8 @@ BEGIN
               AND [WorkflowStage]=@TargetWorkflowStage
               AND
                   (
-                      @TargetWorkflowStage NOT IN (N'Assigned', N'Deployment')
+                      @TargetWorkflowStage NOT IN
+                        (N'Assigned', N'Deployment', N'Deployed')
                       OR [AssignedToWindowsSid]=@TargetSid
                       OR ([AssignedToWindowsSid] IS NULL AND @TargetSid IS NULL)
                   )
@@ -790,7 +799,8 @@ BEGIN
             [AssignedAtUtc]=
                 CASE
                     WHEN @TargetWorkflowStage=N'Stock' THEN NULL
-                    WHEN @SourceStage IN (N'Assigned', N'Deployment')
+                    WHEN @SourceStage IN
+                        (N'Assigned', N'Deployment', N'Deployed')
                      AND
                      (
                          @SourceSid=@TargetSid
@@ -816,14 +826,24 @@ BEGIN
             )
             VALUES
             (
-                @EquipmentId, N'WorkflowMoved', @TargetWorkflowStage,
+                @EquipmentId,
+                CASE
+                    WHEN @TargetWorkflowStage = N'Deployed'
+                        THEN N'Deployed'
+                    ELSE N'WorkflowMoved'
+                END,
+                @TargetWorkflowStage,
                 CASE
                     WHEN @TargetWorkflowStage = N'Stock' THEN NULL
                     ELSE @TargetSid
                 END,
                 @SourceClientId, @SourceClientUserId,
                 @SourceLocationName,
-                N'Equipment moved between inventory workflow lanes.',
+                CASE
+                    WHEN @TargetWorkflowStage = N'Deployed'
+                        THEN N'Equipment deployment completed.'
+                    ELSE N'Equipment moved between inventory workflow lanes.'
+                END,
                 @ActorSid
             );
         END;
@@ -842,7 +862,8 @@ BEGIN
                   AND [WorkflowStage]=@SourceStage
                   AND
                       (
-                          @SourceStage NOT IN (N'Assigned', N'Deployment')
+                          @SourceStage NOT IN
+                            (N'Assigned', N'Deployment', N'Deployed')
                           OR [AssignedToWindowsSid]=@SourceSid
                           OR ([AssignedToWindowsSid] IS NULL AND @SourceSid IS NULL)
                       )
@@ -865,7 +886,8 @@ BEGIN
         THROW;
     END CATCH;
 
-    EXEC [tb_app].[AdminGetEquipmentBoard];
+    EXEC [tb_app].[AdminGetEquipmentBoard]
+        @IncludeDeployed=@IncludeDeployed;
 END;
 GO
 

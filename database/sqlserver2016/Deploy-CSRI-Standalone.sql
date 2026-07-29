@@ -3464,7 +3464,8 @@ BEGIN TRY
             CONSTRAINT [CK_Equipment_Name_NotBlank]
                 CHECK (LEN(LTRIM(RTRIM([Name]))) > 0),
             CONSTRAINT [CK_Equipment_WorkflowStage]
-                CHECK ([WorkflowStage] IN (N'Stock', N'Assigned', N'Deployment')),
+                CHECK ([WorkflowStage] IN
+                    (N'Stock', N'Assigned', N'Deployment', N'Deployed')),
             CONSTRAINT [FK_Equipment_AssignedUser]
                 FOREIGN KEY ([AssignedToWindowsSid])
                 REFERENCES [tb_security].[Users]([WindowsSid]),
@@ -3504,7 +3505,8 @@ BEGIN TRY
     )
         ALTER TABLE [tb_inventory].[Equipment] WITH CHECK
             ADD CONSTRAINT [CK_Equipment_WorkflowStage]
-                CHECK ([WorkflowStage] IN (N'Stock', N'Assigned', N'Deployment'));
+                CHECK ([WorkflowStage] IN
+                    (N'Stock', N'Assigned', N'Deployment', N'Deployed'));
 
     IF NOT EXISTS
     (
@@ -3605,7 +3607,8 @@ BEGIN TRY
                 FOREIGN KEY ([ChangedByWindowsSid])
                 REFERENCES [tb_security].[Users]([WindowsSid]),
             CONSTRAINT [CK_EquipmentAssignmentHistory_WorkflowStage]
-                CHECK ([WorkflowStage] IN (N'Stock', N'Assigned', N'Deployment'))
+                CHECK ([WorkflowStage] IN
+                    (N'Stock', N'Assigned', N'Deployment', N'Deployed'))
         );
 
         CREATE INDEX [IX_EquipmentAssignmentHistory_Equipment]
@@ -3699,6 +3702,78 @@ GO
 
 -- ============================================================================
 -- END 34-V0015-EquipmentAnyDeskSchema.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 35-V0015-EquipmentDeploymentLifecycle.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.EquipmentAnyDesk.0015'
+      AND [SchemaVersion] = 15
+)
+BEGIN
+    RAISERROR(N'V0015 must be installed before the equipment deployment lifecycle extension.', 16, 1);
+    RETURN;
+END;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM sys.check_constraints
+        WHERE [parent_object_id] = OBJECT_ID(N'tb_inventory.Equipment', N'U')
+          AND [name] = N'CK_Equipment_WorkflowStage'
+    )
+        ALTER TABLE [tb_inventory].[Equipment]
+            DROP CONSTRAINT [CK_Equipment_WorkflowStage];
+
+    ALTER TABLE [tb_inventory].[Equipment] WITH CHECK
+        ADD CONSTRAINT [CK_Equipment_WorkflowStage]
+            CHECK ([WorkflowStage] IN
+                (N'Stock', N'Assigned', N'Deployment', N'Deployed'));
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM sys.check_constraints
+        WHERE [parent_object_id] =
+            OBJECT_ID(N'tb_inventory.EquipmentAssignmentHistory', N'U')
+          AND [name] = N'CK_EquipmentAssignmentHistory_WorkflowStage'
+    )
+        ALTER TABLE [tb_inventory].[EquipmentAssignmentHistory]
+            DROP CONSTRAINT [CK_EquipmentAssignmentHistory_WorkflowStage];
+
+    ALTER TABLE [tb_inventory].[EquipmentAssignmentHistory] WITH CHECK
+        ADD CONSTRAINT [CK_EquipmentAssignmentHistory_WorkflowStage]
+            CHECK ([WorkflowStage] IN
+                (N'Stock', N'Assigned', N'Deployment', N'Deployed'));
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+PRINT N'Schema-15-compatible equipment deployment lifecycle extension installed.';
+GO
+
+-- ============================================================================
+-- END 35-V0015-EquipmentDeploymentLifecycle.sql
 -- ============================================================================
 
 -- ============================================================================
@@ -21692,6 +21767,7 @@ IF OBJECT_ID(N'tb_app.AdminGetEquipmentBoardSecure', N'P') IS NOT NULL
 GO
 
 CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoardSecure]
+    @IncludeDeployed bit = 0
 WITH EXECUTE AS OWNER
 AS
 BEGIN
@@ -21738,6 +21814,7 @@ BEGIN
     LEFT JOIN [tb_inventory].[ClientUsers] AS client_user
         ON client_user.[ClientUserId] = equipment.[ClientUserId]
     WHERE equipment.[IsArchived] = 0
+      AND (@IncludeDeployed = 1 OR equipment.[WorkflowStage] <> N'Deployed')
     ORDER BY
         CASE equipment.[WorkflowStage]
             WHEN N'Stock' THEN 0
@@ -21752,6 +21829,7 @@ END;
 GO
 
 CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoard]
+    @IncludeDeployed bit = 0
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -21767,7 +21845,8 @@ BEGIN
     IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
         THROW 52200, N'Only a TechBench Admin may view the equipment board.', 1;
 
-    EXEC [tb_app].[AdminGetEquipmentBoardSecure];
+    EXEC [tb_app].[AdminGetEquipmentBoardSecure]
+        @IncludeDeployed=@IncludeDeployed;
 END;
 GO
 
@@ -22145,6 +22224,7 @@ CREATE PROCEDURE [tb_app].[AdminMoveEquipment]
     @TargetWindowsLoginName nvarchar(256) = NULL,
     @TargetWorkflowStage nvarchar(24),
     @TargetIndex int = NULL,
+    @IncludeDeployed bit = 0,
     @ExpectedRowVersion binary(8) = NULL
 AS
 BEGIN
@@ -22167,14 +22247,16 @@ BEGIN
         NULLIF(LTRIM(RTRIM(@TargetWorkflowStage)), N'');
 
     IF @TargetWorkflowStage IS NULL
-       OR @TargetWorkflowStage NOT IN (N'Stock', N'Assigned', N'Deployment')
+       OR @TargetWorkflowStage NOT IN
+            (N'Stock', N'Assigned', N'Deployment', N'Deployed')
         THROW 52211, N'The selected equipment workflow stage is invalid.', 1;
 
     SET @TargetWorkflowStage =
         CASE
             WHEN @TargetWorkflowStage = N'Stock' THEN N'Stock'
             WHEN @TargetWorkflowStage = N'Assigned' THEN N'Assigned'
-            ELSE N'Deployment'
+            WHEN @TargetWorkflowStage = N'Deployment' THEN N'Deployment'
+            ELSE N'Deployed'
         END;
 
     IF @TargetWorkflowStage = N'Assigned'
@@ -22182,7 +22264,7 @@ BEGIN
         THROW 52212, N'A technician is required for the Assigned equipment stage.', 1;
 
     DECLARE @TargetSid varbinary(85) = NULL;
-    IF @TargetWorkflowStage IN (N'Assigned', N'Deployment')
+    IF @TargetWorkflowStage IN (N'Assigned', N'Deployment', N'Deployed')
        AND @TargetWindowsLoginName IS NOT NULL
     BEGIN
         SELECT @TargetSid=[WindowsSid]
@@ -22234,7 +22316,7 @@ BEGIN
                 WHEN @SourceStage=@TargetWorkflowStage
                  AND
                  (
-                     @SourceStage NOT IN (N'Assigned', N'Deployment')
+                     @SourceStage NOT IN (N'Assigned', N'Deployment', N'Deployed')
                      OR @SourceSid=@TargetSid
                      OR (@SourceSid IS NULL AND @TargetSid IS NULL)
                  )
@@ -22251,7 +22333,8 @@ BEGIN
               AND [WorkflowStage]=@TargetWorkflowStage
               AND
                   (
-                      @TargetWorkflowStage NOT IN (N'Assigned', N'Deployment')
+                      @TargetWorkflowStage NOT IN
+                        (N'Assigned', N'Deployment', N'Deployed')
                       OR [AssignedToWindowsSid]=@TargetSid
                       OR ([AssignedToWindowsSid] IS NULL AND @TargetSid IS NULL)
                   )
@@ -22274,7 +22357,8 @@ BEGIN
               AND [WorkflowStage]=@TargetWorkflowStage
               AND
                   (
-                      @TargetWorkflowStage NOT IN (N'Assigned', N'Deployment')
+                      @TargetWorkflowStage NOT IN
+                        (N'Assigned', N'Deployment', N'Deployed')
                       OR [AssignedToWindowsSid]=@TargetSid
                       OR ([AssignedToWindowsSid] IS NULL AND @TargetSid IS NULL)
                   )
@@ -22312,7 +22396,8 @@ BEGIN
             [AssignedAtUtc]=
                 CASE
                     WHEN @TargetWorkflowStage=N'Stock' THEN NULL
-                    WHEN @SourceStage IN (N'Assigned', N'Deployment')
+                    WHEN @SourceStage IN
+                        (N'Assigned', N'Deployment', N'Deployed')
                      AND
                      (
                          @SourceSid=@TargetSid
@@ -22338,14 +22423,24 @@ BEGIN
             )
             VALUES
             (
-                @EquipmentId, N'WorkflowMoved', @TargetWorkflowStage,
+                @EquipmentId,
+                CASE
+                    WHEN @TargetWorkflowStage = N'Deployed'
+                        THEN N'Deployed'
+                    ELSE N'WorkflowMoved'
+                END,
+                @TargetWorkflowStage,
                 CASE
                     WHEN @TargetWorkflowStage = N'Stock' THEN NULL
                     ELSE @TargetSid
                 END,
                 @SourceClientId, @SourceClientUserId,
                 @SourceLocationName,
-                N'Equipment moved between inventory workflow lanes.',
+                CASE
+                    WHEN @TargetWorkflowStage = N'Deployed'
+                        THEN N'Equipment deployment completed.'
+                    ELSE N'Equipment moved between inventory workflow lanes.'
+                END,
                 @ActorSid
             );
         END;
@@ -22364,7 +22459,8 @@ BEGIN
                   AND [WorkflowStage]=@SourceStage
                   AND
                       (
-                          @SourceStage NOT IN (N'Assigned', N'Deployment')
+                          @SourceStage NOT IN
+                            (N'Assigned', N'Deployment', N'Deployed')
                           OR [AssignedToWindowsSid]=@SourceSid
                           OR ([AssignedToWindowsSid] IS NULL AND @SourceSid IS NULL)
                       )
@@ -22387,7 +22483,8 @@ BEGIN
         THROW;
     END CATCH;
 
-    EXEC [tb_app].[AdminGetEquipmentBoard];
+    EXEC [tb_app].[AdminGetEquipmentBoard]
+        @IncludeDeployed=@IncludeDeployed;
 END;
 GO
 
@@ -29922,6 +30019,116 @@ GO
 
 -- ============================================================================
 -- END 104-V0015-EquipmentAnyDeskVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 105-V0015-EquipmentDeploymentLifecycleVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+
+DECLARE @Failures int = 0;
+
+DECLARE @EquipmentConstraint nvarchar(max) =
+    COALESCE
+    (
+        (
+            SELECT [definition]
+            FROM sys.check_constraints
+            WHERE [parent_object_id] =
+                OBJECT_ID(N'tb_inventory.Equipment', N'U')
+              AND [name] = N'CK_Equipment_WorkflowStage'
+        ),
+        N''
+    );
+DECLARE @HistoryConstraint nvarchar(max) =
+    COALESCE
+    (
+        (
+            SELECT [definition]
+            FROM sys.check_constraints
+            WHERE [parent_object_id] =
+                OBJECT_ID(N'tb_inventory.EquipmentAssignmentHistory', N'U')
+              AND [name] =
+                N'CK_EquipmentAssignmentHistory_WorkflowStage'
+        ),
+        N''
+    );
+
+IF CHARINDEX(N'Deployed', @EquipmentConstraint) = 0
+BEGIN
+    PRINT N'FAIL: Equipment workflow constraint does not allow Deployed.';
+    SET @Failures += 1;
+END;
+
+IF CHARINDEX(N'Deployed', @HistoryConstraint) = 0
+BEGIN
+    PRINT N'FAIL: Equipment history workflow constraint does not allow Deployed.';
+    SET @Failures += 1;
+END;
+
+DECLARE @CapabilitiesDefinition nvarchar(max) =
+    COALESCE
+    (
+        OBJECT_DEFINITION(
+            OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P')),
+        N''
+    );
+IF CHARINDEX(
+       N'CONVERT(int, 15) AS [SchemaVersion]',
+       @CapabilitiesDefinition) = 0
+BEGIN
+    PRINT N'FAIL: Repository capabilities do not preserve schema version 15.';
+    SET @Failures += 1;
+END;
+
+DECLARE @MoveDefinition nvarchar(max) =
+    COALESCE
+    (
+        OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminMoveEquipment', N'P')),
+        N''
+    );
+IF CHARINDEX(N'N''Deployed''', @MoveDefinition) = 0
+   OR CHARINDEX(N'N''Equipment deployment completed.''', @MoveDefinition) = 0
+BEGIN
+    PRINT N'FAIL: Equipment move procedure does not persist and log deployed completion.';
+    SET @Failures += 1;
+END;
+
+DECLARE @BoardDefinition nvarchar(max) =
+    COALESCE
+    (
+        OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminGetEquipmentBoard', N'P')),
+        N''
+    );
+DECLARE @SecureBoardDefinition nvarchar(max) =
+    COALESCE
+    (
+        OBJECT_DEFINITION(
+            OBJECT_ID(N'tb_app.AdminGetEquipmentBoardSecure', N'P')),
+        N''
+    );
+IF CHARINDEX(N'@IncludeDeployed', @BoardDefinition) = 0
+   OR CHARINDEX(N'@IncludeDeployed', @SecureBoardDefinition) = 0
+   OR CHARINDEX(N'[WorkflowStage] <> N''Deployed''', @SecureBoardDefinition) = 0
+BEGIN
+    PRINT N'FAIL: Stable-compatible equipment board filtering is not installed.';
+    SET @Failures += 1;
+END;
+
+IF @Failures > 0
+    THROW 52222, N'TechBench equipment deployment lifecycle verification failed.', 1;
+
+PRINT N'TechBench schema-15-compatible equipment deployment lifecycle verification passed.';
+GO
+
+-- ============================================================================
+-- END 105-V0015-EquipmentDeploymentLifecycleVerify.sql
 -- ============================================================================
 
 PRINT N'TechBench deployment completed successfully on CSRI-SQL.';

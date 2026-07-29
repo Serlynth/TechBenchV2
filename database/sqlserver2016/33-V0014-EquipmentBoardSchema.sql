@@ -191,7 +191,8 @@ BEGIN TRY
             CONSTRAINT [CK_Equipment_Name_NotBlank]
                 CHECK (LEN(LTRIM(RTRIM([Name]))) > 0),
             CONSTRAINT [CK_Equipment_WorkflowStage]
-                CHECK ([WorkflowStage] IN (N'Stock', N'Assigned', N'Deployment')),
+                CHECK ([WorkflowStage] IN
+                    (N'Stock', N'Assigned', N'Deployment', N'Deployed')),
             CONSTRAINT [FK_Equipment_AssignedUser]
                 FOREIGN KEY ([AssignedToWindowsSid])
                 REFERENCES [tb_security].[Users]([WindowsSid]),
@@ -231,7 +232,8 @@ BEGIN TRY
     )
         ALTER TABLE [tb_inventory].[Equipment] WITH CHECK
             ADD CONSTRAINT [CK_Equipment_WorkflowStage]
-                CHECK ([WorkflowStage] IN (N'Stock', N'Assigned', N'Deployment'));
+                CHECK ([WorkflowStage] IN
+                    (N'Stock', N'Assigned', N'Deployment', N'Deployed'));
 
     IF NOT EXISTS
     (
@@ -332,7 +334,8 @@ BEGIN TRY
                 FOREIGN KEY ([ChangedByWindowsSid])
                 REFERENCES [tb_security].[Users]([WindowsSid]),
             CONSTRAINT [CK_EquipmentAssignmentHistory_WorkflowStage]
-                CHECK ([WorkflowStage] IN (N'Stock', N'Assigned', N'Deployment'))
+                CHECK ([WorkflowStage] IN
+                    (N'Stock', N'Assigned', N'Deployment', N'Deployed'))
         );
 
         CREATE INDEX [IX_EquipmentAssignmentHistory_Equipment]

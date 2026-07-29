@@ -35,6 +35,7 @@ public sealed class EquipmentItem
 
     public bool IsInStock => EquipmentWorkflowStages.IsStock(WorkflowStage);
     public bool IsDeployment => EquipmentWorkflowStages.IsDeployment(WorkflowStage);
+    public bool IsDeployed => EquipmentWorkflowStages.IsDeployed(WorkflowStage);
 
     public string DeviceGlyph => DeviceType.Trim().ToLowerInvariant() switch
     {
@@ -101,7 +102,9 @@ public sealed class EquipmentItem
             return string.Join(" · ", values);
         }
     }
-    public string StatusLabel => IsDeployment
+    public string StatusLabel => IsDeployed
+        ? "Deployed"
+        : IsDeployment
         ? HasClientName
             ? HasClientUser
                 ? "User assigned"
@@ -110,7 +113,9 @@ public sealed class EquipmentItem
         : IsInStock
             ? "New"
             : "In progress";
-    public string StatusColor => IsDeployment
+    public string StatusColor => IsDeployed
+        ? "#38D996"
+        : IsDeployment
         ? "#38D996"
         : IsInStock
             ? "#27C7E8"
@@ -118,6 +123,8 @@ public sealed class EquipmentItem
 
     public string InventoryStatusLabel => IsInStock
         ? "Stock"
+        : IsDeployed
+            ? "Deployed"
         : IsDeployment
             ? StatusLabel
             : "In progress";
@@ -149,7 +156,11 @@ public sealed class EquipmentItem
             ? "Unassigned"
             : ClientUserDisplayName;
 
-    public string AssignmentLabel => IsDeployment
+    public string AssignmentLabel => IsDeployed
+        ? HasClientName
+            ? ClientChipLabel
+            : "Deployed"
+        : IsDeployment
         ? HasClientName
             ? ClientChipLabel
             : "Ready for deployment"
@@ -262,12 +273,16 @@ public static class EquipmentWorkflowStages
     public const string Stock = "Stock";
     public const string Assigned = "Assigned";
     public const string Deployment = "Deployment";
+    public const string Deployed = "Deployed";
 
     public static bool IsStock(string? value) =>
         string.Equals(value, Stock, StringComparison.OrdinalIgnoreCase);
 
     public static bool IsDeployment(string? value) =>
         string.Equals(value, Deployment, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsDeployed(string? value) =>
+        string.Equals(value, Deployed, StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>A Stock, technician, or Deployment lane on the equipment assignment board.</summary>
