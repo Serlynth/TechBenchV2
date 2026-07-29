@@ -6,14 +6,24 @@ namespace TechBench.Tests;
 public sealed class ClientUsersWorkspaceTests
 {
     [Fact]
-    public void SidebarPlacesLinksUnderNotesAndTicketsUnderSystem()
+    public void SidebarPlacesWorkspacesInExpandableTaskGroups()
     {
-        var xaml = ReadRepositoryFile("MainWindow.xaml");
-        var notes = xaml.IndexOf(
-            "Text=\"NOTES\"",
+        var xaml = ReadRepositoryFile(
+            Path.Combine("Controls", "WorkspaceNavigation.xaml"));
+        var worklog = xaml.IndexOf(
+            "Header=\"WORKLOG\"",
             StringComparison.Ordinal);
-        var links = xaml.IndexOf(
-            "CommandParameter=\"Common Links\"",
+        var service = xaml.IndexOf(
+            "Header=\"SERVICE\"",
+            StringComparison.Ordinal);
+        var tickets = xaml.IndexOf(
+            "CommandParameter=\"Ticket List\"",
+            StringComparison.Ordinal);
+        var postingHistory = xaml.IndexOf(
+            "CommandParameter=\"Posting History\"",
+            StringComparison.Ordinal);
+        var clients = xaml.IndexOf(
+            "Header=\"CLIENTS\"",
             StringComparison.Ordinal);
         var clientInfo = xaml.IndexOf(
             "CommandParameter=\"Client Info\"",
@@ -21,35 +31,26 @@ public sealed class ClientUsersWorkspaceTests
         var users = xaml.IndexOf(
             "CommandParameter=\"Client Users\"",
             StringComparison.Ordinal);
-        var clientWifi = xaml.IndexOf(
-            "CommandParameter=\"Client WiFi\"",
+        var clientMatch = xaml.IndexOf(
+            "CommandParameter=\"Client Match\"",
+            StringComparison.Ordinal);
+        var equipment = xaml.IndexOf(
+            "Header=\"EQUIPMENT\"",
             StringComparison.Ordinal);
         var system = xaml.IndexOf(
-            "Text=\"SYSTEM\"",
-            StringComparison.Ordinal);
-        var tickets = xaml.IndexOf(
-            "CommandParameter=\"Ticket List\"",
-            StringComparison.Ordinal);
-        var clientMatch = xaml.IndexOf(
-            "Content=\"Client Match\" Command=\"{Binding NavigateCommand}\" CommandParameter=\"Client Match\"",
-            StringComparison.Ordinal);
-        var postingHistory = xaml.IndexOf(
-            "CommandParameter=\"Posting History\"",
+            "Header=\"SYSTEM\"",
             StringComparison.Ordinal);
 
-        Assert.True(notes >= 0);
-        Assert.True(links > notes);
-        Assert.True(clientInfo > links);
+        Assert.True(worklog >= 0);
+        Assert.True(service > worklog);
+        Assert.True(tickets > service);
+        Assert.True(postingHistory > tickets);
+        Assert.True(clients > postingHistory);
+        Assert.True(clientInfo > clients);
         Assert.True(users > clientInfo);
-        Assert.True(clientWifi > users);
-        Assert.True(system > clientWifi);
-        Assert.True(tickets > system);
-        Assert.True(clientMatch > tickets);
-        Assert.True(postingHistory > clientMatch);
-        Assert.DoesNotContain(
-            "Text=\"DIRECTORY\"",
-            xaml,
-            StringComparison.Ordinal);
+        Assert.True(clientMatch > users);
+        Assert.True(equipment > clientMatch);
+        Assert.True(system > equipment);
         Assert.DoesNotContain(
             "CommandParameter=\"Client List\"",
             xaml,

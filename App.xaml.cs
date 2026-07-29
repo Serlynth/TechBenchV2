@@ -67,10 +67,14 @@ public partial class App : System.Windows.Application
         UpdateCompletionVersion = ReadArgumentValue(e.Args, "--updated-to");
         var isEquipmentDemo = e.Args.Any(argument =>
             argument.Equals("--equipment-demo", StringComparison.OrdinalIgnoreCase));
+        var isShellDemo = e.Args.Any(argument =>
+            argument.Equals("--shell-demo", StringComparison.OrdinalIgnoreCase));
 
-        var mutexName = isEquipmentDemo
-            ? $@"{SingleInstanceMutexName}.EquipmentDemo"
-            : SingleInstanceMutexName;
+        var mutexName = isShellDemo
+            ? $@"{SingleInstanceMutexName}.ShellDemo"
+            : isEquipmentDemo
+                ? $@"{SingleInstanceMutexName}.EquipmentDemo"
+                : SingleInstanceMutexName;
         _singleInstanceMutex = new Mutex(initiallyOwned: true, mutexName, out var isFirstInstance);
         if (!isFirstInstance)
         {
@@ -84,6 +88,14 @@ public partial class App : System.Windows.Application
         }
 
         base.OnStartup(e);
+        if (isShellDemo)
+        {
+            ShutdownMode = ShutdownMode.OnMainWindowClose;
+            MainWindow = new WorkspaceShellDemoWindow();
+            MainWindow.Show();
+            return;
+        }
+
         if (isEquipmentDemo)
         {
             ShutdownMode = ShutdownMode.OnMainWindowClose;

@@ -6,21 +6,27 @@ namespace TechBench.Tests;
 public sealed class CredentialWorkspaceLayoutTests
 {
     [Fact]
-    public void SidebarUsesClickableClientInfoParentAndFilteredChildren()
+    public void SidebarGroupsClientWorkspacesUnderOneExpandableArea()
     {
+        var navigation = ReadRepositoryFile(
+            Path.Combine("Controls", "WorkspaceNavigation.xaml"));
         var xaml = ReadRepositoryFile("MainWindow.xaml");
 
         Assert.Contains(
-            "Content=\"CLIENT INFO\" Command=\"{Binding NavigateCommand}\" CommandParameter=\"Client Info\"",
-            xaml,
+            "Header=\"CLIENTS\"",
+            navigation,
             StringComparison.Ordinal);
         foreach (var section in new[] { "Client WiFi", "Domain/AD", "Connection", "Misc Info" })
         {
             Assert.Contains(
-                $"Content=\"{section}\" Command=\"{{Binding NavigateCommand}}\" CommandParameter=\"{section}\"",
-                xaml,
+                $"CommandParameter=\"{section}\"",
+                navigation,
                 StringComparison.Ordinal);
         }
+        Assert.Contains(
+            "CommandParameter=\"Client Info\"",
+            navigation,
+            StringComparison.Ordinal);
         Assert.Contains(
             "Visibility=\"{Binding IsCredentialWorkspaceSection, Converter={StaticResource BooleanToVisibilityConverter}}\"",
             xaml,
@@ -30,22 +36,37 @@ public sealed class CredentialWorkspaceLayoutTests
     }
 
     [Fact]
-    public void SidebarNavigationScrollsAndUsesProminentSectionHeaders()
+    public void SidebarNavigationUsesScrollableExpandableGroups()
     {
-        var xaml = ReadRepositoryFile("MainWindow.xaml");
+        var mainWindow = ReadRepositoryFile("MainWindow.xaml");
+        var navigation = ReadRepositoryFile(
+            Path.Combine("Controls", "WorkspaceNavigation.xaml"));
 
-        Assert.Contains("x:Name=\"SidebarNavigationScrollViewer\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("VerticalScrollBarVisibility=\"Hidden\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Text=\"&#x2192;\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Text=\"›\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Text=\"NOTES\" Style=\"{StaticResource SidebarGroupLabelStyle}\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Text=\"WORKLOG\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("x:Key=\"SidebarGroupHeaderStyle\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("x:Key=\"SidebarGroupButtonStyle\"", xaml, StringComparison.Ordinal);
         Assert.Contains(
-            "x:Key=\"NavClientInfoStyle\" TargetType=\"{x:Type Button}\" BasedOn=\"{StaticResource SidebarGroupButtonStyle}\"",
-            xaml,
+            "<controls:WorkspaceNavigation Grid.Column=\"0\"",
+            mainWindow,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "x:Name=\"SidebarNavigationScrollViewer\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "VerticalScrollBarVisibility=\"Auto\"",
+            navigation,
+            StringComparison.Ordinal);
+        foreach (var group in new[] { "WORKLOG", "SERVICE", "CLIENTS", "EQUIPMENT", "SYSTEM" })
+        {
+            Assert.Contains(
+                $"Header=\"{group}\"",
+                navigation,
+                StringComparison.Ordinal);
+        }
+        Assert.Contains("x:Key=\"WorkspaceNavItemStyle\"", navigation, StringComparison.Ordinal);
+        Assert.Contains(
+            "Converter={StaticResource SectionActiveConverter}",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("x:Key=\"NavTodayStyle\"", navigation, StringComparison.Ordinal);
     }
 
     [Fact]

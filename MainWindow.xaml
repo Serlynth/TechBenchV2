@@ -83,7 +83,7 @@
         <Style x:Key="DeploymentEquipmentCardItemStyle"
                TargetType="{x:Type ListBoxItem}"
                BasedOn="{StaticResource EquipmentCardItemStyle}">
-            <Setter Property="Width" Value="285" />
+            <Setter Property="Width" Value="268" />
             <Setter Property="Margin" Value="0,0,10,10" />
         </Style>
 
@@ -91,69 +91,33 @@
             <StackPanel>
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="34" />
+                        <ColumnDefinition Width="30" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <TextBlock Text="{Binding DeviceGlyph}"
                                FontFamily="Segoe MDL2 Assets"
-                               FontSize="18"
+                               FontSize="17"
                                Foreground="{Binding DeviceBadgeColor}"
                                HorizontalAlignment="Center"
                                VerticalAlignment="Center" />
-                    <StackPanel Grid.Column="1" Margin="9,0,8,0">
+                    <StackPanel Grid.Column="1" Margin="8,0,8,0">
                         <TextBlock Text="{Binding Name}"
                                    Foreground="{DynamicResource PrimaryTextBrush}"
                                    FontWeight="SemiBold"
                                    FontSize="13"
                                    TextTrimming="CharacterEllipsis" />
-                        <TextBlock Text="{Binding ModelLine}"
+                        <TextBlock Text="{Binding IdentityLine}"
                                    Foreground="{DynamicResource MutedTextBrush}"
                                    FontSize="10"
                                    Margin="0,2,0,0"
                                    TextTrimming="CharacterEllipsis" />
                     </StackPanel>
-                </Grid>
-                <WrapPanel Margin="43,9,0,0">
-                    <Border Background="{DynamicResource ControlBackgroundBrush}"
-                            BorderBrush="{DynamicResource BorderBrush}"
-                            BorderThickness="1"
+                    <Border Grid.Column="2"
+                            Background="{DynamicResource ControlBackgroundBrush}"
                             CornerRadius="8"
                             Padding="7,3"
-                            Margin="0,0,6,5"
-                            Visibility="{Binding HasAssetTag, Converter={StaticResource BooleanToVisibilityConverter}}">
-                        <TextBlock Foreground="{DynamicResource SecondaryTextBrush}" FontSize="9">
-                            <Run Text="TAG " />
-                            <Run Text="{Binding AssetTagChipLabel, Mode=OneWay}" />
-                        </TextBlock>
-                    </Border>
-                    <Border Background="{DynamicResource ControlBackgroundBrush}"
-                            BorderBrush="{DynamicResource BorderBrush}"
-                            BorderThickness="1"
-                            CornerRadius="8"
-                            Padding="7,3"
-                            Margin="0,0,6,5"
-                            Visibility="{Binding HasSerialNumber, Converter={StaticResource BooleanToVisibilityConverter}}">
-                        <TextBlock Foreground="{DynamicResource SecondaryTextBrush}" FontSize="9">
-                            <Run Text="# " />
-                            <Run Text="{Binding SerialChipLabel, Mode=OneWay}" />
-                        </TextBlock>
-                    </Border>
-                    <Border Background="{DynamicResource ControlBackgroundBrush}"
-                            BorderBrush="{DynamicResource BorderBrush}"
-                            BorderThickness="1"
-                            CornerRadius="8"
-                            Padding="7,3"
-                            Margin="0,0,6,5"
-                            Visibility="{Binding HasIpAddress, Converter={StaticResource BooleanToVisibilityConverter}}">
-                        <TextBlock Foreground="{DynamicResource SecondaryTextBrush}" FontSize="9">
-                            <Run Text="IP " />
-                            <Run Text="{Binding IpChipLabel, Mode=OneWay}" />
-                        </TextBlock>
-                    </Border>
-                    <Border Background="{DynamicResource ControlBackgroundBrush}"
-                            CornerRadius="8"
-                            Padding="7,3"
-                            Margin="0,0,6,5">
+                            VerticalAlignment="Center">
                         <StackPanel Orientation="Horizontal">
                             <Ellipse Width="5"
                                      Height="5"
@@ -162,23 +126,42 @@
                                      VerticalAlignment="Center" />
                             <TextBlock Text="{Binding StatusLabel}"
                                        Foreground="{Binding StatusColor}"
-                                       FontSize="9"
+                                       FontSize="10"
                                        FontWeight="SemiBold" />
                         </StackPanel>
                     </Border>
-                </WrapPanel>
-                <TextBlock Text="{Binding ClientChipLabel}"
-                           Foreground="{DynamicResource MutedTextBrush}"
-                           FontSize="9"
-                           TextTrimming="CharacterEllipsis"
-                           Margin="43,1,0,0"
-                           Visibility="{Binding HasClientName, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                </Grid>
+                <Grid Margin="38,9,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Background="{DynamicResource ControlBackgroundBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="7,3"
+                            Visibility="{Binding HasAssetTag, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <TextBlock Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="10">
+                            <Run Text="TAG " />
+                            <Run Text="{Binding AssetTagChipLabel, Mode=OneWay}" />
+                        </TextBlock>
+                    </Border>
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding LocationLine}"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               FontSize="10"
+                               Margin="8,0,0,0"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                </Grid>
                 <TextBlock Text="{Binding DeploymentOwnerLabel}"
                            Foreground="#6BE6AE"
                            FontSize="10"
                            FontWeight="SemiBold"
                            TextTrimming="CharacterEllipsis"
-                           Margin="43,3,0,0"
+                           Margin="38,4,0,0"
                            Visibility="{Binding HasDeploymentOwner, Converter={StaticResource BooleanToVisibilityConverter}}" />
             </StackPanel>
         </DataTemplate>
@@ -227,46 +210,6 @@
         <Style x:Key="MutedTextStyle" TargetType="{x:Type TextBlock}">
             <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
             <Setter Property="FontSize" Value="12" />
-        </Style>
-
-        <Style x:Key="HeaderUpdateButtonStyle"
-               TargetType="{x:Type Button}"
-               BasedOn="{StaticResource {x:Type Button}}">
-            <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
-            <Setter Property="Background" Value="{DynamicResource SuccessSoftBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="11,5" />
-            <Setter Property="MinHeight" Value="30" />
-            <Setter Property="FontSize" Value="9" />
-            <Setter Property="FontWeight" Value="Bold" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type Button}">
-                        <Border x:Name="UpdateBorder"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="16"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center"
-                                              TextElement.Foreground="{TemplateBinding Foreground}" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="UpdateBorder" Property="Background" Value="{DynamicResource SuccessSoftHoverBrush}" />
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="UpdateBorder" Property="Opacity" Value="0.76" />
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="UpdateBorder" Property="Opacity" Value="0.45" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
         </Style>
 
         <Style x:Key="TableHeaderTextStyle" TargetType="{x:Type TextBlock}">
@@ -454,112 +397,6 @@
             </Style.Triggers>
         </Style>
 
-        <Style x:Key="SidebarGroupLabelStyle" TargetType="{x:Type TextBlock}">
-            <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
-            <Setter Property="FontSize" Value="11" />
-            <Setter Property="FontWeight" Value="Bold" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-        </Style>
-
-        <Style x:Key="SidebarGroupHeaderStyle" TargetType="{x:Type Border}">
-            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
-            <Setter Property="BorderThickness" Value="0,0,0,1" />
-            <Setter Property="Margin" Value="8,18,8,7" />
-            <Setter Property="Padding" Value="8,0,0,7" />
-        </Style>
-
-        <Style x:Key="SidebarGroupButtonStyle" TargetType="{x:Type Button}">
-            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
-            <Setter Property="Padding" Value="8,0,0,7" />
-            <Setter Property="Margin" Value="8,18,8,7" />
-            <Setter Property="MinHeight" Value="28" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type Button}">
-                        <Border x:Name="GroupHeaderBorder"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{DynamicResource BorderBrush}"
-                                BorderThickness="0,0,0,1"
-                                CornerRadius="5"
-                                Padding="{TemplateBinding Padding}">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock x:Name="NavLabel"
-                                           Text="{TemplateBinding Content}"
-                                           Foreground="{TemplateBinding Foreground}"
-                                           FontSize="11"
-                                           FontWeight="Bold"
-                                           VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="1"
-                                           Text="&#x2192;"
-                                           Foreground="{TemplateBinding Foreground}"
-                                           FontSize="15"
-                                           FontWeight="SemiBold"
-                                           Margin="8,-2,3,-2"
-                                           VerticalAlignment="Center" />
-                            </Grid>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="GroupHeaderBorder" Property="Background" Value="{DynamicResource SidebarHoverBrush}" />
-                                <Setter TargetName="GroupHeaderBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-                            </Trigger>
-                            <Trigger Property="Tag" Value="Active">
-                                <Setter TargetName="GroupHeaderBorder" Property="Background" Value="{DynamicResource SidebarActiveBrush}" />
-                                <Setter TargetName="GroupHeaderBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-                                <Setter TargetName="NavLabel" Property="Foreground" Value="#FFFFFF" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style x:Key="SidebarChildButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarButtonStyle}">
-            <Setter Property="Padding" Value="16,10" />
-        </Style>
-
-        <Style x:Key="NavTodayStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Today"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavWeekStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="This Week"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavHistoryStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="History"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavSearchStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Search"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavQueueStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Posting Queue"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavClientMatchStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Client Match"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavTicketsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Ticket List"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavLinksStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Common Links"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavClientInfoStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarGroupButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Client Info"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavClientInfoChildStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}">
-            <Setter Property="Padding" Value="28,9" />
-        </Style>
-        <Style x:Key="NavClientUsersStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource NavClientInfoChildStyle}">
-            <Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Client Users"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers>
-        </Style>
-        <Style x:Key="NavClientWifiStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource NavClientInfoChildStyle}">
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding CurrentSection}" Value="Client WiFi">
-                    <Setter Property="Tag" Value="Active" />
-                </DataTrigger>
-            </Style.Triggers>
-        </Style>
-        <Style x:Key="NavDomainAdStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource NavClientInfoChildStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Domain/AD"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavConnectionStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource NavClientInfoChildStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Connection"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavMiscInfoStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource NavClientInfoChildStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Misc Info"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavInventoryStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarGroupButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Inventory"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavInventoryChildStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}">
-            <Setter Property="Padding" Value="28,9" />
-        </Style>
-        <Style x:Key="NavEquipmentBoardStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource NavInventoryChildStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Equipment Board"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavPostingHistoryStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Posting History"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavAdminCenterStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarChildButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Admin Center"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-        <Style x:Key="NavSettingsStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource SidebarButtonStyle}"><Style.Triggers><DataTrigger Binding="{Binding CurrentSection}" Value="Settings"><Setter Property="Tag" Value="Active" /></DataTrigger></Style.Triggers></Style>
-
         <Style x:Key="BadgeTextStyle" TargetType="{x:Type TextBlock}">
             <Setter Property="FontSize" Value="11" />
             <Setter Property="FontWeight" Value="SemiBold" />
@@ -692,166 +529,20 @@
 
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="236" />
+            <ColumnDefinition Width="248" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <Border Grid.Column="0" Background="{DynamicResource SidebarBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Padding="16,20,16,16">
-            <DockPanel LastChildFill="True">
-                <Grid DockPanel.Dock="Top" Height="84" Margin="0,0,0,8">
-                    <Image Source="Assets/csri-techbench-logo.png"
-                           Stretch="Uniform"
-                           HorizontalAlignment="Stretch"
-                           RenderOptions.BitmapScalingMode="HighQuality" />
-                </Grid>
-
-                <StackPanel DockPanel.Dock="Bottom">
-                    <Border Background="{DynamicResource ControlBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12" Margin="0,12,0,0">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,7"><Ellipse Width="7" Height="7" Fill="{DynamicResource SuccessBrush}" Margin="0,0,8,0"/><TextBlock Text="SHARED SQL WORKSPACE" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource SecondaryTextBrush}"/></StackPanel>
-                            <TextBlock Text="{Binding StatusMessage}"
-                                       Foreground="{DynamicResource MutedTextBrush}"
-                                       FontSize="11"
-                                       TextTrimming="CharacterEllipsis"
-                                       ToolTip="{Binding StatusMessage}" />
-                        </StackPanel>
-                    </Border>
-                    <TextBlock Text="{Binding DatabasePath}"
-                               Foreground="{DynamicResource SidebarMutedTextBrush}"
-                               FontSize="9"
-                               ToolTip="{Binding DatabasePath}"
-                               TextTrimming="CharacterEllipsis"
-                               Margin="5,9,5,0" />
-                </StackPanel>
-
-                <ScrollViewer x:Name="SidebarNavigationScrollViewer"
-                              VerticalScrollBarVisibility="Hidden"
-                              HorizontalScrollBarVisibility="Disabled"
-                              PanningMode="VerticalOnly">
-                    <StackPanel>
-                    <Border Style="{StaticResource SidebarGroupHeaderStyle}">
-                        <TextBlock Text="NOTES" Style="{StaticResource SidebarGroupLabelStyle}" />
-                    </Border>
-                    <Button Content="Today" Command="{Binding NavigateCommand}" CommandParameter="Today" Style="{StaticResource NavTodayStyle}" />
-                    <Button Content="This Week" Command="{Binding NavigateCommand}" CommandParameter="This Week" Style="{StaticResource NavWeekStyle}" />
-                    <Button Content="History" Command="{Binding NavigateCommand}" CommandParameter="History" Style="{StaticResource NavHistoryStyle}" />
-                    <Button Content="Search" Command="{Binding NavigateCommand}" CommandParameter="Search" Style="{StaticResource NavSearchStyle}" />
-                    <Button Content="Posting Queue" Command="{Binding NavigateCommand}" CommandParameter="Posting Queue" Style="{StaticResource NavQueueStyle}" />
-                    <Button Content="Links" Command="{Binding NavigateCommand}" CommandParameter="Common Links" Style="{StaticResource NavLinksStyle}" />
-                    <Button Content="CLIENT INFO" Command="{Binding NavigateCommand}" CommandParameter="Client Info" Style="{StaticResource NavClientInfoStyle}"
-                            Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <Button Content="Users" Command="{Binding NavigateCommand}" CommandParameter="Client Users" Style="{StaticResource NavClientUsersStyle}"
-                            Visibility="{Binding CanAccessClientUsers, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <Button Content="Client WiFi" Command="{Binding NavigateCommand}" CommandParameter="Client WiFi" Style="{StaticResource NavClientWifiStyle}"
-                            Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <Button Content="Domain/AD" Command="{Binding NavigateCommand}" CommandParameter="Domain/AD" Style="{StaticResource NavDomainAdStyle}"
-                            Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <Button Content="Connection" Command="{Binding NavigateCommand}" CommandParameter="Connection" Style="{StaticResource NavConnectionStyle}"
-                            Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <Button Content="Misc Info" Command="{Binding NavigateCommand}" CommandParameter="Misc Info" Style="{StaticResource NavMiscInfoStyle}"
-                            Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
-
-                    <Button Content="INVENTORY"
-                            Command="{Binding NavigateCommand}"
-                            CommandParameter="Inventory"
-                            Style="{StaticResource NavInventoryStyle}"
-                            Visibility="{Binding CanAccessEquipmentBoard, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <Button Content="Equipment Board"
-                            Command="{Binding NavigateCommand}"
-                            CommandParameter="Equipment Board"
-                            Style="{StaticResource NavEquipmentBoardStyle}"
-                            Visibility="{Binding CanAccessEquipmentBoard, Converter={StaticResource BooleanToVisibilityConverter}}" />
-
-                    <Border Style="{StaticResource SidebarGroupHeaderStyle}">
-                        <TextBlock Text="SYSTEM" Style="{StaticResource SidebarGroupLabelStyle}" />
-                    </Border>
-                    <Button Content="Tickets" Command="{Binding NavigateCommand}" CommandParameter="Ticket List" Style="{StaticResource NavTicketsStyle}" />
-                    <Button Content="Client Match" Command="{Binding NavigateCommand}" CommandParameter="Client Match" Style="{StaticResource NavClientMatchStyle}" />
-                    <Button Content="Posting History" Command="{Binding NavigateCommand}" CommandParameter="Posting History" Style="{StaticResource NavPostingHistoryStyle}" />
-                    <Button Content="Admin Center"
-                            Command="{Binding NavigateCommand}"
-                            CommandParameter="Admin Center"
-                            Style="{StaticResource NavAdminCenterStyle}"
-                            Visibility="{Binding CanAccessAdminCenter, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <Button Content="Settings" Command="{Binding NavigateCommand}" CommandParameter="Settings" Style="{StaticResource NavSettingsStyle}" />
-                    </StackPanel>
-                </ScrollViewer>
-            </DockPanel>
-        </Border>
+        <controls:WorkspaceNavigation Grid.Column="0" />
 
         <Grid Grid.Column="1" Background="{DynamicResource WindowBackgroundBrush}">
             <Grid.RowDefinitions>
-                <RowDefinition Height="88" />
+                <RowDefinition Height="76" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="26,0" Background="{DynamicResource HeaderBackgroundBrush}">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,20,0">
-                        <TextBlock Text="{Binding CurrentSection}"
-                                   FontSize="25"
-                                   FontWeight="SemiBold"
-                                   TextTrimming="CharacterEllipsis" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="1"
-                                Orientation="Horizontal"
-                                HorizontalAlignment="Right"
-                                VerticalAlignment="Center">
-                        <Button Command="{Binding Updates.ShowUpdateBannerCommand}"
-                                Style="{StaticResource HeaderUpdateButtonStyle}"
-                                ToolTip="{Binding Updates.BannerTitle}"
-                                AutomationProperties.Name="{Binding Updates.BannerTitle}"
-                                Margin="0,0,10,0"
-                                Visibility="{Binding Updates.HasAvailableUpdate, Converter={StaticResource BooleanToVisibilityConverter}}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#x2193;"
-                                           FontFamily="Segoe UI Symbol"
-                                           FontSize="14"
-                                           FontWeight="Bold"
-                                           Foreground="{DynamicResource SuccessBrush}"
-                                           Margin="0,-2,7,0" />
-                                <TextBlock Text="{Binding Updates.HeaderUpdateLabel}"
-                                           Foreground="{DynamicResource SuccessBrush}"
-                                           FontSize="9"
-                                           FontWeight="Bold"
-                                           VerticalAlignment="Center" />
-                            </StackPanel>
-                        </Button>
-                        <Border Background="{DynamicResource PanelBackgroundBrush}"
-                                BorderBrush="{DynamicResource BorderBrush}"
-                                BorderThickness="1"
-                                CornerRadius="18"
-                                Padding="13,7">
-                            <StackPanel Orientation="Horizontal">
-                                <Ellipse Width="7" Height="7" Margin="0,0,8,0">
-                                    <Ellipse.Style>
-                                        <Style TargetType="{x:Type Ellipse}">
-                                            <Setter Property="Fill" Value="{DynamicResource SuccessBrush}" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding Editor.IsDirty}" Value="True">
-                                                    <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
-                                                </DataTrigger>
-                                                <DataTrigger Binding="{Binding IsEntryOperationRunning}" Value="True">
-                                                    <Setter Property="Fill" Value="{DynamicResource AccentHoverBrush}" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Ellipse.Style>
-                                </Ellipse>
-                                <TextBlock Text="{Binding WorkspaceStateLabel}"
-                                           FontSize="9"
-                                           FontWeight="Bold"
-                                           Foreground="{DynamicResource SecondaryTextBrush}" />
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
-                </Grid>
-            </Border>
+            <controls:WorkspaceHeader Grid.Row="0" />
 
             <StackPanel Grid.Row="1">
                 <Border Background="{DynamicResource WarningBrush}"
@@ -4084,9 +3775,9 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Grid Width="320"
+                                            <Grid Width="296"
                                                   Height="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType={x:Type ScrollViewer}}}"
-                                                  Margin="0,0,16,0"
+                                                  Margin="0,0,12,0"
                                                   Background="Transparent">
                                                 <Grid.RowDefinitions>
                                                     <RowDefinition Height="Auto" />
@@ -4294,9 +3985,9 @@
                                             </ItemsControl.ItemsPanel>
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>
-                                                    <Grid Width="320"
+                                                    <Grid Width="296"
                                                           Height="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType={x:Type ScrollViewer}}}"
-                                                          Margin="0,0,16,0"
+                                                          Margin="0,0,12,0"
                                                           Background="Transparent">
                                                         <Grid.RowDefinitions>
                                                             <RowDefinition Height="Auto" />

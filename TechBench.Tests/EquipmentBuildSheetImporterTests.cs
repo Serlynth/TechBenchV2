@@ -296,14 +296,21 @@ public sealed class EquipmentBuildSheetImporterTests
     public void InventoryNavigationSeparatesRegistryAndEquipmentBoard()
     {
         var mainWindowXaml = ReadRepositoryFile("MainWindow.xaml");
+        var navigationXaml = ReadRepositoryFile(
+            "Controls/WorkspaceNavigation.xaml");
         var equipmentViewModel = ReadRepositoryFile(
             "ViewModels/MainWindowViewModel.Equipment.cs");
 
-        Assert.Contains("Content=\"INVENTORY\"", mainWindowXaml);
-        Assert.Contains("CommandParameter=\"Inventory\"", mainWindowXaml);
-        Assert.Contains("Style=\"{StaticResource NavInventoryStyle}\"", mainWindowXaml);
-        Assert.Contains("Content=\"Equipment Board\"", mainWindowXaml);
-        Assert.Contains("CommandParameter=\"Equipment Board\"", mainWindowXaml);
+        Assert.Contains("Header=\"EQUIPMENT\"", navigationXaml);
+        Assert.Contains("Content=\"Inventory\"", navigationXaml);
+        Assert.Contains("CommandParameter=\"Inventory\"", navigationXaml);
+        Assert.Contains(
+            "Style=\"{StaticResource WorkspaceNavItemStyle}\"",
+            navigationXaml);
+        Assert.Contains("Content=\"Equipment Board\"", navigationXaml);
+        Assert.Contains(
+            "CommandParameter=\"Equipment Board\"",
+            navigationXaml);
         Assert.Contains("ConverterParameter=Inventory", mainWindowXaml);
         Assert.Contains("ConverterParameter=Equipment Board", mainWindowXaml);
         Assert.Contains("Text=\"All Equipment\"", mainWindowXaml);

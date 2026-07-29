@@ -164,9 +164,15 @@ public sealed class SharedAdminPolicyTests
             StringComparison.Ordinal);
         Assert.DoesNotContain("_whdRestClient", adminSource, StringComparison.Ordinal);
 
+        var navigation = File.ReadAllText(FindRepositoryFile(
+            "Controls",
+            "WorkspaceNavigation.xaml"));
         var xaml = File.ReadAllText(FindRepositoryFile("MainWindow.xaml"));
-        Assert.Contains("Content=\"Admin Center\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Visibility=\"{Binding CanAccessAdminCenter", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Admin Center\"", navigation, StringComparison.Ordinal);
+        Assert.Contains(
+            "Visibility=\"{Binding CanAccessAdminCenter",
+            navigation,
+            StringComparison.Ordinal);
         Assert.Contains("Sync all WHD data now", xaml, StringComparison.Ordinal);
         Assert.Contains("Sync Sage customers now", xaml, StringComparison.Ordinal);
         Assert.Contains("Sync Credentials now", xaml, StringComparison.Ordinal);
