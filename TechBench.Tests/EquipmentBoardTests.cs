@@ -1,6 +1,5 @@
 using TechBench.Controls;
 using TechBench.Models;
-using TechBench.Services;
 using TechBench.ViewModels;
 
 namespace TechBench.Tests;
@@ -34,19 +33,8 @@ public sealed class EquipmentBoardTests
                 "MainWindowViewModel.Equipment.cs"));
 
         Assert.Contains(
-            "Visibility=\"{Binding IsEquipmentInventoryEditorVisible, Converter={StaticResource BooleanToVisibilityConverter}}\"",
+            "Visibility=\"{Binding IsEquipmentEditorVisible, Converter={StaticResource BooleanToVisibilityConverter}}\"",
             mainWindowXaml);
-        Assert.Contains("x:Name=\"InventoryEquipmentEditorPanel\"", mainWindowXaml);
-        Assert.Contains("x:Name=\"EquipmentQuickViewPanel\"", mainWindowXaml);
-        Assert.Contains(
-            "CanEditEquipmentInCurrentSection()",
-            equipmentViewModel);
-        Assert.Contains(
-            "CurrentSection.Equals(",
-            equipmentViewModel);
-        Assert.Contains(
-            "\"Inventory\"",
-            equipmentViewModel);
         Assert.Contains(
             "Data=\"M1,8 C3.8,3.5 12.2,3.5 15,8 C12.2,12.5 3.8,12.5 1,8 Z\"",
             mainWindowXaml);
@@ -294,30 +282,6 @@ public sealed class EquipmentBoardTests
         Assert.Equal(
             "Sample Client \u00B7 Dana Brooks \u00B7 Main office",
             history.ClientChipLabel);
-    }
-
-    [Fact]
-    public void EquipmentDetailsCanBeCopiedWithoutIncludingThePassword()
-    {
-        var equipment = new EquipmentItem
-        {
-            Name = "Reception PC",
-            DeviceType = "Desktop",
-            AssetTag = "TB-0007",
-            SerialNumber = "SERIAL-7",
-            AnyDeskNumber = "123 456 789",
-            AnyDeskPassword = "private-password",
-            ClientName = "Acme Test",
-            ClientUserDisplayName = "Dana Brooks"
-        };
-
-        var text = EquipmentClipboardFormatter.Format(equipment);
-
-        Assert.Contains("Equipment: Reception PC", text);
-        Assert.Contains("Asset tag: TB-0007", text);
-        Assert.Contains("AnyDesk number: 123 456 789", text);
-        Assert.Contains("Client user: Dana Brooks", text);
-        Assert.DoesNotContain("private-password", text);
     }
 
     [Fact]
