@@ -172,7 +172,12 @@
                            Stretch="Uniform"
                            HorizontalAlignment="Center"
                            VerticalAlignment="Center"
-                           RenderOptions.BitmapScalingMode="HighQuality" />
+                           RenderOptions.BitmapScalingMode="HighQuality">
+                        <Image.RenderTransform>
+                            <TranslateTransform X="{Binding ModuleLogoOffsetX}"
+                                                Y="{Binding ModuleLogoOffsetY}" />
+                        </Image.RenderTransform>
+                    </Image>
                 </Grid>
 
                 <UniformGrid Columns="3"

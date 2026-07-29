@@ -22,7 +22,23 @@ public sealed class BenchModuleShellTests
             navigation,
             StringComparison.Ordinal);
         Assert.Contains(
-            "ModuleLogoDisplayWidth => 238",
+            "X=\"{Binding ModuleLogoOffsetX}\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Y=\"{Binding ModuleLogoOffsetY}\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "BenchModule.SalesBench => 263",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "BenchModule.AdminBench => 257",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "_ => 252",
             viewModel,
             StringComparison.Ordinal);
         Assert.Contains(
