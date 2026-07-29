@@ -311,6 +311,31 @@ public sealed class ClientInfoProfileWindowTests
     }
 
     [Fact]
+    public void FullProfileUsesCanonicalClientMatchWhenCredentialNameOmitsConjunction()
+    {
+        var clients = new[]
+        {
+            new Client
+            {
+                Id = 463,
+                Name = "Teeters Harvey Marrone & O’Rourke LLP",
+                Source = "Both",
+                WhdLocationName = "Marrone & O’Rourke LLP",
+                SageCustomerName = "Marrone & O’Rourke"
+            },
+            new Client { Id = 99, Name = "Another Client", Source = "Both" }
+        };
+
+        var match = ClientProfileWhdMatcher.FindConfidentMatch(
+            "Marrone O’Rourke",
+            clients);
+
+        Assert.NotNull(match);
+        Assert.Equal(463, match.Id);
+        Assert.Equal("Teeters Harvey Marrone & O’Rourke LLP", match.Name);
+    }
+
+    [Fact]
     public void FullProfileDoesNotGuessWhenANameMatchIsAmbiguous()
     {
         var clients = new[]
