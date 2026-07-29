@@ -6,8 +6,6 @@ namespace TechBench;
 
 public partial class ClientInfoWindow : Window
 {
-    public event EventHandler<EquipmentItem>? EquipmentOpenRequested;
-
     public ClientInfoWindow()
     {
         InitializeComponent();
@@ -22,8 +20,10 @@ public partial class ClientInfoWindow : Window
             return;
         }
 
-        EquipmentOpenRequested?.Invoke(this, equipment);
-        Close();
+        if (DataContext is ViewModels.ClientInfoProfileViewModel viewModel)
+        {
+            viewModel.SelectedEquipment = equipment;
+        }
         e.Handled = true;
     }
 
@@ -33,6 +33,17 @@ public partial class ClientInfoWindow : Window
     {
         if (e.Key != Key.Escape)
             return;
+
+        if (DataContext is ViewModels.ClientInfoProfileViewModel
+            {
+                SelectedEquipment: not null
+            } viewModel)
+        {
+            viewModel.SelectedEquipment = null;
+            e.Handled = true;
+            return;
+        }
+
         Close();
         e.Handled = true;
     }

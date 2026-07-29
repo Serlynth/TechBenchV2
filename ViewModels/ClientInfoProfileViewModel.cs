@@ -14,6 +14,8 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
     private bool _isCopyingClientUserField;
     private ClientUserSummary? _selectedClientUser;
     private ClientUserSummary? _revealedClientUser;
+    private EquipmentItem? _selectedEquipment;
+    private bool _showEquipmentAnyDeskPassword;
     private string _statusMessage;
 
     public ClientInfoProfileViewModel(
@@ -47,6 +49,13 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
             parameter => IsClientUserRevealed
                          && !_isCopyingClientUserField
                          && parameter is FireDrillCredentialField);
+        CloseEquipmentDetailsCommand = new RelayCommand(
+            _ => SelectedEquipment = null,
+            _ => SelectedEquipment is not null);
+        CopyEquipmentDetailsCommand = new RelayCommand(
+            CopyEquipmentDetails,
+            parameter => parameter is EquipmentItem
+                         || SelectedEquipment is not null);
         foreach (var item in equipment ?? [])
             Equipment.Add(item);
         foreach (var user in clientUsers ?? [])
@@ -64,6 +73,8 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
     public RelayCommand RevealClientUserCommand { get; }
     public RelayCommand HideClientUserCommand { get; }
     public RelayCommand CopyClientUserFieldCommand { get; }
+    public RelayCommand CloseEquipmentDetailsCommand { get; }
+    public RelayCommand CopyEquipmentDetailsCommand { get; }
     public string ClientName => _summary.ClientName;
     public Client? WhdClient { get; }
     public bool HasWhdMatch => WhdClient is not null;
@@ -96,6 +107,49 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
         $"{Equipment.Count} inventory item{(Equipment.Count == 1 ? string.Empty : "s")}";
     public string ClientUserCountLabel =>
         $"{ClientUsers.Count} synchronized user{(ClientUsers.Count == 1 ? string.Empty : "s")}";
+
+    public EquipmentItem? SelectedEquipment
+    {
+        get => _selectedEquipment;
+        set
+        {
+            if (!SetProperty(ref _selectedEquipment, value))
+            {
+                return;
+            }
+
+            ShowEquipmentAnyDeskPassword = false;
+            OnPropertyChanged(nameof(IsEquipmentDetailsVisible));
+            OnPropertyChanged(nameof(HasEquipmentAnyDeskPassword));
+            OnPropertyChanged(nameof(EquipmentAnyDeskPasswordDisplay));
+            CloseEquipmentDetailsCommand.RaiseCanExecuteChanged();
+            CopyEquipmentDetailsCommand.RaiseCanExecuteChanged();
+        }
+    }
+
+    public bool IsEquipmentDetailsVisible => SelectedEquipment is not null;
+
+    public bool HasEquipmentAnyDeskPassword =>
+        !string.IsNullOrEmpty(SelectedEquipment?.AnyDeskPassword);
+
+    public string EquipmentAnyDeskPasswordDisplay =>
+        !HasEquipmentAnyDeskPassword
+            ? "—"
+            : ShowEquipmentAnyDeskPassword
+                ? SelectedEquipment!.AnyDeskPassword
+                : "••••••••";
+
+    public bool ShowEquipmentAnyDeskPassword
+    {
+        get => _showEquipmentAnyDeskPassword;
+        set
+        {
+            if (SetProperty(ref _showEquipmentAnyDeskPassword, value))
+            {
+                OnPropertyChanged(nameof(EquipmentAnyDeskPasswordDisplay));
+            }
+        }
+    }
 
     public ClientUserSummary? SelectedClientUser
     {
@@ -297,6 +351,28 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
         {
             _isCopyingClientUserField = false;
             CopyClientUserFieldCommand.RaiseCanExecuteChanged();
+        }
+    }
+
+    private async void CopyEquipmentDetails(object? parameter)
+    {
+        var equipment = parameter as EquipmentItem ?? SelectedEquipment;
+        if (equipment is null)
+        {
+            return;
+        }
+
+        try
+        {
+            StatusMessage = await ClipboardService.TrySetTextAsync(
+                EquipmentClipboardFormatter.Format(equipment))
+                ? $"Copied {equipment.Name} equipment details."
+                : "Windows could not access the clipboard. Try Copy again.";
+        }
+        catch
+        {
+            StatusMessage =
+                "Windows could not access the clipboard. Try Copy again.";
         }
     }
 

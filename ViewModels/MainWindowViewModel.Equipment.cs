@@ -62,15 +62,20 @@ public sealed partial class MainWindowViewModel
     public AsyncRelayCommand ArchiveEquipmentCommand { get; private set; } = null!;
     public RelayCommand CancelEquipmentEditCommand { get; private set; } = null!;
     public RelayCommand ClearEquipmentSearchCommand { get; private set; } = null!;
+    public RelayCommand CopyEquipmentDetailsCommand { get; private set; } = null!;
 
     public EquipmentItem? SelectedEquipment
     {
         get => _selectedEquipment;
         set
         {
-            if (SetProperty(ref _selectedEquipment, value) && value is not null)
+            if (SetProperty(ref _selectedEquipment, value))
             {
-                LoadEquipmentEditor(value);
+                CopyEquipmentDetailsCommand?.RaiseCanExecuteChanged();
+                if (value is not null)
+                {
+                    LoadEquipmentEditor(value);
+                }
             }
         }
     }
@@ -83,15 +88,22 @@ public sealed partial class MainWindowViewModel
             if (SetProperty(ref _isEquipmentEditorVisible, value))
             {
                 OnPropertyChanged(nameof(EquipmentEditorTitle));
+                OnPropertyChanged(nameof(IsEquipmentInventoryEditorVisible));
                 OnPropertyChanged(nameof(IsEquipmentQuickViewVisible));
             }
         }
     }
 
+    public bool IsEquipmentInventoryEditorVisible =>
+        IsEquipmentEditorVisible
+        && CurrentSection.Equals(
+            "Inventory",
+            StringComparison.Ordinal);
+
     public bool IsEquipmentQuickViewVisible =>
         IsEquipmentEditorVisible
         && !CurrentSection.Equals(
-            "Equipment Board",
+            "Inventory",
             StringComparison.Ordinal);
 
     public bool IsEquipmentBoardBusy
@@ -344,16 +356,16 @@ public sealed partial class MainWindowViewModel
             _ => CanAccessEquipmentBoard && !IsEquipmentBoardBusy);
         ImportEquipmentBuildSheetCommand = new AsyncRelayCommand(
             _ => ImportEquipmentBuildSheetAsync(),
-            _ => CanAccessEquipmentBoard && !IsEquipmentBoardBusy);
+            _ => CanEditEquipmentInCurrentSection());
         NewEquipmentCommand = new RelayCommand(
             _ => BeginNewEquipment(),
-            _ => CanAccessEquipmentBoard && !IsEquipmentBoardBusy);
+            _ => CanEditEquipmentInCurrentSection());
         SaveEquipmentCommand = new AsyncRelayCommand(
             _ => SaveEquipmentAsync(),
             _ => CanSaveEquipment());
         ArchiveEquipmentCommand = new AsyncRelayCommand(
             _ => ArchiveEquipmentAsync(),
-            _ => CanAccessEquipmentBoard
+            _ => CanEditEquipmentInCurrentSection()
                 && !IsEquipmentBoardBusy
                 && !_isNewEquipment
                 && SelectedEquipment is { EquipmentId: > 0 });
@@ -363,6 +375,10 @@ public sealed partial class MainWindowViewModel
         ClearEquipmentSearchCommand = new RelayCommand(
             _ => EquipmentSearchText = string.Empty,
             _ => !string.IsNullOrWhiteSpace(EquipmentSearchText));
+        CopyEquipmentDetailsCommand = new RelayCommand(
+            CopyEquipmentDetails,
+            parameter => parameter is EquipmentItem
+                || SelectedEquipment is not null);
     }
 
     private async Task RefreshEquipmentBoardAsync(long? selectEquipmentId = null)
@@ -892,11 +908,39 @@ public sealed partial class MainWindowViewModel
     }
 
     private bool CanSaveEquipment() =>
-        CanAccessEquipmentBoard
-        && !IsEquipmentBoardBusy
+        CanEditEquipmentInCurrentSection()
         && IsEquipmentEditorVisible
         && !string.IsNullOrWhiteSpace(EquipmentDeviceType)
         && !string.IsNullOrWhiteSpace(EquipmentName);
+
+    private bool CanEditEquipmentInCurrentSection() =>
+        CanAccessEquipmentBoard
+        && !IsEquipmentBoardBusy
+        && CurrentSection.Equals(
+            "Inventory",
+            StringComparison.Ordinal);
+
+    private async void CopyEquipmentDetails(object? parameter)
+    {
+        var equipment = parameter as EquipmentItem ?? SelectedEquipment;
+        if (equipment is null)
+        {
+            return;
+        }
+
+        try
+        {
+            StatusMessage = await ClipboardService.TrySetTextAsync(
+                EquipmentClipboardFormatter.Format(equipment))
+                ? $"Copied {equipment.Name} equipment details."
+                : "Windows could not access the clipboard. Try Copy again.";
+        }
+        catch
+        {
+            StatusMessage =
+                "Windows could not access the clipboard. Try Copy again.";
+        }
+    }
 
     private async Task SaveEquipmentAsync()
     {

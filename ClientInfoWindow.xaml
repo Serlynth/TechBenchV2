@@ -40,6 +40,16 @@
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
             <Setter Property="Margin" Value="0,3,16,0" />
         </Style>
+
+        <Style x:Key="ProfileCopyableValueStyle" TargetType="{x:Type TextBox}">
+            <Setter Property="IsReadOnly" Value="True" />
+            <Setter Property="Background" Value="{DynamicResource ControlBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="9,6" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,0,0,11" />
+        </Style>
     </Window.Resources>
 
     <Grid>
@@ -759,6 +769,162 @@
                         MinWidth="88"
                         VerticalAlignment="Center"
                         Click="CloseButton_Click" />
+            </Grid>
+        </Border>
+
+        <Border x:Name="ClientEquipmentDetailsPanel"
+                Grid.RowSpan="3"
+                Width="410"
+                Margin="16"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Stretch"
+                Panel.ZIndex="50"
+                Background="{DynamicResource PanelBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="1"
+                CornerRadius="12"
+                Padding="18"
+                Visibility="{Binding IsEquipmentDetailsVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Grid Margin="0,0,0,14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Equipment Details"
+                                   Foreground="{DynamicResource PrimaryTextBrush}"
+                                   FontSize="21"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding SelectedEquipment.AssignmentLabel}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   Margin="0,4,0,0" />
+                    </StackPanel>
+                    <WrapPanel Grid.Column="1">
+                        <Button Content="Copy details"
+                                Command="{Binding CopyEquipmentDetailsCommand}"
+                                CommandParameter="{Binding SelectedEquipment}"
+                                Margin="0,0,8,0" />
+                        <Button Content="Close"
+                                Command="{Binding CloseEquipmentDetailsCommand}" />
+                    </WrapPanel>
+                </Grid>
+
+                <ScrollViewer Grid.Row="1"
+                              VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="0,0,8,0">
+                        <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="10"
+                                Padding="13"
+                                Margin="0,0,0,14">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="48" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="38"
+                                        Height="38"
+                                        CornerRadius="9"
+                                        Background="{DynamicResource ControlBackgroundBrush}"
+                                        BorderBrush="{Binding SelectedEquipment.DeviceBadgeColor}"
+                                        BorderThickness="1">
+                                    <TextBlock Text="{Binding SelectedEquipment.DeviceGlyph}"
+                                               FontFamily="Segoe MDL2 Assets"
+                                               Foreground="{Binding SelectedEquipment.DeviceBadgeColor}"
+                                               FontSize="19"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="{Binding SelectedEquipment.Name}"
+                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                               FontSize="16"
+                                               FontWeight="SemiBold"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding SelectedEquipment.ModelLine}"
+                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                               Margin="0,3,0,0"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <TextBlock Text="Device type" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
+                        <TextBox Text="{Binding SelectedEquipment.DeviceType}"
+                                 Style="{StaticResource ProfileCopyableValueStyle}" />
+
+                        <TextBlock Text="Asset tag" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
+                        <TextBox Text="{Binding SelectedEquipment.AssetTag}"
+                                 Style="{StaticResource ProfileCopyableValueStyle}" />
+
+                        <TextBlock Text="Serial number" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
+                        <TextBox Text="{Binding SelectedEquipment.SerialNumber}"
+                                 Style="{StaticResource ProfileCopyableValueStyle}" />
+
+                        <TextBlock Text="Part number" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
+                        <TextBox Text="{Binding SelectedEquipment.PartNumber}"
+                                 Style="{StaticResource ProfileCopyableValueStyle}" />
+
+                        <TextBlock Text="Manufacturer / model" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
+                        <TextBox Text="{Binding SelectedEquipment.ModelLine}"
+                                 Style="{StaticResource ProfileCopyableValueStyle}" />
+
+                        <TextBlock Text="IP address" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
+                        <TextBox Text="{Binding SelectedEquipment.IpAddress}"
+                                 Style="{StaticResource ProfileCopyableValueStyle}" />
+
+                        <Border Background="{DynamicResource AccentSoftBrush}"
+                                BorderBrush="{DynamicResource AccentBrush}"
+                                BorderThickness="1"
+                                CornerRadius="9"
+                                Padding="12"
+                                Margin="0,0,0,14">
+                            <StackPanel>
+                                <TextBlock Text="AnyDesk remote access"
+                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                           FontWeight="SemiBold"
+                                           Margin="0,0,0,9" />
+                                <TextBlock Text="AnyDesk number" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
+                                <TextBox Text="{Binding SelectedEquipment.AnyDeskNumber}"
+                                         Style="{StaticResource ProfileCopyableValueStyle}" />
+                                <TextBlock Text="AnyDesk password" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
+                                <TextBox Text="{Binding EquipmentAnyDeskPasswordDisplay}"
+                                         Style="{StaticResource ProfileCopyableValueStyle}" />
+                                <CheckBox Content="Show password"
+                                          IsChecked="{Binding ShowEquipmentAnyDeskPassword}"
+                                          Visibility="{Binding HasEquipmentAnyDeskPassword, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Text="Client" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
+                        <TextBox Text="{Binding SelectedEquipment.ClientName}"
+                                 Style="{StaticResource ProfileCopyableValueStyle}" />
+
+                        <TextBlock Text="Client user" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
+                        <TextBox Text="{Binding SelectedEquipment.ClientUserDisplayName}"
+                                 Style="{StaticResource ProfileCopyableValueStyle}" />
+
+                        <TextBlock Text="Client user email" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
+                        <TextBox Text="{Binding SelectedEquipment.ClientUserEmail}"
+                                 Style="{StaticResource ProfileCopyableValueStyle}" />
+
+                        <TextBlock Text="Site / room / desk" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
+                        <TextBox Text="{Binding SelectedEquipment.LocationName}"
+                                 Style="{StaticResource ProfileCopyableValueStyle}" />
+
+                        <TextBlock Text="Notes" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
+                        <TextBox Text="{Binding SelectedEquipment.Notes}"
+                                 MinHeight="72"
+                                 Style="{StaticResource ProfileCopyableValueStyle}" />
+                    </StackPanel>
+                </ScrollViewer>
             </Grid>
         </Border>
     </Grid>

@@ -84,7 +84,15 @@ public sealed class ClientInfoProfileWindowTests
         Assert.Contains("Content=\"Reveal Accounts\"", profileXaml, StringComparison.Ordinal);
         Assert.Contains("ItemsSource=\"{Binding ClientUserAccountGroups}\"", profileXaml, StringComparison.Ordinal);
         Assert.Contains(
-            "EquipmentOpenRequested += async",
+            "x:Name=\"ClientEquipmentDetailsPanel\"",
+            profileXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "viewModel.SelectedEquipment = equipment;",
+            ReadRepositoryFile("ClientInfoWindow.xaml.cs"),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "EquipmentOpenRequested",
             mainWindowCode,
             StringComparison.Ordinal);
     }
@@ -121,6 +129,17 @@ public sealed class ClientInfoProfileWindowTests
         Assert.False(profile.HasFields);
         Assert.Equal("1 inventory item", profile.EquipmentCountLabel);
         Assert.Same(equipment, Assert.Single(profile.Equipment));
+
+        profile.SelectedEquipment = equipment;
+
+        Assert.True(profile.IsEquipmentDetailsVisible);
+        Assert.Same(equipment, profile.SelectedEquipment);
+        Assert.True(profile.CopyEquipmentDetailsCommand.CanExecute(equipment));
+
+        profile.CloseEquipmentDetailsCommand.Execute(null);
+
+        Assert.False(profile.IsEquipmentDetailsVisible);
+        Assert.Null(profile.SelectedEquipment);
     }
 
     [Fact]

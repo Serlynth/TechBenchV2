@@ -3704,10 +3704,19 @@
                                 <StackPanel Grid.Column="2"
                                             Orientation="Horizontal"
                                             VerticalAlignment="Center">
+                                    <Button Content="Import build sheet"
+                                            Command="{Binding ImportEquipmentBuildSheetCommand}"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            ToolTip="Read Customer, Machine, S/N, Machine Name, End User, and Email Address from a PC configuration workbook. The imported device opens for review before it is saved."
+                                            Margin="0,0,10,0" />
+                                    <Button Content="+  New device"
+                                            Command="{Binding NewEquipmentCommand}"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Margin="0,0,10,0" />
                                     <Button Content="Open Equipment Board"
                                             Command="{Binding NavigateCommand}"
                                             CommandParameter="Equipment Board"
-                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Style="{StaticResource SecondaryButtonStyle}"
                                             Margin="0,0,10,0" />
                                     <Button Content="Refresh"
                                             Command="{Binding RefreshEquipmentBoardCommand}"
@@ -3863,15 +3872,6 @@
                                         Click="OpenEquipmentBoardDemo_Click"
                                         Style="{StaticResource SecondaryButtonStyle}"
                                         ToolTip="Open an isolated sample inventory board. Demo changes are never written to SQL Server."
-                                        Margin="0,0,10,0" />
-                                <Button Content="Import build sheet"
-                                        Command="{Binding ImportEquipmentBuildSheetCommand}"
-                                        Style="{StaticResource SecondaryButtonStyle}"
-                                        ToolTip="Read Customer, Machine, S/N, Machine Name, End User, and Email Address from a PC configuration workbook. The imported device opens for review before it is saved."
-                                        Margin="0,0,10,0" />
-                                <Button Content="+  New device"
-                                        Command="{Binding NewEquipmentCommand}"
-                                        Style="{StaticResource PrimaryButtonStyle}"
                                         Margin="0,0,10,0" />
                                 <Button Content="Refresh"
                                         Command="{Binding RefreshEquipmentBoardCommand}"
@@ -4262,7 +4262,7 @@
                                 VerticalAlignment="Stretch"
                                 Panel.ZIndex="10"
                                 Style="{StaticResource CardStyle}"
-                                Visibility="{Binding IsEquipmentEditorVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                Visibility="{Binding IsEquipmentInventoryEditorVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <Grid>
                                 <Grid>
                                     <Grid.RowDefinitions>
@@ -5011,6 +5011,225 @@
                     </StackPanel>
                 </ScrollViewer>
 
+                <Border x:Name="InventoryEquipmentEditorPanel"
+                        Width="410"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Stretch"
+                        Panel.ZIndex="51"
+                        Style="{StaticResource CardStyle}"
+                        Visibility="{Binding IsEquipmentInventoryEditorVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="{Binding EquipmentEditorTitle}"
+                                           Style="{StaticResource SectionHeadingStyle}" />
+                                <TextBlock Foreground="{DynamicResource SecondaryTextBrush}"
+                                           Margin="0,3,0,0">
+                                    <Run Text="Assigned to " />
+                                    <Run Text="{Binding EquipmentAssignmentLabel, Mode=OneWay}"
+                                         FontWeight="SemiBold" />
+                                </TextBlock>
+                            </StackPanel>
+                            <WrapPanel Grid.Column="1">
+                                <Button Content="Copy details"
+                                        Command="{Binding CopyEquipmentDetailsCommand}"
+                                        CommandParameter="{Binding SelectedEquipment}"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        Margin="0,0,8,0" />
+                                <Button Content="Close"
+                                        Command="{Binding CancelEquipmentEditCommand}"
+                                        Style="{StaticResource SecondaryButtonStyle}" />
+                            </WrapPanel>
+                        </Grid>
+
+                        <ScrollViewer Grid.Row="1"
+                                      VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="0,0,8,8">
+                                <TextBlock Text="Device type" Style="{StaticResource FieldLabelStyle}" />
+                                <ComboBox ItemsSource="{Binding EquipmentTypeOptions}"
+                                          Text="{Binding EquipmentDeviceType, UpdateSourceTrigger=PropertyChanged}"
+                                          IsEditable="True"
+                                          IsTextSearchEnabled="True"
+                                          Margin="0,0,0,12" />
+
+                                <TextBlock Text="Asset tag" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding EquipmentAssetTag, UpdateSourceTrigger=PropertyChanged}"
+                                         MaxLength="80"
+                                         Margin="0,0,0,12" />
+
+                                <TextBlock Text="Equipment name" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding EquipmentName, UpdateSourceTrigger=PropertyChanged}"
+                                         MaxLength="180"
+                                         Margin="0,0,0,12" />
+
+                                <TextBlock Text="Serial number" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding EquipmentSerialNumber, UpdateSourceTrigger=PropertyChanged}"
+                                         MaxLength="120"
+                                         Margin="0,0,0,12" />
+
+                                <TextBlock Text="Part number" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding EquipmentPartNumber, UpdateSourceTrigger=PropertyChanged}"
+                                         MaxLength="120"
+                                         Margin="0,0,0,12" />
+
+                                <TextBlock Text="Manufacturer" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding EquipmentManufacturer, UpdateSourceTrigger=PropertyChanged}"
+                                         MaxLength="120"
+                                         Margin="0,0,0,12" />
+
+                                <TextBlock Text="Model" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding EquipmentModel, UpdateSourceTrigger=PropertyChanged}"
+                                         MaxLength="120"
+                                         Margin="0,0,0,12" />
+
+                                <TextBlock Text="IP address" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding EquipmentIpAddress, UpdateSourceTrigger=PropertyChanged}"
+                                         MaxLength="80"
+                                         Margin="0,0,0,12" />
+
+                                <StackPanel Visibility="{Binding EquipmentSupportsAnyDesk, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <Border Background="{DynamicResource AccentSoftBrush}"
+                                            BorderBrush="{DynamicResource AccentBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="8"
+                                            Padding="12"
+                                            Margin="0,4,0,12">
+                                        <StackPanel>
+                                            <TextBlock Text="AnyDesk remote access"
+                                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Text="The password is encrypted in SQL Server and never displayed on equipment cards."
+                                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                                       TextWrapping="Wrap"
+                                                       FontSize="10"
+                                                       Margin="0,4,0,0" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <TextBlock Text="AnyDesk number" Style="{StaticResource FieldLabelStyle}" />
+                                    <TextBox Text="{Binding EquipmentAnyDeskNumber, UpdateSourceTrigger=PropertyChanged}"
+                                             MaxLength="80"
+                                             Margin="0,0,0,12" />
+
+                                    <TextBlock Text="AnyDesk password" Style="{StaticResource FieldLabelStyle}" />
+                                    <TextBox Text="••••••••"
+                                             IsReadOnly="True"
+                                             Visibility="{Binding ShowEquipmentAnyDeskPassword, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                                             Margin="0,0,0,8" />
+                                    <TextBox Text="{Binding EquipmentAnyDeskPassword, UpdateSourceTrigger=PropertyChanged}"
+                                             Visibility="{Binding ShowEquipmentAnyDeskPassword, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                             Margin="0,0,0,8" />
+                                    <CheckBox Content="Show and edit AnyDesk password"
+                                              IsChecked="{Binding ShowEquipmentAnyDeskPassword}"
+                                              Margin="0,0,0,12" />
+                                </StackPanel>
+
+                                <Border Background="{DynamicResource AccentSoftBrush}"
+                                        BorderBrush="{DynamicResource AccentBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Padding="12"
+                                        Margin="0,4,0,12">
+                                    <StackPanel>
+                                        <TextBlock Text="Deployment assignment"
+                                                   Foreground="{DynamicResource PrimaryTextBrush}"
+                                                   FontWeight="SemiBold" />
+                                        <TextBlock Text="Choose the client and person or shared role that will receive this device."
+                                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                                   TextWrapping="Wrap"
+                                                   FontSize="10"
+                                                   Margin="0,4,0,0" />
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Text="Client" Style="{StaticResource FieldLabelStyle}" />
+                                <ComboBox ItemsSource="{Binding InventoryClientOptions}"
+                                          SelectedItem="{Binding EquipmentClient, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          DisplayMemberPath="Name"
+                                          IsTextSearchEnabled="True"
+                                          Margin="0,0,0,12" />
+
+                                <TextBlock Text="Client user / shared role" Style="{StaticResource FieldLabelStyle}" />
+                                <ComboBox ItemsSource="{Binding InventoryClientUserOptions}"
+                                          SelectedItem="{Binding EquipmentClientUser, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          DisplayMemberPath="DisplayLabel"
+                                          IsTextSearchEnabled="True"
+                                          Margin="0,0,0,12" />
+
+                                <TextBlock Text="Site / room / desk" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding EquipmentLocationName, UpdateSourceTrigger=PropertyChanged}"
+                                         MaxLength="240"
+                                         Margin="0,0,0,12" />
+
+                                <TextBlock Text="Notes" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding EquipmentNotes, UpdateSourceTrigger=PropertyChanged}"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         MinHeight="90"
+                                         VerticalScrollBarVisibility="Auto"
+                                         Margin="0,0,0,12" />
+
+                                <TextBlock Text="Assignment history"
+                                           Style="{StaticResource FieldLabelStyle}" />
+                                <ItemsControl ItemsSource="{Binding EquipmentAssignmentHistory}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="{DynamicResource ControlBackgroundBrush}"
+                                                    BorderBrush="{DynamicResource BorderBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="7"
+                                                    Padding="9"
+                                                    Margin="0,0,0,6">
+                                                <StackPanel>
+                                                    <TextBlock Foreground="{DynamicResource PrimaryTextBrush}"
+                                                               FontWeight="SemiBold">
+                                                        <Run Text="{Binding EventType}" />
+                                                        <Run Text=" · " />
+                                                        <Run Text="{Binding WorkflowStage}" />
+                                                    </TextBlock>
+                                                    <TextBlock Text="{Binding ClientChipLabel}"
+                                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                                               FontSize="10"
+                                                               TextWrapping="Wrap" />
+                                                    <TextBlock Text="{Binding AssignedAtUtc, StringFormat={}{0:g}}"
+                                                               Foreground="{DynamicResource MutedTextBrush}"
+                                                               FontSize="9" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </ScrollViewer>
+
+                        <Grid Grid.Row="2" Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Button Content="Save Equipment"
+                                    Command="{Binding SaveEquipmentCommand}"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Margin="0,0,10,0" />
+                            <Button Grid.Column="1"
+                                    Content="Archive"
+                                    Command="{Binding ArchiveEquipmentCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Foreground="{DynamicResource DangerBrush}" />
+                        </Grid>
+                    </Grid>
+                </Border>
+
                 <Border x:Name="EquipmentQuickViewPanel"
                         Width="410"
                         HorizontalAlignment="Right"
@@ -5040,10 +5259,16 @@
                                          FontWeight="SemiBold" />
                                 </TextBlock>
                             </StackPanel>
-                            <Button Grid.Column="1"
-                                    Content="Close"
-                                    Command="{Binding CancelEquipmentEditCommand}"
-                                    Style="{StaticResource SecondaryButtonStyle}" />
+                            <WrapPanel Grid.Column="1">
+                                <Button Content="Copy details"
+                                        Command="{Binding CopyEquipmentDetailsCommand}"
+                                        CommandParameter="{Binding SelectedEquipment}"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        Margin="0,0,8,0" />
+                                <Button Content="Close"
+                                        Command="{Binding CancelEquipmentEditCommand}"
+                                        Style="{StaticResource SecondaryButtonStyle}" />
+                            </WrapPanel>
                         </Grid>
 
                         <ScrollViewer Grid.Row="1"
@@ -5141,8 +5366,12 @@
                                                    Style="{StaticResource DetailValueStyle}"
                                                    Margin="0,0,0,10" />
                                         <TextBlock Text="AnyDesk password" Style="{StaticResource FieldLabelStyle}" />
-                                        <TextBlock Text="{Binding EquipmentAnyDeskPasswordDisplay}"
-                                                   Style="{StaticResource DetailValueStyle}" />
+                                        <TextBox Text="{Binding EquipmentAnyDeskPasswordDisplay}"
+                                                 IsReadOnly="True"
+                                                 Background="Transparent"
+                                                 BorderThickness="0"
+                                                 Padding="0"
+                                                 Foreground="{DynamicResource PrimaryTextBrush}" />
                                         <CheckBox Content="Show password"
                                                   IsChecked="{Binding ShowEquipmentAnyDeskPassword}"
                                                   Visibility="{Binding HasEquipmentAnyDeskPassword, Converter={StaticResource BooleanToVisibilityConverter}}"
@@ -5230,9 +5459,9 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <Button Content="Open Equipment Board"
+                            <Button Content="Open Inventory"
                                     Command="{Binding NavigateCommand}"
-                                    CommandParameter="Equipment Board"
+                                    CommandParameter="Inventory"
                                     Style="{StaticResource PrimaryButtonStyle}"
                                     Margin="0,0,10,0" />
                             <Button Grid.Column="1"

@@ -309,7 +309,19 @@ public sealed class EquipmentBuildSheetImporterTests
         Assert.Contains("ItemsSource=\"{Binding StockInventoryItems}\"", mainWindowXaml);
         Assert.Contains("x:Name=\"EquipmentQuickViewPanel\"", mainWindowXaml);
         Assert.Contains(
+            "x:Name=\"InventoryEquipmentEditorPanel\"",
+            mainWindowXaml);
+        Assert.Contains(
             "Visibility=\"{Binding IsEquipmentQuickViewVisible",
+            mainWindowXaml);
+        Assert.Contains(
+            "Visibility=\"{Binding IsEquipmentInventoryEditorVisible",
+            mainWindowXaml);
+        Assert.Contains(
+            "CommandParameter=\"Inventory\"",
+            mainWindowXaml);
+        Assert.Contains(
+            "Content=\"Copy details\"",
             mainWindowXaml);
         Assert.DoesNotContain(
             "CurrentSection = \"Equipment Board\";",

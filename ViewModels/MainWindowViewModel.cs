@@ -381,7 +381,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(CredentialEmptyText));
                 OnPropertyChanged(nameof(CredentialRevealButtonLabel));
                 OnPropertyChanged(nameof(CredentialSelectionPrompt));
+                OnPropertyChanged(nameof(IsEquipmentInventoryEditorVisible));
                 OnPropertyChanged(nameof(IsEquipmentQuickViewVisible));
+                ImportEquipmentBuildSheetCommand?.RaiseCanExecuteChanged();
+                NewEquipmentCommand?.RaiseCanExecuteChanged();
+                SaveEquipmentCommand?.RaiseCanExecuteChanged();
+                ArchiveEquipmentCommand?.RaiseCanExecuteChanged();
             }
         }
     }
