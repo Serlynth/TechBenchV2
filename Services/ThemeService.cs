@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Media;
+using TechBench.Models;
 using WpfApplication = System.Windows.Application;
 using WpfColor = System.Windows.Media.Color;
 using WpfColorConverter = System.Windows.Media.ColorConverter;
@@ -15,7 +16,9 @@ public enum AppTheme
 
 public static class ThemeService
 {
-    public static void Apply(AppTheme theme)
+    public static void Apply(
+        AppTheme theme,
+        BenchModule module = BenchModule.TechBench)
     {
         var resources = WpfApplication.Current.Resources;
 
@@ -98,6 +101,38 @@ public static class ThemeService
             SetBrush(resources, WpfSystemColors.ControlTextBrushKey, "#F7FAFC");
             SetBrush(resources, WpfSystemColors.HighlightBrushKey, "#3B82F6");
             SetBrush(resources, WpfSystemColors.HighlightTextBrushKey, "#FFFFFF");
+        }
+
+        ApplyModulePalette(resources, theme, module);
+    }
+
+    private static void ApplyModulePalette(
+        ResourceDictionary resources,
+        AppTheme theme,
+        BenchModule module)
+    {
+        var isLight = theme == AppTheme.Light;
+        switch (module)
+        {
+            case BenchModule.SalesBench:
+                SetBrush(resources, "AccentBrush", isLight ? "#168447" : "#22C55E");
+                SetBrush(resources, "AccentHoverBrush", isLight ? "#116A39" : "#4ADE80");
+                SetBrush(resources, "AccentSoftBrush", isLight ? "#DCFCE7" : "#123B27");
+                SetBrush(resources, "SidebarHoverBrush", "#0D2117");
+                SetBrush(resources, "SidebarActiveBrush", "#123522");
+                SetBrush(resources, "ComboBoxHighlightBrush", isLight ? "#168447" : "#22C55E");
+                SetBrush(resources, WpfSystemColors.HighlightBrushKey, isLight ? "#168447" : "#22C55E");
+                break;
+
+            case BenchModule.AdminBench:
+                SetBrush(resources, "AccentBrush", isLight ? "#C83B3B" : "#EF4444");
+                SetBrush(resources, "AccentHoverBrush", isLight ? "#A92F2F" : "#F87171");
+                SetBrush(resources, "AccentSoftBrush", isLight ? "#FEE2E2" : "#451A1A");
+                SetBrush(resources, "SidebarHoverBrush", "#231014");
+                SetBrush(resources, "SidebarActiveBrush", "#351519");
+                SetBrush(resources, "ComboBoxHighlightBrush", isLight ? "#C83B3B" : "#EF4444");
+                SetBrush(resources, WpfSystemColors.HighlightBrushKey, isLight ? "#C83B3B" : "#EF4444");
+                break;
         }
     }
 

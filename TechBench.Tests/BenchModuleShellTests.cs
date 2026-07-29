@@ -1,0 +1,92 @@
+using System.Xml.Linq;
+
+namespace TechBench.Tests;
+
+public sealed class BenchModuleShellTests
+{
+    [Fact]
+    public void SidebarHasPrivateModuleSwitcherAndSeparateEmptyNavigationSurfaces()
+    {
+        var navigation = ReadRepositoryFile(
+            Path.Combine("Controls", "WorkspaceNavigation.xaml"));
+
+        Assert.Contains(
+            "Visibility=\"{Binding CanAccessBenchModules",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CommandParameter=\"TechBench\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CommandParameter=\"SalesBench\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CommandParameter=\"AdminBench\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "x:Name=\"SalesBenchNavigation\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "x:Name=\"AdminBenchNavigation\"",
+            navigation,
+            StringComparison.Ordinal);
+
+        var document = XDocument.Parse(navigation);
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        foreach (var name in new[] { "SalesBenchNavigation", "AdminBenchNavigation" })
+        {
+            var moduleSidebar = Assert.Single(
+                document.Descendants(),
+                element =>
+                    string.Equals(
+                        (string?)element.Attribute(xaml + "Name"),
+                        name,
+                        StringComparison.Ordinal));
+            Assert.DoesNotContain(
+                moduleSidebar.Descendants(),
+                element => element.Name.LocalName == "Button");
+        }
+    }
+
+    [Fact]
+    public void NonTechModulesHaveAnIsolatedWorkspaceShell()
+    {
+        var mainWindow = ReadRepositoryFile("MainWindow.xaml");
+        var header = ReadRepositoryFile(
+            Path.Combine("Controls", "WorkspaceHeader.xaml"));
+
+        Assert.Contains(
+            "Visibility=\"{Binding IsTechBenchModule, Converter={StaticResource BooleanToVisibilityConverter}}\"",
+            mainWindow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Visibility=\"{Binding IsTechBenchModule, Converter={StaticResource InverseBooleanToVisibilityConverter}}\"",
+            mainWindow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Text=\"{Binding WorkspaceHeaderEyebrow}\"",
+            header,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Text=\"{Binding WorkspaceHeaderTitle}\"",
+            header,
+            StringComparison.Ordinal);
+    }
+
+    private static string ReadRepositoryFile(string relativePath)
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null
+               && !File.Exists(Path.Combine(directory.FullName, "TechBenchV2.sln")))
+        {
+            directory = directory.Parent;
+        }
+
+        Assert.NotNull(directory);
+        return File.ReadAllText(Path.Combine(directory.FullName, relativePath));
+    }
+}

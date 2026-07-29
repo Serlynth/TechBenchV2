@@ -20,6 +20,7 @@ public sealed class WorkspaceShellDemoViewModel : ObservableObject
             if (SetProperty(ref _currentSection, value))
             {
                 OnPropertyChanged(nameof(StatusMessage));
+                OnPropertyChanged(nameof(WorkspaceHeaderTitle));
             }
         }
     }
@@ -27,6 +28,9 @@ public sealed class WorkspaceShellDemoViewModel : ObservableObject
     public string StatusMessage =>
         $"Local UI preview for {CurrentSection}. No SQL connection is used.";
 
+    public string ModuleBrandName => "TechBench";
+    public string WorkspaceHeaderEyebrow => "WORKSPACE";
+    public string WorkspaceHeaderTitle => CurrentSection;
     public string WorkspaceStateLabel => "LOCAL UI PREVIEW";
 
     public string DatabasePath => "No SQL connection";
@@ -38,4 +42,12 @@ public sealed class WorkspaceShellDemoViewModel : ObservableObject
     public bool CanAccessEquipmentBoard => true;
 
     public bool CanAccessAdminCenter => true;
+
+    public bool CanAccessBenchModules => false;
+
+    public bool IsTechBenchModule => true;
+
+    public bool IsSalesBenchModule => false;
+
+    public bool IsAdminBenchModule => false;
 }

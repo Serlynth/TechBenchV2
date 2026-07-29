@@ -110,6 +110,52 @@
             <Setter Property="FontSize" Value="12" />
             <Setter Property="Margin" Value="0,1" />
         </Style>
+
+        <Style x:Key="BenchModuleSwitchButtonStyle"
+               TargetType="{x:Type Button}">
+            <Setter Property="Foreground" Value="{DynamicResource SidebarMutedTextBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="7,6" />
+            <Setter Property="FontSize" Value="9" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border x:Name="ModuleBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ModuleBorder"
+                                        Property="Background"
+                                        Value="{DynamicResource SidebarHoverBrush}" />
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource AccentHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="Tag" Value="Active">
+                                <Setter TargetName="ModuleBorder"
+                                        Property="Background"
+                                        Value="{DynamicResource AccentSoftBrush}" />
+                                <Setter TargetName="ModuleBorder"
+                                        Property="BorderBrush"
+                                        Value="{DynamicResource AccentBrush}" />
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource AccentHoverBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </UserControl.Resources>
 
     <Border Background="{DynamicResource SidebarBackgroundBrush}"
@@ -117,14 +163,55 @@
             BorderThickness="0,0,1,0"
             Padding="14,16,14,14">
         <DockPanel LastChildFill="True">
-            <Grid DockPanel.Dock="Top"
-                  Height="68"
-                  Margin="2,0,2,8">
-                <Image Source="/TechBenchV2;component/Assets/csri-techbench-logo.png"
-                       Stretch="Uniform"
-                       HorizontalAlignment="Stretch"
-                       RenderOptions.BitmapScalingMode="HighQuality" />
-            </Grid>
+            <StackPanel DockPanel.Dock="Top"
+                        Margin="2,0,2,10">
+                <Grid Height="92"
+                      ClipToBounds="True">
+                    <Image Source="/TechBenchV2;component/Assets/csri-techbench-logo.png"
+                           Width="214"
+                           Height="88"
+                           Stretch="Uniform"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Top"
+                           RenderOptions.BitmapScalingMode="HighQuality" />
+                    <Border Height="27"
+                            Background="{DynamicResource SidebarBackgroundBrush}"
+                            VerticalAlignment="Bottom">
+                        <TextBlock Text="{Binding ModuleBrandName}"
+                                   Foreground="{DynamicResource AccentHoverBrush}"
+                                   FontSize="16"
+                                   FontWeight="Bold"
+                                   FontStyle="Italic"
+                                   FontStretch="Expanded"
+                                   HorizontalAlignment="Right"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,8,0" />
+                    </Border>
+                </Grid>
+
+                <UniformGrid Columns="3"
+                             Margin="0,5,0,0"
+                             Visibility="{Binding CanAccessBenchModules, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Button Content="TECH"
+                            Command="{Binding SwitchBenchModuleCommand}"
+                            CommandParameter="TechBench"
+                            Tag="{Binding ActiveBenchModule, Converter={StaticResource SectionActiveConverter}, ConverterParameter=TechBench}"
+                            Style="{StaticResource BenchModuleSwitchButtonStyle}"
+                            Margin="0,0,3,0" />
+                    <Button Content="SALES"
+                            Command="{Binding SwitchBenchModuleCommand}"
+                            CommandParameter="SalesBench"
+                            Tag="{Binding ActiveBenchModule, Converter={StaticResource SectionActiveConverter}, ConverterParameter=SalesBench}"
+                            Style="{StaticResource BenchModuleSwitchButtonStyle}"
+                            Margin="2,0" />
+                    <Button Content="ADMIN"
+                            Command="{Binding SwitchBenchModuleCommand}"
+                            CommandParameter="AdminBench"
+                            Tag="{Binding ActiveBenchModule, Converter={StaticResource SectionActiveConverter}, ConverterParameter=AdminBench}"
+                            Style="{StaticResource BenchModuleSwitchButtonStyle}"
+                            Margin="3,0,0,0" />
+                </UniformGrid>
+            </StackPanel>
 
             <Border DockPanel.Dock="Bottom"
                     Background="{DynamicResource ControlBackgroundBrush}"
@@ -163,7 +250,8 @@
                           HorizontalScrollBarVisibility="Disabled"
                           PanningMode="VerticalOnly">
                 <StackPanel>
-                    <Expander Header="NOTES"
+                    <StackPanel Visibility="{Binding IsTechBenchModule, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Expander Header="NOTES"
                               Style="{StaticResource WorkspaceGroupStyle}">
                         <StackPanel>
                             <Button Content="Today"
@@ -202,9 +290,9 @@
                                     Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Posting History}"
                                     Style="{StaticResource WorkspaceNavItemStyle}" />
                         </StackPanel>
-                    </Expander>
+                        </Expander>
 
-                    <Expander Header="CLIENTS"
+                        <Expander Header="CLIENTS"
                               Style="{StaticResource WorkspaceGroupStyle}">
                         <StackPanel>
                             <Button Content="Overview"
@@ -249,9 +337,9 @@
                                     Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Common Links}"
                                     Style="{StaticResource WorkspaceNavItemStyle}" />
                         </StackPanel>
-                    </Expander>
+                        </Expander>
 
-                    <Expander Header="EQUIPMENT"
+                        <Expander Header="EQUIPMENT"
                               Style="{StaticResource WorkspaceGroupStyle}"
                               Visibility="{Binding CanAccessEquipmentBoard, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <StackPanel>
@@ -266,9 +354,9 @@
                                     Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Equipment Board}"
                                     Style="{StaticResource WorkspaceNavItemStyle}" />
                         </StackPanel>
-                    </Expander>
+                        </Expander>
 
-                    <Expander Header="SYSTEM"
+                        <Expander Header="SYSTEM"
                               Style="{StaticResource WorkspaceGroupStyle}">
                         <StackPanel>
                             <Button Content="Client Matching"
@@ -288,7 +376,18 @@
                                     Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Settings}"
                                     Style="{StaticResource WorkspaceNavItemStyle}" />
                         </StackPanel>
-                    </Expander>
+                        </Expander>
+                    </StackPanel>
+
+                    <!-- These are intentionally separate, empty navigation
+                         surfaces so each private beta module can grow without
+                         coupling its future destinations to TechBench. -->
+                    <Grid x:Name="SalesBenchNavigation"
+                          MinHeight="1"
+                          Visibility="{Binding IsSalesBenchModule, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <Grid x:Name="AdminBenchNavigation"
+                          MinHeight="1"
+                          Visibility="{Binding IsAdminBenchModule, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 </StackPanel>
             </ScrollViewer>
         </DockPanel>

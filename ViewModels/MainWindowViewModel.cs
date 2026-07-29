@@ -92,6 +92,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private bool _isSagePostingRunning;
     private string _sageEmployeeId = string.Empty;
     private string _sageActivityItemId = string.Empty;
+    private BenchModule _activeBenchModule = BenchModule.TechBench;
     private bool _isLightTheme;
     private bool _isInventoryBetaUpdateChannel;
     private string _refreshIntervalMinutesText =
@@ -144,6 +145,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _notificationService.ShowUpdateAvailable,
             _localPreferences);
 
+        SwitchBenchModuleCommand = new RelayCommand(SwitchBenchModule);
         NavigateCommand = new RelayCommand(parameter => Navigate(parameter?.ToString() ?? "Today"));
         EditEntryCommand = new RelayCommand(EditEntry, parameter => parameter is WorkEntry { Id: > 0 });
         NewEntryCommand = new RelayCommand(_ => NewEntry(), _ => CanWrite);
@@ -264,6 +266,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public ObservableCollection<string> PostingLogResultOptions { get; } = new();
     public ObservableCollection<string> WhdAuthenticationModeOptions { get; } = new();
 
+    public RelayCommand SwitchBenchModuleCommand { get; }
     public RelayCommand NavigateCommand { get; }
     public RelayCommand EditEntryCommand { get; }
     public RelayCommand NewEntryCommand { get; }
@@ -301,6 +304,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public string DatabasePath => _repository.DatabasePath;
     public bool CanWrite => _currentUser.CanWrite;
+    public bool CanAccessBenchModules =>
+        BenchModuleAccess.CanAccessPrivateModules(_currentUser);
     public bool CanAccessAdminCenter => _currentUser.IsAdmin && CanWrite;
     public bool CanAccessEquipmentBoard =>
         CanAccessAdminCenter && _repository.EquipmentBoardAvailable;
@@ -359,9 +364,48 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _entryOperationText, value);
     }
 
-    public string WorkspaceStateLabel => IsEntryOperationRunning
-        ? "W O R K I N G"
-        : EditorSaveStatus.ToUpperInvariant();
+    public string WorkspaceStateLabel => !IsTechBenchModule
+        ? "MODULE READY"
+        : IsEntryOperationRunning
+            ? "W O R K I N G"
+            : EditorSaveStatus.ToUpperInvariant();
+
+    public BenchModule ActiveBenchModule
+    {
+        get => _activeBenchModule;
+        private set
+        {
+            if (!SetProperty(ref _activeBenchModule, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(ModuleBrandName));
+            OnPropertyChanged(nameof(IsTechBenchModule));
+            OnPropertyChanged(nameof(IsSalesBenchModule));
+            OnPropertyChanged(nameof(IsAdminBenchModule));
+            OnPropertyChanged(nameof(WorkspaceHeaderEyebrow));
+            OnPropertyChanged(nameof(WorkspaceHeaderTitle));
+            OnPropertyChanged(nameof(ModuleWelcomeTitle));
+            OnPropertyChanged(nameof(ModuleWelcomeDescription));
+            OnPropertyChanged(nameof(WorkspaceStateLabel));
+            OnPropertyChanged(nameof(WindowTitle));
+        }
+    }
+
+    public string ModuleBrandName => ActiveBenchModule.ToString();
+    public bool IsTechBenchModule => ActiveBenchModule == BenchModule.TechBench;
+    public bool IsSalesBenchModule => ActiveBenchModule == BenchModule.SalesBench;
+    public bool IsAdminBenchModule => ActiveBenchModule == BenchModule.AdminBench;
+    public string WorkspaceHeaderEyebrow => IsTechBenchModule
+        ? "WORKSPACE"
+        : "PRIVATE BETA MODULE";
+    public string WorkspaceHeaderTitle => IsTechBenchModule
+        ? CurrentSection
+        : ModuleBrandName;
+    public string ModuleWelcomeTitle => $"{ModuleBrandName} is ready";
+    public string ModuleWelcomeDescription =>
+        "This module shell is intentionally empty. Its own navigation will appear here as workspaces are added.";
 
     public string CurrentSection
     {
@@ -371,6 +415,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _currentSection, value))
             {
                 OnPropertyChanged(nameof(WindowTitle));
+                OnPropertyChanged(nameof(WorkspaceHeaderTitle));
                 OnPropertyChanged(nameof(IsCredentialWorkspaceSection));
                 OnPropertyChanged(nameof(IsClientWifiSection));
                 OnPropertyChanged(nameof(IsDomainAdSection));
@@ -391,7 +436,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    public string WindowTitle => $"TechBench V2 - {CurrentSection}";
+    public string WindowTitle => IsTechBenchModule
+        ? $"TechBench V2 - {CurrentSection}"
+        : $"{ModuleBrandName} - Private Beta";
 
     public string StatusMessage
     {
@@ -858,7 +905,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _isLightTheme, value))
             {
                 MarkSettingsDirty();
-                ThemeService.Apply(value ? AppTheme.Light : AppTheme.Dark);
+                ThemeService.Apply(
+                    value ? AppTheme.Light : AppTheme.Dark,
+                    ActiveBenchModule);
             }
         }
     }
@@ -918,6 +967,25 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         $"Reload shared clients, tickets, statuses, links, tags, templates, and server status every "
         + $"{ResolveSharedDataRefreshIntervalMinutes()} minutes.";
 
+    private void SwitchBenchModule(object? requestedModule)
+    {
+        var module = BenchModuleAccess.ResolveRequestedModule(
+            requestedModule,
+            _currentUser);
+        if (module == ActiveBenchModule)
+        {
+            return;
+        }
+
+        ActiveBenchModule = module;
+        ThemeService.Apply(
+            IsLightTheme ? AppTheme.Light : AppTheme.Dark,
+            ActiveBenchModule);
+        StatusMessage = IsTechBenchModule
+            ? GetSectionStatusMessage(CurrentSection)
+            : $"{ModuleBrandName} private beta shell. Navigation is intentionally empty for now.";
+    }
+
     private void Navigate(string section)
     {
         if ((section.Equals("Inventory", StringComparison.Ordinal)
@@ -942,7 +1010,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         CurrentSection = section;
         RefreshCurrentSectionData();
-        StatusMessage = section switch
+        StatusMessage = GetSectionStatusMessage(section);
+    }
+
+    private string GetSectionStatusMessage(string section) =>
+        section switch
         {
             "Today" => $"Showing worklog for {SelectedDate:dddd, MMM d}",
             "This Week" => "Showing weekly grouped worklog",
@@ -963,7 +1035,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Admin Center" => "Showing server synchronization and active TechBench clients",
             _ => $"Showing {section}"
         };
-    }
 
     private void RefreshCurrentSectionData()
     {
@@ -3123,7 +3194,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             IsLightTheme = _localPreferences.Theme.Equals(
                 "Light",
                 StringComparison.OrdinalIgnoreCase);
-            ThemeService.Apply(IsLightTheme ? AppTheme.Light : AppTheme.Dark);
+            ThemeService.Apply(
+                IsLightTheme ? AppTheme.Light : AppTheme.Dark,
+                ActiveBenchModule);
         }
         finally
         {

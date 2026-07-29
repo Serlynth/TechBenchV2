@@ -62,12 +62,12 @@
             </Grid.ColumnDefinitions>
             <StackPanel VerticalAlignment="Center"
                         Margin="0,0,20,0">
-                <TextBlock Text="WORKSPACE"
+                <TextBlock Text="{Binding WorkspaceHeaderEyebrow}"
                            Foreground="{DynamicResource MutedTextBrush}"
                            FontSize="9"
                            FontWeight="Bold"
                            Margin="0,0,0,2" />
-                <TextBlock Text="{Binding CurrentSection}"
+                <TextBlock Text="{Binding WorkspaceHeaderTitle}"
                            FontSize="22"
                            FontWeight="SemiBold"
                            TextTrimming="CharacterEllipsis" />
