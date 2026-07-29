@@ -73,6 +73,22 @@ BEGIN
     BEGIN TRY
         BEGIN TRANSACTION;
 
+        /*
+            Active Directory can legitimately issue a new SID for a reused login
+            name. Preserve the historical row and its foreign-key relationships,
+            but release the unique login name before registering the current SID.
+        */
+        UPDATE conflicting_user WITH (UPDLOCK, HOLDLOCK)
+        SET [LoginName] = LEFT
+            (
+                N'Retired:' + CONVERT(nvarchar(170), conflicting_user.[WindowsSid], 1)
+                    + N':' + conflicting_user.[LoginName],
+                256
+            )
+        FROM [tb_security].[Users] AS conflicting_user
+        WHERE conflicting_user.[LoginName] = @LoginName
+          AND conflicting_user.[WindowsSid] <> @UserSid;
+
         UPDATE [tb_security].[Users] WITH (UPDLOCK, HOLDLOCK)
         SET
             [LoginName] = @LoginName,

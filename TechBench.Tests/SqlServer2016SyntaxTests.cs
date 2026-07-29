@@ -587,13 +587,32 @@ public sealed partial class SqlServer2016SyntaxTests
             "49-V0007-ServerOwnedSageAndAdminPreviewProcedures.sql"));
 
         var ensureBody = ProcedureBody(source, "EnsureCurrentUser", "tb_security");
+        var authorizedReconciliation = ensureBody.IndexOf(
+            "IF @HasApplicationRole = 1",
+            StringComparison.OrdinalIgnoreCase);
+        var conflictingLoginRelease = ensureBody.IndexOf(
+            "UPDATE conflicting_user WITH (UPDLOCK, HOLDLOCK)",
+            StringComparison.OrdinalIgnoreCase);
         var roleRefresh = ensureBody.IndexOf(
             "UPDATE [tb_security].[Users] WITH (UPDLOCK, HOLDLOCK)",
             StringComparison.OrdinalIgnoreCase);
         var zeroRoleThrow = ensureBody.IndexOf(
             "IF @HasApplicationRole = 0",
             StringComparison.OrdinalIgnoreCase);
+        Assert.True(
+            authorizedReconciliation >= 0
+            && conflictingLoginRelease > authorizedReconciliation
+            && roleRefresh > conflictingLoginRelease);
         Assert.True(roleRefresh >= 0 && zeroRoleThrow > roleRefresh);
+        Assert.Contains("N'Retired:'", ensureBody);
+        Assert.Contains(
+            "conflicting_user.[LoginName] = @LoginName",
+            ensureBody,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "conflicting_user.[WindowsSid] <> @UserSid",
+            ensureBody,
+            StringComparison.OrdinalIgnoreCase);
         Assert.Contains("[IsTechnician] = @IsTechnician", ensureBody);
         Assert.Contains("[IsManager] = @IsManager", ensureBody);
         Assert.Contains("[IsAdmin] = @IsAdmin", ensureBody);
