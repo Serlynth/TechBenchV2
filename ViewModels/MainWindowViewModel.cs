@@ -404,14 +404,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "/TechBenchV2;component/Assets/csri-adminbench-logo.png",
         _ => "/TechBenchV2;component/Assets/csri-techbench-logo.png"
     };
-    public double ModuleLogoDisplayWidth => ActiveBenchModule switch
-    {
-        // The Sales/Admin source canvases contain wider side padding than the
-        // original Tech asset. Their extra display width is clipped only in
-        // that empty padding so all three marks read at the same visual size.
-        BenchModule.SalesBench or BenchModule.AdminBench => 250,
-        _ => 218
-    };
+    public double ModuleLogoDisplayWidth => 238;
     public bool IsTechBenchModule => ActiveBenchModule == BenchModule.TechBench;
     public bool IsSalesBenchModule => ActiveBenchModule == BenchModule.SalesBench;
     public bool IsAdminBenchModule => ActiveBenchModule == BenchModule.AdminBench;

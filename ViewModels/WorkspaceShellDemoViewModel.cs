@@ -31,7 +31,7 @@ public sealed class WorkspaceShellDemoViewModel : ObservableObject
     public string ModuleBrandName => "TechBench";
     public string ModuleLogoSource =>
         "/TechBenchV2;component/Assets/csri-techbench-logo.png";
-    public double ModuleLogoDisplayWidth => 218;
+    public double ModuleLogoDisplayWidth => 238;
     public string WorkspaceHeaderEyebrow => "WORKSPACE";
     public string WorkspaceHeaderTitle => CurrentSection;
     public string WorkspaceStateLabel => "LOCAL UI PREVIEW";

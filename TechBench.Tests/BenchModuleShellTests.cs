@@ -22,7 +22,7 @@ public sealed class BenchModuleShellTests
             navigation,
             StringComparison.Ordinal);
         Assert.Contains(
-            "BenchModule.SalesBench or BenchModule.AdminBench => 250",
+            "ModuleLogoDisplayWidth => 238",
             viewModel,
             StringComparison.Ordinal);
         Assert.Contains(
