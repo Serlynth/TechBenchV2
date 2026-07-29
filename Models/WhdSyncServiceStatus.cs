@@ -10,7 +10,9 @@ public sealed class WhdSyncServiceStatus
     public DateTime? LastRunAt { get; init; }
     public DateTime? LastSuccessfulRunAt { get; init; }
 
-    public string Summary => string.IsNullOrWhiteSpace(Message)
-        ? Health
-        : $"{Health}: {Message}";
+    public string Summary => IsRunning
+        ? "Running: Synchronization is in progress."
+        : string.IsNullOrWhiteSpace(Message)
+            ? Health
+            : $"{Health}: {Message}";
 }

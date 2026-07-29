@@ -1035,14 +1035,24 @@ internal sealed class ServerManagerForm : Form
 
         return $"{Math.Max(0, bytes) / 1024d:0.0} KB";
     }
-    private static string FormatStatus(SyncStatus status, bool sage)
+    internal static string FormatStatus(SyncStatus status, bool sage)
     {
         static string Time(DateTime? value) => value?.ToLocalTime().ToString("g") ?? "Never";
-        var health = string.IsNullOrWhiteSpace(status.LastError) ? status.Status : $"{status.Status}: {status.LastError}";
-        var workLabel = status.Status.Equals("Running", StringComparison.OrdinalIgnoreCase)
+        var isRunning = status.Status.Equals("Running", StringComparison.OrdinalIgnoreCase);
+        var health = isRunning
+            ? "Running: Synchronization is in progress."
+            : string.IsNullOrWhiteSpace(status.LastError)
+                ? status.Status
+                : $"{status.Status}: {status.LastError}";
+        var workLabel = isRunning
             ? $"Work remaining: {status.QueueDepth} (includes the active step)"
             : $"Waiting: {status.QueueDepth}";
         var result = $"Health: {health}\r\n{workLabel} | Last attempt: {Time(status.LastAttemptAtUtc)} | Last success: {Time(status.LastSuccessfulAtUtc)}";
+        if (isRunning && !string.IsNullOrWhiteSpace(status.LastError))
+        {
+            result += $"\r\nPrevious failure: {status.LastError}";
+        }
+
         return sage ? result + $"\r\nLast snapshot: read {status.ReadCount}, saved {status.SavedCount}, stale {status.StaleCount}" : result;
     }
 
