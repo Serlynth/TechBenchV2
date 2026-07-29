@@ -71,7 +71,7 @@
                                 <TextBlock Text="Task-based navigation"
                                            FontSize="17"
                                            FontWeight="SemiBold" />
-                                <TextBlock Text="Worklog, Service, Clients, Equipment, and System give new pages an obvious home."
+                                <TextBlock Text="Notes, Clients, Equipment, and System give new pages an obvious home."
                                            Foreground="{DynamicResource SecondaryTextBrush}"
                                            Margin="0,7,0,0" />
                             </StackPanel>

@@ -10,11 +10,8 @@ public sealed class ClientUsersWorkspaceTests
     {
         var xaml = ReadRepositoryFile(
             Path.Combine("Controls", "WorkspaceNavigation.xaml"));
-        var worklog = xaml.IndexOf(
-            "Header=\"WORKLOG\"",
-            StringComparison.Ordinal);
-        var service = xaml.IndexOf(
-            "Header=\"SERVICE\"",
+        var notes = xaml.IndexOf(
+            "Header=\"NOTES\"",
             StringComparison.Ordinal);
         var tickets = xaml.IndexOf(
             "CommandParameter=\"Ticket List\"",
@@ -41,16 +38,19 @@ public sealed class ClientUsersWorkspaceTests
             "Header=\"SYSTEM\"",
             StringComparison.Ordinal);
 
-        Assert.True(worklog >= 0);
-        Assert.True(service > worklog);
-        Assert.True(tickets > service);
+        Assert.True(notes >= 0);
+        Assert.True(tickets > notes);
         Assert.True(postingHistory > tickets);
         Assert.True(clients > postingHistory);
         Assert.True(clientInfo > clients);
         Assert.True(users > clientInfo);
-        Assert.True(clientMatch > users);
-        Assert.True(equipment > clientMatch);
+        Assert.True(equipment > users);
         Assert.True(system > equipment);
+        Assert.True(clientMatch > system);
+        Assert.DoesNotContain(
+            "Header=\"SERVICE\"",
+            xaml,
+            StringComparison.Ordinal);
         Assert.DoesNotContain(
             "CommandParameter=\"Client List\"",
             xaml,

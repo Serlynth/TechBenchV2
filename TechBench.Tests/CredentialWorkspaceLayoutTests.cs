@@ -54,13 +54,17 @@ public sealed class CredentialWorkspaceLayoutTests
             "VerticalScrollBarVisibility=\"Auto\"",
             navigation,
             StringComparison.Ordinal);
-        foreach (var group in new[] { "WORKLOG", "SERVICE", "CLIENTS", "EQUIPMENT", "SYSTEM" })
+        foreach (var group in new[] { "NOTES", "CLIENTS", "EQUIPMENT", "SYSTEM" })
         {
             Assert.Contains(
                 $"Header=\"{group}\"",
                 navigation,
                 StringComparison.Ordinal);
         }
+        Assert.DoesNotContain(
+            "Header=\"SERVICE\"",
+            navigation,
+            StringComparison.Ordinal);
         Assert.Contains("x:Key=\"WorkspaceNavItemStyle\"", navigation, StringComparison.Ordinal);
         Assert.Contains(
             "Converter={StaticResource SectionActiveConverter}",

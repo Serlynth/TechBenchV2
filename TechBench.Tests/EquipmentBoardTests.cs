@@ -1,6 +1,7 @@
 using TechBench.Controls;
 using TechBench.Models;
 using TechBench.ViewModels;
+using System.Xml.Linq;
 
 namespace TechBench.Tests;
 
@@ -36,6 +37,22 @@ public sealed class EquipmentBoardTests
         Assert.Contains(
             "Visibility=\"{Binding IsEquipmentInventoryEditorVisible",
             mainWindowXaml);
+        Assert.Contains(
+            "x:Name=\"InventoryRegistrySurface\"",
+            mainWindowXaml);
+        var document = XDocument.Parse(mainWindowXaml);
+        var xamlNamespace = XNamespace.Get(
+            "http://schemas.microsoft.com/winfx/2006/xaml");
+        var registrySurface = Assert.Single(
+            document.Descendants(),
+            element =>
+                (string?)element.Attribute(xamlNamespace + "Name")
+                == "InventoryRegistrySurface");
+        var inventoryWorkspace = Assert.IsType<XElement>(
+            registrySurface.Parent);
+        Assert.Contains(
+            inventoryWorkspace.Elements(),
+            element => element.Name.LocalName == "EquipmentEditorPanel");
         Assert.Contains(
             "x:Name=\"EquipmentDetailsPanel\"",
             mainWindowXaml);

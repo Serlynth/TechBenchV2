@@ -163,7 +163,7 @@
                           HorizontalScrollBarVisibility="Disabled"
                           PanningMode="VerticalOnly">
                 <StackPanel>
-                    <Expander Header="WORKLOG"
+                    <Expander Header="NOTES"
                               Style="{StaticResource WorkspaceGroupStyle}">
                         <StackPanel>
                             <Button Content="Today"
@@ -186,12 +186,6 @@
                                     CommandParameter="Search"
                                     Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Search}"
                                     Style="{StaticResource WorkspaceNavItemStyle}" />
-                        </StackPanel>
-                    </Expander>
-
-                    <Expander Header="SERVICE"
-                              Style="{StaticResource WorkspaceGroupStyle}">
-                        <StackPanel>
                             <Button Content="Tickets"
                                     Command="{Binding NavigateCommand}"
                                     CommandParameter="Ticket List"
@@ -254,11 +248,6 @@
                                     CommandParameter="Common Links"
                                     Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Common Links}"
                                     Style="{StaticResource WorkspaceNavItemStyle}" />
-                            <Button Content="Client Matching"
-                                    Command="{Binding NavigateCommand}"
-                                    CommandParameter="Client Match"
-                                    Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Client Match}"
-                                    Style="{StaticResource WorkspaceNavItemStyle}" />
                         </StackPanel>
                     </Expander>
 
@@ -282,6 +271,11 @@
                     <Expander Header="SYSTEM"
                               Style="{StaticResource WorkspaceGroupStyle}">
                         <StackPanel>
+                            <Button Content="Client Matching"
+                                    Command="{Binding NavigateCommand}"
+                                    CommandParameter="Client Match"
+                                    Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Client Match}"
+                                    Style="{StaticResource WorkspaceNavItemStyle}" />
                             <Button Content="Admin Center"
                                     Command="{Binding NavigateCommand}"
                                     CommandParameter="Admin Center"

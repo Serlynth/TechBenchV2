@@ -3362,14 +3362,15 @@
                 </Grid>
 
                 <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Inventory}">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
+                    <Grid x:Name="InventoryRegistrySurface">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
 
-                    <Border Grid.Row="0"
-                            Style="{StaticResource CardStyle}"
-                            Margin="0,0,0,14">
+                        <Border Grid.Row="0"
+                                Style="{StaticResource CardStyle}"
+                                Margin="0,0,0,14">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -3419,11 +3420,11 @@
                                         Style="{StaticResource SecondaryButtonStyle}" />
                             </StackPanel>
                         </Grid>
-                    </Border>
+                        </Border>
 
-                    <Border Grid.Row="1"
-                            Style="{StaticResource CardStyle}"
-                            Padding="16">
+                        <Border Grid.Row="1"
+                                Style="{StaticResource CardStyle}"
+                                Padding="16">
                         <Grid Grid.IsSharedSizeScope="True">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
@@ -3648,7 +3649,8 @@
                                 </StackPanel>
                             </Grid>
                         </Grid>
-                    </Border>
+                        </Border>
+                    </Grid>
 
                     <controls:EquipmentEditorPanel Panel.ZIndex="50"
                                                    Visibility="{Binding IsEquipmentInventoryEditorVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
