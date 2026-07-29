@@ -60,6 +60,7 @@ public sealed class ClientInfoProfileWindowTests
         var mainWindowXaml = ReadRepositoryFile("MainWindow.xaml");
         var mainWindowCode = ReadRepositoryFile("MainWindow.xaml.cs");
         var profileXaml = ReadRepositoryFile("ClientInfoWindow.xaml");
+        var profileCode = ReadRepositoryFile("ClientInfoWindow.xaml.cs");
 
         Assert.Contains(
             "MouseDoubleClick=\"FireDrillCredentialsListBox_MouseDoubleClick\"",
@@ -77,15 +78,21 @@ public sealed class ClientInfoProfileWindowTests
         Assert.Contains("Text=\"ADDRESS\"", profileXaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"CLIENT INVENTORY\"", profileXaml, StringComparison.Ordinal);
         Assert.Contains("ItemsSource=\"{Binding Equipment}\"", profileXaml, StringComparison.Ordinal);
-        Assert.Contains("Click=\"EquipmentCard_Click\"", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("OpenEquipmentDetailsCommand", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("<controls:ClientEquipmentDetailsDrawer", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("IsEquipmentDetailsVisible", profileXaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"CLIENT USERS\"", profileXaml, StringComparison.Ordinal);
         Assert.Contains("ItemsSource=\"{Binding ClientUsers}\"", profileXaml, StringComparison.Ordinal);
         Assert.Contains("SelectedItem=\"{Binding SelectedClientUser}\"", profileXaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Reveal Accounts\"", profileXaml, StringComparison.Ordinal);
         Assert.Contains("ItemsSource=\"{Binding ClientUserAccountGroups}\"", profileXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("EquipmentOpenRequested", mainWindowCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("EquipmentOpenRequested", profileCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("EquipmentCard_Click", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("IsEquipmentDetailsVisible: true", profileCode, StringComparison.Ordinal);
         Assert.Contains(
-            "EquipmentOpenRequested += async",
-            mainWindowCode,
+            "CloseEquipmentDetailsCommand.Execute(null)",
+            profileCode,
             StringComparison.Ordinal);
     }
 
@@ -121,6 +128,46 @@ public sealed class ClientInfoProfileWindowTests
         Assert.False(profile.HasFields);
         Assert.Equal("1 inventory item", profile.EquipmentCountLabel);
         Assert.Same(equipment, Assert.Single(profile.Equipment));
+    }
+
+    [Fact]
+    public void EquipmentDetailsStayInsideThePoppedOutClientProfile()
+    {
+        var equipment = new EquipmentItem
+        {
+            EquipmentId = 7,
+            Name = "Reception PC",
+            DeviceType = "Desktop",
+            ClientName = "Acme Test"
+        };
+        var profile = new ClientInfoProfileViewModel(
+            new FireDrillCredentialSummary(
+                42,
+                "Acme Test",
+                string.Empty,
+                string.Empty,
+                DateTime.UtcNow,
+                []),
+            _ => null,
+            equipment: [equipment]);
+
+        profile.OpenEquipmentDetailsCommand.Execute(equipment);
+
+        Assert.True(profile.IsEquipmentDetailsVisible);
+        Assert.Same(equipment, profile.SelectedEquipment);
+        Assert.Contains(
+            "inside the Acme Test client profile",
+            profile.StatusMessage,
+            StringComparison.Ordinal);
+
+        profile.CloseEquipmentDetailsCommand.Execute(null);
+
+        Assert.False(profile.IsEquipmentDetailsVisible);
+        Assert.Null(profile.SelectedEquipment);
+        Assert.Contains(
+            "profile remains open",
+            profile.StatusMessage,
+            StringComparison.Ordinal);
     }
 
     [Fact]

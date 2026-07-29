@@ -12,6 +12,7 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
     private bool _isRevealed;
     private bool _isCopying;
     private bool _isCopyingClientUserField;
+    private EquipmentItem? _selectedEquipment;
     private ClientUserSummary? _selectedClientUser;
     private ClientUserSummary? _revealedClientUser;
     private string _statusMessage;
@@ -47,6 +48,12 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
             parameter => IsClientUserRevealed
                          && !_isCopyingClientUserField
                          && parameter is FireDrillCredentialField);
+        OpenEquipmentDetailsCommand = new RelayCommand(
+            OpenEquipmentDetails,
+            parameter => parameter is EquipmentItem);
+        CloseEquipmentDetailsCommand = new RelayCommand(
+            _ => CloseEquipmentDetails(),
+            _ => SelectedEquipment is not null);
         foreach (var item in equipment ?? [])
             Equipment.Add(item);
         foreach (var user in clientUsers ?? [])
@@ -64,6 +71,8 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
     public RelayCommand RevealClientUserCommand { get; }
     public RelayCommand HideClientUserCommand { get; }
     public RelayCommand CopyClientUserFieldCommand { get; }
+    public RelayCommand OpenEquipmentDetailsCommand { get; }
+    public RelayCommand CloseEquipmentDetailsCommand { get; }
     public string ClientName => _summary.ClientName;
     public Client? WhdClient { get; }
     public bool HasWhdMatch => WhdClient is not null;
@@ -91,11 +100,25 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
     public bool HasClientUsers => ClientUsers.Count > 0;
     public bool HasSelectedClientUser => SelectedClientUser is not null;
     public bool IsClientUserRevealed => RevealedClientUser is not null;
+    public bool IsEquipmentDetailsVisible => SelectedEquipment is not null;
     public bool HasProfileContent => HasFields || HasEquipment || HasClientUsers;
     public string EquipmentCountLabel =>
         $"{Equipment.Count} inventory item{(Equipment.Count == 1 ? string.Empty : "s")}";
     public string ClientUserCountLabel =>
         $"{ClientUsers.Count} synchronized user{(ClientUsers.Count == 1 ? string.Empty : "s")}";
+
+    public EquipmentItem? SelectedEquipment
+    {
+        get => _selectedEquipment;
+        private set
+        {
+            if (!SetProperty(ref _selectedEquipment, value))
+                return;
+
+            OnPropertyChanged(nameof(IsEquipmentDetailsVisible));
+            CloseEquipmentDetailsCommand.RaiseCanExecuteChanged();
+        }
+    }
 
     public ClientUserSummary? SelectedClientUser
     {
@@ -146,6 +169,27 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
     {
         get => _statusMessage;
         private set => SetProperty(ref _statusMessage, value);
+    }
+
+    private void OpenEquipmentDetails(object? parameter)
+    {
+        if (parameter is not EquipmentItem equipment)
+            return;
+
+        SelectedEquipment = equipment;
+        StatusMessage =
+            $"Showing {equipment.Name} inside the {ClientName} client profile.";
+    }
+
+    private void CloseEquipmentDetails()
+    {
+        var equipmentName = SelectedEquipment?.Name;
+        SelectedEquipment = null;
+        if (!string.IsNullOrWhiteSpace(equipmentName))
+        {
+            StatusMessage =
+                $"Closed {equipmentName} details. The {ClientName} profile remains open.";
+        }
     }
 
     private void Reveal()
