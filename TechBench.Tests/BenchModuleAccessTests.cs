@@ -7,13 +7,14 @@ public sealed class BenchModuleAccessTests
 {
     [Theory]
     [InlineData(@"CSRI\rskoog")]
-    [InlineData(@"csri\RSKOOG")]
-    [InlineData(@" CSRI\rskoog ")]
-    public void PrivateModulesAreAvailableOnlyToRyanSkoog(string loginName)
+    [InlineData(@"CSRI\other.admin")]
+    [InlineData(@"OTHER\admin")]
+    public void TechBenchAdminsCanAccessModulesRegardlessOfLoginName(
+        string loginName)
     {
-        var user = CreateUser(loginName);
+        var user = CreateUser(loginName, isAdmin: true);
 
-        Assert.True(BenchModuleAccess.CanAccessPrivateModules(user));
+        Assert.True(BenchModuleAccess.CanAccessModules(user));
         Assert.Equal(
             BenchModule.SalesBench,
             BenchModuleAccess.ResolveRequestedModule("SalesBench", user));
@@ -24,13 +25,14 @@ public sealed class BenchModuleAccessTests
 
     [Theory]
     [InlineData(@"CSRI\other.user")]
-    [InlineData(@"OTHER\rskoog")]
+    [InlineData(@"CSRI\rskoog")]
     [InlineData("")]
-    public void PrivateModulesAreDeniedToEveryOtherLogin(string loginName)
+    public void NonAdminsCannotAccessModulesRegardlessOfLoginName(
+        string loginName)
     {
-        var user = CreateUser(loginName);
+        var user = CreateUser(loginName, isAdmin: false);
 
-        Assert.False(BenchModuleAccess.CanAccessPrivateModules(user));
+        Assert.False(BenchModuleAccess.CanAccessModules(user));
         Assert.Equal(
             BenchModule.TechBench,
             BenchModuleAccess.ResolveRequestedModule("SalesBench", user));
@@ -40,28 +42,18 @@ public sealed class BenchModuleAccessTests
     }
 
     [Fact]
-    public void PreviewCannotExposePrivateModulesByImpersonatingRyan()
+    public void UnknownModuleRequestsReturnToTechBench()
     {
-        var user = CreateUser(
-            loginName: @"CSRI\rskoog",
-            authenticatedLoginName: @"CSRI\other.admin");
+        var admin = CreateUser(@"CSRI\admin", isAdmin: true);
 
-        Assert.False(BenchModuleAccess.CanAccessPrivateModules(user));
-    }
-
-    [Fact]
-    public void AuthenticatedRyanKeepsModuleAccessDuringAUserPreview()
-    {
-        var user = CreateUser(
-            loginName: @"CSRI\preview.user",
-            authenticatedLoginName: @"CSRI\rskoog");
-
-        Assert.True(BenchModuleAccess.CanAccessPrivateModules(user));
+        Assert.Equal(
+            BenchModule.TechBench,
+            BenchModuleAccess.ResolveRequestedModule("UnknownBench", admin));
     }
 
     private static CurrentUserContext CreateUser(
         string loginName,
-        string? authenticatedLoginName = null) =>
+        bool isAdmin) =>
         new(
             UserSid: [1, 2, 3],
             LoginName: loginName,
@@ -70,13 +62,7 @@ public sealed class BenchModuleAccessTests
             SchemaVersion: 15,
             ServerUtc: DateTime.UtcNow,
             IsTechnician: true,
-            IsManager: true,
-            IsAdmin: true,
-            IsSyncOperator: true,
-            AuthenticatedUserSid: authenticatedLoginName is null
-                ? null
-                : [4, 5, 6],
-            AuthenticatedLoginName: authenticatedLoginName,
-            AuthenticatedDisplayName: authenticatedLoginName,
-            IsReadOnlyPreview: authenticatedLoginName is not null);
+            IsManager: isAdmin,
+            IsAdmin: isAdmin,
+            IsSyncOperator: false);
 }

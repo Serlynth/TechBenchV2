@@ -305,7 +305,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public string DatabasePath => _repository.DatabasePath;
     public bool CanWrite => _currentUser.CanWrite;
     public bool CanAccessBenchModules =>
-        BenchModuleAccess.CanAccessPrivateModules(_currentUser);
+        BenchModuleAccess.CanAccessModules(_currentUser);
     public bool CanAccessAdminCenter => _currentUser.IsAdmin && CanWrite;
     public bool CanAccessEquipmentBoard =>
         CanAccessAdminCenter && _repository.EquipmentBoardAvailable;

@@ -4,22 +4,10 @@ namespace TechBench.Services;
 
 public static class BenchModuleAccess
 {
-    internal const string PrivateModuleLoginName = @"CSRI\rskoog";
-
-    public static bool CanAccessPrivateModules(CurrentUserContext currentUser)
+    public static bool CanAccessModules(CurrentUserContext currentUser)
     {
         ArgumentNullException.ThrowIfNull(currentUser);
-
-        // In a read-only preview, LoginName is the account being previewed.
-        // AuthenticatedLoginName remains the person at the keyboard and must
-        // therefore take precedence for this private beta gate.
-        var authenticatedLoginName =
-            currentUser.AuthenticatedLoginName ?? currentUser.LoginName;
-
-        return string.Equals(
-            authenticatedLoginName?.Trim(),
-            PrivateModuleLoginName,
-            StringComparison.OrdinalIgnoreCase);
+        return currentUser.IsAdmin;
     }
 
     public static BenchModule ResolveRequestedModule(
@@ -35,7 +23,7 @@ public static class BenchModuleAccess
         }
 
         return module == BenchModule.TechBench
-            || CanAccessPrivateModules(currentUser)
+            || CanAccessModules(currentUser)
                 ? module
                 : BenchModule.TechBench;
     }
