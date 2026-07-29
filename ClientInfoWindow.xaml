@@ -735,8 +735,6 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <controls:ClientEquipmentDetailsDrawer Panel.ZIndex="50"
-                                                   Visibility="{Binding IsEquipmentDetailsVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
         </Grid>
 
         <Border Grid.Row="2"
@@ -766,5 +764,10 @@
                         Click="CloseButton_Click" />
             </Grid>
         </Border>
+
+        <controls:ClientEquipmentDetailsDrawer Grid.Row="0"
+                                               Grid.RowSpan="3"
+                                               Panel.ZIndex="50"
+                                               Visibility="{Binding IsEquipmentDetailsVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
     </Grid>
 </Window>

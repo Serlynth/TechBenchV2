@@ -187,6 +187,28 @@ public sealed class ClientInfoProfileWindowTests
     }
 
     [Fact]
+    public void EquipmentDrawerUsesTheFullClientWindowHeight()
+    {
+        var profileXaml = ReadRepositoryFile("ClientInfoWindow.xaml");
+        var drawerXaml = ReadRepositoryFile(
+            Path.Combine("Controls", "ClientEquipmentDetailsDrawer.xaml"));
+
+        Assert.Contains(
+            "<controls:ClientEquipmentDetailsDrawer Grid.Row=\"0\"",
+            profileXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Grid.RowSpan=\"3\"",
+            profileXaml,
+            StringComparison.Ordinal);
+        Assert.Contains("Width=\"520\"", drawerXaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "BorderThickness=\"1,0,0,0\"",
+            drawerXaml,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FullProfileListsClientUsersAndProtectsTheirAccountDetails()
     {
         var summary = new FireDrillCredentialSummary(
