@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows.Data;
 using ExcelDataReader.Exceptions;
 using Microsoft.Data.SqlClient;
@@ -33,10 +34,31 @@ public sealed partial class MainWindowViewModel
         "Drag equipment from Stock to a technician, then into Deployment when work is complete.";
     private string _equipmentSearchText = string.Empty;
     private int _equipmentBoardItemCount;
+    private string _inventoryEquipmentSearchText = string.Empty;
+    private string _inventoryStatusFilter =
+        EquipmentInventoryFilter.AllStatuses;
+    private string _inventoryDeviceTypeFilter =
+        EquipmentInventoryFilter.AllDeviceTypes;
+    private string _inventoryClientFilter =
+        EquipmentInventoryFilter.AllClients;
+    private string _inventoryTechnicianFilter =
+        EquipmentInventoryFilter.AllTechnicians;
+    private bool _inventoryStockOnly;
 
     public ObservableCollection<EquipmentLane> EquipmentLanes { get; } = new();
     public ObservableCollection<EquipmentLane> DeploymentLanes { get; } = new();
     public ObservableCollection<EquipmentItem> StockInventoryItems { get; } = new();
+    public ObservableCollection<EquipmentItem> InventoryEquipmentItems { get; } = new();
+    public ObservableCollection<string> InventoryStatusFilterOptions { get; } =
+    [
+        EquipmentInventoryFilter.AllStatuses,
+        EquipmentInventoryFilter.StockStatus,
+        EquipmentInventoryFilter.InProgressStatus,
+        EquipmentInventoryFilter.DeploymentStatus
+    ];
+    public ObservableCollection<string> InventoryDeviceTypeFilterOptions { get; } = new();
+    public ObservableCollection<string> InventoryClientFilterOptions { get; } = new();
+    public ObservableCollection<string> InventoryTechnicianFilterOptions { get; } = new();
     public ObservableCollection<InventoryClient> InventoryClientOptions { get; } = new();
     public ObservableCollection<InventoryClientUser> InventoryClientUserOptions { get; } = new();
     public ObservableCollection<EquipmentAssignmentHistoryEntry>
@@ -62,6 +84,8 @@ public sealed partial class MainWindowViewModel
     public AsyncRelayCommand ArchiveEquipmentCommand { get; private set; } = null!;
     public RelayCommand CancelEquipmentEditCommand { get; private set; } = null!;
     public RelayCommand ClearEquipmentSearchCommand { get; private set; } = null!;
+    public RelayCommand ClearInventoryEquipmentFiltersCommand { get; private set; } = null!;
+    public RelayCommand CopyEquipmentDetailsCommand { get; private set; } = null!;
 
     public EquipmentItem? SelectedEquipment
     {
@@ -84,6 +108,8 @@ public sealed partial class MainWindowViewModel
             {
                 OnPropertyChanged(nameof(EquipmentEditorTitle));
                 OnPropertyChanged(nameof(IsEquipmentQuickViewVisible));
+                OnPropertyChanged(nameof(IsEquipmentInventoryEditorVisible));
+                CopyEquipmentDetailsCommand?.RaiseCanExecuteChanged();
             }
         }
     }
@@ -91,7 +117,13 @@ public sealed partial class MainWindowViewModel
     public bool IsEquipmentQuickViewVisible =>
         IsEquipmentEditorVisible
         && !CurrentSection.Equals(
-            "Equipment Board",
+            "Inventory",
+            StringComparison.Ordinal);
+
+    public bool IsEquipmentInventoryEditorVisible =>
+        IsEquipmentEditorVisible
+        && CurrentSection.Equals(
+            "Inventory",
             StringComparison.Ordinal);
 
     public bool IsEquipmentBoardBusy
@@ -250,6 +282,103 @@ public sealed partial class MainWindowViewModel
         }
     }
 
+    public string InventoryEquipmentSearchText
+    {
+        get => _inventoryEquipmentSearchText;
+        set
+        {
+            if (SetProperty(
+                    ref _inventoryEquipmentSearchText,
+                    value ?? string.Empty))
+            {
+                RefreshInventoryEquipmentFilter();
+            }
+        }
+    }
+
+    public string InventoryStatusFilter
+    {
+        get => _inventoryStatusFilter;
+        set
+        {
+            if (SetProperty(
+                    ref _inventoryStatusFilter,
+                    value ?? EquipmentInventoryFilter.AllStatuses))
+            {
+                RefreshInventoryEquipmentFilter();
+            }
+        }
+    }
+
+    public string InventoryDeviceTypeFilter
+    {
+        get => _inventoryDeviceTypeFilter;
+        set
+        {
+            if (SetProperty(
+                    ref _inventoryDeviceTypeFilter,
+                    value ?? EquipmentInventoryFilter.AllDeviceTypes))
+            {
+                RefreshInventoryEquipmentFilter();
+            }
+        }
+    }
+
+    public string InventoryClientFilter
+    {
+        get => _inventoryClientFilter;
+        set
+        {
+            if (SetProperty(
+                    ref _inventoryClientFilter,
+                    value ?? EquipmentInventoryFilter.AllClients))
+            {
+                RefreshInventoryEquipmentFilter();
+            }
+        }
+    }
+
+    public string InventoryTechnicianFilter
+    {
+        get => _inventoryTechnicianFilter;
+        set
+        {
+            if (SetProperty(
+                    ref _inventoryTechnicianFilter,
+                    value ?? EquipmentInventoryFilter.AllTechnicians))
+            {
+                RefreshInventoryEquipmentFilter();
+            }
+        }
+    }
+
+    public bool InventoryStockOnly
+    {
+        get => _inventoryStockOnly;
+        set
+        {
+            if (SetProperty(ref _inventoryStockOnly, value))
+            {
+                RefreshInventoryEquipmentFilter();
+            }
+        }
+    }
+
+    public string InventoryEquipmentCountLabel
+    {
+        get
+        {
+            var visibleCount = GetVisibleInventoryEquipmentCount();
+            var totalCount = InventoryEquipmentItems.Count;
+            return visibleCount == totalCount
+                ? $"{totalCount} device{(totalCount == 1 ? string.Empty : "s")}"
+                : $"{visibleCount} of {totalCount} devices";
+        }
+    }
+
+    public bool HasInventoryEquipmentResults =>
+        GetVisibleInventoryEquipmentCount() > 0;
+
     public string EquipmentDeviceCountLabel
     {
         get
@@ -344,17 +473,16 @@ public sealed partial class MainWindowViewModel
             _ => CanAccessEquipmentBoard && !IsEquipmentBoardBusy);
         ImportEquipmentBuildSheetCommand = new AsyncRelayCommand(
             _ => ImportEquipmentBuildSheetAsync(),
-            _ => CanAccessEquipmentBoard && !IsEquipmentBoardBusy);
+            _ => CanEditEquipmentRecords());
         NewEquipmentCommand = new RelayCommand(
             _ => BeginNewEquipment(),
-            _ => CanAccessEquipmentBoard && !IsEquipmentBoardBusy);
+            _ => CanEditEquipmentRecords());
         SaveEquipmentCommand = new AsyncRelayCommand(
             _ => SaveEquipmentAsync(),
             _ => CanSaveEquipment());
         ArchiveEquipmentCommand = new AsyncRelayCommand(
             _ => ArchiveEquipmentAsync(),
-            _ => CanAccessEquipmentBoard
-                && !IsEquipmentBoardBusy
+            _ => CanEditEquipmentRecords()
                 && !_isNewEquipment
                 && SelectedEquipment is { EquipmentId: > 0 });
         CancelEquipmentEditCommand = new RelayCommand(
@@ -363,6 +491,14 @@ public sealed partial class MainWindowViewModel
         ClearEquipmentSearchCommand = new RelayCommand(
             _ => EquipmentSearchText = string.Empty,
             _ => !string.IsNullOrWhiteSpace(EquipmentSearchText));
+        ClearInventoryEquipmentFiltersCommand = new RelayCommand(
+            _ => ClearInventoryEquipmentFilters(),
+            _ => HasActiveInventoryEquipmentFilters());
+        CopyEquipmentDetailsCommand = new RelayCommand(
+            _ => CopyEquipmentDetails(),
+            _ => IsEquipmentEditorVisible
+                && (!string.IsNullOrWhiteSpace(EquipmentName)
+                    || SelectedEquipment is not null));
     }
 
     private async Task RefreshEquipmentBoardAsync(long? selectEquipmentId = null)
@@ -419,6 +555,7 @@ public sealed partial class MainWindowViewModel
         EquipmentLanes.Clear();
         DeploymentLanes.Clear();
         StockInventoryItems.Clear();
+        RebuildInventoryEquipmentRegistry(equipment);
         var stockLane = new EquipmentLane(
             "Stock Room",
             null,
@@ -891,9 +1028,15 @@ public sealed partial class MainWindowViewModel
         ArchiveEquipmentCommand.RaiseCanExecuteChanged();
     }
 
-    private bool CanSaveEquipment() =>
+    private bool CanEditEquipmentRecords() =>
         CanAccessEquipmentBoard
         && !IsEquipmentBoardBusy
+        && CurrentSection.Equals(
+            "Inventory",
+            StringComparison.Ordinal);
+
+    private bool CanSaveEquipment() =>
+        CanEditEquipmentRecords()
         && IsEquipmentEditorVisible
         && !string.IsNullOrWhiteSpace(EquipmentDeviceType)
         && !string.IsNullOrWhiteSpace(EquipmentName);
@@ -1103,6 +1246,195 @@ public sealed partial class MainWindowViewModel
                 StringComparison.OrdinalIgnoreCase)
             || item.ClientUserEmail.Contains(query, StringComparison.OrdinalIgnoreCase)
             || item.LocationName.Contains(query, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void RebuildInventoryEquipmentRegistry(
+        IReadOnlyList<EquipmentItem> equipment)
+    {
+        InventoryEquipmentItems.Clear();
+        foreach (var item in equipment
+                     .OrderBy(static item => item.Name)
+                     .ThenBy(static item => item.AssetTag)
+                     .ThenBy(static item => item.EquipmentId))
+        {
+            InventoryEquipmentItems.Add(item);
+        }
+
+        ReplaceInventoryFilterOptions(
+            InventoryDeviceTypeFilterOptions,
+            EquipmentInventoryFilter.AllDeviceTypes,
+            equipment.Select(static item => item.DeviceType));
+        ReplaceInventoryFilterOptions(
+            InventoryClientFilterOptions,
+            EquipmentInventoryFilter.AllClients,
+            equipment.Select(static item => item.ClientName));
+        ReplaceInventoryFilterOptions(
+            InventoryTechnicianFilterOptions,
+            EquipmentInventoryFilter.AllTechnicians,
+            equipment.Select(static item => item.TechnicianLabel));
+
+        if (!InventoryDeviceTypeFilterOptions.Contains(
+                InventoryDeviceTypeFilter,
+                StringComparer.OrdinalIgnoreCase))
+        {
+            _inventoryDeviceTypeFilter =
+                EquipmentInventoryFilter.AllDeviceTypes;
+            OnPropertyChanged(nameof(InventoryDeviceTypeFilter));
+        }
+
+        if (!InventoryClientFilterOptions.Contains(
+                InventoryClientFilter,
+                StringComparer.OrdinalIgnoreCase))
+        {
+            _inventoryClientFilter = EquipmentInventoryFilter.AllClients;
+            OnPropertyChanged(nameof(InventoryClientFilter));
+        }
+
+        if (!InventoryTechnicianFilterOptions.Contains(
+                InventoryTechnicianFilter,
+                StringComparer.OrdinalIgnoreCase))
+        {
+            _inventoryTechnicianFilter =
+                EquipmentInventoryFilter.AllTechnicians;
+            OnPropertyChanged(nameof(InventoryTechnicianFilter));
+        }
+
+        RefreshInventoryEquipmentFilter();
+    }
+
+    private static void ReplaceInventoryFilterOptions(
+        ObservableCollection<string> options,
+        string allOption,
+        IEnumerable<string> values)
+    {
+        options.Clear();
+        options.Add(allOption);
+        foreach (var value in values
+                     .Where(static value => !string.IsNullOrWhiteSpace(value))
+                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(static value => value))
+        {
+            options.Add(value);
+        }
+    }
+
+    private void RefreshInventoryEquipmentFilter()
+    {
+        var view = CollectionViewSource.GetDefaultView(
+            InventoryEquipmentItems);
+        view.Filter = value =>
+            value is EquipmentItem item
+            && EquipmentInventoryFilter.Matches(
+                item,
+                InventoryEquipmentSearchText,
+                InventoryStatusFilter,
+                InventoryDeviceTypeFilter,
+                InventoryClientFilter,
+                InventoryTechnicianFilter,
+                InventoryStockOnly);
+        view.Refresh();
+
+        OnPropertyChanged(nameof(InventoryEquipmentCountLabel));
+        OnPropertyChanged(nameof(HasInventoryEquipmentResults));
+        ClearInventoryEquipmentFiltersCommand?.RaiseCanExecuteChanged();
+    }
+
+    private int GetVisibleInventoryEquipmentCount() =>
+        CollectionViewSource.GetDefaultView(InventoryEquipmentItems)
+            .Cast<object>()
+            .Count();
+
+    private bool HasActiveInventoryEquipmentFilters() =>
+        !string.IsNullOrWhiteSpace(InventoryEquipmentSearchText)
+        || !InventoryStatusFilter.Equals(
+            EquipmentInventoryFilter.AllStatuses,
+            StringComparison.Ordinal)
+        || !InventoryDeviceTypeFilter.Equals(
+            EquipmentInventoryFilter.AllDeviceTypes,
+            StringComparison.Ordinal)
+        || !InventoryClientFilter.Equals(
+            EquipmentInventoryFilter.AllClients,
+            StringComparison.Ordinal)
+        || !InventoryTechnicianFilter.Equals(
+            EquipmentInventoryFilter.AllTechnicians,
+            StringComparison.Ordinal)
+        || InventoryStockOnly;
+
+    private void ClearInventoryEquipmentFilters()
+    {
+        _inventoryEquipmentSearchText = string.Empty;
+        _inventoryStatusFilter = EquipmentInventoryFilter.AllStatuses;
+        _inventoryDeviceTypeFilter =
+            EquipmentInventoryFilter.AllDeviceTypes;
+        _inventoryClientFilter = EquipmentInventoryFilter.AllClients;
+        _inventoryTechnicianFilter =
+            EquipmentInventoryFilter.AllTechnicians;
+        _inventoryStockOnly = false;
+        OnPropertyChanged(nameof(InventoryEquipmentSearchText));
+        OnPropertyChanged(nameof(InventoryStatusFilter));
+        OnPropertyChanged(nameof(InventoryDeviceTypeFilter));
+        OnPropertyChanged(nameof(InventoryClientFilter));
+        OnPropertyChanged(nameof(InventoryTechnicianFilter));
+        OnPropertyChanged(nameof(InventoryStockOnly));
+        RefreshInventoryEquipmentFilter();
+    }
+
+    private void CopyEquipmentDetails()
+    {
+        var lines = new List<string>();
+        AddEquipmentCopyLine(lines, "Name", EquipmentName);
+        AddEquipmentCopyLine(lines, "Device type", EquipmentDeviceType);
+        AddEquipmentCopyLine(lines, "Asset tag", EquipmentAssetTag);
+        AddEquipmentCopyLine(lines, "Serial number", EquipmentSerialNumber);
+        AddEquipmentCopyLine(lines, "Part number", EquipmentPartNumber);
+        AddEquipmentCopyLine(lines, "Manufacturer", EquipmentManufacturer);
+        AddEquipmentCopyLine(lines, "Model", EquipmentModel);
+        AddEquipmentCopyLine(lines, "IP address", EquipmentIpAddress);
+        AddEquipmentCopyLine(lines, "AnyDesk number", EquipmentAnyDeskNumber);
+        AddEquipmentCopyLine(lines, "Client", EquipmentClient?.Name);
+        AddEquipmentCopyLine(
+            lines,
+            "Client user",
+            EquipmentClientUser?.DisplayLabel);
+        AddEquipmentCopyLine(lines, "Site / room / desk", EquipmentLocationName);
+        AddEquipmentCopyLine(
+            lines,
+            "Technician",
+            SelectedEquipment?.TechnicianLabel);
+        AddEquipmentCopyLine(
+            lines,
+            "Status",
+            SelectedEquipment?.InventoryStatusLabel);
+        AddEquipmentCopyLine(lines, "Notes", EquipmentNotes);
+
+        if (lines.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            System.Windows.Clipboard.SetText(
+                string.Join(Environment.NewLine, lines));
+            StatusMessage = $"Copied equipment details for {EquipmentName}.";
+        }
+        catch (ExternalException ex)
+        {
+            _dialogService.Error(
+                "Copy equipment details",
+                $"Windows could not access the clipboard: {ex.Message}");
+        }
+    }
+
+    private static void AddEquipmentCopyLine(
+        ICollection<string> lines,
+        string label,
+        string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            lines.Add($"{label}: {value.Trim()}");
+        }
     }
 
     private void RefreshInventoryClientOptions(

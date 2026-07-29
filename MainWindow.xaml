@@ -3670,110 +3670,298 @@
                     </Grid>
                 </Grid>
 
-                <ScrollViewer Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Inventory}"
-                              VerticalScrollBarVisibility="Auto">
-                    <StackPanel>
-                        <Border Style="{StaticResource CardStyle}"
-                                Margin="0,0,0,14">
-                            <Grid>
+                <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Inventory}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0"
+                            Style="{StaticResource CardStyle}"
+                            Margin="0,0,0,14">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="All Equipment"
+                                           Style="{StaticResource SectionHeadingStyle}"
+                                           Margin="0,0,0,5" />
+                                <TextBlock Text="Search and maintain every equipment record. Use Equipment Board to assign, prioritize, and deploy devices."
+                                           Style="{StaticResource MutedTextStyle}"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                            <Border Grid.Column="1"
+                                    Background="{DynamicResource AccentSoftBrush}"
+                                    BorderBrush="{DynamicResource AccentBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="12"
+                                    Padding="11,6"
+                                    Margin="16,0"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="{Binding InventoryEquipmentCountLabel}"
+                                           Foreground="{DynamicResource AccentHoverBrush}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold" />
+                            </Border>
+                            <StackPanel Grid.Column="2"
+                                        Orientation="Horizontal"
+                                        VerticalAlignment="Center">
+                                <Button Content="Import build sheet"
+                                        Command="{Binding ImportEquipmentBuildSheetCommand}"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        ToolTip="Import a PC configuration workbook and review the new inventory record before saving."
+                                        Margin="0,0,10,0" />
+                                <Button Content="+  New device"
+                                        Command="{Binding NewEquipmentCommand}"
+                                        Style="{StaticResource PrimaryButtonStyle}"
+                                        Margin="0,0,10,0" />
+                                <Button Content="Open Equipment Board"
+                                        Command="{Binding NavigateCommand}"
+                                        CommandParameter="Equipment Board"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        Margin="0,0,10,0" />
+                                <Button Content="Refresh"
+                                        Command="{Binding RefreshEquipmentBoardCommand}"
+                                        Style="{StaticResource SecondaryButtonStyle}" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="1"
+                            Style="{StaticResource CardStyle}"
+                            Padding="16">
+                        <Grid Grid.IsSharedSizeScope="True">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <Grid Margin="0,0,0,12">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="2*" />
+                                    <ColumnDefinition Width="12" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="10" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <StackPanel VerticalAlignment="Center">
-                                    <TextBlock Text="Stock Room"
-                                               Style="{StaticResource SectionHeadingStyle}"
-                                               Margin="0,0,0,5" />
-                                    <TextBlock Text="Equipment currently in stock and available for technician assignment."
-                                               Style="{StaticResource MutedTextStyle}" />
-                                </StackPanel>
-                                <Border Grid.Column="1"
-                                        Background="{DynamicResource AccentSoftBrush}"
-                                        BorderBrush="{DynamicResource AccentBrush}"
-                                        BorderThickness="1"
-                                        CornerRadius="12"
-                                        Padding="11,6"
-                                        Margin="16,0"
-                                        VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding StockInventoryCountLabel}"
-                                               Foreground="{DynamicResource AccentHoverBrush}"
-                                               FontSize="11"
-                                               FontWeight="SemiBold" />
-                                </Border>
-                                <StackPanel Grid.Column="2"
-                                            Orientation="Horizontal"
-                                            VerticalAlignment="Center">
-                                    <Button Content="Open Equipment Board"
-                                            Command="{Binding NavigateCommand}"
-                                            CommandParameter="Equipment Board"
-                                            Style="{StaticResource PrimaryButtonStyle}"
-                                            Margin="0,0,10,0" />
-                                    <Button Content="Refresh"
-                                            Command="{Binding RefreshEquipmentBoardCommand}"
-                                            Style="{StaticResource SecondaryButtonStyle}" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
 
-                        <Border Style="{StaticResource CardStyle}"
-                                Padding="18">
-                            <Grid>
-                                <ItemsControl ItemsSource="{Binding StockInventoryItems}"
-                                              Visibility="{Binding HasStockInventoryItems, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                    <ItemsControl.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <WrapPanel />
-                                        </ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <Button Content="{Binding}"
-                                                    ContentTemplate="{StaticResource EquipmentCardTemplate}"
-                                                    Style="{StaticResource InventoryStockCardButtonStyle}"
-                                                    ToolTip="Show equipment details"
-                                                    Click="OpenEquipmentFromInventory_Click" />
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-
-                                <Border MinHeight="270"
-                                        Background="{DynamicResource PanelAltBackgroundBrush}"
+                                <Border Grid.Column="0"
+                                        Height="40"
+                                        Background="{DynamicResource ControlBackgroundBrush}"
                                         BorderBrush="{DynamicResource BorderBrush}"
                                         BorderThickness="1"
-                                        CornerRadius="12"
-                                        Visibility="{Binding HasStockInventoryItems, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
-                                    <StackPanel HorizontalAlignment="Center"
-                                                VerticalAlignment="Center"
-                                                MaxWidth="420">
-                                        <Border Width="54"
-                                                Height="54"
-                                                CornerRadius="27"
-                                                Background="{DynamicResource AccentSoftBrush}"
-                                                Margin="0,0,0,14">
-                                            <TextBlock Text="&#xE7B8;"
-                                                       FontFamily="Segoe MDL2 Assets"
-                                                       Foreground="{DynamicResource AccentHoverBrush}"
-                                                       FontSize="23"
-                                                       HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center" />
-                                        </Border>
-                                        <TextBlock Text="No equipment is currently in stock."
-                                                   Foreground="{DynamicResource PrimaryTextBrush}"
-                                                   FontSize="16"
-                                                   FontWeight="SemiBold"
-                                                   TextAlignment="Center" />
-                                        <TextBlock Text="Items assigned to technicians or awaiting deployment remain available on Equipment Board."
-                                                   Style="{StaticResource MutedTextStyle}"
-                                                   TextWrapping="Wrap"
-                                                   TextAlignment="Center"
-                                                   Margin="0,6,0,0" />
-                                    </StackPanel>
+                                        CornerRadius="8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="38" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="&#xE721;"
+                                                   FontFamily="Segoe MDL2 Assets"
+                                                   Foreground="{DynamicResource MutedTextBrush}"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
+                                        <TextBox Grid.Column="1"
+                                                 Text="{Binding InventoryEquipmentSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                                 Background="Transparent"
+                                                 BorderThickness="0"
+                                                 Padding="0"
+                                                 VerticalContentAlignment="Center"
+                                                 ToolTip="Search name, asset tag, serial number, client, user, or technician" />
+                                    </Grid>
                                 </Border>
+                                <ComboBox Grid.Column="2"
+                                          Width="145"
+                                          ItemsSource="{Binding InventoryStatusFilterOptions}"
+                                          SelectedItem="{Binding InventoryStatusFilter}"
+                                          ToolTip="Filter by workflow status" />
+                                <ComboBox Grid.Column="4"
+                                          Width="150"
+                                          ItemsSource="{Binding InventoryDeviceTypeFilterOptions}"
+                                          SelectedItem="{Binding InventoryDeviceTypeFilter}"
+                                          ToolTip="Filter by device type" />
+                                <ComboBox Grid.Column="6"
+                                          Width="175"
+                                          ItemsSource="{Binding InventoryClientFilterOptions}"
+                                          SelectedItem="{Binding InventoryClientFilter}"
+                                          ToolTip="Filter by client" />
+                                <ComboBox Grid.Column="8"
+                                          Width="175"
+                                          ItemsSource="{Binding InventoryTechnicianFilterOptions}"
+                                          SelectedItem="{Binding InventoryTechnicianFilter}"
+                                          ToolTip="Filter by assigned technician" />
+                                <CheckBox Grid.Column="10"
+                                          Content="Stock only"
+                                          IsChecked="{Binding InventoryStockOnly}"
+                                          VerticalAlignment="Center"
+                                          ToolTip="Quickly show only equipment still in Stock." />
+                                <Button Grid.Column="12"
+                                        Content="Clear filters"
+                                        Command="{Binding ClearInventoryEquipmentFiltersCommand}"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        Padding="12,6" />
                             </Grid>
-                        </Border>
-                    </StackPanel>
-                </ScrollViewer>
+
+                            <Border Grid.Row="1"
+                                    Background="{DynamicResource PanelAltBackgroundBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="8,8,0,0"
+                                    Padding="12,9">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="2.1*" SharedSizeGroup="InventoryDeviceColumn" />
+                                        <ColumnDefinition Width="1.2*" SharedSizeGroup="InventoryIdentityColumn" />
+                                        <ColumnDefinition Width="2*" SharedSizeGroup="InventoryClientColumn" />
+                                        <ColumnDefinition Width="1.4*" SharedSizeGroup="InventoryTechnicianColumn" />
+                                        <ColumnDefinition Width="1.1*" SharedSizeGroup="InventoryStatusColumn" />
+                                        <ColumnDefinition Width="24" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="DEVICE" Style="{StaticResource FieldLabelStyle}" Margin="0" />
+                                    <TextBlock Grid.Column="1" Text="ASSET / SERIAL" Style="{StaticResource FieldLabelStyle}" Margin="0" />
+                                    <TextBlock Grid.Column="2" Text="CLIENT / USER" Style="{StaticResource FieldLabelStyle}" Margin="0" />
+                                    <TextBlock Grid.Column="3" Text="TECHNICIAN" Style="{StaticResource FieldLabelStyle}" Margin="0" />
+                                    <TextBlock Grid.Column="4" Text="STATUS" Style="{StaticResource FieldLabelStyle}" Margin="0" />
+                                </Grid>
+                            </Border>
+
+                            <Grid Grid.Row="2">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{Binding InventoryEquipmentItems}"
+                                                  Visibility="{Binding HasInventoryEquipmentResults, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Button Click="OpenEquipmentFromInventory_Click"
+                                                        HorizontalContentAlignment="Stretch"
+                                                        Background="{DynamicResource PanelBackgroundBrush}"
+                                                        BorderBrush="{DynamicResource BorderBrush}"
+                                                        BorderThickness="1,0,1,1"
+                                                        Padding="12,10"
+                                                        Cursor="Hand"
+                                                        ToolTip="Open this editable record in Inventory">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="2.1*" SharedSizeGroup="InventoryDeviceColumn" />
+                                                            <ColumnDefinition Width="1.2*" SharedSizeGroup="InventoryIdentityColumn" />
+                                                            <ColumnDefinition Width="2*" SharedSizeGroup="InventoryClientColumn" />
+                                                            <ColumnDefinition Width="1.4*" SharedSizeGroup="InventoryTechnicianColumn" />
+                                                            <ColumnDefinition Width="1.1*" SharedSizeGroup="InventoryStatusColumn" />
+                                                            <ColumnDefinition Width="24" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="34" />
+                                                                <ColumnDefinition Width="*" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Text="{Binding DeviceGlyph}"
+                                                                       FontFamily="Segoe MDL2 Assets"
+                                                                       FontSize="17"
+                                                                       Foreground="{Binding DeviceBadgeColor}"
+                                                                       VerticalAlignment="Center" />
+                                                            <StackPanel Grid.Column="1">
+                                                                <TextBlock Text="{Binding Name}"
+                                                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                                                           FontWeight="SemiBold"
+                                                                           TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Text="{Binding ModelLine}"
+                                                                           Foreground="{DynamicResource MutedTextBrush}"
+                                                                           FontSize="10"
+                                                                           TextTrimming="CharacterEllipsis" />
+                                                            </StackPanel>
+                                                        </Grid>
+                                                        <StackPanel Grid.Column="1">
+                                                            <TextBlock Text="{Binding AssetTag, TargetNullValue=&#x2014;}"
+                                                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                                                       TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding SerialNumber, TargetNullValue=&#x2014;}"
+                                                                       Foreground="{DynamicResource MutedTextBrush}"
+                                                                       FontSize="10"
+                                                                       TextTrimming="CharacterEllipsis" />
+                                                        </StackPanel>
+                                                        <StackPanel Grid.Column="2">
+                                                            <TextBlock Text="{Binding InventoryClientLabel}"
+                                                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                                                       TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding InventoryUserLabel}"
+                                                                       Foreground="{DynamicResource MutedTextBrush}"
+                                                                       FontSize="10"
+                                                                       TextTrimming="CharacterEllipsis" />
+                                                        </StackPanel>
+                                                        <TextBlock Grid.Column="3"
+                                                                   Text="{Binding TechnicianLabel}"
+                                                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                                                   VerticalAlignment="Center"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                        <Border Grid.Column="4"
+                                                                HorizontalAlignment="Left"
+                                                                VerticalAlignment="Center"
+                                                                Background="{Binding StatusColor}"
+                                                                CornerRadius="10"
+                                                                Padding="9,4">
+                                                            <TextBlock Text="{Binding InventoryStatusLabel}"
+                                                                       Foreground="#07131E"
+                                                                       FontSize="10"
+                                                                       FontWeight="SemiBold" />
+                                                        </Border>
+                                                        <TextBlock Grid.Column="5"
+                                                                   Text="&#xE76C;"
+                                                                   FontFamily="Segoe MDL2 Assets"
+                                                                   Foreground="{DynamicResource MutedTextBrush}"
+                                                                   HorizontalAlignment="Right"
+                                                                   VerticalAlignment="Center" />
+                                                    </Grid>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+
+                                <StackPanel HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            MaxWidth="430"
+                                            Visibility="{Binding HasInventoryEquipmentResults, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                    <Border Width="54"
+                                            Height="54"
+                                            CornerRadius="27"
+                                            Background="{DynamicResource AccentSoftBrush}"
+                                            Margin="0,0,0,14">
+                                        <TextBlock Text="&#xE721;"
+                                                   FontFamily="Segoe MDL2 Assets"
+                                                   Foreground="{DynamicResource AccentHoverBrush}"
+                                                   FontSize="23"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
+                                    </Border>
+                                    <TextBlock Text="No equipment matches these filters."
+                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                               FontSize="16"
+                                               FontWeight="SemiBold"
+                                               TextAlignment="Center" />
+                                    <TextBlock Text="Clear one or more filters to see the complete equipment registry."
+                                               Style="{StaticResource MutedTextStyle}"
+                                               TextWrapping="Wrap"
+                                               TextAlignment="Center"
+                                               Margin="0,6,0,0" />
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <controls:EquipmentEditorPanel Panel.ZIndex="50"
+                                                   Visibility="{Binding IsEquipmentInventoryEditorVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                </Grid>
 
                 <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Equipment Board}">
                     <Grid.RowDefinitions>
@@ -3863,15 +4051,6 @@
                                         Click="OpenEquipmentBoardDemo_Click"
                                         Style="{StaticResource SecondaryButtonStyle}"
                                         ToolTip="Open an isolated sample inventory board. Demo changes are never written to SQL Server."
-                                        Margin="0,0,10,0" />
-                                <Button Content="Import build sheet"
-                                        Command="{Binding ImportEquipmentBuildSheetCommand}"
-                                        Style="{StaticResource SecondaryButtonStyle}"
-                                        ToolTip="Read Customer, Machine, S/N, Machine Name, End User, and Email Address from a PC configuration workbook. The imported device opens for review before it is saved."
-                                        Margin="0,0,10,0" />
-                                <Button Content="+  New device"
-                                        Command="{Binding NewEquipmentCommand}"
-                                        Style="{StaticResource PrimaryButtonStyle}"
                                         Margin="0,0,10,0" />
                                 <Button Content="Refresh"
                                         Command="{Binding RefreshEquipmentBoardCommand}"
@@ -4262,7 +4441,7 @@
                                 VerticalAlignment="Stretch"
                                 Panel.ZIndex="10"
                                 Style="{StaticResource CardStyle}"
-                                Visibility="{Binding IsEquipmentEditorVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                Visibility="Collapsed">
                             <Grid>
                                 <Grid>
                                     <Grid.RowDefinitions>
@@ -5040,10 +5219,17 @@
                                          FontWeight="SemiBold" />
                                 </TextBlock>
                             </StackPanel>
-                            <Button Grid.Column="1"
-                                    Content="Close"
-                                    Command="{Binding CancelEquipmentEditCommand}"
-                                    Style="{StaticResource SecondaryButtonStyle}" />
+                            <StackPanel Grid.Column="1"
+                                        Orientation="Horizontal">
+                                <Button Content="Copy details"
+                                        Command="{Binding CopyEquipmentDetailsCommand}"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        Margin="0,0,8,0"
+                                        ToolTip="Copy the equipment record without copying the AnyDesk password." />
+                                <Button Content="Close"
+                                        Command="{Binding CancelEquipmentEditCommand}"
+                                        Style="{StaticResource SecondaryButtonStyle}" />
+                            </StackPanel>
                         </Grid>
 
                         <ScrollViewer Grid.Row="1"
@@ -5230,9 +5416,9 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <Button Content="Open Equipment Board"
+                            <Button Content="Open Inventory"
                                     Command="{Binding NavigateCommand}"
-                                    CommandParameter="Equipment Board"
+                                    CommandParameter="Inventory"
                                     Style="{StaticResource PrimaryButtonStyle}"
                                     Margin="0,0,10,0" />
                             <Button Grid.Column="1"

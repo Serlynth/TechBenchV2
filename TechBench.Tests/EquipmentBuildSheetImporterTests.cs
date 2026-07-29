@@ -293,7 +293,7 @@ public sealed class EquipmentBuildSheetImporterTests
     }
 
     [Fact]
-    public void InventoryNavigationSeparatesStockOverviewAndEquipmentBoard()
+    public void InventoryNavigationSeparatesRegistryAndEquipmentBoard()
     {
         var mainWindowXaml = ReadRepositoryFile("MainWindow.xaml");
         var equipmentViewModel = ReadRepositoryFile(
@@ -306,7 +306,12 @@ public sealed class EquipmentBuildSheetImporterTests
         Assert.Contains("CommandParameter=\"Equipment Board\"", mainWindowXaml);
         Assert.Contains("ConverterParameter=Inventory", mainWindowXaml);
         Assert.Contains("ConverterParameter=Equipment Board", mainWindowXaml);
-        Assert.Contains("ItemsSource=\"{Binding StockInventoryItems}\"", mainWindowXaml);
+        Assert.Contains("Text=\"All Equipment\"", mainWindowXaml);
+        Assert.Contains(
+            "ItemsSource=\"{Binding InventoryEquipmentItems}\"",
+            mainWindowXaml);
+        Assert.Contains("InventoryEquipmentSearchText", mainWindowXaml);
+        Assert.Contains("InventoryStockOnly", mainWindowXaml);
         Assert.Contains("x:Name=\"EquipmentQuickViewPanel\"", mainWindowXaml);
         Assert.Contains(
             "Visibility=\"{Binding IsEquipmentQuickViewVisible",
@@ -318,9 +323,11 @@ public sealed class EquipmentBuildSheetImporterTests
             "without leaving {CurrentSection}",
             equipmentViewModel);
         Assert.Contains(
-            ".Where(static item => item.IsInStock)",
+            "RebuildInventoryEquipmentRegistry(equipment);",
             equipmentViewModel);
-        Assert.Contains("StockInventoryItems.Add(item);", equipmentViewModel);
+        Assert.Contains(
+            "EquipmentInventoryFilter.Matches(",
+            equipmentViewModel);
         Assert.Contains("Content=\"Import build sheet\"", mainWindowXaml);
         Assert.Contains(
             "Command=\"{Binding ImportEquipmentBuildSheetCommand}\"",

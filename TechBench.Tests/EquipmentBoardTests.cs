@@ -23,7 +23,7 @@ public sealed class EquipmentBoardTests
     }
 
     [Fact]
-    public void LiveInventoryBoardUsesTransientEditorAndDragOnlyTechnicianControls()
+    public void EquipmentBoardKeepsDragWorkflowWhileInventoryOwnsTheEditor()
     {
         var mainWindowXaml = ReadRepositoryFile("MainWindow.xaml");
         var mainWindowCode = ReadRepositoryFile("MainWindow.xaml.cs");
@@ -32,9 +32,14 @@ public sealed class EquipmentBoardTests
                 "ViewModels",
                 "MainWindowViewModel.Equipment.cs"));
 
+        Assert.Contains("<controls:EquipmentEditorPanel", mainWindowXaml);
         Assert.Contains(
-            "Visibility=\"{Binding IsEquipmentEditorVisible, Converter={StaticResource BooleanToVisibilityConverter}}\"",
+            "Visibility=\"{Binding IsEquipmentInventoryEditorVisible",
             mainWindowXaml);
+        Assert.Contains(
+            "x:Name=\"EquipmentDetailsPanel\"",
+            mainWindowXaml);
+        Assert.Contains("Visibility=\"Collapsed\"", mainWindowXaml);
         Assert.Contains(
             "Data=\"M1,8 C3.8,3.5 12.2,3.5 15,8 C12.2,12.5 3.8,12.5 1,8 Z\"",
             mainWindowXaml);
@@ -287,7 +292,9 @@ public sealed class EquipmentBoardTests
     [Fact]
     public void DesktopAndLaptopEditorSupportsProtectedAnyDeskDetails()
     {
-        var xaml = ReadRepositoryFile("MainWindow.xaml");
+        var xaml = ReadRepositoryFile(Path.Combine(
+            "Controls",
+            "EquipmentEditorPanel.xaml"));
         var equipmentViewModel = ReadRepositoryFile(Path.Combine(
             "ViewModels",
             "MainWindowViewModel.Equipment.cs"));
@@ -315,5 +322,146 @@ public sealed class EquipmentBoardTests
             "AddMaxText(command, \"@AnyDeskPassword\", equipment.AnyDeskPassword)",
             repository,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InventoryRegistryAndEquipmentBoardHaveDistinctResponsibilities()
+    {
+        var xaml = ReadRepositoryFile("MainWindow.xaml");
+        var viewModel = ReadRepositoryFile(Path.Combine(
+            "ViewModels",
+            "MainWindowViewModel.Equipment.cs"));
+        var inventoryStart = xaml.IndexOf(
+            "<Grid Visibility=\"{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Inventory}\">",
+            StringComparison.Ordinal);
+        var boardStart = xaml.IndexOf(
+            "<Grid Visibility=\"{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Equipment Board}\">",
+            StringComparison.Ordinal);
+
+        Assert.True(inventoryStart >= 0);
+        Assert.True(boardStart > inventoryStart);
+        var inventory = xaml[inventoryStart..boardStart];
+        var board = xaml[boardStart..];
+
+        Assert.Contains("Text=\"All Equipment\"", inventory);
+        Assert.Contains(
+            "ItemsSource=\"{Binding InventoryEquipmentItems}\"",
+            inventory);
+        Assert.Contains("InventoryEquipmentSearchText", inventory);
+        Assert.Contains("InventoryStatusFilterOptions", inventory);
+        Assert.Contains("InventoryDeviceTypeFilterOptions", inventory);
+        Assert.Contains("InventoryClientFilterOptions", inventory);
+        Assert.Contains("InventoryTechnicianFilterOptions", inventory);
+        Assert.Contains("InventoryStockOnly", inventory);
+        Assert.Contains("ImportEquipmentBuildSheetCommand", inventory);
+        Assert.Contains("NewEquipmentCommand", inventory);
+        Assert.Contains("<controls:EquipmentEditorPanel", inventory);
+
+        Assert.Contains("ItemsSource=\"{Binding EquipmentLanes}\"", board);
+        Assert.Contains("ItemsSource=\"{Binding DeploymentLanes}\"", board);
+        Assert.Contains(
+            "Drop=\"EquipmentLaneListBox_Drop\"",
+            board);
+        Assert.DoesNotContain("ImportEquipmentBuildSheetCommand", board);
+        Assert.DoesNotContain("NewEquipmentCommand", board);
+        Assert.Contains("CanEditEquipmentRecords()", viewModel);
+        Assert.Contains(
+            "CurrentSection.Equals(\n            \"Inventory\"",
+            viewModel.ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
+    public void InventoryFilterSearchesRequestedEquipmentFields()
+    {
+        var equipment = new EquipmentItem
+        {
+            EquipmentId = 12,
+            Name = "Accounting Workstation",
+            AssetTag = "TB-2048",
+            SerialNumber = "SN-9000",
+            DeviceType = "Desktop",
+            ClientName = "Marrone O'Rourke",
+            ClientUserDisplayName = "Licia Marrone",
+            ClientUserEmail = "licia@example.test",
+            AssignedToDisplayName = "Ryan Skoog",
+            WorkflowStage = EquipmentWorkflowStages.Assigned
+        };
+
+        foreach (var query in new[]
+                 {
+                     "Accounting",
+                     "TB-2048",
+                     "SN-9000",
+                     "Marrone",
+                     "Licia",
+                     "Ryan"
+                 })
+        {
+            Assert.True(EquipmentInventoryFilter.Matches(
+                equipment,
+                query,
+                EquipmentInventoryFilter.AllStatuses,
+                EquipmentInventoryFilter.AllDeviceTypes,
+                EquipmentInventoryFilter.AllClients,
+                EquipmentInventoryFilter.AllTechnicians,
+                stockOnly: false));
+        }
+
+        Assert.False(EquipmentInventoryFilter.Matches(
+            equipment,
+            "not present",
+            EquipmentInventoryFilter.AllStatuses,
+            EquipmentInventoryFilter.AllDeviceTypes,
+            EquipmentInventoryFilter.AllClients,
+            EquipmentInventoryFilter.AllTechnicians,
+            stockOnly: false));
+    }
+
+    [Theory]
+    [InlineData(EquipmentWorkflowStages.Stock, EquipmentInventoryFilter.StockStatus)]
+    [InlineData(EquipmentWorkflowStages.Assigned, EquipmentInventoryFilter.InProgressStatus)]
+    [InlineData(EquipmentWorkflowStages.Deployment, EquipmentInventoryFilter.DeploymentStatus)]
+    public void InventoryStatusFiltersMapToBoardWorkflowStages(
+        string workflowStage,
+        string statusFilter)
+    {
+        var equipment = new EquipmentItem
+        {
+            EquipmentId = 13,
+            Name = "Filtered device",
+            DeviceType = "Laptop",
+            WorkflowStage = workflowStage
+        };
+
+        Assert.True(EquipmentInventoryFilter.Matches(
+            equipment,
+            searchText: string.Empty,
+            statusFilter,
+            EquipmentInventoryFilter.AllDeviceTypes,
+            EquipmentInventoryFilter.AllClients,
+            EquipmentInventoryFilter.AllTechnicians,
+            stockOnly: false));
+    }
+
+    [Fact]
+    public void InventoryEditorXamlLoadsIndependentlyOnAnStaThread()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                _ = new EquipmentEditorPanel();
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(10)));
+
+        Assert.Null(failure);
     }
 }

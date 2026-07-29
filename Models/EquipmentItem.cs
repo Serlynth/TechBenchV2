@@ -112,6 +112,39 @@ public sealed class EquipmentItem
             ? "#27C7E8"
             : "#F6B73C";
 
+    public string InventoryStatusLabel => IsInStock
+        ? "Stock"
+        : IsDeployment
+            ? StatusLabel
+            : "In progress";
+
+    public string TechnicianLabel
+    {
+        get
+        {
+            if (IsInStock)
+            {
+                return "Unassigned";
+            }
+
+            var technician = string.IsNullOrWhiteSpace(AssignedToDisplayName)
+                ? AssignedToLoginName
+                : AssignedToDisplayName;
+            return string.IsNullOrWhiteSpace(technician)
+                ? "Unassigned"
+                : technician;
+        }
+    }
+
+    public string InventoryClientLabel => string.IsNullOrWhiteSpace(ClientName)
+        ? "Unassigned"
+        : ClientName;
+
+    public string InventoryUserLabel =>
+        string.IsNullOrWhiteSpace(ClientUserDisplayName)
+            ? "Unassigned"
+            : ClientUserDisplayName;
+
     public string AssignmentLabel => IsDeployment
         ? HasClientName
             ? ClientChipLabel
