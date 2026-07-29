@@ -307,7 +307,16 @@ public sealed class EquipmentBuildSheetImporterTests
         Assert.Contains("ConverterParameter=Inventory", mainWindowXaml);
         Assert.Contains("ConverterParameter=Equipment Board", mainWindowXaml);
         Assert.Contains("ItemsSource=\"{Binding StockInventoryItems}\"", mainWindowXaml);
-        Assert.Contains("CurrentSection = \"Equipment Board\";", equipmentViewModel);
+        Assert.Contains("x:Name=\"EquipmentQuickViewPanel\"", mainWindowXaml);
+        Assert.Contains(
+            "Visibility=\"{Binding IsEquipmentQuickViewVisible",
+            mainWindowXaml);
+        Assert.DoesNotContain(
+            "CurrentSection = \"Equipment Board\";",
+            equipmentViewModel);
+        Assert.Contains(
+            "without leaving {CurrentSection}",
+            equipmentViewModel);
         Assert.Contains(
             ".Where(static item => item.IsInStock)",
             equipmentViewModel);

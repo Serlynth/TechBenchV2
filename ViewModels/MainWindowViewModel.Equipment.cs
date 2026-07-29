@@ -83,9 +83,16 @@ public sealed partial class MainWindowViewModel
             if (SetProperty(ref _isEquipmentEditorVisible, value))
             {
                 OnPropertyChanged(nameof(EquipmentEditorTitle));
+                OnPropertyChanged(nameof(IsEquipmentQuickViewVisible));
             }
         }
     }
+
+    public bool IsEquipmentQuickViewVisible =>
+        IsEquipmentEditorVisible
+        && !CurrentSection.Equals(
+            "Equipment Board",
+            StringComparison.Ordinal);
 
     public bool IsEquipmentBoardBusy
     {
@@ -276,13 +283,38 @@ public sealed partial class MainWindowViewModel
     public string EquipmentAnyDeskPassword
     {
         get => _equipmentAnyDeskPassword;
-        set => SetEquipmentEditorProperty(ref _equipmentAnyDeskPassword, value);
+        set
+        {
+            if (SetEquipmentEditorProperty(
+                    ref _equipmentAnyDeskPassword,
+                    value))
+            {
+                OnPropertyChanged(nameof(HasEquipmentAnyDeskPassword));
+                OnPropertyChanged(nameof(EquipmentAnyDeskPasswordDisplay));
+            }
+        }
     }
+
+    public bool HasEquipmentAnyDeskPassword =>
+        !string.IsNullOrEmpty(EquipmentAnyDeskPassword);
+
+    public string EquipmentAnyDeskPasswordDisplay =>
+        !HasEquipmentAnyDeskPassword
+            ? "—"
+            : ShowEquipmentAnyDeskPassword
+                ? EquipmentAnyDeskPassword
+                : "••••••••";
 
     public bool ShowEquipmentAnyDeskPassword
     {
         get => _showEquipmentAnyDeskPassword;
-        set => SetProperty(ref _showEquipmentAnyDeskPassword, value);
+        set
+        {
+            if (SetProperty(ref _showEquipmentAnyDeskPassword, value))
+            {
+                OnPropertyChanged(nameof(EquipmentAnyDeskPasswordDisplay));
+            }
+        }
     }
 
     public int HiddenEquipmentTechnicianCount =>
@@ -694,9 +726,9 @@ public sealed partial class MainWindowViewModel
             return;
         }
 
-        CurrentSection = "Equipment Board";
         await RefreshEquipmentBoardAsync(equipment.EquipmentId);
-        StatusMessage = $"Opened {equipment.Name} in Equipment Board.";
+        StatusMessage =
+            $"Showing {equipment.Name} details without leaving {CurrentSection}.";
     }
 
     private async Task ImportEquipmentBuildSheetAsync()
