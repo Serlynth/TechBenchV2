@@ -160,7 +160,13 @@
                                  Margin="0,0,0,8" />
                         <CheckBox Content="Show and edit AnyDesk password"
                                   IsChecked="{Binding ShowEquipmentAnyDeskPassword}"
-                                  Margin="0,0,0,12" />
+                                  Margin="0,0,0,10" />
+                        <Button Content="Connect with AnyDesk"
+                                Command="{Binding LaunchAnyDeskCommand}"
+                                Style="{DynamicResource PrimaryButtonStyle}"
+                                HorizontalAlignment="Stretch"
+                                Margin="0,0,0,12"
+                                ToolTip="Open AnyDesk, connect to this address, and submit the stored unattended-access password when available." />
                     </StackPanel>
 
                     <Border Background="{DynamicResource AccentSoftBrush}"

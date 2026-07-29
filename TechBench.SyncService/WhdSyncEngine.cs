@@ -146,8 +146,8 @@ public sealed class WhdSyncEngine
         // next delta subtracts an overlap, so changes on a paging boundary are
         // safely repeated and idempotently upserted.
         var nextCursor = DateTimeOffset.UtcNow;
-        var cursor = work.CursorUtc ?? configuration.CursorUtc;
-        var result = work.IsFullSync || cursor is null
+        var cursor = ResolveTicketCursor(work, configuration);
+        var result = cursor is null
             ? await _whd.GetOrganizationTicketsAsync(connection, cancellationToken).ConfigureAwait(false)
             : await _whd.GetOrganizationTicketsChangedSinceAsync(
                 connection,
@@ -199,6 +199,17 @@ public sealed class WhdSyncEngine
             new WhdSyncCounts(result.Tickets.Count, result.Tickets.Count + clients.Count, result.Tickets.Count + clients.Count),
             nextCursor,
             result.Message);
+    }
+
+    internal static DateTimeOffset? ResolveTicketCursor(
+        WhdSyncWork work,
+        WhdServiceConfiguration configuration)
+    {
+        // A manual Full request means all five WHD categories are queued. It
+        // must not force Tickets to rescan the complete WHD history when a
+        // successful ticket cursor already exists. The first-ever ticket sync
+        // still performs the required historical bootstrap.
+        return work.CursorUtc ?? configuration.CursorUtc;
     }
 
     private static void EnsureSucceeded(bool success, bool isComplete, string message)

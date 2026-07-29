@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Windows;
+using System.Windows.Input;
 using TechBench.Models;
 
 namespace TechBench.Controls;
@@ -27,6 +28,12 @@ public partial class EquipmentDetailsContent : System.Windows.Controls.UserContr
                 false,
                 FrameworkPropertyMetadataOptions.BindsTwoWayByDefault));
 
+    public static readonly DependencyProperty LaunchAnyDeskCommandProperty =
+        DependencyProperty.Register(
+            nameof(LaunchAnyDeskCommand),
+            typeof(ICommand),
+            typeof(EquipmentDetailsContent));
+
     public EquipmentDetailsContent()
     {
         InitializeComponent();
@@ -48,5 +55,11 @@ public partial class EquipmentDetailsContent : System.Windows.Controls.UserContr
     {
         get => (bool)GetValue(ShowSensitiveValueProperty);
         set => SetValue(ShowSensitiveValueProperty, value);
+    }
+
+    public ICommand? LaunchAnyDeskCommand
+    {
+        get => (ICommand?)GetValue(LaunchAnyDeskCommandProperty);
+        set => SetValue(LaunchAnyDeskCommandProperty, value);
     }
 }

@@ -57,7 +57,8 @@
                                    TextWrapping="Wrap" />
                     </Border>
 
-                    <local:EquipmentDetailsContent Equipment="{Binding SelectedEquipment}" />
+                    <local:EquipmentDetailsContent Equipment="{Binding SelectedEquipment}"
+                                                   LaunchAnyDeskCommand="{Binding LaunchAnyDeskCommand}" />
                 </StackPanel>
             </ScrollViewer>
 

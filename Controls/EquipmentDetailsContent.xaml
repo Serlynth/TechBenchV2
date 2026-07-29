@@ -173,11 +173,12 @@
                     CornerRadius="9"
                     Padding="12"
                     Margin="0,0,0,14">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
                     <StackPanel Margin="0,0,12,0">
                         <TextBlock Text="AnyDesk number"
                                    Style="{StaticResource EquipmentDetailsLabelStyle}" />
@@ -242,7 +243,15 @@
                                   Visibility="{Binding HasAnyDeskPassword, Converter={StaticResource BooleanToVisibilityConverter}}"
                                   Margin="0,8,0,0" />
                     </StackPanel>
-                </Grid>
+                    </Grid>
+                    <Button Content="Connect with AnyDesk"
+                            Command="{Binding LaunchAnyDeskCommand, RelativeSource={RelativeSource AncestorType={x:Type local:EquipmentDetailsContent}}}"
+                            CommandParameter="{Binding}"
+                            Style="{DynamicResource PrimaryButtonStyle}"
+                            HorizontalAlignment="Stretch"
+                            Margin="0,12,0,0"
+                            ToolTip="Open AnyDesk, connect to this address, and submit the stored unattended-access password when available." />
+                </StackPanel>
             </Border>
         </StackPanel>
 

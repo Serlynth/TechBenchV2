@@ -86,6 +86,7 @@ public sealed partial class MainWindowViewModel
     public RelayCommand ClearEquipmentSearchCommand { get; private set; } = null!;
     public RelayCommand ClearInventoryEquipmentFiltersCommand { get; private set; } = null!;
     public RelayCommand CopyEquipmentDetailsCommand { get; private set; } = null!;
+    public RelayCommand LaunchAnyDeskCommand { get; private set; } = null!;
 
     public EquipmentItem? SelectedEquipment
     {
@@ -110,6 +111,7 @@ public sealed partial class MainWindowViewModel
                 OnPropertyChanged(nameof(IsEquipmentQuickViewVisible));
                 OnPropertyChanged(nameof(IsEquipmentInventoryEditorVisible));
                 CopyEquipmentDetailsCommand?.RaiseCanExecuteChanged();
+                LaunchAnyDeskCommand?.RaiseCanExecuteChanged();
             }
         }
     }
@@ -406,7 +408,15 @@ public sealed partial class MainWindowViewModel
     public string EquipmentAnyDeskNumber
     {
         get => _equipmentAnyDeskNumber;
-        set => SetEquipmentEditorProperty(ref _equipmentAnyDeskNumber, value);
+        set
+        {
+            if (SetEquipmentEditorProperty(
+                    ref _equipmentAnyDeskNumber,
+                    value))
+            {
+                LaunchAnyDeskCommand?.RaiseCanExecuteChanged();
+            }
+        }
     }
 
     public string EquipmentAnyDeskPassword
@@ -479,6 +489,9 @@ public sealed partial class MainWindowViewModel
             _ => IsEquipmentEditorVisible
                 && (!string.IsNullOrWhiteSpace(EquipmentName)
                     || SelectedEquipment is not null));
+        LaunchAnyDeskCommand = new RelayCommand(
+            LaunchAnyDesk,
+            CanLaunchAnyDesk);
     }
 
     private async Task RefreshEquipmentBoardAsync(long? selectEquipmentId = null)
@@ -1404,6 +1417,44 @@ public sealed partial class MainWindowViewModel
                 "Copy equipment details",
                 $"Windows could not access the clipboard: {ex.Message}");
         }
+    }
+
+    private bool CanLaunchAnyDesk(object? parameter)
+    {
+        var address = parameter is EquipmentItem equipment
+            ? equipment.AnyDeskNumber
+            : EquipmentAnyDeskNumber;
+        return !string.IsNullOrWhiteSpace(address);
+    }
+
+    private void LaunchAnyDesk(object? parameter)
+    {
+        var equipment = parameter as EquipmentItem;
+        var address = equipment?.AnyDeskNumber
+            ?? EquipmentAnyDeskNumber;
+        var password = equipment?.AnyDeskPassword
+            ?? EquipmentAnyDeskPassword;
+        var equipmentName = equipment?.Name
+            ?? EquipmentName;
+        var result = AnyDeskLauncher.Launch(
+            address,
+            password);
+        if (!result.Succeeded)
+        {
+            var message =
+                result.ErrorMessage
+                ?? "AnyDesk could not be started.";
+            StatusMessage = $"AnyDesk launch failed: {message}";
+            _dialogService.Error("Launch AnyDesk", message);
+            return;
+        }
+
+        var target = string.IsNullOrWhiteSpace(equipmentName)
+            ? AnyDeskLauncher.NormalizeAddress(address)
+            : equipmentName.Trim();
+        StatusMessage = result.PasswordSubmitted
+            ? $"Opening AnyDesk for {target} and submitting the unattended-access password."
+            : $"Opening AnyDesk for {target}. No unattended-access password was stored.";
     }
 
     private static void AddEquipmentCopyLine(

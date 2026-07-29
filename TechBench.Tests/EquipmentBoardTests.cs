@@ -342,6 +342,52 @@ public sealed class EquipmentBoardTests
     }
 
     [Fact]
+    public void AnyDeskConnectActionIsAvailableFromEveryEquipmentPane()
+    {
+        var mainWindowXaml = ReadRepositoryFile("MainWindow.xaml");
+        var editorXaml = ReadRepositoryFile(Path.Combine(
+            "Controls",
+            "EquipmentEditorPanel.xaml"));
+        var detailsXaml = ReadRepositoryFile(Path.Combine(
+            "Controls",
+            "EquipmentDetailsContent.xaml"));
+        var clientDrawerXaml = ReadRepositoryFile(Path.Combine(
+            "Controls",
+            "ClientEquipmentDetailsDrawer.xaml"));
+        var mainViewModel = ReadRepositoryFile(Path.Combine(
+            "ViewModels",
+            "MainWindowViewModel.Equipment.cs"));
+        var clientViewModel = ReadRepositoryFile(Path.Combine(
+            "ViewModels",
+            "ClientInfoProfileViewModel.cs"));
+
+        Assert.Contains(
+            "Content=\"Connect with AnyDesk\"",
+            editorXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Content=\"Connect with AnyDesk\"",
+            detailsXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "LaunchAnyDeskCommand=\"{Binding LaunchAnyDeskCommand}\"",
+            mainWindowXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "LaunchAnyDeskCommand=\"{Binding LaunchAnyDeskCommand}\"",
+            clientDrawerXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "AnyDeskLauncher.Launch(",
+            mainViewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "AnyDeskLauncher.Launch(",
+            clientViewModel,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ReadOnlyEquipmentViewsShareOneCanonicalFieldSet()
     {
         var mainWindowXaml = ReadRepositoryFile("MainWindow.xaml");

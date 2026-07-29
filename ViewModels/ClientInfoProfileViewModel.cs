@@ -54,6 +54,11 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
         CloseEquipmentDetailsCommand = new RelayCommand(
             _ => CloseEquipmentDetails(),
             _ => SelectedEquipment is not null);
+        LaunchAnyDeskCommand = new RelayCommand(
+            LaunchAnyDesk,
+            parameter => parameter is EquipmentItem equipment
+                         && !string.IsNullOrWhiteSpace(
+                             equipment.AnyDeskNumber));
         foreach (var item in equipment ?? [])
             Equipment.Add(item);
         foreach (var user in clientUsers ?? [])
@@ -73,6 +78,7 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
     public RelayCommand CopyClientUserFieldCommand { get; }
     public RelayCommand OpenEquipmentDetailsCommand { get; }
     public RelayCommand CloseEquipmentDetailsCommand { get; }
+    public RelayCommand LaunchAnyDeskCommand { get; }
     public string ClientName => _summary.ClientName;
     public Client? WhdClient { get; }
     public bool HasWhdMatch => WhdClient is not null;
@@ -190,6 +196,26 @@ internal sealed class ClientInfoProfileViewModel : ObservableObject
             StatusMessage =
                 $"Closed {equipmentName} details. The {ClientName} profile remains open.";
         }
+    }
+
+    private void LaunchAnyDesk(object? parameter)
+    {
+        if (parameter is not EquipmentItem equipment)
+            return;
+
+        var result = AnyDeskLauncher.Launch(
+            equipment.AnyDeskNumber,
+            equipment.AnyDeskPassword);
+        if (!result.Succeeded)
+        {
+            StatusMessage =
+                $"AnyDesk launch failed: {result.ErrorMessage ?? "AnyDesk could not be started."}";
+            return;
+        }
+
+        StatusMessage = result.PasswordSubmitted
+            ? $"Opening AnyDesk for {equipment.Name} and submitting the unattended-access password."
+            : $"Opening AnyDesk for {equipment.Name}. No unattended-access password was stored.";
     }
 
     private void Reveal()

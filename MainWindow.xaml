@@ -4717,6 +4717,7 @@
                             <controls:EquipmentDetailsContent Equipment="{Binding SelectedEquipment}"
                                                               AssignmentHistory="{Binding EquipmentAssignmentHistory}"
                                                               ShowSensitiveValue="{Binding ShowEquipmentAnyDeskPassword, Mode=TwoWay}"
+                                                              LaunchAnyDeskCommand="{Binding LaunchAnyDeskCommand}"
                                                               Margin="0,0,8,8" />
                         </ScrollViewer>
 
