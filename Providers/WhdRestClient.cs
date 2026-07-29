@@ -20,6 +20,7 @@ public sealed class WhdRestClient
     private const int MaximumConcurrentClientDetailRequests = 6;
     private const int MaximumConcurrentTechnicianDetailRequests = 6;
     internal static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(90);
+    internal static readonly TimeSpan OptionalClientDetailTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan PostReconciliationWindow = TimeSpan.FromSeconds(20);
     private readonly HttpClient _httpClient;
     private readonly ConcurrentDictionary<string, WhdAuthParameters> _authenticationCache = new(StringComparer.Ordinal);
@@ -140,7 +141,12 @@ public sealed class WhdRestClient
                 tickets,
                 isComplete);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return WhdSyncResult.Failed(
+                $"Web Help Desk sync timed out after {_httpClient.Timeout.TotalSeconds:0} seconds while reading ticket data.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException or UriFormatException)
         {
             return WhdSyncResult.Failed($"Web Help Desk sync failed: {ex.Message}");
         }
@@ -287,14 +293,19 @@ public sealed class WhdRestClient
             return WhdClientSyncResult.Succeeded(
                 $"Synced {clients.Count} active Web Help Desk location(s)."
                 + $" Added contact details for {clients.Count(client => !string.IsNullOrWhiteSpace(client.ContactName))} location(s)."
-                + (contactResult.RejectedClientIds.Count == 0
+                + (contactResult.UnavailableClientIds.Count == 0
                     ? string.Empty
-                    : $" WHD rejected optional details for client(s) {string.Join(", ", contactResult.RejectedClientIds)}; list data was retained.")
+                    : $" WHD could not return optional details for client(s) {string.Join(", ", contactResult.UnavailableClientIds)}; list data was retained.")
                 + (isComplete ? string.Empty : " Paging stopped because WHD repeated a page; stale-client reconciliation was skipped."),
                 clients,
                 isComplete);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return WhdClientSyncResult.Failed(
+                $"Web Help Desk client sync timed out after {_httpClient.Timeout.TotalSeconds:0} seconds while reading required list data.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException or UriFormatException)
         {
             return WhdClientSyncResult.Failed($"Web Help Desk client sync failed: {ex.Message}");
         }
@@ -1060,7 +1071,7 @@ public sealed class WhdRestClient
                     return new WhdLocationContactEnrichment(
                         pair.Key,
                         contact,
-                        DetailRejected: false);
+                        DetailUnavailable: false);
                 }
 
                 await detailGate.WaitAsync(cancellationToken);
@@ -1074,7 +1085,7 @@ public sealed class WhdRestClient
                     return new WhdLocationContactEnrichment(
                         pair.Key,
                         detailResult.Contact,
-                        detailResult.DetailRejected);
+                        detailResult.DetailUnavailable);
                 }
                 finally
                 {
@@ -1090,7 +1101,7 @@ public sealed class WhdRestClient
                 static result => result.Contact,
                 StringComparer.OrdinalIgnoreCase),
             enrichments
-                .Where(static result => result.DetailRejected)
+                .Where(static result => result.DetailUnavailable)
                 .Select(static result => result.Contact.ExternalId)
                 .OrderBy(static id => id, StringComparer.OrdinalIgnoreCase)
                 .ToArray());
@@ -1108,47 +1119,60 @@ public sealed class WhdRestClient
             $"Clients/{encodedClientId}",
             auth,
             new Dictionary<string, string>());
-        using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
-        var content = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (response.StatusCode == HttpStatusCode.NotFound)
+        using var detailTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        detailTimeout.CancelAfter(OptionalClientDetailTimeout);
+        try
         {
+            using var response = await _httpClient.GetAsync(requestUri, detailTimeout.Token);
+            var content = await response.Content.ReadAsStringAsync(detailTimeout.Token);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return new WhdLocationContactDetailResult(
+                    listContact,
+                    DetailUnavailable: false);
+            }
+
+            if (response.StatusCode == HttpStatusCode.BadRequest)
+            {
+                // WHD can retain legacy client records whose provider email no
+                // longer passes its current RFC validation. The Clients list still
+                // contains enough information to associate the contact with its
+                // location, so keep that data instead of failing the full snapshot.
+                return new WhdLocationContactDetailResult(
+                    listContact,
+                    DetailUnavailable: true);
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var message = string.IsNullOrWhiteSpace(content) ? response.ReasonPhrase : content.Trim();
+                throw new HttpRequestException(
+                    $"HTTP {(int)response.StatusCode} from Web Help Desk client {listContact.ExternalId}: {message}",
+                    null,
+                    response.StatusCode);
+            }
+
+            using var document = JsonDocument.Parse(content);
+            var detailed = ParseClientContacts(document.RootElement).FirstOrDefault();
+            if (detailed is null)
+            {
+                return new WhdLocationContactDetailResult(
+                    listContact,
+                    DetailUnavailable: false);
+            }
+
+            return new WhdLocationContactDetailResult(
+                MergeContactDetails(listContact, detailed),
+                DetailUnavailable: false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Client detail is optional enrichment. A slow legacy record must
+            // not cancel the complete location snapshot.
             return new WhdLocationContactDetailResult(
                 listContact,
-                DetailRejected: false);
+                DetailUnavailable: true);
         }
-
-        if (response.StatusCode == HttpStatusCode.BadRequest)
-        {
-            // WHD can retain legacy client records whose provider email no
-            // longer passes its current RFC validation. The Clients list still
-            // contains enough information to associate the contact with its
-            // location, so keep that data instead of failing the full snapshot.
-            return new WhdLocationContactDetailResult(
-                listContact,
-                DetailRejected: true);
-        }
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var message = string.IsNullOrWhiteSpace(content) ? response.ReasonPhrase : content.Trim();
-            throw new HttpRequestException(
-                $"HTTP {(int)response.StatusCode} from Web Help Desk client {listContact.ExternalId}: {message}",
-                null,
-                response.StatusCode);
-        }
-
-        using var document = JsonDocument.Parse(content);
-        var detailed = ParseClientContacts(document.RootElement).FirstOrDefault();
-        if (detailed is null)
-        {
-            return new WhdLocationContactDetailResult(
-                listContact,
-                DetailRejected: false);
-        }
-
-        return new WhdLocationContactDetailResult(
-            MergeContactDetails(listContact, detailed),
-            DetailRejected: false);
     }
 
     private async Task<IReadOnlyList<WhdLocationContact>> GetClientContactsPageAsync(
@@ -2496,16 +2520,16 @@ public sealed class WhdRestClient
 
     private sealed record WhdLocationContactDetailResult(
         WhdLocationContact Contact,
-        bool DetailRejected);
+        bool DetailUnavailable);
 
     private sealed record WhdLocationContactEnrichment(
         string LocationExternalId,
         WhdLocationContact Contact,
-        bool DetailRejected);
+        bool DetailUnavailable);
 
     private sealed record WhdLocationContactResult(
         IReadOnlyDictionary<string, WhdLocationContact> Contacts,
-        IReadOnlyList<string> RejectedClientIds);
+        IReadOnlyList<string> UnavailableClientIds);
 
     private static string BuildClientDisplayName(string? locationName, string clientName)
     {
