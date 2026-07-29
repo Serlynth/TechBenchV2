@@ -55,4 +55,8 @@ public sealed class WorkspaceShellDemoViewModel : ObservableObject
     public bool IsSalesBenchModule => false;
 
     public bool IsAdminBenchModule => false;
+
+    public bool HasModuleWorkspace => true;
+
+    public bool ShowsEmptyModuleShell => false;
 }

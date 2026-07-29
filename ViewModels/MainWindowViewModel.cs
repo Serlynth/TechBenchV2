@@ -36,6 +36,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly DispatcherTimer _sharedDataRefreshTimer = new();
     private readonly HashSet<string> _knownWhdTicketKeys = new(StringComparer.OrdinalIgnoreCase);
     private string _currentSection = "Today";
+    private string _techBenchSection = "Today";
+    private string _adminBenchSection = "Client Match";
     private string _statusMessage = "Ready";
     private DateTime _selectedDate = DateTime.Today;
     private WorkEntry? _selectedEntry;
@@ -388,6 +390,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(IsTechBenchModule));
             OnPropertyChanged(nameof(IsSalesBenchModule));
             OnPropertyChanged(nameof(IsAdminBenchModule));
+            OnPropertyChanged(nameof(HasModuleWorkspace));
+            OnPropertyChanged(nameof(ShowsEmptyModuleShell));
             OnPropertyChanged(nameof(WorkspaceHeaderEyebrow));
             OnPropertyChanged(nameof(WorkspaceHeaderTitle));
             OnPropertyChanged(nameof(ModuleWelcomeTitle));
@@ -430,10 +434,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public bool IsTechBenchModule => ActiveBenchModule == BenchModule.TechBench;
     public bool IsSalesBenchModule => ActiveBenchModule == BenchModule.SalesBench;
     public bool IsAdminBenchModule => ActiveBenchModule == BenchModule.AdminBench;
-    public string WorkspaceHeaderEyebrow => IsTechBenchModule
-        ? "WORKSPACE"
-        : "PRIVATE BETA MODULE";
-    public string WorkspaceHeaderTitle => IsTechBenchModule
+    public bool HasModuleWorkspace => IsTechBenchModule || IsAdminBenchModule;
+    public bool ShowsEmptyModuleShell => IsSalesBenchModule;
+    public string WorkspaceHeaderEyebrow => ActiveBenchModule switch
+    {
+        BenchModule.TechBench => "WORKSPACE",
+        BenchModule.AdminBench => "ADMIN WORKSPACE",
+        _ => "PRIVATE BETA MODULE"
+    };
+    public string WorkspaceHeaderTitle => HasModuleWorkspace
         ? CurrentSection
         : ModuleBrandName;
     public string ModuleWelcomeTitle => $"{ModuleBrandName} is ready";
@@ -447,6 +456,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _currentSection, value))
             {
+                if (IsTechBenchModule)
+                {
+                    _techBenchSection = value;
+                }
+                else if (IsAdminBenchModule)
+                {
+                    _adminBenchSection = value;
+                }
+
                 OnPropertyChanged(nameof(WindowTitle));
                 OnPropertyChanged(nameof(WorkspaceHeaderTitle));
                 OnPropertyChanged(nameof(IsCredentialWorkspaceSection));
@@ -469,8 +487,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    public string WindowTitle => IsTechBenchModule
-        ? $"TechBench V2 - {CurrentSection}"
+    public string WindowTitle => HasModuleWorkspace
+        ? $"{ModuleBrandName} - {CurrentSection}"
         : $"{ModuleBrandName} - Private Beta";
 
     public string StatusMessage
@@ -1011,12 +1029,28 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         ActiveBenchModule = module;
+        if (IsTechBenchModule)
+        {
+            CurrentSection = _techBenchSection;
+        }
+        else if (IsAdminBenchModule)
+        {
+            CurrentSection = _adminBenchSection;
+        }
+
         ThemeService.Apply(
             IsLightTheme ? AppTheme.Light : AppTheme.Dark,
             ActiveBenchModule);
-        StatusMessage = IsTechBenchModule
-            ? GetSectionStatusMessage(CurrentSection)
-            : $"{ModuleBrandName} private beta shell. Navigation is intentionally empty for now.";
+        if (HasModuleWorkspace)
+        {
+            RefreshCurrentSectionData();
+            StatusMessage = GetSectionStatusMessage(CurrentSection);
+        }
+        else
+        {
+            StatusMessage =
+                $"{ModuleBrandName} private beta shell. Navigation is intentionally empty for now.";
+        }
     }
 
     private void Navigate(string section)

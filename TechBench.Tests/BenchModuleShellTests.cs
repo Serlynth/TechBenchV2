@@ -5,7 +5,7 @@ namespace TechBench.Tests;
 public sealed class BenchModuleShellTests
 {
     [Fact]
-    public void SidebarHasPrivateModuleSwitcherAndSeparateEmptyNavigationSurfaces()
+    public void SidebarKeepsModuleNavigationSeparateAndMovesAdminToolsToAdminBench()
     {
         var navigation = ReadRepositoryFile(
             Path.Combine("Controls", "WorkspaceNavigation.xaml"));
@@ -76,6 +76,10 @@ public sealed class BenchModuleShellTests
             navigation,
             StringComparison.Ordinal);
         Assert.Contains(
+            "x:Name=\"TechBenchNavigation\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "x:Name=\"SalesBenchNavigation\"",
             navigation,
             StringComparison.Ordinal);
@@ -86,35 +90,52 @@ public sealed class BenchModuleShellTests
 
         var document = XDocument.Parse(navigation);
         XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
-        foreach (var name in new[] { "SalesBenchNavigation", "AdminBenchNavigation" })
-        {
-            var moduleSidebar = Assert.Single(
-                document.Descendants(),
-                element =>
-                    string.Equals(
-                        (string?)element.Attribute(xaml + "Name"),
-                        name,
-                        StringComparison.Ordinal));
-            Assert.DoesNotContain(
-                moduleSidebar.Descendants(),
-                element => element.Name.LocalName == "Button");
-        }
+        var techBenchSidebar = FindNamedElement(
+            document,
+            xaml,
+            "TechBenchNavigation");
+        var salesBenchSidebar = FindNamedElement(
+            document,
+            xaml,
+            "SalesBenchNavigation");
+        var adminBenchSidebar = FindNamedElement(
+            document,
+            xaml,
+            "AdminBenchNavigation");
+
+        Assert.DoesNotContain(
+            techBenchSidebar.Descendants(),
+            element => HasButtonContent(element, "Client Matching")
+                || HasButtonContent(element, "Admin Center"));
+        Assert.DoesNotContain(
+            salesBenchSidebar.Descendants(),
+            element => element.Name.LocalName == "Button");
+        Assert.Contains(
+            adminBenchSidebar.Descendants(),
+            element => HasButtonContent(element, "Client Matching"));
+        Assert.Contains(
+            adminBenchSidebar.Descendants(),
+            element => HasButtonContent(element, "Admin Center"));
     }
 
     [Fact]
-    public void NonTechModulesHaveAnIsolatedWorkspaceShell()
+    public void AdminBenchUsesTheWorkspaceWhileSalesBenchKeepsTheEmptyShell()
     {
         var mainWindow = ReadRepositoryFile("MainWindow.xaml");
         var header = ReadRepositoryFile(
             Path.Combine("Controls", "WorkspaceHeader.xaml"));
 
         Assert.Contains(
-            "Visibility=\"{Binding IsTechBenchModule, Converter={StaticResource BooleanToVisibilityConverter}}\"",
+            "Visibility=\"{Binding HasModuleWorkspace, Converter={StaticResource BooleanToVisibilityConverter}}\"",
             mainWindow,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Visibility=\"{Binding IsTechBenchModule, Converter={StaticResource InverseBooleanToVisibilityConverter}}\"",
+            "Visibility=\"{Binding ShowsEmptyModuleShell, Converter={StaticResource BooleanToVisibilityConverter}}\"",
             mainWindow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "public bool HasModuleWorkspace => IsTechBenchModule || IsAdminBenchModule;",
+            ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.cs")),
             StringComparison.Ordinal);
         Assert.Contains(
             "Text=\"{Binding WorkspaceHeaderEyebrow}\"",
@@ -125,6 +146,24 @@ public sealed class BenchModuleShellTests
             header,
             StringComparison.Ordinal);
     }
+
+    private static XElement FindNamedElement(
+        XDocument document,
+        XNamespace xaml,
+        string name) =>
+        Assert.Single(
+            document.Descendants(),
+            element => string.Equals(
+                (string?)element.Attribute(xaml + "Name"),
+                name,
+                StringComparison.Ordinal));
+
+    private static bool HasButtonContent(XElement element, string content) =>
+        element.Name.LocalName == "Button"
+        && string.Equals(
+            (string?)element.Attribute("Content"),
+            content,
+            StringComparison.Ordinal);
 
     private static string ReadRepositoryFile(string relativePath)
     {

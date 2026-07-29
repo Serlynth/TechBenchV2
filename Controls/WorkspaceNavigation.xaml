@@ -241,7 +241,8 @@
                           HorizontalScrollBarVisibility="Disabled"
                           PanningMode="VerticalOnly">
                 <StackPanel>
-                    <StackPanel Visibility="{Binding IsTechBenchModule, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <StackPanel x:Name="TechBenchNavigation"
+                                Visibility="{Binding IsTechBenchModule, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <Expander Header="NOTES"
                               Style="{StaticResource WorkspaceGroupStyle}">
                         <StackPanel>
@@ -350,17 +351,6 @@
                         <Expander Header="SYSTEM"
                               Style="{StaticResource WorkspaceGroupStyle}">
                         <StackPanel>
-                            <Button Content="Client Matching"
-                                    Command="{Binding NavigateCommand}"
-                                    CommandParameter="Client Match"
-                                    Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Client Match}"
-                                    Style="{StaticResource WorkspaceNavItemStyle}" />
-                            <Button Content="Admin Center"
-                                    Command="{Binding NavigateCommand}"
-                                    CommandParameter="Admin Center"
-                                    Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Admin Center}"
-                                    Style="{StaticResource WorkspaceNavItemStyle}"
-                                    Visibility="{Binding CanAccessAdminCenter, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <Button Content="Settings"
                                     Command="{Binding NavigateCommand}"
                                     CommandParameter="Settings"
@@ -370,15 +360,31 @@
                         </Expander>
                     </StackPanel>
 
-                    <!-- These are intentionally separate, empty navigation
-                         surfaces so each private beta module can grow without
-                         coupling its future destinations to TechBench. -->
+                    <!-- SalesBench remains an independent empty navigation
+                         surface until its first workspace is introduced. -->
                     <Grid x:Name="SalesBenchNavigation"
                           MinHeight="1"
                           Visibility="{Binding IsSalesBenchModule, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <Grid x:Name="AdminBenchNavigation"
-                          MinHeight="1"
-                          Visibility="{Binding IsAdminBenchModule, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                    <StackPanel x:Name="AdminBenchNavigation"
+                                Visibility="{Binding IsAdminBenchModule, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Expander Header="ADMINISTRATION"
+                                  Style="{StaticResource WorkspaceGroupStyle}">
+                            <StackPanel>
+                                <Button Content="Client Matching"
+                                        Command="{Binding NavigateCommand}"
+                                        CommandParameter="Client Match"
+                                        Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Client Match}"
+                                        Style="{StaticResource WorkspaceNavItemStyle}" />
+                                <Button Content="Admin Center"
+                                        Command="{Binding NavigateCommand}"
+                                        CommandParameter="Admin Center"
+                                        Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Admin Center}"
+                                        Style="{StaticResource WorkspaceNavItemStyle}"
+                                        Visibility="{Binding CanAccessAdminCenter, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            </StackPanel>
+                        </Expander>
+                    </StackPanel>
                 </StackPanel>
             </ScrollViewer>
         </DockPanel>

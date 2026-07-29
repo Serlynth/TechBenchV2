@@ -619,7 +619,7 @@
 
             <Grid Grid.Row="2"
                   Margin="24"
-                  Visibility="{Binding IsTechBenchModule, Converter={StaticResource BooleanToVisibilityConverter}}">
+                  Visibility="{Binding HasModuleWorkspace, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Today}">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -4745,7 +4745,7 @@
 
             <Grid Grid.Row="2"
                   Margin="24"
-                  Visibility="{Binding IsTechBenchModule, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                  Visibility="{Binding ShowsEmptyModuleShell, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <Border Background="{DynamicResource PanelBackgroundBrush}"
                         BorderBrush="{DynamicResource AccentBrush}"
                         BorderThickness="1"
