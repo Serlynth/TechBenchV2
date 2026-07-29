@@ -276,17 +276,20 @@ public sealed class WhdRestClient
                 }
             }
 
-            var contactsByLocation = await GetBestLocationContactsAsync(
+            var contactResult = await GetBestLocationContactsAsync(
                 settings,
                 auth,
                 cancellationToken);
             clients = clients
-                .Select(location => EnrichLocation(location, contactsByLocation))
+                .Select(location => EnrichLocation(location, contactResult.Contacts))
                 .ToList();
 
             return WhdClientSyncResult.Succeeded(
                 $"Synced {clients.Count} active Web Help Desk location(s)."
                 + $" Added contact details for {clients.Count(client => !string.IsNullOrWhiteSpace(client.ContactName))} location(s)."
+                + (contactResult.RejectedClientIds.Count == 0
+                    ? string.Empty
+                    : $" WHD rejected optional details for client(s) {string.Join(", ", contactResult.RejectedClientIds)}; list data was retained.")
                 + (isComplete ? string.Empty : " Paging stopped because WHD repeated a page; stale-client reconciliation was skipped."),
                 clients,
                 isComplete);
@@ -1006,7 +1009,7 @@ public sealed class WhdRestClient
         return ParseLocations(document.RootElement);
     }
 
-    private async Task<IReadOnlyDictionary<string, WhdLocationContact>> GetBestLocationContactsAsync(
+    private async Task<WhdLocationContactResult> GetBestLocationContactsAsync(
         WhdConnectionSettings settings,
         WhdAuthParameters auth,
         CancellationToken cancellationToken)
@@ -1053,17 +1056,25 @@ public sealed class WhdRestClient
             {
                 var contact = pair.Value;
                 if (contact.HasCompleteDetails)
-                    return pair;
+                {
+                    return new WhdLocationContactEnrichment(
+                        pair.Key,
+                        contact,
+                        DetailRejected: false);
+                }
 
                 await detailGate.WaitAsync(cancellationToken);
                 try
                 {
-                    var detailed = await GetClientContactDetailsAsync(
+                    var detailResult = await GetClientContactDetailsAsync(
                         settings,
                         auth,
                         contact,
                         cancellationToken);
-                    return new KeyValuePair<string, WhdLocationContact>(pair.Key, detailed);
+                    return new WhdLocationContactEnrichment(
+                        pair.Key,
+                        detailResult.Contact,
+                        detailResult.DetailRejected);
                 }
                 finally
                 {
@@ -1072,11 +1083,20 @@ public sealed class WhdRestClient
             })
             .ToArray();
 
-        return (await Task.WhenAll(detailTasks))
-            .ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        var enrichments = await Task.WhenAll(detailTasks);
+        return new WhdLocationContactResult(
+            enrichments.ToDictionary(
+                static result => result.LocationExternalId,
+                static result => result.Contact,
+                StringComparer.OrdinalIgnoreCase),
+            enrichments
+                .Where(static result => result.DetailRejected)
+                .Select(static result => result.Contact.ExternalId)
+                .OrderBy(static id => id, StringComparer.OrdinalIgnoreCase)
+                .ToArray());
     }
 
-    private async Task<WhdLocationContact> GetClientContactDetailsAsync(
+    private async Task<WhdLocationContactDetailResult> GetClientContactDetailsAsync(
         WhdConnectionSettings settings,
         WhdAuthParameters auth,
         WhdLocationContact listContact,
@@ -1091,7 +1111,22 @@ public sealed class WhdRestClient
         using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
         if (response.StatusCode == HttpStatusCode.NotFound)
-            return listContact;
+        {
+            return new WhdLocationContactDetailResult(
+                listContact,
+                DetailRejected: false);
+        }
+
+        if (response.StatusCode == HttpStatusCode.BadRequest)
+        {
+            // WHD can retain legacy client records whose provider email no
+            // longer passes its current RFC validation. The Clients list still
+            // contains enough information to associate the contact with its
+            // location, so keep that data instead of failing the full snapshot.
+            return new WhdLocationContactDetailResult(
+                listContact,
+                DetailRejected: true);
+        }
 
         if (!response.IsSuccessStatusCode)
         {
@@ -1105,9 +1140,15 @@ public sealed class WhdRestClient
         using var document = JsonDocument.Parse(content);
         var detailed = ParseClientContacts(document.RootElement).FirstOrDefault();
         if (detailed is null)
-            return listContact;
+        {
+            return new WhdLocationContactDetailResult(
+                listContact,
+                DetailRejected: false);
+        }
 
-        return MergeContactDetails(listContact, detailed);
+        return new WhdLocationContactDetailResult(
+            MergeContactDetails(listContact, detailed),
+            DetailRejected: false);
     }
 
     private async Task<IReadOnlyList<WhdLocationContact>> GetClientContactsPageAsync(
@@ -2452,6 +2493,19 @@ public sealed class WhdRestClient
             + (string.IsNullOrWhiteSpace(Phone) ? 0 : 1)
             + (string.IsNullOrWhiteSpace(Address) ? 0 : 1);
     }
+
+    private sealed record WhdLocationContactDetailResult(
+        WhdLocationContact Contact,
+        bool DetailRejected);
+
+    private sealed record WhdLocationContactEnrichment(
+        string LocationExternalId,
+        WhdLocationContact Contact,
+        bool DetailRejected);
+
+    private sealed record WhdLocationContactResult(
+        IReadOnlyDictionary<string, WhdLocationContact> Contacts,
+        IReadOnlyList<string> RejectedClientIds);
 
     private static string BuildClientDisplayName(string? locationName, string clientName)
     {
