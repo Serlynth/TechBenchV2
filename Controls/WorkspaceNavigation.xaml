@@ -165,28 +165,11 @@
         <DockPanel LastChildFill="True">
             <StackPanel DockPanel.Dock="Top"
                         Margin="2,0,2,10">
-                <Grid Height="92"
-                      ClipToBounds="True">
+                <Grid Height="68">
                     <Image Source="/TechBenchV2;component/Assets/csri-techbench-logo.png"
-                           Width="214"
-                           Height="88"
                            Stretch="Uniform"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Top"
+                           HorizontalAlignment="Stretch"
                            RenderOptions.BitmapScalingMode="HighQuality" />
-                    <Border Height="27"
-                            Background="{DynamicResource SidebarBackgroundBrush}"
-                            VerticalAlignment="Bottom">
-                        <TextBlock Text="{Binding ModuleBrandName}"
-                                   Foreground="{DynamicResource AccentHoverBrush}"
-                                   FontSize="16"
-                                   FontWeight="Bold"
-                                   FontStyle="Italic"
-                                   FontStretch="Expanded"
-                                   HorizontalAlignment="Right"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,8,0" />
-                    </Border>
                 </Grid>
 
                 <UniformGrid Columns="3"

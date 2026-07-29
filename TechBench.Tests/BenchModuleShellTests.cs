@@ -11,6 +11,14 @@ public sealed class BenchModuleShellTests
             Path.Combine("Controls", "WorkspaceNavigation.xaml"));
 
         Assert.Contains(
+            "Source=\"/TechBenchV2;component/Assets/csri-techbench-logo.png\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Text=\"{Binding ModuleBrandName}\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "Visibility=\"{Binding CanAccessBenchModules",
             navigation,
             StringComparison.Ordinal);
