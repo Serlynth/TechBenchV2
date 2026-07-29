@@ -171,6 +171,22 @@ public sealed class ClientInfoProfileWindowTests
     }
 
     [Fact]
+    public void EquipmentDrawerTreatsReadOnlyAssignmentLabelAsOneWay()
+    {
+        var drawerXaml = ReadRepositoryFile(
+            Path.Combine("Controls", "ClientEquipmentDetailsDrawer.xaml"));
+
+        Assert.Contains(
+            "Text=\"{Binding SelectedEquipment.AssignmentLabel, Mode=OneWay}\"",
+            drawerXaml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Text=\"{Binding SelectedEquipment.AssignmentLabel}\"",
+            drawerXaml,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FullProfileListsClientUsersAndProtectsTheirAccountDetails()
     {
         var summary = new FireDrillCredentialSummary(

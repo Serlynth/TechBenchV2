@@ -62,7 +62,7 @@
                     <TextBlock Foreground="{DynamicResource SecondaryTextBrush}"
                                Margin="0,3,0,0">
                         <Run Text="Assigned to " />
-                        <Run Text="{Binding SelectedEquipment.AssignmentLabel}"
+                        <Run Text="{Binding SelectedEquipment.AssignmentLabel, Mode=OneWay}"
                              FontWeight="SemiBold" />
                     </TextBlock>
                 </StackPanel>
