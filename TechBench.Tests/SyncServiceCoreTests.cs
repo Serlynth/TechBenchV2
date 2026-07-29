@@ -51,7 +51,7 @@ public sealed class SyncServiceCoreTests
         Assert.Equal(120, options.EffectiveLeaseSeconds);
         Assert.Equal(TimeSpan.FromMinutes(60), options.DeltaOverlap);
         Assert.Equal(30, options.EffectiveCommandTimeoutSeconds);
-        Assert.Equal(TimeSpan.FromSeconds(15), options.WhdRequestTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(300), options.WhdRequestTimeout);
         Assert.Equal(TimeSpan.FromSeconds(30), options.SageOdbcTimeout);
         Assert.Equal(TimeSpan.FromSeconds(5), options.FinalizationTimeout);
         Assert.Equal(Path.GetFullPath(customPath), options.ResolveSecretPath());

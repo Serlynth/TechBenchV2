@@ -11,7 +11,7 @@ public sealed class SyncServiceOptions
     public int LeaseSeconds { get; set; } = 300;
     public int DeltaOverlapMinutes { get; set; } = 5;
     public int CommandTimeoutSeconds { get; set; } = 300;
-    public int WhdRequestTimeoutSeconds { get; set; } = 90;
+    public int WhdRequestTimeoutSeconds { get; set; } = 300;
     public string? SecretPath { get; set; }
     public string? SageSecretPath { get; set; }
     public string? FireDrillSecretPath { get; set; }
@@ -23,7 +23,7 @@ public sealed class SyncServiceOptions
     public int EffectiveLeaseSeconds => Math.Clamp(LeaseSeconds, 120, 3600);
     public TimeSpan DeltaOverlap => TimeSpan.FromMinutes(Math.Clamp(DeltaOverlapMinutes, 1, 60));
     public int EffectiveCommandTimeoutSeconds => Math.Clamp(CommandTimeoutSeconds, 30, 1800);
-    public TimeSpan WhdRequestTimeout => TimeSpan.FromSeconds(Math.Clamp(WhdRequestTimeoutSeconds, 15, 600));
+    public TimeSpan WhdRequestTimeout => TimeSpan.FromSeconds(Math.Clamp(WhdRequestTimeoutSeconds, 300, 600));
     public TimeSpan SageOdbcTimeout => TimeSpan.FromSeconds(Math.Clamp(SageOdbcTimeoutSeconds, 30, 900));
     public TimeSpan FinalizationTimeout => TimeSpan.FromSeconds(Math.Clamp(FinalizationTimeoutSeconds, 5, 30));
 
