@@ -381,6 +381,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
 
             OnPropertyChanged(nameof(ModuleBrandName));
+            OnPropertyChanged(nameof(ModuleLogoSource));
             OnPropertyChanged(nameof(IsTechBenchModule));
             OnPropertyChanged(nameof(IsSalesBenchModule));
             OnPropertyChanged(nameof(IsAdminBenchModule));
@@ -394,6 +395,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     public string ModuleBrandName => ActiveBenchModule.ToString();
+    public string ModuleLogoSource => ActiveBenchModule switch
+    {
+        BenchModule.SalesBench =>
+            "/TechBenchV2;component/Assets/csri-salesbench-logo.png",
+        BenchModule.AdminBench =>
+            "/TechBenchV2;component/Assets/csri-adminbench-logo.png",
+        _ => "/TechBenchV2;component/Assets/csri-techbench-logo.png"
+    };
     public bool IsTechBenchModule => ActiveBenchModule == BenchModule.TechBench;
     public bool IsSalesBenchModule => ActiveBenchModule == BenchModule.SalesBench;
     public bool IsAdminBenchModule => ActiveBenchModule == BenchModule.AdminBench;

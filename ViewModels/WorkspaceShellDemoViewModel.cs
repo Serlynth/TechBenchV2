@@ -29,6 +29,8 @@ public sealed class WorkspaceShellDemoViewModel : ObservableObject
         $"Local UI preview for {CurrentSection}. No SQL connection is used.";
 
     public string ModuleBrandName => "TechBench";
+    public string ModuleLogoSource =>
+        "/TechBenchV2;component/Assets/csri-techbench-logo.png";
     public string WorkspaceHeaderEyebrow => "WORKSPACE";
     public string WorkspaceHeaderTitle => CurrentSection;
     public string WorkspaceStateLabel => "LOCAL UI PREVIEW";

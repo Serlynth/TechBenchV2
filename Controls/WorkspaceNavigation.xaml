@@ -166,7 +166,7 @@
             <StackPanel DockPanel.Dock="Top"
                         Margin="2,0,2,10">
                 <Grid Height="68">
-                    <Image Source="/TechBenchV2;component/Assets/csri-techbench-logo.png"
+                    <Image Source="{Binding ModuleLogoSource}"
                            Stretch="Uniform"
                            HorizontalAlignment="Stretch"
                            RenderOptions.BitmapScalingMode="HighQuality" />

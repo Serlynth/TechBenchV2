@@ -9,15 +9,28 @@ public sealed class BenchModuleShellTests
     {
         var navigation = ReadRepositoryFile(
             Path.Combine("Controls", "WorkspaceNavigation.xaml"));
+        var viewModel = ReadRepositoryFile(
+            Path.Combine("ViewModels", "MainWindowViewModel.cs"));
+        var project = ReadRepositoryFile("TechBench.csproj");
 
         Assert.Contains(
-            "Source=\"/TechBenchV2;component/Assets/csri-techbench-logo.png\"",
+            "Source=\"{Binding ModuleLogoSource}\"",
             navigation,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
             "Text=\"{Binding ModuleBrandName}\"",
             navigation,
             StringComparison.Ordinal);
+        foreach (var asset in new[]
+                 {
+                     "csri-techbench-logo.png",
+                     "csri-salesbench-logo.png",
+                     "csri-adminbench-logo.png"
+                 })
+        {
+            Assert.Contains(asset, viewModel, StringComparison.Ordinal);
+            Assert.Contains(asset, project, StringComparison.Ordinal);
+        }
         Assert.Contains(
             "Visibility=\"{Binding CanAccessBenchModules",
             navigation,
