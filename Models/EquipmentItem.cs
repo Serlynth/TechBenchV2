@@ -79,6 +79,10 @@ public sealed class EquipmentItem
     public bool HasAssetTag => !string.IsNullOrWhiteSpace(AssetTag);
     public bool HasSerialNumber => !string.IsNullOrWhiteSpace(SerialNumber);
     public bool HasIpAddress => !string.IsNullOrWhiteSpace(IpAddress);
+    public bool SupportsAnyDesk =>
+        DeviceType.Equals("Desktop", StringComparison.OrdinalIgnoreCase)
+        || DeviceType.Equals("Laptop", StringComparison.OrdinalIgnoreCase);
+    public bool HasAnyDeskPassword => !string.IsNullOrWhiteSpace(AnyDeskPassword);
     public bool HasClientName => !string.IsNullOrWhiteSpace(ClientName);
     public bool HasClientUser => !string.IsNullOrWhiteSpace(ClientUserDisplayName);
     public bool HasDeploymentOwner =>

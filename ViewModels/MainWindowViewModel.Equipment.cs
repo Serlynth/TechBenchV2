@@ -414,36 +414,16 @@ public sealed partial class MainWindowViewModel
         get => _equipmentAnyDeskPassword;
         set
         {
-            if (SetEquipmentEditorProperty(
-                    ref _equipmentAnyDeskPassword,
-                    value))
-            {
-                OnPropertyChanged(nameof(HasEquipmentAnyDeskPassword));
-                OnPropertyChanged(nameof(EquipmentAnyDeskPasswordDisplay));
-            }
+            SetEquipmentEditorProperty(
+                ref _equipmentAnyDeskPassword,
+                value);
         }
     }
-
-    public bool HasEquipmentAnyDeskPassword =>
-        !string.IsNullOrEmpty(EquipmentAnyDeskPassword);
-
-    public string EquipmentAnyDeskPasswordDisplay =>
-        !HasEquipmentAnyDeskPassword
-            ? "—"
-            : ShowEquipmentAnyDeskPassword
-                ? EquipmentAnyDeskPassword
-                : "••••••••";
 
     public bool ShowEquipmentAnyDeskPassword
     {
         get => _showEquipmentAnyDeskPassword;
-        set
-        {
-            if (SetProperty(ref _showEquipmentAnyDeskPassword, value))
-            {
-                OnPropertyChanged(nameof(EquipmentAnyDeskPasswordDisplay));
-            }
-        }
+        set => SetProperty(ref _showEquipmentAnyDeskPassword, value);
     }
 
     public int HiddenEquipmentTechnicianCount =>

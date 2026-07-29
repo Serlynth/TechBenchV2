@@ -1,4 +1,5 @@
 using TechBench.Controls;
+using TechBench.Converters;
 using TechBench.Models;
 using TechBench.ViewModels;
 using System.Xml.Linq;
@@ -53,10 +54,9 @@ public sealed class EquipmentBoardTests
         Assert.Contains(
             inventoryWorkspace.Elements(),
             element => element.Name.LocalName == "EquipmentEditorPanel");
-        Assert.Contains(
+        Assert.DoesNotContain(
             "x:Name=\"EquipmentDetailsPanel\"",
             mainWindowXaml);
-        Assert.Contains("Visibility=\"Collapsed\"", mainWindowXaml);
         Assert.Contains(
             "Data=\"M1,8 C3.8,3.5 12.2,3.5 15,8 C12.2,12.5 3.8,12.5 1,8 Z\"",
             mainWindowXaml);
@@ -342,6 +342,97 @@ public sealed class EquipmentBoardTests
     }
 
     [Fact]
+    public void ReadOnlyEquipmentViewsShareOneCanonicalFieldSet()
+    {
+        var mainWindowXaml = ReadRepositoryFile("MainWindow.xaml");
+        var clientDrawerXaml = ReadRepositoryFile(Path.Combine(
+            "Controls",
+            "ClientEquipmentDetailsDrawer.xaml"));
+        var detailsXaml = ReadRepositoryFile(Path.Combine(
+            "Controls",
+            "EquipmentDetailsContent.xaml"));
+        var editorXaml = ReadRepositoryFile(Path.Combine(
+            "Controls",
+            "EquipmentEditorPanel.xaml"));
+        var expectedFieldOrder = new[]
+        {
+            "Device type",
+            "Asset tag",
+            "Equipment name",
+            "Serial number",
+            "Part number",
+            "Manufacturer",
+            "Model",
+            "IP address",
+            "AnyDesk number",
+            "AnyDesk password",
+            "Client",
+            "Client user / shared role",
+            "Site / room / desk",
+            "Notes",
+            "Assignment history"
+        };
+
+        Assert.Contains(
+            "<controls:EquipmentDetailsContent Equipment=\"{Binding SelectedEquipment}\"",
+            mainWindowXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<local:EquipmentDetailsContent Equipment=\"{Binding SelectedEquipment}\"",
+            clientDrawerXaml,
+            StringComparison.Ordinal);
+
+        var detailsPosition = 0;
+        var editorPosition = 0;
+        foreach (var field in expectedFieldOrder)
+        {
+            detailsPosition = detailsXaml.IndexOf(
+                $"Text=\"{field}\"",
+                detailsPosition,
+                StringComparison.OrdinalIgnoreCase);
+            editorPosition = editorXaml.IndexOf(
+                $"Text=\"{field}\"",
+                editorPosition,
+                StringComparison.OrdinalIgnoreCase);
+
+            Assert.True(detailsPosition >= 0, $"Shared details are missing {field}.");
+            Assert.True(editorPosition >= 0, $"Inventory editor is missing {field}.");
+            detailsPosition++;
+            editorPosition++;
+        }
+
+        Assert.Contains(
+            "StringOrPlaceholderConverter",
+            detailsXaml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "SelectedEquipment.AssetTag, Converter={StaticResource StringToVisibilityConverter}",
+            clientDrawerXaml,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EmptyEquipmentValuesUseAStablePlaceholder()
+    {
+        var converter = new StringOrPlaceholderConverter();
+
+        Assert.Equal(
+            "—",
+            converter.Convert(
+                "  ",
+                typeof(string),
+                null,
+                System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal(
+            "TB-100",
+            converter.Convert(
+                "TB-100",
+                typeof(string),
+                null,
+                System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
     public void InventoryRegistryAndEquipmentBoardHaveDistinctResponsibilities()
     {
         var xaml = ReadRepositoryFile("MainWindow.xaml");
@@ -469,6 +560,38 @@ public sealed class EquipmentBoardTests
             try
             {
                 _ = new EquipmentEditorPanel();
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(10)));
+
+        Assert.Null(failure);
+    }
+
+    [Fact]
+    public void SharedEquipmentDetailsXamlLoadsIndependentlyOnAnStaThread()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var details = new EquipmentDetailsContent
+                {
+                    Equipment = new EquipmentItem
+                    {
+                        EquipmentId = 12,
+                        DeviceType = "Desktop",
+                        Name = "Accounting PC",
+                        ClientName = "Sample Client"
+                    }
+                };
+                details.UpdateLayout();
             }
             catch (Exception ex)
             {
