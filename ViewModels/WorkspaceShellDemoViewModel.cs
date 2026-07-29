@@ -1,16 +1,22 @@
+using TechBench.Models;
+using TechBench.Services;
+
 namespace TechBench.ViewModels;
 
 public sealed class WorkspaceShellDemoViewModel : ObservableObject
 {
     private string _currentSection = "Today";
+    private BenchModule _activeBenchModule = BenchModule.TechBench;
 
     public WorkspaceShellDemoViewModel()
     {
         NavigateCommand = new RelayCommand(parameter =>
             CurrentSection = parameter?.ToString() ?? "Today");
+        SwitchBenchModuleCommand = new RelayCommand(SwitchBenchModule);
     }
 
     public RelayCommand NavigateCommand { get; }
+    public RelayCommand SwitchBenchModuleCommand { get; }
 
     public string CurrentSection
     {
@@ -25,17 +31,48 @@ public sealed class WorkspaceShellDemoViewModel : ObservableObject
         }
     }
 
-    public string StatusMessage =>
-        $"Local UI preview for {CurrentSection}. No SQL connection is used.";
+    public BenchModule ActiveBenchModule
+    {
+        get => _activeBenchModule;
+        private set
+        {
+            if (!SetProperty(ref _activeBenchModule, value))
+            {
+                return;
+            }
 
-    public string ModuleBrandName => "TechBench";
-    public string ModuleLogoSource =>
-        "/TechBenchV2;component/Assets/csri-techbench-logo.png";
+            OnPropertyChanged(nameof(ModuleBrandName));
+            OnPropertyChanged(nameof(ModuleLogoSource));
+            OnPropertyChanged(nameof(IsTechBenchModule));
+            OnPropertyChanged(nameof(IsSalesBenchModule));
+            OnPropertyChanged(nameof(IsAdminBenchModule));
+            OnPropertyChanged(nameof(HasModuleWorkspace));
+            OnPropertyChanged(nameof(ShowsEmptyModuleShell));
+            OnPropertyChanged(nameof(WorkspaceHeaderEyebrow));
+            OnPropertyChanged(nameof(WorkspaceHeaderTitle));
+            OnPropertyChanged(nameof(StatusMessage));
+        }
+    }
+
+    public string StatusMessage =>
+        $"Local {ModuleBrandName} preview. No SQL connection is used.";
+
+    public string ModuleBrandName => ActiveBenchModule.ToString();
+    public string ModuleLogoSource => ActiveBenchModule switch
+    {
+        BenchModule.SalesBench =>
+            "/TechBenchV2;component/Assets/csri-salesbench-logo.png",
+        BenchModule.AdminBench =>
+            "/TechBenchV2;component/Assets/csri-adminbench-logo.png",
+        _ => "/TechBenchV2;component/Assets/csri-techbench-logo.png"
+    };
     public double ModuleLogoDisplayWidth => 252;
-    public double ModuleLogoOffsetX => 0;
-    public double ModuleLogoOffsetY => 2.5;
-    public string WorkspaceHeaderEyebrow => "WORKSPACE";
-    public string WorkspaceHeaderTitle => CurrentSection;
+    public string WorkspaceHeaderEyebrow => IsTechBenchModule
+        ? "WORKSPACE"
+        : "LOCAL MODULE PREVIEW";
+    public string WorkspaceHeaderTitle => IsSalesBenchModule
+        ? ModuleBrandName
+        : CurrentSection;
     public string WorkspaceStateLabel => "LOCAL UI PREVIEW";
 
     public string DatabasePath => "No SQL connection";
@@ -48,15 +85,32 @@ public sealed class WorkspaceShellDemoViewModel : ObservableObject
 
     public bool CanAccessAdminCenter => true;
 
-    public bool CanAccessBenchModules => false;
+    public bool CanAccessBenchModules => true;
 
-    public bool IsTechBenchModule => true;
+    public bool IsTechBenchModule => ActiveBenchModule == BenchModule.TechBench;
 
-    public bool IsSalesBenchModule => false;
+    public bool IsSalesBenchModule => ActiveBenchModule == BenchModule.SalesBench;
 
-    public bool IsAdminBenchModule => false;
+    public bool IsAdminBenchModule => ActiveBenchModule == BenchModule.AdminBench;
 
-    public bool HasModuleWorkspace => true;
+    public bool HasModuleWorkspace => !IsSalesBenchModule;
 
-    public bool ShowsEmptyModuleShell => false;
+    public bool ShowsEmptyModuleShell => IsSalesBenchModule;
+
+    private void SwitchBenchModule(object? parameter)
+    {
+        if (!Enum.TryParse<BenchModule>(
+                parameter?.ToString(),
+                ignoreCase: true,
+                out var module))
+        {
+            return;
+        }
+
+        ActiveBenchModule = module;
+        CurrentSection = module == BenchModule.AdminBench
+            ? "Client Match"
+            : "Today";
+        ThemeService.Apply(AppTheme.Dark, module);
+    }
 }

@@ -385,8 +385,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(ModuleBrandName));
             OnPropertyChanged(nameof(ModuleLogoSource));
             OnPropertyChanged(nameof(ModuleLogoDisplayWidth));
-            OnPropertyChanged(nameof(ModuleLogoOffsetX));
-            OnPropertyChanged(nameof(ModuleLogoOffsetY));
             OnPropertyChanged(nameof(IsTechBenchModule));
             OnPropertyChanged(nameof(IsSalesBenchModule));
             OnPropertyChanged(nameof(IsAdminBenchModule));
@@ -410,27 +408,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "/TechBenchV2;component/Assets/csri-adminbench-logo.png",
         _ => "/TechBenchV2;component/Assets/csri-techbench-logo.png"
     };
-    // The supplied PNGs share a canvas size, but their visible artwork has
-    // different internal bounds. These calibrated values keep the artwork
-    // centered and equally sized while preserving each original image.
-    public double ModuleLogoDisplayWidth => ActiveBenchModule switch
-    {
-        BenchModule.SalesBench => 263,
-        BenchModule.AdminBench => 257,
-        _ => 252
-    };
-    public double ModuleLogoOffsetX => ActiveBenchModule switch
-    {
-        BenchModule.SalesBench => -1.25,
-        BenchModule.AdminBench => -2.4,
-        _ => 0
-    };
-    public double ModuleLogoOffsetY => ActiveBenchModule switch
-    {
-        BenchModule.SalesBench => 6.5,
-        BenchModule.AdminBench => 6.7,
-        _ => 2.5
-    };
+    public double ModuleLogoDisplayWidth => 252;
     public bool IsTechBenchModule => ActiveBenchModule == BenchModule.TechBench;
     public bool IsSalesBenchModule => ActiveBenchModule == BenchModule.SalesBench;
     public bool IsAdminBenchModule => ActiveBenchModule == BenchModule.AdminBench;
