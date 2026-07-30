@@ -4558,14 +4558,12 @@
                                                      Margin="0,0,0,12"
                                                      Visibility="{Binding Updates.IsProgressVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                         <CheckBox Content="Light theme" IsChecked="{Binding IsLightTheme}" Margin="0,0,0,12" />
-                                        <CheckBox Content="Use Inventory Beta update channel"
-                                                  IsChecked="{Binding IsInventoryBetaUpdateChannel}"
-                                                  IsEnabled="{Binding Updates.CanChangeUpdateChannel}"
-                                                  Margin="0,0,0,4" />
+                                        <TextBlock Text="Update channel"
+                                                   Style="{StaticResource FieldLabelStyle}" />
                                         <TextBlock Text="{Binding UpdateChannelDescription}"
                                                    Style="{StaticResource MutedTextStyle}"
                                                    TextWrapping="Wrap"
-                                                   Margin="24,0,0,12" />
+                                                   Margin="0,0,0,12" />
                                         <TextBlock Text="Shared data refresh" Style="{StaticResource FieldLabelStyle}" />
                                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,4">
                                             <TextBlock Text="Every"

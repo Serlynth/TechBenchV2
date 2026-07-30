@@ -18,14 +18,15 @@ public sealed class V2AppUpdateServiceTests
         Assert.Equal(
             "inventory-beta",
             V2AppUpdateService.InventoryBetaReleaseChannel);
+        Assert.False(V2AppUpdateService.InventoryBetaAvailable);
         Assert.Equal("v2", V2AppUpdateService.CompiledReleaseChannel);
     }
 
     [Fact]
-    public void ResolvesStableOrInventoryBetaAtRuntime()
+    public void RetiredInventoryBetaPreferencesResolveToStable()
     {
         Assert.Equal(
-            V2AppUpdateService.InventoryBetaReleaseChannel,
+            V2AppUpdateService.StableReleaseChannel,
             V2AppUpdateService.ResolveReleaseChannel(
                 V2AppUpdateService.InventoryBetaReleaseChannel));
         Assert.Equal(
@@ -37,6 +38,11 @@ public sealed class V2AppUpdateServiceTests
             V2AppUpdateService.ResolveReleaseChannel(
                 "invalid",
                 V2AppUpdateService.StableReleaseChannel));
+        Assert.Equal(
+            V2AppUpdateService.StableReleaseChannel,
+            V2AppUpdateService.ResolveReleaseChannel(
+                null,
+                V2AppUpdateService.InventoryBetaReleaseChannel));
     }
 
     [Fact]
@@ -81,6 +87,26 @@ public sealed class V2AppUpdateServiceTests
         Assert.Contains(
             "AllowVersionDowngrade = true",
             service,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "public const bool InventoryBetaAvailable = false;",
+            service,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StableWorkspaceDoesNotOfferADeadBetaChannel()
+    {
+        var mainWindow = File.ReadAllText(RepositoryFile("MainWindow.xaml"));
+
+        Assert.DoesNotContain(
+            "Use Inventory Beta update channel",
+            mainWindow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "All completed beta functionality is included in TechBench 0.6.0.",
+            File.ReadAllText(
+                RepositoryFile(@"ViewModels\MainWindowViewModel.cs")),
             StringComparison.Ordinal);
     }
 

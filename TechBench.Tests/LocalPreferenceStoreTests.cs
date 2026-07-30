@@ -33,7 +33,7 @@ public sealed class LocalPreferenceStoreTests
                 DateTimeKind.Utc);
             created.SkippedUpdateVersion = "2.0.0-alpha.2";
             created.UpdateChannel =
-                V2AppUpdateService.InventoryBetaReleaseChannel;
+                V2AppUpdateService.StableReleaseChannel;
             created.EquipmentDetailsPanelVisible = false;
             created.EquipmentTechnicianOrder =
             [
@@ -62,7 +62,7 @@ public sealed class LocalPreferenceStoreTests
             Assert.Equal(created.LastUpdateCheckAtUtc, loaded.LastUpdateCheckAtUtc);
             Assert.Equal("2.0.0-alpha.2", loaded.SkippedUpdateVersion);
             Assert.Equal(
-                V2AppUpdateService.InventoryBetaReleaseChannel,
+                V2AppUpdateService.StableReleaseChannel,
                 loaded.UpdateChannel);
             Assert.False(loaded.EquipmentDetailsPanelVisible);
             Assert.Equal(
@@ -74,6 +74,33 @@ public sealed class LocalPreferenceStoreTests
             Assert.Equal(
                 "CSRI\\rskoog",
                 loaded.EquipmentTechnicianPriorityLoginName);
+        }
+        finally
+        {
+            DeleteDirectory(directory);
+        }
+    }
+
+    [Fact]
+    public void MigratesRetiredInventoryBetaPreferenceToStable()
+    {
+        var (directory, path) = CreateTestPath();
+        try
+        {
+            var preferences = LocalPreferenceStore.LoadOrCreate(path);
+            preferences.UpdateChannel =
+                V2AppUpdateService.InventoryBetaReleaseChannel;
+
+            LocalPreferenceStore.Save(preferences, path);
+            var loaded = LocalPreferenceStore.LoadOrCreate(path);
+
+            Assert.Equal(
+                V2AppUpdateService.StableReleaseChannel,
+                loaded.UpdateChannel);
+            Assert.Contains(
+                $"\"updateChannel\": \"{V2AppUpdateService.StableReleaseChannel}\"",
+                File.ReadAllText(path),
+                StringComparison.Ordinal);
         }
         finally
         {

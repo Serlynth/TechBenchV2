@@ -197,7 +197,9 @@ public sealed class LocalPreferences
             V2AppUpdateService.StableReleaseChannel =>
                 V2AppUpdateService.StableReleaseChannel,
             V2AppUpdateService.InventoryBetaReleaseChannel =>
-                V2AppUpdateService.InventoryBetaReleaseChannel,
+                V2AppUpdateService.InventoryBetaAvailable
+                    ? V2AppUpdateService.InventoryBetaReleaseChannel
+                    : V2AppUpdateService.StableReleaseChannel,
             _ => string.Empty
         };
         EquipmentTechnicianOrder = (EquipmentTechnicianOrder ?? [])

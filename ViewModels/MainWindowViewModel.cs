@@ -954,6 +954,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         get => _isInventoryBetaUpdateChannel;
         set
         {
+            if (!V2AppUpdateService.InventoryBetaAvailable)
+            {
+                value = false;
+            }
+
             if (!SetProperty(ref _isInventoryBetaUpdateChannel, value))
             {
                 return;
@@ -983,7 +988,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     public string UpdateChannelDescription =>
-        IsInventoryBetaUpdateChannel
+        !V2AppUpdateService.InventoryBetaAvailable
+            ? "Stable selected. All completed beta functionality is included in TechBench 0.6.0."
+            : IsInventoryBetaUpdateChannel
             ? "Inventory Beta selected. Update checks use the beta channel; switch this off to return to Stable."
             : "Stable selected. Turn this on to check for Inventory Beta builds.";
 

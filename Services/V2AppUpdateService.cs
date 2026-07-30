@@ -13,6 +13,7 @@ public sealed class V2AppUpdateService :
         "https://github.com/Serlynth/TechBenchV2-Releases";
     public const string StableReleaseChannel = "v2";
     public const string InventoryBetaReleaseChannel = "inventory-beta";
+    public const bool InventoryBetaAvailable = false;
 #if TECHBENCH_INVENTORY_BETA
     public const string CompiledReleaseChannel = InventoryBetaReleaseChannel;
 #else
@@ -61,7 +62,8 @@ public sealed class V2AppUpdateService :
         string? fallbackChannel = null)
     {
         var selected = releaseChannel?.Trim();
-        if (selected?.Equals(
+        if (InventoryBetaAvailable
+            && selected?.Equals(
                 InventoryBetaReleaseChannel,
                 StringComparison.OrdinalIgnoreCase) == true)
         {
@@ -75,7 +77,8 @@ public sealed class V2AppUpdateService :
             return StableReleaseChannel;
         }
 
-        return fallbackChannel?.Equals(
+        return InventoryBetaAvailable
+            && fallbackChannel?.Equals(
                 InventoryBetaReleaseChannel,
                 StringComparison.OrdinalIgnoreCase) == true
             ? InventoryBetaReleaseChannel
