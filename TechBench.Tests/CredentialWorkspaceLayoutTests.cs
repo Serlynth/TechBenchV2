@@ -16,7 +16,7 @@ public sealed class CredentialWorkspaceLayoutTests
             "Header=\"CLIENTS\"",
             navigation,
             StringComparison.Ordinal);
-        foreach (var section in new[] { "Client WiFi", "Domain/AD", "Connection", "Misc Info" })
+        foreach (var section in new[] { "Client WiFi", "Domain/AD", "Connection", "Veeam", "Misc Info" })
         {
             Assert.Contains(
                 $"CommandParameter=\"{section}\"",
@@ -153,20 +153,23 @@ public sealed class CredentialWorkspaceLayoutTests
             Field("ESET Password", 10),
             Field("Barracuda Login", 11),
             Field("Barracuda Password", 12),
-            Field("SonicWall Username", 13),
-            Field("SonicWall Password", 14),
-            Field("Unclassified note", 15),
-            Field("Wireless SSID", 16),
-            Field("Wireless Password", 17)
+            Field("Veeam Username", 13),
+            Field("Veeam Password", 14),
+            Field("SonicWall Username", 15),
+            Field("SonicWall Password", 16),
+            Field("Unclassified note", 17),
+            Field("Wireless SSID", 18),
+            Field("Wireless Password", 19)
         ];
 
         var groups = CredentialFieldGrouper.Group(fields);
 
         Assert.Equal(
-            ["Wireless", "WatchGuard", "Microsoft 365", "ESET", "Barracuda", "SonicWall", "Other"],
+            ["Wireless", "WatchGuard", "Microsoft 365", "ESET", "Barracuda", "Veeam", "SonicWall", "Other"],
             groups.Select(group => group.Name));
         Assert.Equal(2, groups.Single(group => group.Name == "Wireless").Fields.Count);
         Assert.Equal(7, groups.Single(group => group.Name == "WatchGuard").Fields.Count);
+        Assert.Equal(2, groups.Single(group => group.Name == "Veeam").Fields.Count);
         Assert.Equal(2, groups.Single(group => group.Name == "SonicWall").Fields.Count);
         Assert.Equal(
             "Unclassified note",
@@ -230,16 +233,19 @@ public sealed class CredentialWorkspaceLayoutTests
         var localDomain = Field("Local Domain", 2);
         var connection = Field("Firebox IP", 3);
         var authPoint = Field("AuthPoint User", 4);
-        var misc = Field("Microsoft 365 Password", 5);
+        var veeam = Field("Veeam Password", 5);
+        var misc = Field("Microsoft 365 Password", 6);
 
         Assert.True(CredentialFieldGrouper.IsWirelessField(wireless));
         Assert.True(CredentialFieldGrouper.IsDomainOrAdField(domain));
         Assert.True(CredentialFieldGrouper.IsDomainOrAdField(localDomain));
         Assert.True(CredentialFieldGrouper.IsConnectionField(connection));
         Assert.True(CredentialFieldGrouper.IsConnectionField(authPoint));
+        Assert.True(CredentialFieldGrouper.IsVeeamField(veeam));
+        Assert.False(CredentialFieldGrouper.IsVeeamField(misc));
         Assert.True(CredentialFieldGrouper.IsMiscInfoField(misc));
 
-        foreach (var field in new[] { wireless, domain, localDomain, connection, authPoint })
+        foreach (var field in new[] { wireless, domain, localDomain, connection, authPoint, veeam })
             Assert.False(CredentialFieldGrouper.IsMiscInfoField(field));
     }
 
@@ -249,12 +255,13 @@ public sealed class CredentialWorkspaceLayoutTests
         var viewModel = ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.FireDrill.cs"));
         var navigation = ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.cs"));
 
-        foreach (var section in new[] { "Client Info", "Client WiFi", "Domain/AD", "Connection", "Misc Info" })
+        foreach (var section in new[] { "Client Info", "Client WiFi", "Domain/AD", "Connection", "Veeam", "Misc Info" })
             Assert.Contains($"\"{section}\"", viewModel + navigation, StringComparison.Ordinal);
 
         Assert.Contains("item.Fields.Any(IsFieldVisibleInCurrentCredentialSection)", viewModel, StringComparison.Ordinal);
         Assert.Contains("\"Domain/AD\" => CredentialFieldGrouper.IsDomainOrAdField(field)", viewModel, StringComparison.Ordinal);
         Assert.Contains("\"Connection\" => CredentialFieldGrouper.IsConnectionField(field)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("\"Veeam\" => CredentialFieldGrouper.IsVeeamField(field)", viewModel, StringComparison.Ordinal);
         Assert.Contains("\"Misc Info\" => CredentialFieldGrouper.IsMiscInfoField(field)", viewModel, StringComparison.Ordinal);
     }
 

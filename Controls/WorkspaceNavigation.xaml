@@ -312,6 +312,12 @@
                                     Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Connection}"
                                     Style="{StaticResource WorkspaceNavItemStyle}"
                                     Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <Button Content="Veeam"
+                                    Command="{Binding NavigateCommand}"
+                                    CommandParameter="Veeam"
+                                    Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Veeam}"
+                                    Style="{StaticResource WorkspaceNavItemStyle}"
+                                    Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             <Button Content="Miscellaneous"
                                     Command="{Binding NavigateCommand}"
                                     CommandParameter="Misc Info"

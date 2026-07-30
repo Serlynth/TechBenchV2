@@ -451,6 +451,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(IsClientWifiSection));
                 OnPropertyChanged(nameof(IsDomainAdSection));
                 OnPropertyChanged(nameof(IsConnectionSection));
+                OnPropertyChanged(nameof(IsVeeamSection));
                 OnPropertyChanged(nameof(IsMiscInfoSection));
                 OnPropertyChanged(nameof(CredentialWorkspaceTitle));
                 OnPropertyChanged(nameof(CredentialWorkspaceDescription));
@@ -1078,6 +1079,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Client WiFi" => "Showing synchronized client WiFi information",
             "Domain/AD" => "Showing synchronized local domain and Active Directory information",
             "Connection" => "Showing synchronized WatchGuard connection information",
+            "Veeam" => "Showing synchronized Veeam backup information",
             "Misc Info" => "Showing remaining synchronized client information",
             "Inventory" => "Showing equipment currently available in Stock Room",
             "Equipment Board" => "Showing stock, technician assignments, and deployment order",
@@ -1123,6 +1125,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             case "Client WiFi":
             case "Domain/AD":
             case "Connection":
+            case "Veeam":
             case "Misc Info":
                 RefreshFireDrillCredentials();
                 break;
