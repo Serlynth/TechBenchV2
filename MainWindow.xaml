@@ -1939,6 +1939,47 @@
 
                                 <Border Background="{DynamicResource PanelAltBackgroundBrush}"
                                         BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="12"
+                                        Margin="0,0,0,12"
+                                        Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="TechBench client name"
+                                                       Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBox Text="{Binding ClientNameEditText, UpdateSourceTrigger=PropertyChanged}"
+                                                     MaxLength="240"
+                                                     ToolTip="The editable canonical client name shown throughout TechBench."
+                                                     Margin="0,0,12,0" />
+                                            <TextBlock Text="{Binding ClientNameSuggestionText}"
+                                                       Style="{StaticResource MutedTextStyle}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,5,12,0" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1"
+                                                Content="Use suggestion"
+                                                Command="{Binding UseSuggestedClientNameCommand}"
+                                                MinWidth="118"
+                                                Margin="0,20,8,0"
+                                                VerticalAlignment="Top" />
+                                        <Button Grid.Column="2"
+                                                Content="Save name"
+                                                Command="{Binding SaveClientNameCommand}"
+                                                Style="{StaticResource PrimaryButtonStyle}"
+                                                MinWidth="100"
+                                                Margin="0,20,0,0"
+                                                VerticalAlignment="Top" />
+                                    </Grid>
+                                </Border>
+
+                                <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}"
                                         BorderThickness="0,0,0,1"
                                         Padding="10,8">
                                     <Grid>

@@ -179,6 +179,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ChangeTicketStatusCommand = new AsyncRelayCommand(ChangeTicketStatusAsync, CanChangeTicketStatus);
         SelectEditorClientCommand = new RelayCommand(SelectEditorClient, parameter => parameter is Client);
         ApplyClientMatchCommand = new RelayCommand(_ => ApplyClientMatch(), _ => CanApplyClientMatch());
+        InitializeClientNameEditing();
         SaveSettingsCommand = new RelayCommand(_ => SaveSettings(), _ => CanWrite);
         TestWhdConnectionCommand = new AsyncRelayCommand(TestWhdConnectionAsync, _ => CanWrite);
         TestSageConnectionCommand = new RelayCommand(_ => TestSageConnection(), _ => CanWrite);
@@ -680,6 +681,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _selectedManagedClient, value))
             {
                 RefreshClientMatchOptions();
+                ResetClientNameEditor();
             }
         }
     }
@@ -700,6 +702,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 }
 
                 ApplyClientMatchCommand.RaiseCanExecuteChanged();
+                RefreshClientNameSuggestion();
             }
         }
     }
@@ -1396,6 +1399,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(SelectedSageMatchCandidate));
             ClientMatchSuggestionText = "Select an unmatched WHD location to review its Sage match.";
             ApplyClientMatchCommand.RaiseCanExecuteChanged();
+            RefreshClientNameSuggestion();
             return;
         }
 
@@ -1407,6 +1411,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 ? $"Already linked to {SelectedManagedClient.SageCustomerLabel}."
                 : "This is a Sage-only customer. Select a WHD-only location to create a match.";
             ApplyClientMatchCommand.RaiseCanExecuteChanged();
+            RefreshClientNameSuggestion();
             return;
         }
 
@@ -1420,6 +1425,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             ? "No confident automatic suggestion. Choose the correct Sage customer manually."
             : $"{suggestion.Description} Suggested: {suggestion.Candidate.SageCustomerLabel}";
         ApplyClientMatchCommand.RaiseCanExecuteChanged();
+        RefreshClientNameSuggestion();
     }
 
     private void RefreshEditorClientOptions()
