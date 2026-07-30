@@ -13,18 +13,23 @@ public sealed class CredentialWorkspaceLayoutTests
         var xaml = ReadRepositoryFile("MainWindow.xaml");
 
         Assert.Contains(
-            "Header=\"CLIENTS\"",
+            "Header=\"FIREDRILL\"",
             navigation,
             StringComparison.Ordinal);
-        foreach (var section in new[] { "Client WiFi", "Domain/AD", "Connection", "Veeam", "Misc Info" })
-        {
-            Assert.Contains(
-                $"CommandParameter=\"{section}\"",
-                navigation,
-                StringComparison.Ordinal);
-        }
         Assert.Contains(
             "CommandParameter=\"Client Info\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ItemsSource=\"{Binding FireDrillWorkspaceSections}\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Content=\"{Binding DisplayName}\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CommandParameter=\"{Binding SectionKey}\"",
             navigation,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -54,7 +59,7 @@ public sealed class CredentialWorkspaceLayoutTests
             "VerticalScrollBarVisibility=\"Auto\"",
             navigation,
             StringComparison.Ordinal);
-        foreach (var group in new[] { "NOTES", "CLIENTS", "EQUIPMENT", "SYSTEM" })
+        foreach (var group in new[] { "NOTES", "FIREDRILL", "EQUIPMENT", "SYSTEM" })
         {
             Assert.Contains(
                 $"Header=\"{group}\"",
@@ -195,8 +200,8 @@ public sealed class CredentialWorkspaceLayoutTests
 
         var viewModel = ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.FireDrill.cs"));
         Assert.Contains("item.Fields.Any(IsFieldVisibleInCurrentCredentialSection)", viewModel, StringComparison.Ordinal);
-        Assert.Contains("\"Client WiFi\" => CredentialFieldGrouper.IsWirelessField(field)", viewModel, StringComparison.Ordinal);
-        Assert.Contains("CredentialFieldGrouper.CreateWirelessSectionGroup(fields)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("CredentialFieldGrouper.IsFieldInWorkspaceSection", viewModel, StringComparison.Ordinal);
+        Assert.Contains("CredentialFieldGrouper.CreateWirelessSectionGroup(", viewModel, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -250,19 +255,79 @@ public sealed class CredentialWorkspaceLayoutTests
     }
 
     [Fact]
-    public void ViewModelFiltersEveryClientInfoWorkspace()
+    public void RepeatedLeadingKeywordsCreateFutureWorkspaceSections()
+    {
+        FireDrillCredentialField[] fields =
+        [
+            Field("ILO Host 1 User", 0),
+            Field("ILO Host 1 PW", 1),
+            Field("ILO Host 2 IP", 2),
+            Field("UPS 1 User", 3),
+            Field("UPS 1 PW", 4),
+            Field("Rack 1 User", 5),
+            Field("Rack 2 Password", 6),
+            Field("One-off note", 7)
+        ];
+
+        var groups = CredentialFieldGrouper.Group(fields);
+        var sections =
+            CredentialFieldGrouper.DiscoverWorkspaceSections(fields);
+
+        Assert.Equal(
+            ["ILO", "UPS", "Rack", "Other"],
+            groups.Select(group => group.Name));
+        Assert.Equal(
+            ["ILO", "UPS", "Rack", "Miscellaneous"],
+            sections.Select(section => section.DisplayName));
+        Assert.Equal(
+            3,
+            sections.Single(section =>
+                section.DisplayName == "ILO").FieldKeys.Count);
+        Assert.Equal(
+            2,
+            sections.Single(section =>
+                section.DisplayName == "UPS").FieldKeys.Count);
+        Assert.All(
+            sections,
+            section => Assert.StartsWith(
+                CredentialFieldGrouper.WorkspaceSectionPrefix,
+                section.SectionKey,
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void OneRepeatedClientRowDoesNotCreateASection()
+    {
+        var repeatedColumn = Enumerable.Range(0, 5)
+            .Select(index => new FireDrillCredentialField
+            {
+                Label = "Single Appliance Token",
+                FieldName = "single_appliance_token",
+                SortOrder = index,
+                Value = "***"
+            });
+
+        var sections =
+            CredentialFieldGrouper.DiscoverWorkspaceSections(
+                repeatedColumn);
+
+        var miscellaneous = Assert.Single(sections);
+        Assert.Equal("Miscellaneous", miscellaneous.DisplayName);
+        Assert.Single(miscellaneous.FieldKeys);
+    }
+
+    [Fact]
+    public void ViewModelFiltersDiscoveredFireDrillWorkspaces()
     {
         var viewModel = ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.FireDrill.cs"));
         var navigation = ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.cs"));
 
-        foreach (var section in new[] { "Client Info", "Client WiFi", "Domain/AD", "Connection", "Veeam", "Misc Info" })
-            Assert.Contains($"\"{section}\"", viewModel + navigation, StringComparison.Ordinal);
-
+        Assert.Contains("\"Client Info\"", viewModel + navigation, StringComparison.Ordinal);
         Assert.Contains("item.Fields.Any(IsFieldVisibleInCurrentCredentialSection)", viewModel, StringComparison.Ordinal);
-        Assert.Contains("\"Domain/AD\" => CredentialFieldGrouper.IsDomainOrAdField(field)", viewModel, StringComparison.Ordinal);
-        Assert.Contains("\"Connection\" => CredentialFieldGrouper.IsConnectionField(field)", viewModel, StringComparison.Ordinal);
-        Assert.Contains("\"Veeam\" => CredentialFieldGrouper.IsVeeamField(field)", viewModel, StringComparison.Ordinal);
-        Assert.Contains("\"Misc Info\" => CredentialFieldGrouper.IsMiscInfoField(field)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("DiscoverWorkspaceSections", viewModel, StringComparison.Ordinal);
+        Assert.Contains("FireDrillWorkspaceSections", viewModel + navigation, StringComparison.Ordinal);
+        Assert.Contains("IsWorkspaceSectionKey(CurrentSection)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("CurrentFireDrillWorkspaceSection", viewModel, StringComparison.Ordinal);
     }
 
     private static FireDrillCredentialField Field(string label, int order) =>
