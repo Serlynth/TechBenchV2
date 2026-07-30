@@ -196,8 +196,22 @@ public sealed partial class MainWindowViewModel
         {
             try
             {
-                foreach (var equipment in _repository
-                             .GetEquipmentInventory(clientUserId: clientUserId)
+                var equipmentItems = _repository
+                    .GetEquipmentInventory(clientUserId: clientUserId);
+                try
+                {
+                    equipmentItems = EquipmentDeploymentState.Apply(
+                        equipmentItems,
+                        EquipmentDeploymentState.ReadFromSettings(
+                            _repository.GetSettings()));
+                }
+                catch
+                {
+                    // Keep the inventory list available if lifecycle settings
+                    // cannot be refreshed.
+                }
+
+                foreach (var equipment in equipmentItems
                              .OrderBy(item => item.DeviceType, StringComparer.OrdinalIgnoreCase)
                              .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
                 {

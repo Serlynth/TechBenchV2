@@ -632,15 +632,94 @@ public sealed class EquipmentBoardTests
         Assert.Contains("Content=\"✓  Mark Deployed\"", xaml);
         Assert.Contains("MarkEquipmentDeployedCommand", xaml);
         Assert.Contains("CanMarkSelectedEquipmentDeployed", xaml);
+        var markStart = viewModel.IndexOf(
+            "private async Task MarkEquipmentDeployedAsync()",
+            StringComparison.Ordinal);
+        var markEnd = viewModel.IndexOf(
+            "public async Task AssignEquipmentAsync(",
+            markStart,
+            StringComparison.Ordinal);
+        Assert.True(markStart >= 0 && markEnd > markStart);
+        var markBody = viewModel[markStart..markEnd];
         Assert.Contains(
-            "EquipmentWorkflowStages.Deployed",
-            viewModel);
+            "EquipmentDeploymentState.Create",
+            markBody);
+        Assert.Contains("SaveOrganizationSetting", markBody);
+        Assert.DoesNotContain("MoveEquipment", markBody);
         Assert.Contains(
             "item.IsDeployed",
             viewModel);
         Assert.Contains(
             "It remains in Inventory",
             viewModel);
+    }
+
+    [Fact]
+    public void SharedDeploymentStateRoundTripsAndOverlaysInventoryStatus()
+    {
+        var equipment = new EquipmentItem
+        {
+            EquipmentId = 44,
+            DeviceType = "Laptop",
+            Name = "Field laptop",
+            WorkflowStage = EquipmentWorkflowStages.Deployment,
+            AssignedToLoginName = @"CSRI\rjs",
+            AssignedToDisplayName = "Ryan Skoog",
+            ClientId = 7,
+            ClientName = "Sample Client",
+            ClientUserId = 701,
+            ClientUserDisplayName = "Dana Brooks",
+            LocationName = "Main office"
+        };
+        var currentUser = new CurrentUserContext(
+            [1],
+            @"CSRI\rjs",
+            "Ryan Skoog",
+            Guid.NewGuid(),
+            15,
+            DateTime.UtcNow,
+            IsTechnician: true,
+            IsManager: true,
+            IsAdmin: true,
+            IsSyncOperator: false);
+        var deployedAt = new DateTime(
+            2026,
+            7,
+            30,
+            12,
+            0,
+            0,
+            DateTimeKind.Utc);
+        var state = EquipmentDeploymentState.Create(
+            equipment,
+            currentUser,
+            deployedAt);
+        var settings = new Dictionary<string, string>
+        {
+            [state.SettingKey] = state.Serialize()
+        };
+
+        var states = EquipmentDeploymentState.ReadFromSettings(settings);
+        var effective = Assert.Single(
+            EquipmentDeploymentState.Apply([equipment], states));
+        var history = states[equipment.EquipmentId].ToHistoryEntry();
+
+        Assert.True(effective.IsDeployed);
+        Assert.Equal("Deployed", effective.InventoryStatusLabel);
+        Assert.Equal(deployedAt, history.AssignedAtUtc);
+        Assert.Equal("Deployed", history.EventType);
+        Assert.Contains("Ryan Skoog", history.Notes);
+    }
+
+    [Fact]
+    public void MalformedDeploymentSettingDoesNotHideEquipment()
+    {
+        var settings = new Dictionary<string, string>
+        {
+            [EquipmentDeploymentState.BuildSettingKey(55)] = "{not-json"
+        };
+
+        Assert.Empty(EquipmentDeploymentState.ReadFromSettings(settings));
     }
 
     [Fact]

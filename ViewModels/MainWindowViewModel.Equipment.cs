@@ -44,6 +44,9 @@ public sealed partial class MainWindowViewModel
     private string _inventoryTechnicianFilter =
         EquipmentInventoryFilter.AllTechnicians;
     private bool _inventoryStockOnly;
+    private IReadOnlyDictionary<long, EquipmentDeploymentState>
+        _equipmentDeploymentStates =
+            new Dictionary<long, EquipmentDeploymentState>();
 
     public ObservableCollection<EquipmentLane> EquipmentLanes { get; } = new();
     public ObservableCollection<EquipmentLane> DeploymentLanes { get; } = new();
@@ -533,9 +536,20 @@ public sealed partial class MainWindowViewModel
                 var mappings = _repository.GetWhdUserMappings();
                 var equipment = _repository.GetEquipmentBoard();
                 var clients = _repository.GetInventoryClients();
-                return (mappings, equipment, clients);
+                var deploymentStates =
+                    EquipmentDeploymentState.ReadFromSettings(
+                        _repository.GetSettings());
+                var effectiveEquipment = EquipmentDeploymentState.Apply(
+                    equipment,
+                    deploymentStates);
+                return (
+                    mappings,
+                    equipment: effectiveEquipment,
+                    clients,
+                    deploymentStates);
             });
 
+            _equipmentDeploymentStates = result.deploymentStates;
             RefreshInventoryClientOptions(result.clients);
             RebuildEquipmentLanes(result.mappings, result.equipment);
             var selectedId = selectEquipmentId ?? SelectedEquipment?.EquipmentId;
@@ -1206,13 +1220,13 @@ public sealed partial class MainWindowViewModel
         EquipmentBoardStatus = $"Marking {equipment.Name} deployed…";
         try
         {
-            await Task.Run(() => _repository.MoveEquipment(
+            var deploymentState = EquipmentDeploymentState.Create(
                 equipment,
-                string.IsNullOrWhiteSpace(equipment.AssignedToLoginName)
-                    ? null
-                    : equipment.AssignedToLoginName,
-                EquipmentWorkflowStages.Deployed,
-                0));
+                _currentUser,
+                DateTime.UtcNow);
+            await Task.Run(() => _repository.SaveOrganizationSetting(
+                deploymentState.SettingKey,
+                deploymentState.Serialize()));
             CloseEquipmentEditor();
             IsEquipmentBoardBusy = false;
             await RefreshEquipmentBoardAsync();
@@ -1268,7 +1282,9 @@ public sealed partial class MainWindowViewModel
             });
             RebuildEquipmentLanes(
                 result.mappings,
-                result.updated);
+                EquipmentDeploymentState.Apply(
+                    result.updated,
+                    _equipmentDeploymentStates));
             SelectedEquipment = null;
             EquipmentBoardStatus =
                 $"Moved {equipment.Name} to {targetLane.Title}.";
@@ -1620,7 +1636,18 @@ public sealed partial class MainWindowViewModel
                 return;
             }
 
-            foreach (var entry in history)
+            var combinedHistory = history.AsEnumerable();
+            if (_equipmentDeploymentStates.TryGetValue(
+                    equipmentId,
+                    out var deploymentState))
+            {
+                combinedHistory = combinedHistory.Append(
+                    deploymentState.ToHistoryEntry());
+            }
+
+            foreach (var entry in combinedHistory
+                         .OrderByDescending(static entry =>
+                             entry.AssignedAtUtc))
             {
                 EquipmentAssignmentHistory.Add(entry);
             }

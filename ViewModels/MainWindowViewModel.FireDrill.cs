@@ -157,6 +157,19 @@ public sealed partial class MainWindowViewModel
 
         try
         {
+            equipment = EquipmentDeploymentState.Apply(
+                equipment,
+                EquipmentDeploymentState.ReadFromSettings(
+                    _repository.GetSettings()));
+        }
+        catch
+        {
+            // Lifecycle enrichment is best-effort. Equipment details remain
+            // available even if shared settings are temporarily unavailable.
+        }
+
+        try
+        {
             clientUsers = whdMatch is not null
                 ? _repository.SearchClientUsers(clientId: whdMatch.Id)
                 : _repository.SearchClientUsers(searchTerm: summary.ClientName)

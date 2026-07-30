@@ -176,36 +176,8 @@ public sealed class SqlServerTechBenchRepositoryContractTests
         var repositorySource = File.ReadAllText(FindRepositoryFile(
             "Data",
             "SqlServerTechBenchRepository.Equipment.cs"));
-        Assert.Contains(
-            "AddBit(command, \"@IncludeDeployed\", true)",
-            repositorySource,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "TooManyStoredProcedureArgumentsErrorNumber = 8144",
-            repositorySource,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "StoredProcedureAcceptsNoArgumentsErrorNumber = 8146",
-            repositorySource,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "when (HasLegacyEquipmentProcedureSignature(ex))",
-            repositorySource,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "GetEquipmentBoard(includeDeployedParameter: false)",
-            repositorySource,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "MoveEquipment(\n                    equipment,\n"
-            + "                    targetWindowsLoginName,\n"
-            + "                    targetWorkflowStage,\n"
-            + "                    targetIndex,\n"
-            + "                    includeDeployedParameter: false)",
-            repositorySource.ReplaceLineEndings("\n"),
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "Mark Deployed requires the matching TechBench server/SQL update.",
+        Assert.DoesNotContain(
+            "@IncludeDeployed",
             repositorySource,
             StringComparison.Ordinal);
     }
