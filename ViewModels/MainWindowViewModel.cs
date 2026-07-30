@@ -382,6 +382,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 return;
             }
 
+            CloseEquipmentEditor();
             OnPropertyChanged(nameof(ModuleBrandName));
             OnPropertyChanged(nameof(ModuleLogoSource));
             OnPropertyChanged(nameof(ModuleLogoDisplayWidth));
@@ -434,6 +435,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _currentSection, value))
             {
+                CloseEquipmentEditor();
                 if (IsTechBenchModule)
                 {
                     _techBenchSection = value;

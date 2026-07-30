@@ -1059,8 +1059,8 @@ public sealed partial class MainWindowViewModel
         IsEquipmentEditorVisible = false;
         OnPropertyChanged(nameof(EquipmentEditorTitle));
         OnPropertyChanged(nameof(EquipmentAssignmentLabel));
-        SaveEquipmentCommand.RaiseCanExecuteChanged();
-        ArchiveEquipmentCommand.RaiseCanExecuteChanged();
+        SaveEquipmentCommand?.RaiseCanExecuteChanged();
+        ArchiveEquipmentCommand?.RaiseCanExecuteChanged();
     }
 
     private bool CanEditEquipmentRecords() =>

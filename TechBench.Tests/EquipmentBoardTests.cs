@@ -97,6 +97,32 @@ public sealed class EquipmentBoardTests
         Assert.DoesNotContain("insertAfterTarget", equipmentViewModel);
     }
 
+    [Fact]
+    public void EquipmentPaneClosesWheneverTheWorkspaceScreenChanges()
+    {
+        var mainViewModel = ReadRepositoryFile(
+            Path.Combine("ViewModels", "MainWindowViewModel.cs"));
+
+        var moduleSetter = ReadBlock(
+            mainViewModel,
+            "public BenchModule ActiveBenchModule",
+            "public string ModuleBrandName");
+        var sectionSetter = ReadBlock(
+            mainViewModel,
+            "public string CurrentSection",
+            "public string WindowTitle");
+
+        Assert.Contains("CloseEquipmentEditor();", moduleSetter);
+        Assert.Contains("CloseEquipmentEditor();", sectionSetter);
+        Assert.True(
+            sectionSetter.IndexOf(
+                "CloseEquipmentEditor();",
+                StringComparison.Ordinal)
+            > sectionSetter.IndexOf(
+                "if (SetProperty(ref _currentSection, value))",
+                StringComparison.Ordinal));
+    }
+
     private static string ReadRepositoryFile(string relativePath)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -108,6 +134,21 @@ public sealed class EquipmentBoardTests
 
         Assert.NotNull(directory);
         return File.ReadAllText(Path.Combine(directory.FullName, relativePath));
+    }
+
+    private static string ReadBlock(
+        string source,
+        string startMarker,
+        string endMarker)
+    {
+        var start = source.IndexOf(startMarker, StringComparison.Ordinal);
+        var end = source.IndexOf(
+            endMarker,
+            start,
+            StringComparison.Ordinal);
+
+        Assert.True(start >= 0 && end > start);
+        return source[start..end];
     }
 
     [Theory]
