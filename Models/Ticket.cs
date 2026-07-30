@@ -12,6 +12,7 @@ public sealed class Ticket
     public int? WhdStatusTypeId { get; set; }
     public bool IsClosed { get; set; }
     public DateTime? LastSyncedAt { get; set; }
+    public byte[]? RowVersion { get; set; }
 
     public string DisplayName => Id == 0
         ? "No Ticket"

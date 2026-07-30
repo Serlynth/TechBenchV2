@@ -48,6 +48,48 @@ public sealed class ClientMatchingServiceTests
     }
 
     [Fact]
+    public void SuggestsCurrentSageNameForAnAlreadyMatchedRenamedClient()
+    {
+        var client = new Client
+        {
+            Id = 463,
+            Name = "Teeters Harvey Marrone & O'Rourke LLP",
+            Source = "Both",
+            WhdLocationName = "Marrone & O'Rourke LLP",
+            SageCustomerId = "69832",
+            SageCustomerName = "Marrone & O'Rourke"
+        };
+
+        var suggestion = ClientMatchingService.SuggestCanonicalName(client);
+
+        Assert.Equal("Marrone & O'Rourke", suggestion);
+    }
+
+    [Fact]
+    public void SuggestsCandidateNameOnlyAfterAReasonableWhdNameMatch()
+    {
+        var whd = new Client
+        {
+            Id = 1,
+            Name = "Marrone & O'Rourke LLP",
+            Source = "WHD",
+            WhdLocationName = "Marrone & O'Rourke LLP"
+        };
+        var sage = new Client
+        {
+            Id = 2,
+            Name = "Marrone & O'Rourke",
+            Source = "Sage",
+            SageCustomerId = "69832",
+            SageCustomerName = "Marrone & O'Rourke"
+        };
+
+        Assert.Equal(
+            "Marrone & O'Rourke",
+            ClientMatchingService.SuggestCanonicalName(whd, sage));
+    }
+
+    [Fact]
     public void AutomaticallyMatchesUniqueDelanceyAndDevineLocationPairs()
     {
         var whdClients = new[]
@@ -165,5 +207,78 @@ public sealed class ClientMatchingServiceTests
         };
 
         Assert.Empty(ClientMatchingService.FindSafeAutomaticMatches([whd], [sage]));
+    }
+
+    [Fact]
+    public void DoesNotAutomaticallyChooseWhenMultipleWhdLocationsCompeteForOneSageCustomer()
+    {
+        var whdClients = new[]
+        {
+            new Client
+            {
+                Id = 1,
+                Name = "9Prime - Restaurant",
+                Source = "WHD",
+                ExternalId = "WHD-LOCATION-402",
+                WhdLocationName = "9Prime - Restaurant"
+            },
+            new Client
+            {
+                Id = 2,
+                Name = "9Prime - Speak Easy",
+                Source = "WHD",
+                ExternalId = "WHD-LOCATION-403",
+                WhdLocationName = "9Prime - Speak Easy"
+            }
+        };
+        var sage = new Client
+        {
+            Id = 3,
+            Name = "9Prime",
+            Source = "Sage",
+            SageCustomerId = "68767",
+            SageCustomerName = "9Prime"
+        };
+
+        Assert.Empty(ClientMatchingService.FindSafeAutomaticMatches(whdClients, [sage]));
+    }
+
+    [Fact]
+    public void AutomaticallyGroupsNumberedWhdLocationsUnderOneSageCustomer()
+    {
+        var whdClients = new[]
+        {
+            new Client
+            {
+                Id = 1,
+                Name = "People for People 700",
+                Source = "WHD",
+                ExternalId = "WHD-LOCATION-299",
+                WhdLocationName = "People for People 700"
+            },
+            new Client
+            {
+                Id = 2,
+                Name = "People for People 800",
+                Source = "WHD",
+                ExternalId = "WHD-LOCATION-298",
+                WhdLocationName = "People for People 800"
+            }
+        };
+        var sage = new Client
+        {
+            Id = 3,
+            Name = "People for People Charter School",
+            Source = "Sage",
+            SageCustomerId = "37313",
+            SageCustomerName = "People for People Charter School"
+        };
+
+        var matches = ClientMatchingService.FindSafeAutomaticMatches(whdClients, [sage]);
+
+        Assert.Equal(2, matches.Count);
+        Assert.All(matches, match => Assert.Equal(sage.Id, match.SageClient.Id));
+        Assert.Contains(matches, match => match.WhdClient.Id == 1);
+        Assert.Contains(matches, match => match.WhdClient.Id == 2);
     }
 }

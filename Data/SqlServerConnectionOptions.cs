@@ -7,6 +7,8 @@ public sealed record SqlServerConnectionOptions(
     string Database,
     bool TrustServerCertificate = false)
 {
+    public const string DefaultServerName = "CSRI-SQL.CSRI.local";
+    public const string DefaultDatabaseName = "TechBench";
     public const string DefaultApplicationName = "TechBench V2";
     public const int DefaultConnectTimeoutSeconds = 15;
     public const int DefaultCommandTimeoutSeconds = 30;
@@ -53,7 +55,9 @@ public sealed record SqlServerConnectionOptions(
         };
     }
 
-    public string BuildConnectionString()
+    public string BuildConnectionString(
+        bool pooling = true,
+        string? applicationName = null)
     {
         var options = NormalizeAndValidate();
         var builder = new SqlConnectionStringBuilder
@@ -62,9 +66,11 @@ public sealed record SqlServerConnectionOptions(
             InitialCatalog = options.Database,
             IntegratedSecurity = true,
             PersistSecurityInfo = false,
-            ApplicationName = DefaultApplicationName,
+            ApplicationName = string.IsNullOrWhiteSpace(applicationName)
+                ? DefaultApplicationName
+                : applicationName.Trim(),
             ConnectTimeout = options.ConnectTimeoutSeconds,
-            Pooling = true,
+            Pooling = pooling,
             MultipleActiveResultSets = false,
             TrustServerCertificate = options.TrustServerCertificate
         };

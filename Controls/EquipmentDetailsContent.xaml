@@ -1,0 +1,373 @@
+<UserControl x:Class="TechBench.Controls.EquipmentDetailsContent"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="clr-namespace:TechBench.Converters"
+             xmlns:local="clr-namespace:TechBench.Controls"
+             Focusable="False">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+        <conv:StringOrPlaceholderConverter x:Key="StringOrPlaceholderConverter" />
+
+        <Style x:Key="EquipmentDetailsLabelStyle"
+               TargetType="{x:Type TextBlock}">
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,5" />
+        </Style>
+
+        <Style x:Key="EquipmentDetailsValueStyle"
+               TargetType="{x:Type TextBlock}">
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+
+        <Style x:Key="EquipmentDetailsFieldStyle"
+               TargetType="{x:Type Border}">
+            <Setter Property="Background" Value="{DynamicResource ControlBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="11,9" />
+            <Setter Property="Margin" Value="0,0,10,10" />
+        </Style>
+
+        <Style x:Key="EquipmentDetailsSectionStyle"
+               TargetType="{x:Type TextBlock}">
+            <Setter Property="Foreground" Value="{DynamicResource AccentHoverBrush}" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Margin" Value="1,2,0,8" />
+        </Style>
+    </UserControl.Resources>
+
+    <StackPanel DataContext="{Binding Equipment, RelativeSource={RelativeSource AncestorType={x:Type local:EquipmentDetailsContent}}}">
+        <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="1"
+                CornerRadius="10"
+                Padding="13"
+                Margin="0,0,0,14">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="48" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Border Width="38"
+                        Height="38"
+                        CornerRadius="9"
+                        Background="{DynamicResource PanelBackgroundBrush}"
+                        BorderBrush="{Binding DeviceBadgeColor}"
+                        BorderThickness="1">
+                    <TextBlock Text="{Binding DeviceGlyph}"
+                               FontFamily="Segoe MDL2 Assets"
+                               Foreground="{Binding DeviceBadgeColor}"
+                               FontSize="19"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center" />
+                </Border>
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="{Binding Name, Converter={StaticResource StringOrPlaceholderConverter}}"
+                               Foreground="{DynamicResource PrimaryTextBrush}"
+                               FontSize="16"
+                               FontWeight="SemiBold"
+                               TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding ModelLine, Converter={StaticResource StringOrPlaceholderConverter}}"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               Margin="0,3,0,0"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+                <Border Grid.Column="2"
+                        Background="{DynamicResource ControlBackgroundBrush}"
+                        CornerRadius="10"
+                        Padding="8,4"
+                        Margin="8,0,0,0"
+                        VerticalAlignment="Top">
+                    <TextBlock Text="{Binding StatusLabel}"
+                               Foreground="{Binding StatusColor}"
+                               FontSize="10"
+                               FontWeight="SemiBold" />
+                </Border>
+            </Grid>
+        </Border>
+
+        <TextBlock Text="EQUIPMENT"
+                   Style="{StaticResource EquipmentDetailsSectionStyle}" />
+        <UniformGrid Columns="2"
+                     Margin="0,0,-10,2">
+            <Border Style="{StaticResource EquipmentDetailsFieldStyle}">
+                <StackPanel>
+                    <TextBlock Text="Device type"
+                               Style="{StaticResource EquipmentDetailsLabelStyle}" />
+                    <TextBlock Text="{Binding DeviceType, Converter={StaticResource StringOrPlaceholderConverter}}"
+                               Style="{StaticResource EquipmentDetailsValueStyle}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource EquipmentDetailsFieldStyle}">
+                <StackPanel>
+                    <TextBlock Text="Asset tag"
+                               Style="{StaticResource EquipmentDetailsLabelStyle}" />
+                    <TextBlock Text="{Binding AssetTag, Converter={StaticResource StringOrPlaceholderConverter}}"
+                               Style="{StaticResource EquipmentDetailsValueStyle}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource EquipmentDetailsFieldStyle}">
+                <StackPanel>
+                    <TextBlock Text="Equipment name"
+                               Style="{StaticResource EquipmentDetailsLabelStyle}" />
+                    <TextBlock Text="{Binding Name, Converter={StaticResource StringOrPlaceholderConverter}}"
+                               Style="{StaticResource EquipmentDetailsValueStyle}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource EquipmentDetailsFieldStyle}">
+                <StackPanel>
+                    <TextBlock Text="Serial number"
+                               Style="{StaticResource EquipmentDetailsLabelStyle}" />
+                    <TextBlock Text="{Binding SerialNumber, Converter={StaticResource StringOrPlaceholderConverter}}"
+                               Style="{StaticResource EquipmentDetailsValueStyle}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource EquipmentDetailsFieldStyle}">
+                <StackPanel>
+                    <TextBlock Text="Part number"
+                               Style="{StaticResource EquipmentDetailsLabelStyle}" />
+                    <TextBlock Text="{Binding PartNumber, Converter={StaticResource StringOrPlaceholderConverter}}"
+                               Style="{StaticResource EquipmentDetailsValueStyle}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource EquipmentDetailsFieldStyle}">
+                <StackPanel>
+                    <TextBlock Text="Manufacturer"
+                               Style="{StaticResource EquipmentDetailsLabelStyle}" />
+                    <TextBlock Text="{Binding Manufacturer, Converter={StaticResource StringOrPlaceholderConverter}}"
+                               Style="{StaticResource EquipmentDetailsValueStyle}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource EquipmentDetailsFieldStyle}">
+                <StackPanel>
+                    <TextBlock Text="Model"
+                               Style="{StaticResource EquipmentDetailsLabelStyle}" />
+                    <TextBlock Text="{Binding Model, Converter={StaticResource StringOrPlaceholderConverter}}"
+                               Style="{StaticResource EquipmentDetailsValueStyle}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource EquipmentDetailsFieldStyle}">
+                <StackPanel>
+                    <TextBlock Text="IP address"
+                               Style="{StaticResource EquipmentDetailsLabelStyle}" />
+                    <TextBlock Text="{Binding IpAddress, Converter={StaticResource StringOrPlaceholderConverter}}"
+                               Style="{StaticResource EquipmentDetailsValueStyle}" />
+                </StackPanel>
+            </Border>
+        </UniformGrid>
+
+        <StackPanel Visibility="{Binding SupportsAnyDesk, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <TextBlock Text="REMOTE ACCESS"
+                       Style="{StaticResource EquipmentDetailsSectionStyle}" />
+            <Border Background="{DynamicResource AccentSoftBrush}"
+                    BorderBrush="{DynamicResource AccentBrush}"
+                    BorderThickness="1"
+                    CornerRadius="9"
+                    Padding="12"
+                    Margin="0,0,0,14">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                    <StackPanel Margin="0,0,12,0">
+                        <TextBlock Text="AnyDesk number"
+                                   Style="{StaticResource EquipmentDetailsLabelStyle}" />
+                        <TextBlock Text="{Binding AnyDeskNumber, Converter={StaticResource StringOrPlaceholderConverter}}"
+                                   Style="{StaticResource EquipmentDetailsValueStyle}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Text="AnyDesk password"
+                                   Style="{StaticResource EquipmentDetailsLabelStyle}" />
+                        <Grid>
+                            <TextBlock Text="{Binding AnyDeskPassword}">
+                                <TextBlock.Style>
+                                    <Style TargetType="{x:Type TextBlock}"
+                                           BasedOn="{StaticResource EquipmentDetailsValueStyle}">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding HasAnyDeskPassword}" Value="True" />
+                                                    <Condition Binding="{Binding ShowSensitiveValue, RelativeSource={RelativeSource AncestorType={x:Type local:EquipmentDetailsContent}}}" Value="True" />
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock Text="••••••••">
+                                <TextBlock.Style>
+                                    <Style TargetType="{x:Type TextBlock}"
+                                           BasedOn="{StaticResource EquipmentDetailsValueStyle}">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding HasAnyDeskPassword}" Value="True" />
+                                                    <Condition Binding="{Binding ShowSensitiveValue, RelativeSource={RelativeSource AncestorType={x:Type local:EquipmentDetailsContent}}}" Value="False" />
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock Text="Protected in Inventory"
+                                       Foreground="{DynamicResource MutedTextBrush}"
+                                       FontSize="11">
+                                <TextBlock.Style>
+                                    <Style TargetType="{x:Type TextBlock}">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasAnyDeskPassword}" Value="False">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
+                        <CheckBox Content="Show password"
+                                  IsChecked="{Binding ShowSensitiveValue, RelativeSource={RelativeSource AncestorType={x:Type local:EquipmentDetailsContent}}, Mode=TwoWay}"
+                                  Visibility="{Binding HasAnyDeskPassword, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                  Margin="0,8,0,0" />
+                    </StackPanel>
+                    </Grid>
+                    <Button Content="Connect with AnyDesk"
+                            Command="{Binding LaunchAnyDeskCommand, RelativeSource={RelativeSource AncestorType={x:Type local:EquipmentDetailsContent}}}"
+                            CommandParameter="{Binding}"
+                            Style="{DynamicResource PrimaryButtonStyle}"
+                            HorizontalAlignment="Stretch"
+                            Margin="0,12,0,0"
+                            ToolTip="Open AnyDesk, connect to this address, and submit the stored unattended-access password when available." />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+
+        <TextBlock Text="ASSIGNMENT"
+                   Style="{StaticResource EquipmentDetailsSectionStyle}" />
+        <UniformGrid Columns="2"
+                     Margin="0,0,-10,2">
+            <Border Style="{StaticResource EquipmentDetailsFieldStyle}">
+                <StackPanel>
+                    <TextBlock Text="Status"
+                               Style="{StaticResource EquipmentDetailsLabelStyle}" />
+                    <TextBlock Text="{Binding InventoryStatusLabel}"
+                               Style="{StaticResource EquipmentDetailsValueStyle}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource EquipmentDetailsFieldStyle}">
+                <StackPanel>
+                    <TextBlock Text="Technician"
+                               Style="{StaticResource EquipmentDetailsLabelStyle}" />
+                    <TextBlock Text="{Binding TechnicianLabel}"
+                               Style="{StaticResource EquipmentDetailsValueStyle}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource EquipmentDetailsFieldStyle}">
+                <StackPanel>
+                    <TextBlock Text="Client"
+                               Style="{StaticResource EquipmentDetailsLabelStyle}" />
+                    <TextBlock Text="{Binding InventoryClientLabel}"
+                               Style="{StaticResource EquipmentDetailsValueStyle}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource EquipmentDetailsFieldStyle}">
+                <StackPanel>
+                    <TextBlock Text="Client user / shared role"
+                               Style="{StaticResource EquipmentDetailsLabelStyle}" />
+                    <TextBlock Text="{Binding InventoryUserLabel}"
+                               Style="{StaticResource EquipmentDetailsValueStyle}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource EquipmentDetailsFieldStyle}">
+                <StackPanel>
+                    <TextBlock Text="Site / room / desk"
+                               Style="{StaticResource EquipmentDetailsLabelStyle}" />
+                    <TextBlock Text="{Binding LocationName, Converter={StaticResource StringOrPlaceholderConverter}}"
+                               Style="{StaticResource EquipmentDetailsValueStyle}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource EquipmentDetailsFieldStyle}">
+                <StackPanel>
+                    <TextBlock Text="Assigned"
+                               Style="{StaticResource EquipmentDetailsLabelStyle}" />
+                    <TextBlock Text="{Binding AssignedAtUtc, StringFormat={}{0:g}, TargetNullValue=—}"
+                               Style="{StaticResource EquipmentDetailsValueStyle}" />
+                </StackPanel>
+            </Border>
+        </UniformGrid>
+
+        <TextBlock Text="NOTES"
+                   Style="{StaticResource EquipmentDetailsSectionStyle}" />
+        <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="1"
+                CornerRadius="9"
+                Padding="12"
+                MinHeight="62"
+                Margin="0,0,0,14">
+            <TextBlock Text="{Binding Notes, Converter={StaticResource StringOrPlaceholderConverter}}"
+                       Foreground="{DynamicResource SecondaryTextBrush}"
+                       TextWrapping="Wrap" />
+        </Border>
+
+        <TextBlock Text="ASSIGNMENT HISTORY"
+                   Style="{StaticResource EquipmentDetailsSectionStyle}" />
+        <ItemsControl x:Name="AssignmentHistoryList"
+                      ItemsSource="{Binding AssignmentHistory, RelativeSource={RelativeSource AncestorType={x:Type local:EquipmentDetailsContent}}}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Border Background="{DynamicResource ControlBackgroundBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="7"
+                            Padding="9"
+                            Margin="0,0,0,6">
+                        <StackPanel>
+                            <TextBlock Foreground="{DynamicResource PrimaryTextBrush}"
+                                       FontWeight="SemiBold">
+                                <Run Text="{Binding EventType, Mode=OneWay}" />
+                                <Run Text=" · " />
+                                <Run Text="{Binding WorkflowStage, Mode=OneWay}" />
+                            </TextBlock>
+                            <TextBlock Text="{Binding ClientChipLabel}"
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                       FontSize="10"
+                                       TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding AssignedAtUtc, StringFormat={}{0:g}}"
+                                       Foreground="{DynamicResource MutedTextBrush}"
+                                       FontSize="9" />
+                        </StackPanel>
+                    </Border>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <TextBlock Text="No assignment history is available in this view."
+                   Foreground="{DynamicResource MutedTextBrush}"
+                   FontSize="11"
+                   Margin="1,2,0,4">
+            <TextBlock.Style>
+                <Style TargetType="{x:Type TextBlock}">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding HasItems, ElementName=AssignmentHistoryList}" Value="False">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+    </StackPanel>
+</UserControl>

@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>TechBench.WHD</AssemblyName>
+    <RootNamespace>TechBench</RootNamespace>
+    <Version>0.6.0</Version>
+    <AssemblyVersion>0.6.0.0</AssemblyVersion>
+    <FileVersion>0.6.0.0</FileVersion>
+    <PlatformTarget Condition="'$(PlatformTarget)' == ''">AnyCPU</PlatformTarget>
+    <OutputPath>bin\$(Configuration)\$(PlatformTarget)\</OutputPath>
+    <IntermediateOutputPath>obj\$(Configuration)\$(PlatformTarget)\</IntermediateOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Models\WhdConnectionSettings.cs" Link="Models\WhdConnectionSettings.cs" />
+    <Compile Include="..\Models\WhdSyncResult.cs" Link="Models\WhdSyncResult.cs" />
+    <Compile Include="..\Providers\PostingResult.cs" Link="Providers\PostingResult.cs" />
+    <Compile Include="..\Providers\WhdRestClient.cs" Link="Providers\WhdRestClient.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TechBench.Tests" />
+  </ItemGroup>
+
+</Project>

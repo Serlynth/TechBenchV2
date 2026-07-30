@@ -1,85 +1,247 @@
 <Window x:Class="TechBench.DatabaseConnectionWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Connect TechBench V2"
-        Width="520"
-        Height="470"
-        ResizeMode="NoResize"
+        Title="Connect to TechBench"
+        Width="760"
+        Height="590"
+        MinWidth="620"
+        MinHeight="520"
+        ResizeMode="CanResizeWithGrip"
         WindowStartupLocation="CenterScreen"
-        Background="{DynamicResource WindowBackgroundBrush}"
-        Foreground="{DynamicResource PrimaryTextBrush}">
-    <Grid Margin="34">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+        Foreground="{DynamicResource PrimaryTextBrush}"
+        FontSize="15"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display">
+    <Window.Background>
+        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Offset="0" Color="#07101C" />
+            <GradientStop Offset="0.58" Color="#080D14" />
+            <GradientStop Offset="1" Color="#0D1B2D" />
+        </LinearGradientBrush>
+    </Window.Background>
 
-        <StackPanel Grid.Row="0" Margin="0,0,0,24">
-            <TextBlock Text="TechBench V2"
-                       FontSize="30"
-                       FontWeight="SemiBold" />
-            <TextBlock Margin="0,8,0,0"
-                       Foreground="{DynamicResource SecondaryTextBrush}"
-                       TextWrapping="Wrap"
-                       Text="Connect directly to the shared SQL Server using your current Windows domain identity. No TechBench password is stored." />
-        </StackPanel>
+    <Window.Resources>
+        <Style x:Key="ConnectionTextBoxStyle"
+               TargetType="{x:Type TextBox}"
+               BasedOn="{StaticResource {x:Type TextBox}}">
+            <Setter Property="MinHeight" Value="48" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Padding" Value="13,9" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
 
-        <StackPanel Grid.Row="1" Margin="0,0,0,14">
-            <TextBlock Margin="0,0,0,6"
-                       FontWeight="SemiBold"
-                       Text="SQL Server or instance" />
-            <TextBox x:Name="ServerTextBox"
-                     Height="38"
-                     Padding="10,7"
-                     VerticalContentAlignment="Center" />
-        </StackPanel>
+        <Style x:Key="ConnectionLabelStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="Margin" Value="0,0,0,7" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
+        </Style>
+    </Window.Resources>
 
-        <StackPanel Grid.Row="2" Margin="0,0,0,14">
-            <TextBlock Margin="0,0,0,6"
-                       FontWeight="SemiBold"
-                       Text="Database" />
-            <TextBox x:Name="DatabaseTextBox"
-                     Height="38"
-                     Padding="10,7"
-                     VerticalContentAlignment="Center" />
-        </StackPanel>
+    <Grid Margin="32">
+        <Border Background="{DynamicResource PanelBackgroundBrush}"
+                BorderBrush="#2A405A"
+                BorderThickness="1"
+                CornerRadius="18"
+                Effect="{DynamicResource CardShadowEffect}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="6" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="3" Margin="0,0,0,12">
-            <TextBlock FontWeight="SemiBold"
-                       Text="Windows identity" />
-            <TextBlock x:Name="WindowsIdentityTextBlock"
-                       Margin="0,5,0,8"
-                       Foreground="{DynamicResource SecondaryTextBrush}" />
-            <CheckBox x:Name="TrustServerCertificateCheckBox"
-                      Content="Trust the SQL Server certificate (temporary/test use)" />
-        </StackPanel>
+                <Border Grid.Row="0"
+                        Background="{DynamicResource AccentBrush}"
+                        CornerRadius="18,18,0,0" />
 
-        <TextBlock x:Name="StatusTextBlock"
-                   Grid.Row="4"
-                   MinHeight="42"
-                   Margin="0,2,0,14"
-                   Foreground="{DynamicResource SecondaryTextBrush}"
-                   TextWrapping="Wrap" />
+                <Border Grid.Row="1"
+                        Padding="28,22"
+                        Background="{DynamicResource HeaderBackgroundBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="0,0,0,1">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="210" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
 
-        <StackPanel Grid.Row="5"
-                    Orientation="Horizontal"
-                    HorizontalAlignment="Right">
-            <Button Width="100"
-                    Height="38"
-                    Margin="0,0,10,0"
-                    IsCancel="True"
-                    Click="CancelButton_Click"
-                    Content="Cancel" />
-            <Button x:Name="ConnectButton"
-                    Width="120"
-                    Height="38"
-                    IsDefault="True"
-                    Click="ConnectButton_Click"
-                    Content="Connect" />
-        </StackPanel>
+                        <Image Grid.Column="0"
+                               Width="190"
+                               Height="82"
+                               HorizontalAlignment="Left"
+                               Stretch="Uniform"
+                               Source="Assets/csri-techbench-logo.png" />
+
+                        <StackPanel Grid.Column="1"
+                                    Margin="24,0,0,0"
+                                    VerticalAlignment="Center">
+                            <TextBlock Text="Welcome to TechBench"
+                                       FontSize="25"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Margin="0,6,0,0"
+                                       FontSize="14"
+                                       LineHeight="20"
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                       Text="Connect to the shared workspace with your Windows domain account." />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Row="2" Margin="28,24,28,18">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.7*" />
+                            <ColumnDefinition Width="18" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Style="{StaticResource ConnectionLabelStyle}"
+                                       Text="SQL Server" />
+                            <TextBox x:Name="ServerTextBox"
+                                     Style="{StaticResource ConnectionTextBoxStyle}"
+                                     AutomationProperties.Name="SQL Server" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Style="{StaticResource ConnectionLabelStyle}"
+                                       Text="Database" />
+                            <TextBox x:Name="DatabaseTextBox"
+                                     Style="{StaticResource ConnectionTextBoxStyle}"
+                                     AutomationProperties.Name="Database" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Border Grid.Row="1"
+                            Margin="0,22,0,0"
+                            Padding="16,13"
+                            CornerRadius="10"
+                            Background="{DynamicResource PanelAltBackgroundBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="1">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Width="10"
+                                    Height="10"
+                                    Margin="0,0,12,0"
+                                    VerticalAlignment="Center"
+                                    Background="{DynamicResource SuccessBrush}"
+                                    CornerRadius="5" />
+
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="Windows authentication"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource SecondaryTextBrush}" />
+                                <TextBlock x:Name="WindowsIdentityTextBlock"
+                                           Margin="0,3,0,0"
+                                           FontSize="16"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource PrimaryTextBrush}" />
+                            </StackPanel>
+
+                            <Border Grid.Column="2"
+                                    Margin="16,0,0,0"
+                                    Padding="10,5"
+                                    VerticalAlignment="Center"
+                                    Background="{DynamicResource SuccessSoftBrush}"
+                                    CornerRadius="12">
+                                <TextBlock Text="READY"
+                                           FontSize="11"
+                                           FontWeight="Bold"
+                                           Foreground="{DynamicResource SuccessBrush}" />
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <StackPanel Grid.Row="2"
+                                Margin="2,16,2,0">
+                        <CheckBox x:Name="UpdateChannelCheckBox"
+                                  Content="Check the Inventory Beta channel instead of Stable"
+                                  FontWeight="SemiBold" />
+                        <TextBlock x:Name="UpdateChannelDescriptionTextBlock"
+                                   Margin="24,4,0,0"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="3"
+                               Margin="2,14,2,0"
+                               VerticalAlignment="Top"
+                               FontSize="13"
+                               LineHeight="19"
+                               Foreground="{DynamicResource MutedTextBrush}"
+                               Text="Your domain identity is verified by SQL Server. TechBench does not store a separate login password." />
+                </Grid>
+
+                <Border Grid.Row="3"
+                        Padding="28,16"
+                        Background="{DynamicResource HeaderBackgroundBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="0,1,0,0"
+                        CornerRadius="0,0,18,18">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock x:Name="StatusTextBlock"
+                                   MaxWidth="330"
+                                   Margin="0,0,20,0"
+                                   VerticalAlignment="Center"
+                                   FontSize="13"
+                                   LineHeight="18"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   TextWrapping="Wrap" />
+
+                        <StackPanel Grid.Column="1"
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Right">
+                            <Button x:Name="UpdateButton"
+                                    MinWidth="138"
+                                    MinHeight="44"
+                                    Margin="0,0,10,0"
+                                    Padding="14,10"
+                                    FontSize="13"
+                                    Click="UpdateButton_Click"
+                                    Content="Check for updates" />
+                            <Button MinWidth="82"
+                                    MinHeight="44"
+                                    Margin="0,0,10,0"
+                                    FontSize="13"
+                                    IsCancel="True"
+                                    Click="CancelButton_Click"
+                                    Content="Cancel" />
+                            <Button x:Name="ConnectButton"
+                                    MinWidth="156"
+                                    MinHeight="44"
+                                    Padding="18,10"
+                                    FontSize="13"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    IsDefault="True"
+                                    Click="ConnectButton_Click"
+                                    Content="Connect" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Border>
     </Grid>
 </Window>

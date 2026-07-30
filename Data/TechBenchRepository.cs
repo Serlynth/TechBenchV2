@@ -8,7 +8,7 @@ using TechBench.Services;
 
 namespace TechBench.Data;
 
-public sealed class TechBenchRepository
+public sealed class TechBenchRepository : ITechBenchRepository
 {
     private const string ClientSelectColumns = """
         Id, Name, Source, ExternalId, IsActive, LastSyncedAt,
@@ -54,6 +54,40 @@ public sealed class TechBenchRepository
     }
 
     public bool FullTextSearchAvailable => _fullTextSearchAvailable;
+
+    // Legacy SQLite workspaces do not host the server-side WHD synchronization service.
+    public WhdSyncServiceStatus GetWhdSyncStatus() => new()
+    {
+        Health = "Unavailable",
+        Message = "WHD organization sync requires the SQL Server workspace."
+    };
+
+    public WhdSyncRequestResult RequestWhdSync() => new()
+    {
+        Accepted = false,
+        Message = "WHD organization sync requires the SQL Server workspace."
+    };
+
+    public SageSyncServiceStatus GetSageSyncStatus() => new()
+    {
+        Health = "Unavailable",
+        Message = "Server-side Sage synchronization requires the V2 SQL Server workspace."
+    };
+
+    public SageSyncRequestResult RequestSageSync(
+        bool allowLargeRemoval = false,
+        Guid? confirmedRequestId = null) => new()
+    {
+        Accepted = false,
+        Message = "Server-side Sage synchronization requires the V2 SQL Server workspace."
+    };
+
+    public IReadOnlyList<WhdUserMapping> GetWhdUserMappings() => Array.Empty<WhdUserMapping>();
+
+    public IReadOnlyList<WhdTechnician> GetWhdTechnicians() => Array.Empty<WhdTechnician>();
+
+    public WhdUserMapping SaveWhdUserMapping(WhdUserMapping mapping) =>
+        throw new InvalidOperationException("WHD user mappings require the SQL Server workspace.");
 
     public IReadOnlyList<Client> GetClients(bool includeInactive = false, string? searchTerm = null)
     {
@@ -476,45 +510,6 @@ public sealed class TechBenchRepository
         return UpsertSyncedClient(client);
     }
 
-    public void SaveClientSageMapping(int clientId, string sageCustomerId, string? sageCustomerName = null)
-    {
-        var client = GetClient(clientId);
-        if (client is null)
-        {
-            return;
-        }
-
-        var normalizedCustomerId = string.IsNullOrWhiteSpace(sageCustomerId) ? null : sageCustomerId.Trim();
-        if (normalizedCustomerId is not null)
-        {
-            var existingSageClient = GetClients(includeInactive: true)
-                .FirstOrDefault(candidate => candidate.Id != clientId
-                    && string.Equals(
-                        candidate.SageCustomerId?.Trim(),
-                        normalizedCustomerId,
-                        StringComparison.OrdinalIgnoreCase));
-            if (existingSageClient is not null && HasWhdIdentity(client))
-            {
-                MergeClientRecords(clientId, existingSageClient.Id);
-                return;
-            }
-        }
-
-        client.SageCustomerId = normalizedCustomerId;
-        if (!string.IsNullOrWhiteSpace(sageCustomerName))
-        {
-            client.SageCustomerName = sageCustomerName.Trim();
-        }
-        else if (string.IsNullOrWhiteSpace(client.SageCustomerName))
-        {
-            client.SageCustomerName = client.WhdLocationName ?? client.Name;
-        }
-
-        client.Source = MergeClientSources(client.Source, "Sage");
-        client.MatchStatus = string.IsNullOrWhiteSpace(client.SageCustomerId) ? "Unmatched" : "Manual match";
-        SaveClient(client);
-    }
-
     public Client MergeClientRecords(int whdClientId, int sageClientId)
     {
         if (whdClientId <= 0 || sageClientId <= 0 || whdClientId == sageClientId)
@@ -656,10 +651,25 @@ public sealed class TechBenchRepository
         var clients = GetClients(includeInactive: true);
         var matches = ClientMatchingService.FindSafeAutomaticMatches(clients, clients);
         var matchedCount = 0;
-        foreach (var match in matches)
+        foreach (var matchGroup in matches
+                     .GroupBy(static match => match.SageClient.Id)
+                     .OrderBy(static group => group.Key))
         {
-            MergeClientRecords(match.WhdClient.Id, match.SageClient.Id);
+            var orderedMatches = matchGroup
+                .OrderBy(static match => match.WhdClient.Id)
+                .ToList();
+            var canonical = MergeClientRecords(
+                orderedMatches[0].WhdClient.Id,
+                orderedMatches[0].SageClient.Id);
             matchedCount++;
+
+            foreach (var additionalMatch in orderedMatches.Skip(1))
+            {
+                canonical = MergeClientRecords(
+                    additionalMatch.WhdClient.Id,
+                    canonical.Id);
+                matchedCount++;
+            }
         }
 
         return matchedCount;
@@ -962,55 +972,6 @@ public sealed class TechBenchRepository
         return matchedCount;
     }
 
-    public (int SavedCount, int StaleCount) SynchronizeSageCustomers(
-        IReadOnlyList<SageCustomer> customers,
-        DateTime syncedAt)
-    {
-        using var connection = _connectionFactory.CreateConnection();
-        connection.Open();
-        using var transaction = connection.BeginTransaction();
-        var clients = ReadAllClients(connection, transaction);
-        var activeSageIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var savedCount = 0;
-
-        foreach (var customer in customers)
-        {
-            if (string.IsNullOrWhiteSpace(customer.CustomerId)
-                || string.IsNullOrWhiteSpace(customer.CustomerName))
-            {
-                continue;
-            }
-
-            activeSageIds.Add(customer.CustomerId.Trim());
-            var incoming = new Client
-            {
-                Name = customer.CustomerName,
-                Source = "Sage",
-                IsActive = customer.IsActive,
-                LastSyncedAt = syncedAt,
-                SageCustomerId = customer.CustomerId,
-                SageCustomerName = customer.CustomerName,
-                SageContactName = customer.ContactName,
-                SageTelephone = customer.Telephone
-            };
-            var existing = FindClientForSync(clients, incoming);
-            var merged = existing is null ? incoming : MergeClient(existing, incoming);
-            SaveClient(connection, transaction, merged);
-            if (existing is null)
-            {
-                clients.Add(merged);
-            }
-
-            savedCount++;
-        }
-
-        var staleCount = activeSageIds.Count == 0
-            ? 0
-            : RemoveStaleSageCustomers(connection, transaction, clients, activeSageIds, syncedAt);
-        transaction.Commit();
-        return (savedCount, staleCount);
-    }
-
     public IReadOnlyList<WorkEntry> GetWorkEntries(WorkEntryQuery query)
     {
         using var connection = _connectionFactory.CreateConnection();
@@ -1187,6 +1148,27 @@ public sealed class TechBenchRepository
         return tags.ToArray();
     }
 
+    public IReadOnlyList<OrganizationTag> GetOrganizationTags() =>
+        GetDistinctTags()
+            .Select((tag, index) => new OrganizationTag
+            {
+                Id = index + 1,
+                Tag = tag
+            })
+            .ToArray();
+
+    public int SaveOrganizationTag(OrganizationTag tag)
+    {
+        ArgumentNullException.ThrowIfNull(tag);
+        tag.Tag = tag.Tag.Trim();
+        tag.Id = tag.Id > 0 ? tag.Id : GetOrganizationTags().Count + 1;
+        tag.UpdatedAt = DateTime.Now;
+        return tag.Id;
+    }
+
+    public void DeleteOrganizationTag(OrganizationTag tag) =>
+        ArgumentNullException.ThrowIfNull(tag);
+
     public WorkEntry? GetWorkEntry(int id)
     {
         using var connection = _connectionFactory.CreateConnection();
@@ -1261,7 +1243,26 @@ public sealed class TechBenchRepository
         return count;
     }
 
-    public void DeleteWorkEntry(int id)
+    public V1ImportReferenceResolution ResolveV1ImportReferences(
+        V1DatabaseImportPackage package)
+    {
+        ArgumentNullException.ThrowIfNull(package);
+        throw new NotSupportedException(
+            "V1 reference resolution is available only in the SQL Server-backed TechBench V2 client.");
+    }
+
+    public V1DatabaseImportResult ImportV1Database(V1DatabaseImportPackage package)
+    {
+        ArgumentNullException.ThrowIfNull(package);
+        throw new NotSupportedException(
+            "V1 database migration is available only in the SQL Server-backed TechBench V2 client.");
+    }
+
+    public void AbandonV1Import() =>
+        throw new NotSupportedException(
+            "V1 import recovery is available only in the SQL Server-backed TechBench V2 client.");
+
+    public void DeleteWorkEntry(int id, bool confirmMissingWhdTechNote = false)
     {
         using var connection = _connectionFactory.CreateConnection();
         connection.Open();
@@ -1271,7 +1272,9 @@ public sealed class TechBenchRepository
             throw new InvalidOperationException("Entries posted to Sage are permanently locked and cannot be deleted.");
         }
 
-        if (IsWhdPosted(connection, transaction, id))
+        if (IsWhdPosted(connection, transaction, id)
+            && (!confirmMissingWhdTechNote
+                || !HasVerifiedMissingWhdTechNote(connection, transaction, id)))
         {
             throw new InvalidOperationException("Entries synchronized to WHD cannot be deleted because their exact TechNote tracking must be preserved.");
         }
@@ -1294,6 +1297,38 @@ public sealed class TechBenchRepository
         }
 
         transaction.Commit();
+    }
+
+    private static bool HasVerifiedMissingWhdTechNote(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        int workEntryId)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT EXISTS
+            (
+                SELECT 1
+                FROM WorkEntries w
+                WHERE w.Id = $id
+                  AND w.WhdPosted = 1
+                  AND w.SagePosted = 0
+                  AND LOWER(COALESCE(w.LastError, '')) LIKE 'whd sync pending:%technote #%was not found.%'
+                  AND EXISTS
+                  (
+                      SELECT 1
+                      FROM PostingLogs p
+                      WHERE p.WorkEntryId = w.Id
+                        AND p.Destination = 'WHD'
+                        AND p.Success = 0
+                        AND UPPER(COALESCE(p.ExternalReference, '')) LIKE 'WHD-TECHNOTE-%'
+                        AND LOWER(COALESCE(p.Message, '')) LIKE '%technote #%was not found.%'
+                  )
+            )
+            """;
+        command.Parameters.AddWithValue("$id", workEntryId);
+        return Convert.ToInt32(command.ExecuteScalar()) == 1;
     }
 
     public IReadOnlyList<WorkEntryLink> GetWorkEntryLinks(int workEntryId)
@@ -1623,17 +1658,6 @@ public sealed class TechBenchRepository
 
         if (link.Id > 0)
         {
-            using (var builtInCommand = connection.CreateCommand())
-            {
-                builtInCommand.CommandText = "SELECT BuiltInKey FROM CommonLinks WHERE Id = $id";
-                builtInCommand.Parameters.AddWithValue("$id", link.Id);
-                if (builtInCommand.ExecuteScalar() is string builtInKey
-                    && !string.IsNullOrWhiteSpace(builtInKey))
-                {
-                    throw new InvalidOperationException("Built-in links cannot be changed.");
-                }
-            }
-
             using var updateCommand = connection.CreateCommand();
             updateCommand.CommandText = """
                 UPDATE CommonLinks
@@ -1653,7 +1677,6 @@ public sealed class TechBenchRepository
 
             link.Name = link.Name.Trim();
             link.Url = link.Url.Trim();
-            link.BuiltInKey = null;
             link.UpdatedAt = now;
             return link.Id;
         }
@@ -1754,6 +1777,15 @@ public sealed class TechBenchRepository
         command.Parameters.AddWithValue("$key", key);
         command.ExecuteNonQuery();
     }
+
+    // The SQLite repository is retained only for isolated legacy tests. It has
+    // no multi-user scope, so organization-setting operations use its existing
+    // settings table.
+    public void SaveOrganizationSetting(string key, string value) =>
+        SaveSetting(key, value);
+
+    public void DeleteOrganizationSetting(string key) =>
+        DeleteSetting(key);
 
     public void AddPostingLog(PostingLog log)
     {
@@ -1864,7 +1896,8 @@ public sealed class TechBenchRepository
         int attemptId,
         PostingAttemptStatus status,
         string message,
-        string? externalReference = null)
+        string? externalReference = null,
+        bool markPosted = true)
     {
         if (status == PostingAttemptStatus.Started)
         {
@@ -1936,6 +1969,74 @@ public sealed class TechBenchRepository
         command.Parameters.AddWithValue("$message", message);
         command.Parameters.AddWithValue("$completedAt", ToDbDateTime(DateTime.Now));
         return command.ExecuteNonQuery();
+    }
+
+    public void MarkWorkEntryPosted(
+        int workEntryId,
+        string destination,
+        string message,
+        string? externalReference = null)
+    {
+        var normalizedDestination = destination.Trim();
+        if (normalizedDestination is not ("WHD" or "Sage"))
+        {
+            throw new ArgumentException(
+                "Destination must be WHD or Sage.",
+                nameof(destination));
+        }
+
+        var entry = GetWorkEntry(workEntryId)
+            ?? throw new InvalidOperationException(
+                "The work entry no longer exists.");
+        if (entry.SagePosted)
+        {
+            throw new InvalidOperationException(
+                "Entries posted to Sage are permanently locked.");
+        }
+
+        if (normalizedDestination == "WHD")
+        {
+            if (entry.WhdPosted)
+            {
+                throw new InvalidOperationException(
+                    "The work entry is already marked posted to WHD.");
+            }
+
+            entry.WhdPosted = true;
+            entry.WhdPostedAt = DateTime.Now;
+        }
+        else
+        {
+            entry.SagePosted = true;
+            entry.SagePostedAt = DateTime.Now;
+            if (!string.IsNullOrWhiteSpace(externalReference))
+            {
+                entry.SageTicketNumber = externalReference.StartsWith(
+                    "SAGE-",
+                    StringComparison.OrdinalIgnoreCase)
+                    ? externalReference[5..]
+                    : externalReference;
+            }
+        }
+
+        entry.LastError = null;
+        WorkEntryPostingStatusCalculator.Update(entry);
+        SaveWorkEntry(entry);
+        ResolveOutstandingPostingAttempts(
+            workEntryId,
+            normalizedDestination,
+            message,
+            externalReference);
+        AddPostingLog(new PostingLog
+        {
+            WorkEntryId = workEntryId,
+            Destination = normalizedDestination,
+            Payload = "Manual external verification",
+            Success = true,
+            Message = message,
+            ExternalReference = externalReference,
+            CreatedAt = DateTime.Now
+        });
     }
 
     public bool HasSuccessfulSageDraftLog(int workEntryId)
@@ -2024,26 +2125,6 @@ public sealed class TechBenchRepository
         }
 
         return logs;
-    }
-
-    public static void UpdatePostingStatus(WorkEntry entry)
-    {
-        if (!string.IsNullOrWhiteSpace(entry.LastError))
-        {
-            entry.PostingStatus = PostingStatus.Failed;
-            return;
-        }
-
-        entry.PostingStatus = (entry.WhdPosted, entry.SagePosted) switch
-        {
-            (true, true) => PostingStatus.PostedToBoth,
-            (true, false) => PostingStatus.PostedToWhd,
-            (false, true) => PostingStatus.PostedToSage,
-            _ when entry.DurationMinutes > 0
-                && (entry.ClientId is > 0 || !string.IsNullOrWhiteSpace(entry.ManualClientName))
-                && !string.IsNullOrWhiteSpace(entry.Note) => PostingStatus.Ready,
-            _ => PostingStatus.Draft
-        };
     }
 
     private static void EnsureClientSyncColumns(SqliteConnection connection)
@@ -2774,6 +2855,10 @@ public sealed class TechBenchRepository
     private static void SeedCommonLinks(SqliteConnection connection)
     {
         var now = ToDbDateTime(DateTime.Now);
+        using var markerCommand = connection.CreateCommand();
+        markerCommand.CommandText =
+            "SELECT 1 FROM Settings WHERE Key = 'CommonLinks.AdminEditableDefaultsV2' LIMIT 1";
+        var canonicalizeExistingDefaults = markerCommand.ExecuteScalar() is null;
         var defaults = new[]
         {
             ("watchguard-cloud", "WatchGuard Cloud", "https://cloud.watchguard.com/", 0),
@@ -2790,7 +2875,8 @@ public sealed class TechBenchRepository
         {
             using var insertCommand = connection.CreateCommand();
             insertCommand.Transaction = transaction;
-            insertCommand.CommandText = """
+            insertCommand.CommandText = canonicalizeExistingDefaults
+                ? """
                 INSERT OR IGNORE INTO CommonLinks
                     (Name, Url, SortOrder, BuiltInKey, CreatedAt, UpdatedAt)
                 VALUES
@@ -2802,11 +2888,13 @@ public sealed class TechBenchRepository
                     SortOrder = $sortOrder,
                     BuiltInKey = $builtInKey,
                     UpdatedAt = $updatedAt
-                WHERE (BuiltInKey = $builtInKey OR Url = $url COLLATE NOCASE)
-                  AND (Name <> $name
-                       OR Url <> $url COLLATE NOCASE
-                       OR SortOrder <> $sortOrder
-                       OR BuiltInKey IS NULL)
+                WHERE BuiltInKey = $builtInKey OR Url = $url COLLATE NOCASE;
+                """
+                : """
+                INSERT OR IGNORE INTO CommonLinks
+                    (Name, Url, SortOrder, BuiltInKey, CreatedAt, UpdatedAt)
+                VALUES
+                    ($name, $url, $sortOrder, $builtInKey, $createdAt, $updatedAt);
                 """;
             insertCommand.Parameters.AddWithValue("$builtInKey", link.Item1);
             insertCommand.Parameters.AddWithValue("$name", link.Item2);
@@ -2816,6 +2904,19 @@ public sealed class TechBenchRepository
             insertCommand.Parameters.AddWithValue("$updatedAt", now);
             insertCommand.ExecuteNonQuery();
         }
+
+        if (canonicalizeExistingDefaults)
+        {
+            using var saveMarker = connection.CreateCommand();
+            saveMarker.Transaction = transaction;
+            saveMarker.CommandText = """
+                INSERT INTO Settings (Key, Value)
+                VALUES ('CommonLinks.AdminEditableDefaultsV2', 'true')
+                ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value
+                """;
+            saveMarker.ExecuteNonQuery();
+        }
+
         transaction.Commit();
     }
 

@@ -9,7 +9,86 @@ namespace TechBench.Tests;
 public sealed class WhdRestClientTests
 {
     [Fact]
-    public async Task SyncRetainsClosedTicketsReturnedByWhd()
+    public void DefaultClientAllowsSlowWhdResponses()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(90), WhdRestClient.DefaultRequestTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(20), WhdRestClient.OptionalClientDetailTimeout);
+    }
+
+    [Fact]
+    public async Task PersonalConnectionTestUsesOnlyTheAuthenticationSessionResource()
+    {
+        var handler = new RecordingHandler(request =>
+            request.Method == HttpMethod.Get
+                ? Json(HttpStatusCode.OK, "{\"sessionKey\":\"temporary-key\",\"currentTechId\":7,\"instanceId\":-1}")
+                : Json(HttpStatusCode.OK, "{}"));
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.TestConnectionAsync(new WhdConnectionSettings
+        {
+            BaseUrl = "https://whd.example.test",
+            Username = "technician",
+            Secret = "secret"
+        });
+
+        Assert.True(result.Success, result.Message);
+        Assert.Empty(result.Tickets);
+        Assert.Contains("No tickets were downloaded or synchronized", result.Message, StringComparison.Ordinal);
+        Assert.Equal(2, handler.RequestCount);
+        Assert.All(handler.Requests, request => Assert.EndsWith("/Session", request.Uri?.AbsolutePath, StringComparison.Ordinal));
+        Assert.DoesNotContain(handler.Requests, request =>
+            request.Uri?.AbsolutePath.Contains("/Tickets", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    [Fact]
+    public async Task AutoAuthenticationBeforePostingNeverReadsTickets()
+    {
+        var handler = new RecordingHandler(request =>
+        {
+            if (request.Method == HttpMethod.Delete)
+            {
+                return Json(HttpStatusCode.OK, "{}");
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/Session", StringComparison.Ordinal) == true)
+            {
+                var query = Uri.UnescapeDataString(request.RequestUri.Query);
+                return query.Contains("password=", StringComparison.Ordinal)
+                    ? Json(HttpStatusCode.Unauthorized, "Authentication required.")
+                    : Json(HttpStatusCode.OK, "{\"sessionKey\":\"temporary-key\",\"currentTechId\":7,\"instanceId\":-1}");
+            }
+
+            return Json(HttpStatusCode.OK, "{\"id\":987}");
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.PostTicketNoteAsync(
+            new WhdConnectionSettings
+            {
+                BaseUrl = "https://whd.example.test",
+                Username = "technician",
+                Secret = "application-key"
+            },
+            101,
+            "Investigated the issue.",
+            15,
+            new DateTime(2026, 7, 20, 13, 30, 0, DateTimeKind.Utc));
+
+        Assert.True(result.Success, result.Message);
+        Assert.Contains(handler.Requests, request => request.Method == HttpMethod.Post);
+        Assert.DoesNotContain(handler.Requests, request =>
+            request.Uri?.AbsolutePath.Contains("/Tickets", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.Equal(2, handler.Requests.Count(request => request.Method == HttpMethod.Get));
+
+        var postedRequest = Assert.Single(handler.Requests, request => request.Method == HttpMethod.Post);
+        using var payload = JsonDocument.Parse(postedRequest.Body);
+        Assert.Equal("2026-07-20T13:30:00Z", payload.RootElement.GetProperty("date").GetString());
+    }
+
+    [Fact]
+    public async Task OrganizationSyncRetainsExplicitlyClosedOrDeletedTicketsReturnedByWhd()
     {
         const string responseJson = """
             [
@@ -24,6 +103,13 @@ public sealed class WhdRestClientTests
                 "subject": "Closed ticket",
                 "statustype": { "id": 2, "statusTypeName": "Closed" },
                 "clientReporter": { "id": 11, "displayName": "Closed Client" }
+              },
+              {
+                "id": 103,
+                "subject": "Deleted ticket",
+                "deleted": 1,
+                "statustype": { "id": 1, "statusTypeName": "Open" },
+                "clientReporter": { "id": 12, "displayName": "Deleted Client" }
               }
             ]
             """;
@@ -31,17 +117,77 @@ public sealed class WhdRestClientTests
         using var httpClient = new HttpClient(new JsonResponseHandler(responseJson));
         var client = new WhdRestClient(httpClient);
 
-        var result = await client.GetMyTicketsAsync(new WhdConnectionSettings
+        var result = await client.GetOrganizationTicketsAsync(new WhdConnectionSettings
         {
             BaseUrl = "https://whd.example.test",
             Username = "technician",
-            Secret = "secret"
+            Secret = "secret",
+            AuthenticationMode = WhdAuthenticationMode.ApplicationApiKey
         });
 
         Assert.True(result.Success);
-        Assert.Equal(2, result.Tickets.Count);
+        Assert.Equal(3, result.Tickets.Count);
         Assert.Contains(result.Tickets, ticket => ticket.ExternalId == "WHD-101" && !ticket.IsClosed);
         Assert.Contains(result.Tickets, ticket => ticket.ExternalId == "WHD-102" && ticket.IsClosed);
+        Assert.Contains(result.Tickets, ticket => ticket.ExternalId == "WHD-103" && ticket.IsClosed);
+        Assert.Contains("organization", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("assigned", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task OrganizationSyncUsesTicketsResourceAndAllTicketQualifierOnEveryPage()
+    {
+        var firstPage = JsonSerializer.Serialize(Enumerable.Range(1, 100).Select(id => new
+        {
+            id,
+            subject = $"Ticket {id}",
+            statustype = new { id = 1, statusTypeName = "Open" },
+            clientReporter = new { id, displayName = $"Client {id}" }
+        }));
+        var handler = new RecordingHandler(request =>
+        {
+            var query = Uri.UnescapeDataString(request.RequestUri?.Query ?? string.Empty);
+            return Json(HttpStatusCode.OK, query.Contains("page=1", StringComparison.Ordinal)
+                ? firstPage
+                : "[]");
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetOrganizationTicketsAsync(ExplicitSettings());
+
+        Assert.True(result.Success, result.Message);
+        Assert.True(result.IsComplete);
+        Assert.Equal(100, result.Tickets.Count);
+        Assert.Equal(2, handler.Requests.Count);
+        foreach (var request in handler.Requests)
+        {
+            Assert.EndsWith("/Tickets", request.Uri?.AbsolutePath, StringComparison.Ordinal);
+            Assert.DoesNotContain("/Tickets/mine", request.Uri?.AbsolutePath, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(
+                "qualifier=((deleted = null) or (deleted = 0) or (deleted = 1))",
+                Uri.UnescapeDataString(request.Uri?.Query ?? string.Empty),
+                StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task OrganizationSyncExplainsTicketRequestTimeout()
+    {
+        var handler = new RecordingHandler(_ =>
+            throw new TaskCanceledException("The operation was canceled."));
+        using var httpClient = new HttpClient(handler)
+        {
+            Timeout = TimeSpan.FromSeconds(90)
+        };
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetOrganizationTicketsAsync(ExplicitSettings());
+
+        Assert.False(result.Success);
+        Assert.Contains("timed out after 90 seconds", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ticket data", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("operation was canceled", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -51,7 +197,7 @@ public sealed class WhdRestClientTests
         using var httpClient = new HttpClient(handler);
         var client = new WhdRestClient(httpClient);
 
-        var result = await client.GetMyTicketsAsync(new WhdConnectionSettings
+        var result = await client.GetOrganizationTicketsAsync(new WhdConnectionSettings
         {
             BaseUrl = "http://whd.example.test",
             Username = "technician",
@@ -84,12 +230,75 @@ public sealed class WhdRestClientTests
             ExplicitSettings(),
             101,
             "Investigated the issue.",
-            15);
+            15,
+            new DateTime(2026, 7, 20, 13, 30, 0, DateTimeKind.Utc));
 
         Assert.True(result.Success);
         Assert.True(result.MarkPosted);
         Assert.Equal("WHD-TECHNOTE-987", result.ExternalReference);
         Assert.Equal(2, handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task VerifiesExactNoteAfterPostResponseTimesOut()
+    {
+        var handler = new RecordingHandler(request =>
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                throw new TaskCanceledException("Simulated WHD response timeout.");
+            }
+
+            return Json(HttpStatusCode.OK, """
+                [{"id":988,"noteText":"Investigated the timeout.","workTime":"15"}]
+                """);
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.PostTicketNoteAsync(
+            ExplicitSettings(),
+            101,
+            "Investigated the timeout.",
+            15,
+            new DateTime(2026, 7, 20, 13, 30, 0, DateTimeKind.Utc));
+
+        Assert.True(result.Success, result.Message);
+        Assert.True(result.MarkPosted);
+        Assert.False(result.OutcomeUncertain);
+        Assert.Equal("WHD-TECHNOTE-988", result.ExternalReference);
+        Assert.Contains("did not return", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task KeepsPostUncertainWhenTimeoutReadbackCannotFindExactNote()
+    {
+        var handler = new RecordingHandler(request =>
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                throw new TaskCanceledException("Simulated WHD response timeout.");
+            }
+
+            return Json(HttpStatusCode.OK, "[]");
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.PostTicketNoteAsync(
+            ExplicitSettings(),
+            101,
+            "Investigated the timeout.",
+            15,
+            new DateTime(2026, 7, 20, 13, 30, 0, DateTimeKind.Utc));
+
+        Assert.False(result.Success);
+        Assert.False(result.MarkPosted);
+        Assert.True(result.OutcomeUncertain);
+        Assert.Null(result.ExternalReference);
+        Assert.Contains("could not find the exact note", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(4, handler.RequestCount);
     }
 
     [Fact]
@@ -105,7 +314,8 @@ public sealed class WhdRestClientTests
             ExplicitSettings(),
             101,
             "Investigated the issue.",
-            15);
+            15,
+            new DateTime(2026, 7, 20, 13, 30, 0, DateTimeKind.Utc));
 
         Assert.False(result.Success);
         Assert.False(result.MarkPosted);
@@ -150,7 +360,8 @@ public sealed class WhdRestClientTests
             ExplicitSettings(),
             101,
             987,
-            "Updated work note.");
+            "Updated work note.",
+            new DateTime(2026, 7, 20, 13, 30, 0, DateTimeKind.Utc));
 
         Assert.True(result.Success, result.Message);
         Assert.Equal("WHD-TECHNOTE-987", result.ExternalReference);
@@ -160,8 +371,8 @@ public sealed class WhdRestClientTests
         Assert.Equal(HttpMethod.Get, handler.Requests[1].Method);
 
         using var payload = JsonDocument.Parse(handler.Requests[0].Body);
-        Assert.Single(payload.RootElement.EnumerateObject());
         Assert.Equal("Updated work note.", payload.RootElement.GetProperty("noteText").GetString());
+        Assert.Equal("2026-07-20T13:30:00Z", payload.RootElement.GetProperty("date").GetString());
         Assert.False(payload.RootElement.TryGetProperty("jobticket", out _));
         Assert.False(payload.RootElement.TryGetProperty("workTime", out _));
     }
@@ -200,7 +411,7 @@ public sealed class WhdRestClientTests
         using var httpClient = new HttpClient(handler);
         var client = new WhdRestClient(httpClient);
 
-        var result = await client.GetMyTicketsAsync(ExplicitSettings());
+        var result = await client.GetOrganizationTicketsAsync(ExplicitSettings());
 
         Assert.True(result.Success);
         Assert.False(result.IsComplete);
@@ -211,13 +422,46 @@ public sealed class WhdRestClientTests
     [Fact]
     public async Task SyncsWhdLocationsAsCustomerCompanies()
     {
-        const string response = """
+        const string locationResponse = """
             [
-              {"id": 12, "locationName": "Friends Central School", "isInactive": false},
+              {
+                "id": 12,
+                "locationName": "Friends Central School",
+                "address": "1101 City Avenue",
+                "city": "Wynnewood",
+                "state": "PA",
+                "postalCode": "19096",
+                "phone": "610-555-0100",
+                "isInactive": false
+              },
               {"id": 13, "locationName": "Old Location", "isInactive": true}
             ]
             """;
-        var handler = new RecordingHandler(_ => Json(HttpStatusCode.OK, response));
+        const string clientResponse = """
+            [
+              {
+                "id": 72,
+                "firstName": "Alex",
+                "lastName": "Morgan",
+                "email": "alex@example.test",
+                "phone": "610-555-0123",
+                "isAdmin": true,
+                "location": {"id": 12}
+              },
+              {
+                "id": 73,
+                "firstName": "Secondary",
+                "lastName": "Contact",
+                "email": "secondary@example.test",
+                "location": {"id": 12}
+              }
+            ]
+            """;
+        var handler = new RecordingHandler(request => Json(
+            HttpStatusCode.OK,
+            request.RequestUri?.AbsolutePath.EndsWith("/Clients", StringComparison.Ordinal) == true
+                ? clientResponse
+                : locationResponse));
         using var httpClient = new HttpClient(handler);
         var client = new WhdRestClient(httpClient);
 
@@ -228,15 +472,243 @@ public sealed class WhdRestClientTests
         Assert.Equal("WHD-LOCATION-12", location.ExternalId);
         Assert.Equal("Friends Central School", location.Name);
         Assert.Equal("Friends Central School", location.LocationName);
-        Assert.Null(location.ContactName);
+        Assert.Equal("Alex Morgan", location.ContactName);
+        Assert.Equal("alex@example.test", location.ContactEmail);
+        Assert.Equal("610-555-0123", location.Phone);
+        Assert.Equal("1101 City Avenue, Wynnewood, PA 19096", location.Address);
         Assert.Contains("/Locations", handler.Requests[0].Uri?.AbsolutePath);
+        Assert.Contains("/Clients", handler.Requests[1].Uri?.AbsolutePath);
     }
 
     [Fact]
-    public async Task AutoAuthenticationIsDetectedOnlyOncePerConnection()
+    public async Task FullClientSyncLoadsDetailedWhdContactInformation()
+    {
+        const string locationResponse = """
+            [
+              {
+                "id": 12,
+                "locationName": "Holy Ghost Prep",
+                "address": "Fallback location address",
+                "city": "Bensalem",
+                "state": "PA",
+                "postalCode": "19020"
+              }
+            ]
+            """;
+        const string clientListResponse = """
+            [
+              {
+                "id": 72,
+                "firstName": "Mike",
+                "lastName": "Jacobs",
+                "isAdmin": true,
+                "location": {"id": 12}
+              }
+            ]
+            """;
+        const string clientDetailResponse = """
+            {
+              "id": 72,
+              "firstName": "Mike",
+              "lastName": "Jacobs",
+              "email": "technology@holyghostprep.org",
+              "secondaryEmail": "mjacobs@holyghostprep.org",
+              "phone": "(215) 639-2102",
+              "phone2": "(610) 613-1882",
+              "address": "2429 Bristol Pike",
+              "city": "Bensalem",
+              "state": "PA",
+              "zip": "19020",
+              "location": {"id": 12}
+            }
+            """;
+        var handler = new RecordingHandler(request =>
+        {
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            return Json(
+                HttpStatusCode.OK,
+                path.EndsWith("/Clients/72", StringComparison.Ordinal)
+                    ? clientDetailResponse
+                    : path.EndsWith("/Clients", StringComparison.Ordinal)
+                        ? clientListResponse
+                        : locationResponse);
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetClientsAsync(ExplicitSettings());
+
+        Assert.True(result.Success, result.Message);
+        var location = Assert.Single(result.Clients);
+        Assert.Equal("Mike Jacobs", location.ContactName);
+        Assert.Equal(
+            "technology@holyghostprep.org / mjacobs@holyghostprep.org",
+            location.ContactEmail);
+        Assert.Equal("(215) 639-2102 / (610) 613-1882", location.Phone);
+        Assert.Equal("2429 Bristol Pike, Bensalem, PA 19020", location.Address);
+        Assert.Contains(
+            handler.Requests,
+            request => request.Uri?.AbsolutePath.EndsWith("/Clients/72", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public async Task FullClientSyncRetainsListContactWhenWhdRejectsLegacyClientDetails()
+    {
+        const string locationResponse = """
+            [
+              {
+                "id": 22,
+                "locationName": "Problem School"
+              }
+            ]
+            """;
+        const string clientListResponse = """
+            [
+              {
+                "id": 486,
+                "firstName": "Legacy",
+                "lastName": "Contact",
+                "location": {"id": 22}
+              }
+            ]
+            """;
+        var handler = new RecordingHandler(request =>
+        {
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            return path.EndsWith("/Clients/486", StringComparison.Ordinal)
+                ? Json(
+                    HttpStatusCode.BadRequest,
+                    """{"message":"The provider e-mail address does not meet RFC 5322."}""")
+                : Json(
+                    HttpStatusCode.OK,
+                    path.EndsWith("/Clients", StringComparison.Ordinal)
+                        ? clientListResponse
+                        : locationResponse);
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetClientsAsync(ExplicitSettings());
+
+        Assert.True(result.Success, result.Message);
+        var location = Assert.Single(result.Clients);
+        Assert.Equal("Legacy Contact", location.ContactName);
+        Assert.True(string.IsNullOrWhiteSpace(location.ContactEmail));
+        Assert.Contains("486", result.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            "list data was retained",
+            result.Message,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task FullClientSyncStillFailsWhenClientDetailServiceIsUnavailable()
+    {
+        const string locationResponse =
+            """[{"id":22,"locationName":"Problem School"}]""";
+        const string clientListResponse =
+            """[{"id":486,"firstName":"Legacy","lastName":"Contact","location":{"id":22}}]""";
+        var handler = new RecordingHandler(request =>
+        {
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            return path.EndsWith("/Clients/486", StringComparison.Ordinal)
+                ? Json(HttpStatusCode.InternalServerError, """{"message":"Unavailable"}""")
+                : Json(
+                    HttpStatusCode.OK,
+                    path.EndsWith("/Clients", StringComparison.Ordinal)
+                        ? clientListResponse
+                        : locationResponse);
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetClientsAsync(ExplicitSettings());
+
+        Assert.False(result.Success);
+        Assert.Contains("client 486", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("HTTP 500", result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FullClientSyncRetainsListContactWhenOptionalClientDetailTimesOut()
+    {
+        const string locationResponse =
+            """[{"id":22,"locationName":"Slow School"}]""";
+        const string clientListResponse =
+            """[{"id":486,"firstName":"Slow","lastName":"Contact","location":{"id":22}}]""";
+        var handler = new RecordingHandler(request =>
+        {
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            if (path.EndsWith("/Clients/486", StringComparison.Ordinal))
+            {
+                throw new TaskCanceledException("Simulated optional detail timeout.");
+            }
+
+            return Json(
+                HttpStatusCode.OK,
+                path.EndsWith("/Clients", StringComparison.Ordinal)
+                    ? clientListResponse
+                    : locationResponse);
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetClientsAsync(ExplicitSettings());
+
+        Assert.True(result.Success, result.Message);
+        var location = Assert.Single(result.Clients);
+        Assert.Equal("Slow Contact", location.ContactName);
+        Assert.Contains("486", result.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            "list data was retained",
+            result.Message,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task FullClientSyncExplainsTimeoutWhenRequiredListDataTimesOut()
+    {
+        var handler = new RecordingHandler(request =>
+        {
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            if (path.EndsWith("/Clients", StringComparison.Ordinal))
+            {
+                throw new TaskCanceledException("The operation was canceled.");
+            }
+
+            return Json(
+                HttpStatusCode.OK,
+                """[{"id":22,"locationName":"Slow School"}]""");
+        });
+        using var httpClient = new HttpClient(handler)
+        {
+            Timeout = TimeSpan.FromSeconds(90)
+        };
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetClientsAsync(ExplicitSettings());
+
+        Assert.False(result.Success);
+        Assert.Contains("timed out after 90 seconds", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("required list data", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("operation was canceled", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AutoAuthenticationUsesPermissionLightProbeOnlyOncePerConnection()
     {
         const string response = "[{\"id\":1,\"subject\":\"One\",\"clientReporter\":{\"id\":1,\"displayName\":\"Client\"}}]";
-        var handler = new RecordingHandler(_ => Json(HttpStatusCode.OK, response));
+        var handler = new RecordingHandler(request =>
+        {
+            if (request.RequestUri?.AbsolutePath.EndsWith("/Session", StringComparison.Ordinal) == true)
+            {
+                return request.Method == HttpMethod.Get
+                    ? Json(HttpStatusCode.OK, "{\"sessionKey\":\"temporary-key\",\"currentTechId\":7,\"instanceId\":-1}")
+                    : Json(HttpStatusCode.OK, "{}");
+            }
+
+            return Json(HttpStatusCode.OK, response);
+        });
         using var httpClient = new HttpClient(handler);
         var client = new WhdRestClient(httpClient);
         var settings = new WhdConnectionSettings
@@ -246,9 +718,26 @@ public sealed class WhdRestClientTests
             Secret = "secret"
         };
 
-        Assert.True((await client.GetMyTicketsAsync(settings)).Success);
-        Assert.True((await client.GetMyTicketsAsync(settings)).Success);
-        Assert.Equal(3, handler.RequestCount);
+        Assert.True((await client.GetOrganizationTicketsAsync(settings)).Success);
+        Assert.True((await client.GetOrganizationTicketsAsync(settings)).Success);
+        Assert.Equal(4, handler.RequestCount);
+        Assert.EndsWith("/Session", handler.Requests[0].Uri?.AbsolutePath, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "qualifier=",
+            Uri.UnescapeDataString(handler.Requests[0].Uri?.Query ?? string.Empty),
+            StringComparison.OrdinalIgnoreCase);
+        Assert.All(
+            handler.Requests.Skip(2),
+            request =>
+            {
+                Assert.EndsWith("/Tickets", request.Uri?.AbsolutePath, StringComparison.Ordinal);
+                Assert.Contains(
+                    "qualifier=((deleted = null) or (deleted = 0) or (deleted = 1))",
+                    Uri.UnescapeDataString(request.Uri?.Query ?? string.Empty),
+                    StringComparison.Ordinal);
+            });
+        Assert.DoesNotContain(handler.Requests, request =>
+            request.Uri?.AbsolutePath.EndsWith("/Tickets/mine", StringComparison.OrdinalIgnoreCase) == true);
     }
 
     [Fact]

@@ -14,12 +14,9 @@ SELECT [PrincipalName]
 FROM
 (
     VALUES
-        (N'$(DeploymentGroup)'),
-        (N'$(TechnicianGroup)'),
-        (N'$(ManagerGroup)'),
+        (N'$(UserGroup)'),
         (N'$(AdminGroup)'),
-        (N'$(SyncOperatorGroup)'),
-        (N'$(AuditReaderGroup)')
+        (N'$(SyncServicePrincipal)')
 ) AS Principals([PrincipalName]);
 
 OPEN PrincipalCursor;
@@ -49,6 +46,45 @@ GO
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
+DECLARE @LegacyRoleName sysname;
+DECLARE @LegacyMemberName sysname;
+DECLARE @LegacySql nvarchar(max);
+
+DECLARE LegacyMembershipCursor CURSOR LOCAL FAST_FORWARD FOR
+SELECT
+    role_principal.[name],
+    member_principal.[name]
+FROM sys.database_role_members AS drm
+INNER JOIN sys.database_principals AS role_principal
+    ON role_principal.[principal_id] = drm.[role_principal_id]
+INNER JOIN sys.database_principals AS member_principal
+    ON member_principal.[principal_id] = drm.[member_principal_id]
+WHERE role_principal.[name] IN
+    (N'tb_role_auditor', N'tb_role_deployer');
+
+OPEN LegacyMembershipCursor;
+FETCH NEXT FROM LegacyMembershipCursor
+INTO @LegacyRoleName, @LegacyMemberName;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    SET @LegacySql =
+        N'ALTER ROLE ' + QUOTENAME(@LegacyRoleName)
+        + N' DROP MEMBER ' + QUOTENAME(@LegacyMemberName) + N';';
+    EXEC sys.sp_executesql @LegacySql;
+
+    FETCH NEXT FROM LegacyMembershipCursor
+    INTO @LegacyRoleName, @LegacyMemberName;
+END;
+
+CLOSE LegacyMembershipCursor;
+DEALLOCATE LegacyMembershipCursor;
+
+IF DATABASE_PRINCIPAL_ID(N'tb_role_auditor') IS NOT NULL
+    DROP ROLE [tb_role_auditor];
+IF DATABASE_PRINCIPAL_ID(N'tb_role_deployer') IS NOT NULL
+    DROP ROLE [tb_role_deployer];
+
 IF DATABASE_PRINCIPAL_ID(N'tb_role_user') IS NULL
     CREATE ROLE [tb_role_user] AUTHORIZATION [dbo];
 IF DATABASE_PRINCIPAL_ID(N'tb_role_manager') IS NULL
@@ -57,10 +93,8 @@ IF DATABASE_PRINCIPAL_ID(N'tb_role_admin') IS NULL
     CREATE ROLE [tb_role_admin] AUTHORIZATION [dbo];
 IF DATABASE_PRINCIPAL_ID(N'tb_role_sync_operator') IS NULL
     CREATE ROLE [tb_role_sync_operator] AUTHORIZATION [dbo];
-IF DATABASE_PRINCIPAL_ID(N'tb_role_auditor') IS NULL
-    CREATE ROLE [tb_role_auditor] AUTHORIZATION [dbo];
-IF DATABASE_PRINCIPAL_ID(N'tb_role_deployer') IS NULL
-    CREATE ROLE [tb_role_deployer] AUTHORIZATION [dbo];
+IF DATABASE_PRINCIPAL_ID(N'tb_role_sync_service') IS NULL
+    CREATE ROLE [tb_role_sync_service] AUTHORIZATION [dbo];
 
 DECLARE @Principal sysname;
 DECLARE @DefaultSchema sysname;
@@ -71,12 +105,9 @@ SELECT [PrincipalName], [DefaultSchema]
 FROM
 (
     VALUES
-        (N'$(DeploymentGroup)', N'dbo'),
-        (N'$(TechnicianGroup)', N'tb_app'),
-        (N'$(ManagerGroup)', N'tb_app'),
+        (N'$(UserGroup)', N'tb_app'),
         (N'$(AdminGroup)', N'tb_app'),
-        (N'$(SyncOperatorGroup)', N'tb_app'),
-        (N'$(AuditReaderGroup)', N'tb_app')
+        (N'$(SyncServicePrincipal)', N'tb_service')
 ) AS Principals([PrincipalName], [DefaultSchema]);
 
 OPEN UserCursor;
@@ -107,15 +138,11 @@ DECLARE @Membership TABLE
 
 INSERT INTO @Membership([RoleName], [MemberName])
 VALUES
-    (N'tb_role_deployer', N'$(DeploymentGroup)'),
-    (N'tb_role_user', N'$(TechnicianGroup)'),
-    (N'tb_role_user', N'$(ManagerGroup)'),
-    (N'tb_role_manager', N'$(ManagerGroup)'),
+    (N'tb_role_user', N'$(UserGroup)'),
     (N'tb_role_user', N'$(AdminGroup)'),
     (N'tb_role_manager', N'$(AdminGroup)'),
     (N'tb_role_admin', N'$(AdminGroup)'),
-    (N'tb_role_sync_operator', N'$(SyncOperatorGroup)'),
-    (N'tb_role_auditor', N'$(AuditReaderGroup)');
+    (N'tb_role_sync_operator', N'$(AdminGroup)');
 
 DECLARE @RoleName sysname;
 DECLARE @MemberName sysname;
@@ -152,6 +179,82 @@ END;
 
 CLOSE MembershipCursor;
 DEALLOCATE MembershipCursor;
+
+/* Keep the service boundary exact across redeployments or principal changes. */
+DECLARE ServiceBoundaryCursor CURSOR LOCAL STATIC READ_ONLY FOR
+SELECT role_principal.[name], member_principal.[name]
+FROM sys.database_role_members AS drm
+INNER JOIN sys.database_principals AS role_principal
+    ON role_principal.[principal_id] = drm.[role_principal_id]
+INNER JOIN sys.database_principals AS member_principal
+    ON member_principal.[principal_id] = drm.[member_principal_id]
+WHERE
+    (role_principal.[name] = N'tb_role_sync_service'
+     AND member_principal.[name] <> N'$(SyncServicePrincipal)')
+ OR (member_principal.[name] = N'$(SyncServicePrincipal)'
+     AND role_principal.[name] <> N'tb_role_sync_service')
+ OR (member_principal.[name] = N'tb_role_sync_service'
+     AND role_principal.[name] <> N'tb_role_sync_service');
+
+OPEN ServiceBoundaryCursor;
+FETCH NEXT FROM ServiceBoundaryCursor INTO @RoleName, @MemberName;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    SET @Sql = N'ALTER ROLE ' + QUOTENAME(@RoleName)
+        + N' DROP MEMBER ' + QUOTENAME(@MemberName) + N';';
+    EXEC sys.sp_executesql @Sql;
+
+    FETCH NEXT FROM ServiceBoundaryCursor INTO @RoleName, @MemberName;
+END;
+
+CLOSE ServiceBoundaryCursor;
+DEALLOCATE ServiceBoundaryCursor;
+
+/* The Windows service identity is deliberately not an application Admin. */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.database_role_members AS drm
+    INNER JOIN sys.database_principals AS role_principal
+        ON role_principal.principal_id = drm.role_principal_id
+    INNER JOIN sys.database_principals AS member_principal
+        ON member_principal.principal_id = drm.member_principal_id
+    WHERE role_principal.name = N'tb_role_sync_service'
+      AND member_principal.name = N'$(SyncServicePrincipal)'
+)
+BEGIN
+    SET @Sql = N'ALTER ROLE [tb_role_sync_service] ADD MEMBER '
+        + QUOTENAME(N'$(SyncServicePrincipal)') + N';';
+    EXEC sys.sp_executesql @Sql;
+END;
+
+DECLARE @SyncServiceSid varbinary(85) = SUSER_SID(N'$(SyncServicePrincipal)');
+IF @SyncServiceSid IS NULL
+    THROW 51790, N'The WHD sync service principal could not be resolved after login creation.', 1;
+
+/* Preserve historical FK actors if AD recreates the service principal with
+   the same name but a different SID, while freeing the unique login name. */
+UPDATE [tb_security].[Users]
+SET [LoginName] = LEFT
+    (
+        N'Retired:' + CONVERT(nvarchar(170), [WindowsSid], 1) + N':' + [LoginName],
+        256
+    )
+WHERE [LoginName] = N'$(SyncServicePrincipal)'
+  AND [WindowsSid] <> @SyncServiceSid;
+
+IF NOT EXISTS (SELECT 1 FROM [tb_security].[Users] WHERE [WindowsSid] = @SyncServiceSid)
+BEGIN
+    INSERT INTO [tb_security].[Users]
+    (
+        [WindowsSid], [LoginName], [DisplayName], [IsTechnician], [IsManager], [IsAdmin], [IsSyncOperator]
+    )
+    VALUES
+    (
+        @SyncServiceSid, N'$(SyncServicePrincipal)', N'TechBench WHD Sync Service', 0, 0, 0, 0
+    );
+END;
 
 PRINT N'TechBench AD logins, database users, and role memberships are configured.';
 GO

@@ -1,5 +1,5 @@
 using System.IO;
-using Microsoft.Data.Sqlite;
+using Microsoft.Data.SqlClient;
 using TechBench.Models;
 
 namespace TechBench.ViewModels;
@@ -35,22 +35,16 @@ public sealed partial class MainWindowViewModel
 
             IsEntryOperationRunning = true;
             EntryOperationText = "Importing worklog notes...";
-            var backup = _databaseBackupService.CreateBackup("Pre-import backup");
-            if (!backup.Succeeded)
-            {
-                _dialogService.Error("Import worklog", $"Import stopped because the safety backup failed. {backup.Message}");
-                StatusMessage = backup.Message;
-                return;
-            }
-
-            var count = _repository.ImportWorkEntries(entries, importViewModel.BuildAliasMappings());
-            RefreshDatabaseSafetyStatus();
+            var aliasMappings = _currentUser.CanManageSharedConfiguration
+                ? importViewModel.BuildAliasMappings()
+                : null;
+            var count = _repository.ImportWorkEntries(entries, aliasMappings);
             RefreshAll();
             RunSearch();
             StatusMessage = $"Imported {count} worklog notes from {Path.GetFileName(path)}.";
-            _dialogService.Info("Import worklog", $"Imported {count} notes. Backup: {Path.GetFileName(backup.BackupPath)}");
+            _dialogService.Info("Import worklog", $"Imported {count} notes into the shared SQL workspace.");
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException or InvalidOperationException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqlException or InvalidOperationException)
         {
             StatusMessage = $"Worklog import failed: {ex.Message}";
             _dialogService.Error("Import worklog", StatusMessage);

@@ -55,7 +55,7 @@ public sealed partial class MainWindowViewModel
 
     private bool CanSyncWhdNote(object? parameter)
     {
-        if (IsEntryOperationRunning)
+        if (!CanWrite || IsEntryOperationRunning)
         {
             return false;
         }
@@ -87,15 +87,6 @@ public sealed partial class MainWindowViewModel
         bool allowConflictPrompt,
         bool refreshAfter)
     {
-        if (_isSageVerificationRunning)
-        {
-            StatusMessage = "Waiting for the current read-only Sage verification before synchronizing WHD...";
-            while (_isSageVerificationRunning)
-            {
-                await Task.Delay(100);
-            }
-        }
-
         entry = _repository.GetWorkEntry(entry.Id) ?? entry;
         if (entry.SagePosted)
         {
@@ -216,7 +207,8 @@ public sealed partial class MainWindowViewModel
             BuildWhdConnectionSettings(),
             whdTicketId,
             techNoteId,
-            WhdNoteTextFormatter.BuildWhdNoteText(entry));
+            WhdNoteTextFormatter.BuildWhdNoteText(entry),
+            WhdRestPoster.GetWhdNoteTimestampUtc(entry));
         if (!update.Success)
         {
             RecordWhdSyncFailure(entry, update.Message, trackingLog.ExternalReference, refreshAfter, update.Payload);
@@ -278,7 +270,7 @@ public sealed partial class MainWindowViewModel
         entry.WhdPosted = true;
         entry.WhdPostedAt = DateTime.Now;
         entry.LastError = null;
-        TechBenchRepository.UpdatePostingStatus(entry);
+        WorkEntryPostingStatusCalculator.Update(entry);
         _repository.SaveWorkEntry(entry);
         _repository.AddPostingLog(new PostingLog
         {
@@ -305,7 +297,7 @@ public sealed partial class MainWindowViewModel
             ? message
             : $"WHD sync pending: {message}";
         entry.LastError = fullMessage;
-        TechBenchRepository.UpdatePostingStatus(entry);
+        WorkEntryPostingStatusCalculator.Update(entry);
         _repository.SaveWorkEntry(entry);
         _repository.AddPostingLog(new PostingLog
         {
@@ -329,7 +321,7 @@ public sealed partial class MainWindowViewModel
     {
         var fullMessage = $"WHD sync conflict: {message}";
         entry.LastError = fullMessage;
-        TechBenchRepository.UpdatePostingStatus(entry);
+        WorkEntryPostingStatusCalculator.Update(entry);
         _repository.SaveWorkEntry(entry);
         _repository.AddPostingLog(new PostingLog
         {

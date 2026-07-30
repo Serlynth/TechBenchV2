@@ -3,6 +3,7 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using TechBench.Models;
 using TechBench.Services;
 
 namespace TechBench.Tests;
@@ -36,6 +37,16 @@ public sealed class SidebarThemeTests
             button.Tag = "Active";
             button.UpdateLayout();
             Assert.Equal(Colors.White, Assert.IsType<SolidColorBrush>(label.Foreground).Color);
+
+            ThemeService.Apply(AppTheme.Dark, BenchModule.SalesBench);
+            Assert.Equal(
+                Color.FromRgb(0x22, 0xC5, 0x5E),
+                Assert.IsType<SolidColorBrush>(app.Resources["AccentBrush"]).Color);
+
+            ThemeService.Apply(AppTheme.Dark, BenchModule.AdminBench);
+            Assert.Equal(
+                Color.FromRgb(0xEF, 0x44, 0x44),
+                Assert.IsType<SolidColorBrush>(app.Resources["AccentBrush"]).Color);
         });
     }
 

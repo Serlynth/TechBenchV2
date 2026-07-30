@@ -22,7 +22,6 @@ public sealed partial class MainWindowViewModel
     private DateTime? _lastEditorSaveAt;
     private string _editorSaveStatus = "Saved";
     private string _searchTags = string.Empty;
-    private string? _selectedEditorTagSuggestion;
     private FollowUpOption? _searchFollowUpOption;
     private bool _searchOpenFollowUpsOnly;
     private NoteTemplate? _managedNoteTemplate;
@@ -61,22 +60,6 @@ public sealed partial class MainWindowViewModel
         set => SetProperty(ref _searchTags, value);
     }
 
-    public string? SelectedEditorTagSuggestion
-    {
-        get => _selectedEditorTagSuggestion;
-        set
-        {
-            if (!SetProperty(ref _selectedEditorTagSuggestion, value) || string.IsNullOrWhiteSpace(value))
-            {
-                return;
-            }
-
-            Editor.Tags = WorkEntryTags.Add(Editor.Tags, value);
-            _selectedEditorTagSuggestion = null;
-            OnPropertyChanged();
-        }
-    }
-
     public FollowUpOption? SearchFollowUpOption
     {
         get => _searchFollowUpOption;
@@ -99,10 +82,19 @@ public sealed partial class MainWindowViewModel
                 TemplateName = value?.Name ?? string.Empty;
                 TemplateCategory = value?.Category ?? string.Empty;
                 TemplateText = value?.TemplateText ?? string.Empty;
+                OnPropertyChanged(nameof(CanEditManagedNoteTemplate));
                 DeleteNoteTemplateCommand.RaiseCanExecuteChanged();
+                SaveNoteTemplateCommand.RaiseCanExecuteChanged();
             }
         }
     }
+
+    public bool CanEditManagedNoteTemplate =>
+        _currentUser.IsAdmin
+        && (ManagedNoteTemplate is null
+            || ManagedNoteTemplate.ScopeType.Equals(
+                "Organization",
+                StringComparison.OrdinalIgnoreCase));
 
     public string TemplateName
     {
@@ -209,26 +201,33 @@ public sealed partial class MainWindowViewModel
         InsertRecentNoteCommand = new RelayCommand(InsertRecentNote, parameter => parameter is WorkEntry && IsEditorEditable);
         ToggleNoteLinkPickerCommand = new RelayCommand(
             _ => IsNoteLinkPickerOpen = !IsNoteLinkPickerOpen,
-            _ => Editor.Id > 0 && !IsEntryOperationRunning && !IsEditorLocked);
+            _ => CanWrite && Editor.Id > 0 && !IsEntryOperationRunning && !IsEditorLocked);
         LinkExistingNoteCommand = new RelayCommand(
             LinkExistingNote,
-            parameter => parameter is WorkEntry { Id: > 0 } && Editor.Id > 0 && !IsEntryOperationRunning && !IsEditorLocked);
+            parameter => CanWrite && parameter is WorkEntry { Id: > 0 } && Editor.Id > 0 && !IsEntryOperationRunning && !IsEditorLocked);
         RemoveNoteLinkCommand = new RelayCommand(
             RemoveNoteLink,
-            parameter => parameter is WorkEntryLink { Id: > 0 } && !IsEntryOperationRunning && !IsEditorLocked);
+            parameter => CanWrite && parameter is WorkEntryLink { Id: > 0 } && !IsEntryOperationRunning && !IsEditorLocked);
         OpenRelatedNoteCommand = new RelayCommand(
             OpenRelatedNote,
             parameter => parameter is WorkEntryLink or WorkEntry);
         ContinueThisWorkCommand = new RelayCommand(
             _ => ContinueThisWork(),
-            _ => Editor.Id > 0 && !IsEntryOperationRunning);
+            _ => CanWrite && Editor.Id > 0 && !IsEntryOperationRunning);
         CancelPendingNoteLinkCommand = new RelayCommand(
             _ => CancelPendingNoteLink(),
-            _ => HasPendingFollowUp);
-        ImportGoogleSheetsCommand = new RelayCommand(_ => ImportGoogleSheetsCsv(), _ => !IsEntryOperationRunning);
-        NewNoteTemplateCommand = new RelayCommand(_ => StartNewNoteTemplate());
+            _ => CanWrite && HasPendingFollowUp);
+        ImportGoogleSheetsCommand = new RelayCommand(
+            _ => ImportGoogleSheetsCsv(),
+            _ => CanWrite && !IsEntryOperationRunning);
+        NewNoteTemplateCommand = new RelayCommand(
+            _ => StartNewNoteTemplate(),
+            _ => _currentUser.IsAdmin && CanWrite);
         SaveNoteTemplateCommand = new RelayCommand(_ => SaveManagedNoteTemplate(), _ => CanSaveManagedNoteTemplate());
-        DeleteNoteTemplateCommand = new RelayCommand(_ => DeleteManagedNoteTemplate(), _ => ManagedNoteTemplate is { Id: > 0 });
+        DeleteNoteTemplateCommand = new RelayCommand(
+            _ => DeleteManagedNoteTemplate(),
+            _ => ManagedNoteTemplate is { Id: > 0 } template
+                && CanManageNoteTemplate(template));
 
         FollowUpOptions.Add(new FollowUpOption(FollowUpState.None, "None"));
         FollowUpOptions.Add(new FollowUpOption(FollowUpState.FollowUp, "Follow-up"));
@@ -294,7 +293,7 @@ public sealed partial class MainWindowViewModel
 
     private void PersistEditorRecoveryDraft()
     {
-        if (_isPersistingEditorDraft || IsEntryOperationRunning || IsEditorLocked || !Editor.IsDirty)
+        if (!CanWrite || _isPersistingEditorDraft || IsEntryOperationRunning || IsEditorLocked || !Editor.IsDirty)
         {
             return;
         }
@@ -322,6 +321,12 @@ public sealed partial class MainWindowViewModel
 
     private void RestoreEditorDraft()
     {
+        if (!CanWrite)
+        {
+            EditorSaveStatus = "Read-only preview";
+            return;
+        }
+
         var draft = _repository.GetEditorDraft();
         if (draft is null)
         {
@@ -382,7 +387,7 @@ public sealed partial class MainWindowViewModel
     private void PersistEditorDraftBeforeExit()
     {
         _editorDraftTimer.Stop();
-        if (!Editor.IsDirty)
+        if (!CanWrite || !Editor.IsDirty)
         {
             return;
         }
@@ -393,6 +398,46 @@ public sealed partial class MainWindowViewModel
         }
         catch
         {
+        }
+    }
+
+    private bool TrySaveEditorRecoveryDraftForForcedSignOut(out string result)
+    {
+        _editorDraftTimer.Stop();
+        if (!CanWrite)
+        {
+            result = "TechBench could not save a recovery draft because this session is read-only.";
+            return false;
+        }
+
+        if (!Editor.IsDirty)
+        {
+            result = "TechBench closed safely; there were no unsaved entry changes.";
+            return true;
+        }
+
+        try
+        {
+            var draft = BuildEditorRecoveryDraft();
+            _repository.SaveEditorDraft(draft);
+            _lastEditorSaveAt = draft.UpdatedAt;
+            EditorSaveStatus = $"Unsaved - recovery copy {_lastEditorSaveAt.Value:h:mm tt}";
+            result =
+                "Unsaved entry work was saved as a server recovery draft before TechBench closed. "
+                + "It was not posted to WHD or Sage.";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            EditorSaveStatus = "Unsaved - recovery failed";
+            result =
+                "TechBench could not save the current entry recovery draft, so forced sign-out was canceled: "
+                + ex.Message;
+            return false;
+        }
+        finally
+        {
+            OnPropertyChanged(nameof(WorkspaceStateLabel));
         }
     }
 
@@ -723,8 +768,12 @@ public sealed partial class MainWindowViewModel
 
     private bool CanSaveManagedNoteTemplate()
     {
-        return !string.IsNullOrWhiteSpace(TemplateName)
-            && !string.IsNullOrWhiteSpace(TemplateText);
+        return CanWrite
+            && CanEditManagedNoteTemplate
+            && !string.IsNullOrWhiteSpace(TemplateName)
+            && !string.IsNullOrWhiteSpace(TemplateText)
+            && (ManagedNoteTemplate is null
+                || CanManageNoteTemplate(ManagedNoteTemplate));
     }
 
     private void SaveManagedNoteTemplate()
@@ -737,6 +786,7 @@ public sealed partial class MainWindowViewModel
         var template = new NoteTemplate
         {
             Id = ManagedNoteTemplate?.Id ?? 0,
+            ScopeType = ManagedNoteTemplate?.ScopeType ?? "Organization",
             Name = TemplateName.Trim(),
             Category = TemplateCategory.Trim(),
             TemplateText = TemplateText.Trim()
@@ -749,6 +799,7 @@ public sealed partial class MainWindowViewModel
     private void DeleteManagedNoteTemplate()
     {
         if (ManagedNoteTemplate is not { Id: > 0 } template
+            || !CanManageNoteTemplate(template)
             || !_dialogService.Confirm(
                 "Delete template",
                 $"Delete the note template '{template.Name}'?",
@@ -762,6 +813,24 @@ public sealed partial class MainWindowViewModel
         ReloadNoteTemplates();
         StartNewNoteTemplate();
         StatusMessage = "Note template deleted.";
+    }
+
+    private bool CanManageNoteTemplate(NoteTemplate template) =>
+        _currentUser.IsAdmin
+        && CanWrite
+        && template.ScopeType.Equals(
+            "Organization",
+            StringComparison.OrdinalIgnoreCase);
+
+    private bool HasPendingTemplateChanges()
+    {
+        return ManagedNoteTemplate is null
+            ? !string.IsNullOrWhiteSpace(TemplateName)
+              || !string.IsNullOrWhiteSpace(TemplateCategory)
+              || !string.IsNullOrWhiteSpace(TemplateText)
+            : !TemplateName.Equals(ManagedNoteTemplate.Name, StringComparison.Ordinal)
+              || !TemplateCategory.Equals(ManagedNoteTemplate.Category, StringComparison.Ordinal)
+              || !TemplateText.Equals(ManagedNoteTemplate.TemplateText, StringComparison.Ordinal);
     }
 
     private void ReloadNoteTemplates(int? selectedId = null)

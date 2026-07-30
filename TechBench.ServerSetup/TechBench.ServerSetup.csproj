@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>TechBench.ServerSetup</AssemblyName>
+    <RootNamespace>TechBench.ServerSetup</RootNamespace>
+    <Version>0.6.0</Version>
+    <AssemblyVersion>0.6.0.0</AssemblyVersion>
+    <FileVersion>0.6.0.0</FileVersion>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\Assets\csri-techbench-icon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\TechBench.ServerManager\TechBench.ServerManager.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TechBenchEmbeddedPayload)' != ''">
+    <EmbeddedResource Include="$(TechBenchEmbeddedPayload)" LogicalName="TechBench.ServerSetup.Payload.zip" />
+  </ItemGroup>
+</Project>

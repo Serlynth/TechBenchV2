@@ -8,6 +8,7 @@ public sealed class WorkEntryLink
     public int CurrentWorkEntryId { get; set; }
     public WorkEntryLinkType LinkType { get; set; }
     public DateTime CreatedAt { get; set; }
+    public byte[]? RowVersion { get; set; }
     public WorkEntry RelatedEntry { get; set; } = new();
 
     public string RelationshipLabel => LinkType switch

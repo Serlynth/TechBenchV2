@@ -1,0 +1,117 @@
+<Window x:Class="TechBench.WorkspaceShellDemoWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:TechBench.Controls"
+        Title="TechBench UI Shell - Local Demo"
+        Icon="Assets/csri-techbench-icon.ico"
+        Width="1420"
+        Height="900"
+        MinWidth="1120"
+        MinHeight="720"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource WindowBackgroundBrush}">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="248" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <controls:WorkspaceNavigation />
+
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="76" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <controls:WorkspaceHeader />
+
+            <ScrollViewer Grid.Row="1"
+                          VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="24">
+                    <Border Background="{DynamicResource AccentSoftBrush}"
+                            BorderBrush="{DynamicResource AccentBrush}"
+                            BorderThickness="1"
+                            CornerRadius="12"
+                            Padding="18"
+                            Margin="0,0,0,18">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Expandable application shell"
+                                           FontSize="20"
+                                           FontWeight="SemiBold" />
+                                <TextBlock Text="Use the navigation groups to verify hierarchy, active states, and future workspace placement without connecting to SQL."
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           Margin="0,5,20,0"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                            <Border Grid.Column="1"
+                                    Background="{DynamicResource ControlBackgroundBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="14"
+                                    Padding="12,7"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="LOCAL DEMO  &#x00B7;  Nothing is saved"
+                                           Foreground="{DynamicResource SuccessBrush}"
+                                           FontSize="10"
+                                           FontWeight="Bold" />
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <UniformGrid Columns="2">
+                        <Border Style="{StaticResource CardStyle}"
+                                Margin="0,0,10,10">
+                            <StackPanel>
+                                <TextBlock Text="Task-based navigation"
+                                           FontSize="17"
+                                           FontWeight="SemiBold" />
+                                <TextBlock Text="Notes, Clients, Equipment, and System give new pages an obvious home."
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           Margin="0,7,0,0" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource CardStyle}"
+                                Margin="10,0,0,10">
+                            <StackPanel>
+                                <TextBlock Text="Shared active-state behavior"
+                                           FontSize="17"
+                                           FontWeight="SemiBold" />
+                                <TextBlock Text="Every destination uses one style and converter instead of adding a page-specific WPF style."
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           Margin="0,7,0,0" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource CardStyle}"
+                                Margin="0,10,10,0">
+                            <StackPanel>
+                                <TextBlock Text="Collapsible groups"
+                                           FontSize="17"
+                                           FontWeight="SemiBold" />
+                                <TextBlock Text="Technicians can keep daily work open and collapse the specialized areas they do not need."
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           Margin="0,7,0,0" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource CardStyle}"
+                                Margin="10,10,0,0">
+                            <StackPanel>
+                                <TextBlock Text="Database-free visual QA"
+                                           FontSize="17"
+                                           FontWeight="SemiBold" />
+                                <TextBlock Text="The shell can be reviewed on any workstation without authenticating or touching business data."
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           Margin="0,7,0,0" />
+                            </StackPanel>
+                        </Border>
+                    </UniformGrid>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</Window>

@@ -110,16 +110,7 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
                 sage.ProcessId,
                 cancellationToken);
 
-            if (!request.AutoSave)
-            {
-                var ticketNumber = WaitForTicketNumber(timeTickets, cancellationToken);
-                TryRestoreForeground(originalForeground);
-                var ticketLabel = string.IsNullOrWhiteSpace(ticketNumber) ? "" : $" #{ticketNumber}";
-                return new SageTimeTicketAutomationResult(
-                    true,
-                    $"Filled Sage ticket{ticketLabel} and left it unsaved for review. {validation}",
-                    ticketNumber);
-            }
+            var ticketNumber = WaitForTicketNumber(timeTickets, cancellationToken);
 
             InvokeToolbarButton(timeTickets, "Save");
             WaitForSaveResult(timeTickets, sage.ProcessId, cancellationToken);
@@ -128,6 +119,7 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
             return new SageTimeTicketAutomationResult(
                 true,
                 $"Submitted Save for the Sage time ticket. {validation}",
+                ticketNumber,
                 SaveSubmitted: true);
         }
         catch (OperationCanceledException)

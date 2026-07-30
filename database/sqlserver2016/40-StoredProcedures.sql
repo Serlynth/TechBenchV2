@@ -73,6 +73,22 @@ BEGIN
     BEGIN TRY
         BEGIN TRANSACTION;
 
+        /*
+            Active Directory can legitimately issue a new SID for a reused login
+            name. Preserve the historical row and its foreign-key relationships,
+            but release the unique login name before registering the current SID.
+        */
+        UPDATE conflicting_user WITH (UPDLOCK, HOLDLOCK)
+        SET [LoginName] = LEFT
+            (
+                N'Retired:' + CONVERT(nvarchar(170), conflicting_user.[WindowsSid], 1)
+                    + N':' + conflicting_user.[LoginName],
+                256
+            )
+        FROM [tb_security].[Users] AS conflicting_user
+        WHERE conflicting_user.[LoginName] = @LoginName
+          AND conflicting_user.[WindowsSid] <> @UserSid;
+
         UPDATE [tb_security].[Users] WITH (UPDLOCK, HOLDLOCK)
         SET
             [LoginName] = @LoginName,
@@ -250,6 +266,9 @@ BEGIN
         client.[LastSyncedAtUtc] AS [LastSyncedAt],
         client.[WhdLocationName],
         client.[WhdContactName],
+        client.[WhdContactEmail],
+        client.[WhdPhone],
+        client.[WhdAddress],
         client.[SageCustomerId],
         client.[SageCustomerName],
         client.[SageContactName],
@@ -264,6 +283,9 @@ BEGIN
           OR client.[Name] LIKE @Pattern ESCAPE N'~'
           OR client.[WhdLocationName] LIKE @Pattern ESCAPE N'~'
           OR client.[WhdContactName] LIKE @Pattern ESCAPE N'~'
+          OR client.[WhdContactEmail] LIKE @Pattern ESCAPE N'~'
+          OR client.[WhdPhone] LIKE @Pattern ESCAPE N'~'
+          OR client.[WhdAddress] LIKE @Pattern ESCAPE N'~'
           OR client.[SageCustomerId] LIKE @Pattern ESCAPE N'~'
           OR client.[SageCustomerName] LIKE @Pattern ESCAPE N'~'
           OR client.[SageContactName] LIKE @Pattern ESCAPE N'~'
@@ -309,6 +331,9 @@ BEGIN
         client.[LastSyncedAtUtc] AS [LastSyncedAt],
         client.[WhdLocationName],
         client.[WhdContactName],
+        client.[WhdContactEmail],
+        client.[WhdPhone],
+        client.[WhdAddress],
         client.[SageCustomerId],
         client.[SageCustomerName],
         client.[SageContactName],
@@ -542,6 +567,9 @@ BEGIN
             client.[LastSyncedAtUtc] AS [LastSyncedAt],
             client.[WhdLocationName],
             client.[WhdContactName],
+            client.[WhdContactEmail],
+            client.[WhdPhone],
+            client.[WhdAddress],
             client.[SageCustomerId],
             client.[SageCustomerName],
             client.[SageContactName],
@@ -575,10 +603,9 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    IF IS_ROLEMEMBER(N'tb_role_auditor') <> 1
-       AND IS_ROLEMEMBER(N'tb_role_deployer') <> 1
+    IF IS_ROLEMEMBER(N'tb_role_admin') <> 1
     BEGIN
-        THROW 51003, N'The Windows login is not authorized to read TechBench audit events.', 1;
+        THROW 51003, N'Only a current TechBench Admin may read TechBench audit events.', 1;
     END;
 
     SET @Limit =

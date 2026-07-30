@@ -1,0 +1,674 @@
+<Window x:Class="TechBench.EquipmentBoardDemoWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="TechBench Equipment Board - Local Demo"
+        Width="1500"
+        Height="900"
+        MinWidth="1100"
+        MinHeight="680"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource WindowBackgroundBrush}">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+
+        <Style x:Key="FieldLabelStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="1,0,0,7" />
+        </Style>
+
+        <Style x:Key="SectionHeadingStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="FontSize" Value="20" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+
+        <Style x:Key="EquipmentCardItemStyle" TargetType="{x:Type ListBoxItem}">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0,0,0,9" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ListBoxItem}">
+                        <Border x:Name="EquipmentCard"
+                                Background="{DynamicResource PanelBackgroundBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="10"
+                                SnapsToDevicePixels="True">
+                            <Grid>
+                                <Border Width="3"
+                                        HorizontalAlignment="Left"
+                                        Background="{Binding DeviceBadgeColor}"
+                                        CornerRadius="10,0,0,10" />
+                                <ContentPresenter Margin="13,11,11,11" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="EquipmentCard"
+                                        Property="BorderBrush"
+                                        Value="{DynamicResource AccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="EquipmentCard"
+                                        Property="BorderBrush"
+                                        Value="{DynamicResource AccentBrush}" />
+                                <Setter TargetName="EquipmentCard"
+                                        Property="BorderThickness"
+                                        Value="2" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="DeploymentEquipmentCardItemStyle"
+               TargetType="{x:Type ListBoxItem}"
+               BasedOn="{StaticResource EquipmentCardItemStyle}">
+            <Setter Property="Width" Value="268" />
+            <Setter Property="Margin" Value="0,0,10,10" />
+        </Style>
+
+        <DataTemplate x:Key="EquipmentCardTemplate">
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="30" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding DeviceGlyph}"
+                               FontFamily="Segoe MDL2 Assets"
+                               FontSize="17"
+                               Foreground="{Binding DeviceBadgeColor}"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" Margin="8,0,8,0">
+                        <TextBlock Text="{Binding Name}"
+                                   Foreground="{DynamicResource PrimaryTextBrush}"
+                                   FontWeight="SemiBold"
+                                   FontSize="13"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding IdentityLine}"
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   FontSize="10"
+                                   Margin="0,2,0,0"
+                                   TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <Border Grid.Column="2"
+                            Background="{DynamicResource ControlBackgroundBrush}"
+                            CornerRadius="8"
+                            Padding="7,3"
+                            VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="5"
+                                     Height="5"
+                                     Fill="{Binding StatusColor}"
+                                     Margin="0,0,5,0"
+                                     VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding StatusLabel}"
+                                       Foreground="{Binding StatusColor}"
+                                       FontSize="10"
+                                       FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+                <Grid Margin="38,9,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Background="{DynamicResource ControlBackgroundBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="7,3"
+                            Visibility="{Binding HasAssetTag, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <TextBlock Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="10">
+                            <Run Text="TAG " />
+                            <Run Text="{Binding AssetTagChipLabel, Mode=OneWay}" />
+                        </TextBlock>
+                    </Border>
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding LocationLine}"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               FontSize="10"
+                               Margin="8,0,0,0"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                </Grid>
+                <TextBlock Text="{Binding DeploymentOwnerLabel}"
+                           Foreground="#6BE6AE"
+                           FontSize="10"
+                           FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis"
+                           Margin="38,4,0,0"
+                           Visibility="{Binding HasDeploymentOwner, Converter={StaticResource BooleanToVisibilityConverter}}" />
+            </StackPanel>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="72" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Background="{DynamicResource PanelBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="22,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="34" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Image Width="190"
+                       Height="50"
+                       Source="Assets/csri-techbench-logo.png"
+                       Stretch="Uniform"
+                       HorizontalAlignment="Left"
+                       VerticalAlignment="Center"
+                       RenderOptions.BitmapScalingMode="HighQuality" />
+
+                <Border Grid.Column="2"
+                        MaxWidth="620"
+                        Height="42"
+                        HorizontalAlignment="Stretch"
+                        Background="{DynamicResource ControlBackgroundBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="9">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="42" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="&#xE721;"
+                                   FontFamily="Segoe MDL2 Assets"
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center" />
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding EquipmentSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 Padding="0"
+                                 VerticalContentAlignment="Center"
+                                 ToolTip="Search name, model, serial, part number, IP, type, or client" />
+                        <Button Grid.Column="2"
+                                Content="Clear"
+                                Command="{Binding ClearEquipmentSearchCommand}"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Padding="12,5"
+                                Margin="5" />
+                    </Grid>
+                </Border>
+
+                <StackPanel Grid.Column="3"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <Border Background="{DynamicResource ControlBackgroundBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="12"
+                            Padding="11,6"
+                            Margin="0,0,10,0">
+                        <TextBlock Text="{Binding EquipmentDeviceCountLabel}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold" />
+                    </Border>
+                    <Button Content="+  New device"
+                            Command="{Binding NewEquipmentCommand}"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            Margin="0,0,8,0" />
+                    <Button Content="Reset demo"
+                            Command="{Binding ResetDemoCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1" Margin="22,18,22,20">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Grid Margin="2,0,2,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="Equipment Board"
+                               Foreground="{DynamicResource PrimaryTextBrush}"
+                               FontSize="28"
+                               FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding EquipmentBoardStatus}"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               FontSize="13"
+                               TextWrapping="Wrap"
+                               Margin="0,5,20,0" />
+                </StackPanel>
+                <Border Grid.Column="1"
+                        Background="#402A2310"
+                        BorderBrush="#E8A23A"
+                        BorderThickness="1"
+                        CornerRadius="12"
+                        Padding="14,8"
+                        VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="LOCAL DEMO"
+                                   Foreground="#FFD17A"
+                                   FontWeight="Bold" />
+                        <TextBlock Text="  -  Nothing is saved to SQL"
+                                   Foreground="{DynamicResource PrimaryTextBrush}" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Grid Grid.Row="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition x:Name="EquipmentInventoryRow"
+                                   Height="*"
+                                   MinHeight="180" />
+                    <RowDefinition Height="6" />
+                    <RowDefinition x:Name="EquipmentDeploymentRow"
+                                   Height="245" />
+                </Grid.RowDefinitions>
+
+                <ScrollViewer Grid.Row="0"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Disabled"
+                              PanningMode="HorizontalOnly">
+                    <ItemsControl ItemsSource="{Binding EquipmentLanes}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Width="296"
+                                      Height="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType={x:Type ScrollViewer}}}"
+                                      Margin="0,0,12,0">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <Grid Grid.Row="0" Margin="2,0,2,10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="38"
+                                                Height="38"
+                                                CornerRadius="19"
+                                                Background="{Binding LaneAccentColor}">
+                                            <TextBlock Text="{Binding Initials}"
+                                                       FontFamily="{Binding AvatarFontFamily}"
+                                                       FontSize="13"
+                                                       FontWeight="Bold"
+                                                       Foreground="White"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" Margin="10,1,0,0">
+                                            <TextBlock Text="{Binding Title}"
+                                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                                       FontSize="14"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding Subtitle}"
+                                                       Foreground="{DynamicResource MutedTextBrush}"
+                                                       FontSize="10"
+                                                       Margin="0,2,0,0" />
+                                        </StackPanel>
+                                        <Border Grid.Column="2"
+                                                Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                BorderBrush="{DynamicResource BorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="10"
+                                                Padding="8,3"
+                                                VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding CountLabel}"
+                                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                                       FontSize="10"
+                                                       FontWeight="SemiBold" />
+                                        </Border>
+                                    </Grid>
+
+                                    <Border Grid.Row="1"
+                                            Padding="10"
+                                            Background="{DynamicResource PanelAltBackgroundBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="12">
+                                        <ListBox ItemsSource="{Binding Items}"
+                                                 AllowDrop="True"
+                                                 Background="Transparent"
+                                                 BorderThickness="0"
+                                                 ItemContainerStyle="{StaticResource EquipmentCardItemStyle}"
+                                                 ItemTemplate="{StaticResource EquipmentCardTemplate}"
+                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                                 PreviewMouseLeftButtonDown="EquipmentLaneListBox_PreviewMouseLeftButtonDown"
+                                                 PreviewMouseLeftButtonUp="EquipmentLaneListBox_PreviewMouseLeftButtonUp"
+                                                 PreviewMouseMove="EquipmentLaneListBox_PreviewMouseMove"
+                                                 DragOver="EquipmentLaneListBox_DragOver"
+                                                 DragLeave="EquipmentLaneListBox_DragLeave"
+                                                 Drop="EquipmentLaneListBox_Drop" />
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+
+                <GridSplitter x:Name="EquipmentDeploymentSplitter"
+                              Grid.Row="1"
+                              Height="6"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Stretch"
+                              Background="{DynamicResource BorderBrush}"
+                              Cursor="SizeNS"
+                              ResizeDirection="Rows"
+                              ResizeBehavior="PreviousAndNext"
+                              ShowsPreview="True" />
+
+                <Expander x:Name="EquipmentDeploymentExpander"
+                          Grid.Row="2"
+                          IsExpanded="True"
+                          HorizontalContentAlignment="Stretch"
+                          VerticalContentAlignment="Stretch"
+                          Margin="0,8,0,0"
+                          Expanded="EquipmentDeploymentExpander_Expanded"
+                          Collapsed="EquipmentDeploymentExpander_Collapsed">
+                    <Expander.Header>
+                        <Grid Margin="2,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Border Width="38"
+                                    Height="38"
+                                    CornerRadius="19"
+                                    Background="#38D996">
+                                <TextBlock Text="&#xE73E;"
+                                           FontFamily="Segoe MDL2 Assets"
+                                           FontSize="14"
+                                           Foreground="White"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" />
+                            </Border>
+                            <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                                <TextBlock Text="Deployment"
+                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                           FontSize="17"
+                                           FontWeight="SemiBold" />
+                                <TextBlock Text="Drop completed equipment here, then arrange the deployment order."
+                                           Foreground="{DynamicResource MutedTextBrush}"
+                                           FontSize="11"
+                                           Margin="0,2,0,0" />
+                            </StackPanel>
+                            <Border Grid.Column="2"
+                                    Background="#2438D996"
+                                    BorderBrush="#6638D996"
+                                    BorderThickness="1"
+                                    CornerRadius="10"
+                                    Padding="10,4"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="{Binding EquipmentDeploymentCountLabel}"
+                                           Foreground="#6BE6AE"
+                                           FontSize="10"
+                                           FontWeight="SemiBold" />
+                            </Border>
+                        </Grid>
+                    </Expander.Header>
+
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollBarVisibility="Disabled"
+                                  PanningMode="HorizontalOnly">
+                        <ItemsControl ItemsSource="{Binding DeploymentLanes}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Width="296"
+                                          Height="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType={x:Type ScrollViewer}}}"
+                                          Margin="0,0,12,0">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <Grid Grid.Row="0" Margin="2,0,2,8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="32"
+                                                    Height="32"
+                                                    CornerRadius="16"
+                                                    Background="{Binding LaneAccentColor}">
+                                                <TextBlock Text="{Binding Initials}"
+                                                           FontFamily="{Binding AvatarFontFamily}"
+                                                           FontSize="12"
+                                                           FontWeight="Bold"
+                                                           Foreground="White"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center" />
+                                            </Border>
+                                            <StackPanel Grid.Column="1" Margin="9,0,0,0">
+                                                <TextBlock Text="{Binding Title}"
+                                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                                           FontSize="13"
+                                                           FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding Subtitle}"
+                                                           Foreground="{DynamicResource MutedTextBrush}"
+                                                           FontSize="9"
+                                                           Margin="0,1,0,0" />
+                                            </StackPanel>
+                                            <Border Grid.Column="2"
+                                                    Background="#2438D996"
+                                                    BorderBrush="#6638D996"
+                                                    BorderThickness="1"
+                                                    CornerRadius="10"
+                                                    Padding="8,3"
+                                                    VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding CountLabel}"
+                                                           Foreground="#6BE6AE"
+                                                           FontSize="9"
+                                                           FontWeight="SemiBold" />
+                                            </Border>
+                                        </Grid>
+                                        <Border Grid.Row="1"
+                                                Padding="10"
+                                                MinHeight="70"
+                                                Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                BorderBrush="#6638D996"
+                                                BorderThickness="1"
+                                                CornerRadius="12">
+                                            <ListBox ItemsSource="{Binding Items}"
+                                                     AllowDrop="True"
+                                                     Background="Transparent"
+                                                     BorderThickness="0"
+                                                     ItemContainerStyle="{StaticResource DeploymentEquipmentCardItemStyle}"
+                                                     ItemTemplate="{StaticResource EquipmentCardTemplate}"
+                                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                                     PreviewMouseLeftButtonDown="EquipmentLaneListBox_PreviewMouseLeftButtonDown"
+                                                     PreviewMouseLeftButtonUp="EquipmentLaneListBox_PreviewMouseLeftButtonUp"
+                                                     PreviewMouseMove="EquipmentLaneListBox_PreviewMouseMove"
+                                                     DragOver="EquipmentLaneListBox_DragOver"
+                                                     DragLeave="EquipmentLaneListBox_DragLeave"
+                                                     Drop="EquipmentLaneListBox_Drop" />
+                                        </Border>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Expander>
+
+                <Border Grid.RowSpan="3"
+                        Width="410"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Stretch"
+                        Panel.ZIndex="10"
+                        Style="{StaticResource CardStyle}"
+                        Visibility="{Binding IsEquipmentEditorVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="{Binding EquipmentEditorTitle}"
+                                           Style="{StaticResource SectionHeadingStyle}" />
+                                <TextBlock Foreground="{DynamicResource SecondaryTextBrush}">
+                                    <Run Text="Assigned to " />
+                                    <Run Text="{Binding EquipmentAssignmentLabel, Mode=OneWay}"
+                                         FontWeight="SemiBold" />
+                                </TextBlock>
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Content="Close"
+                                    Command="{Binding CancelEquipmentEditCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}" />
+                        </Grid>
+
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="0,0,8,8">
+                                <Border Background="#1838D996"
+                                        BorderBrush="#5538D996"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Padding="10"
+                                        Margin="0,0,0,14">
+                                    <TextBlock Text="Equipment records contain operational assignment details only. Account passwords stay in the encrypted Credentials store."
+                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                               FontSize="10"
+                                               TextWrapping="Wrap" />
+                                </Border>
+
+                                <TextBlock Text="Asset tag" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding EquipmentAssetTag, UpdateSourceTrigger=PropertyChanged}"
+                                         MaxLength="80"
+                                         Margin="0,0,0,12" />
+
+                                <TextBlock Text="Device type" Style="{StaticResource FieldLabelStyle}" />
+                                <ComboBox ItemsSource="{Binding EquipmentTypeOptions}"
+                                          Text="{Binding EquipmentDeviceType, UpdateSourceTrigger=PropertyChanged}"
+                                          IsEditable="True"
+                                          IsTextSearchEnabled="True"
+                                          Margin="0,0,0,12" />
+
+                                <TextBlock Text="Equipment name" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding EquipmentName, UpdateSourceTrigger=PropertyChanged}"
+                                         MaxLength="180"
+                                         Margin="0,0,0,12" />
+
+                                <TextBlock Text="Serial number" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding EquipmentSerialNumber, UpdateSourceTrigger=PropertyChanged}"
+                                         MaxLength="120"
+                                         Margin="0,0,0,12" />
+
+                                <TextBlock Text="Part number" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding EquipmentPartNumber, UpdateSourceTrigger=PropertyChanged}"
+                                         MaxLength="120"
+                                         Margin="0,0,0,12" />
+
+                                <TextBlock Text="Manufacturer" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding EquipmentManufacturer, UpdateSourceTrigger=PropertyChanged}"
+                                         MaxLength="120"
+                                         Margin="0,0,0,12" />
+
+                                <TextBlock Text="Model" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding EquipmentModel, UpdateSourceTrigger=PropertyChanged}"
+                                         MaxLength="120"
+                                         Margin="0,0,0,12" />
+
+                                <TextBlock Text="IP address" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding EquipmentIpAddress, UpdateSourceTrigger=PropertyChanged}"
+                                         MaxLength="80"
+                                         Margin="0,0,0,12" />
+
+                                <Separator Margin="0,4,0,14" />
+                                <TextBlock Text="Deployment assignment"
+                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                           FontSize="14"
+                                           FontWeight="SemiBold"
+                                           Margin="0,0,0,12" />
+
+                                <TextBlock Text="Client" Style="{StaticResource FieldLabelStyle}" />
+                                <ComboBox ItemsSource="{Binding ClientOptions}"
+                                          SelectedItem="{Binding EquipmentClient, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          IsTextSearchEnabled="True"
+                                          Margin="0,0,0,12" />
+
+                                <TextBlock Text="Client user / shared role" Style="{StaticResource FieldLabelStyle}" />
+                                <ComboBox ItemsSource="{Binding ClientUserOptions}"
+                                          SelectedItem="{Binding EquipmentClientUser, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          IsTextSearchEnabled="True"
+                                          Margin="0,0,0,12" />
+
+                                <TextBlock Text="Site / room / desk" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding EquipmentLocationName, UpdateSourceTrigger=PropertyChanged}"
+                                         MaxLength="180"
+                                         Margin="0,0,0,12" />
+
+                                <TextBlock Text="Notes" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox Text="{Binding EquipmentNotes, UpdateSourceTrigger=PropertyChanged}"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         MinHeight="90"
+                                         VerticalScrollBarVisibility="Auto" />
+                            </StackPanel>
+                        </ScrollViewer>
+
+                        <Grid Grid.Row="2" Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Button Content="Save for demo"
+                                    Command="{Binding SaveEquipmentCommand}"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Margin="0,0,10,0" />
+                            <Button Grid.Column="1"
+                                    Content="Remove"
+                                    Command="{Binding ArchiveEquipmentCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Foreground="{DynamicResource DangerBrush}" />
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

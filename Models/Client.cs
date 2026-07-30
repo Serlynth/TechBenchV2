@@ -10,11 +10,15 @@ public sealed class Client
     public DateTime? LastSyncedAt { get; set; }
     public string? WhdLocationName { get; set; }
     public string? WhdContactName { get; set; }
+    public string? WhdContactEmail { get; set; }
+    public string? WhdPhone { get; set; }
+    public string? WhdAddress { get; set; }
     public string? SageCustomerId { get; set; }
     public string? SageCustomerName { get; set; }
     public string? SageContactName { get; set; }
     public string? SageTelephone { get; set; }
     public string MatchStatus { get; set; } = "Unmatched";
+    public byte[]? RowVersion { get; set; }
 
     public string DisplayName => IsActive ? Name : $"{Name} (inactive)";
     public string SourceLabel => string.IsNullOrWhiteSpace(Source) ? "WHD" : Source;

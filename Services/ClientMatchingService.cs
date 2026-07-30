@@ -80,6 +80,44 @@ public static class ClientMatchingService
         return new ClientMatchSuggestion(top.Candidate, top.Score, description);
     }
 
+    public static string? SuggestCanonicalName(
+        Client client,
+        Client? selectedSageCandidate = null)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+
+        var sageName = !string.IsNullOrWhiteSpace(client.SageCustomerName)
+            ? client.SageCustomerName.Trim()
+            : null;
+        if (sageName is not null
+            && (!string.IsNullOrWhiteSpace(client.SageCustomerId)
+                || client.Source.Equals("Sage", StringComparison.OrdinalIgnoreCase)
+                || client.Source.Equals("Both", StringComparison.OrdinalIgnoreCase)))
+        {
+            // A stored Sage customer ID is the durable match. Prefer its current
+            // source name as the editable canonical-name suggestion even when
+            // the company has changed its name substantially.
+            return sageName;
+        }
+
+        if (selectedSageCandidate is not null
+            && IsSageMatchCandidate(selectedSageCandidate))
+        {
+            var candidateName = ResolveSageName(selectedSageCandidate).Trim();
+            var whdName = ResolveWhdName(client);
+            if (ScoreNames(whdName, candidateName) >= 0.68)
+            {
+                return candidateName;
+            }
+        }
+
+        return !string.IsNullOrWhiteSpace(client.WhdLocationName)
+            ? client.WhdLocationName.Trim()
+            : string.IsNullOrWhiteSpace(client.Name)
+                ? null
+                : client.Name.Trim();
+    }
+
     public static IReadOnlyList<ClientAutomaticMatch> FindSafeAutomaticMatches(
         IEnumerable<Client> whdClients,
         IEnumerable<Client> sageClients)
@@ -139,7 +177,88 @@ public static class ClientMatchingService
             matches.Add(new ClientAutomaticMatch(whd, best.SageClient, best.Score));
         }
 
+        AddNumberedLocationFamilyMatches(whdCandidates, sageCandidates, matches);
+
         return matches;
+    }
+
+    private static void AddNumberedLocationFamilyMatches(
+        IReadOnlyList<Client> whdCandidates,
+        IReadOnlyList<Client> sageCandidates,
+        ICollection<ClientAutomaticMatch> matches)
+    {
+        var assignedWhdIds = matches
+            .Select(static match => match.WhdClient.Id)
+            .ToHashSet();
+        var assignedSageIds = matches
+            .Select(static match => match.SageClient.Id)
+            .ToHashSet();
+        var families = whdCandidates
+            .Where(client => !assignedWhdIds.Contains(client.Id))
+            .Select(client => new
+            {
+                Client = client,
+                Stem = GetNumberedLocationStem(ResolveWhdName(client))
+            })
+            .Where(static candidate => candidate.Stem is not null)
+            .GroupBy(static candidate => candidate.Stem!, StringComparer.Ordinal)
+            .Where(static group => group.Count() >= 2)
+            .Select(group => new NumberedLocationFamily(
+                group.Key,
+                group.Select(static candidate => candidate.Client)
+                    .OrderBy(static client => client.Id)
+                    .ToList()))
+            .OrderBy(static family => family.Stem, StringComparer.Ordinal)
+            .ToList();
+        var availableSageCandidates = sageCandidates
+            .Where(client => !assignedSageIds.Contains(client.Id))
+            .ToList();
+        var familyScores = families
+            .SelectMany(family => availableSageCandidates.Select(sage => new FamilyMatchScore(
+                family,
+                sage,
+                ScoreNames(family.Stem, ResolveSageName(sage)))))
+            .ToList();
+
+        foreach (var family in families)
+        {
+            var familyRanking = familyScores
+                .Where(score => ReferenceEquals(score.Family, family))
+                .OrderByDescending(static score => score.Score)
+                .ThenBy(static score => score.SageClient.Id)
+                .ToList();
+            if (!HasUniqueAutomaticLead(familyRanking.Select(static score => score.Score)))
+            {
+                continue;
+            }
+
+            var best = familyRanking[0];
+            if (!IsStructurallySafeAutomaticMatch(
+                    family.Stem,
+                    ResolveSageName(best.SageClient)))
+            {
+                continue;
+            }
+
+            var sageRanking = familyScores
+                .Where(score => score.SageClient.Id == best.SageClient.Id)
+                .OrderByDescending(static score => score.Score)
+                .ThenBy(static score => score.Family.Stem, StringComparer.Ordinal)
+                .ToList();
+            if (!ReferenceEquals(sageRanking[0].Family, family)
+                || !HasUniqueAutomaticLead(sageRanking.Select(static score => score.Score)))
+            {
+                continue;
+            }
+
+            foreach (var whdClient in family.Clients)
+            {
+                matches.Add(new ClientAutomaticMatch(
+                    whdClient,
+                    best.SageClient,
+                    best.Score));
+            }
+        }
     }
 
     public static bool IsWhdLocationCandidate(Client client)
@@ -304,6 +423,25 @@ public static class ClientMatchingService
                 || longer.EndsWith($" {shorter}", StringComparison.Ordinal));
     }
 
+    private static string? GetNumberedLocationStem(string? value)
+    {
+        var normalized = NormalizeCompanyName(value);
+        var words = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+        var removedNumber = false;
+        while (words.Count > 0
+               && words[^1].Length <= 6
+               && words[^1].All(char.IsDigit))
+        {
+            words.RemoveAt(words.Count - 1);
+            removedNumber = true;
+        }
+
+        var stem = string.Join(' ', words);
+        return removedNumber && words.Count >= 2 && stem.Length >= 12
+            ? stem
+            : null;
+    }
+
     private static bool HasWhdLocationExternalId(string? externalIds)
     {
         return (externalIds ?? string.Empty)
@@ -338,4 +476,13 @@ public static class ClientMatchingService
     }
 
     private sealed record MatchScore(Client WhdClient, Client SageClient, double Score);
+
+    private sealed record NumberedLocationFamily(
+        string Stem,
+        IReadOnlyList<Client> Clients);
+
+    private sealed record FamilyMatchScore(
+        NumberedLocationFamily Family,
+        Client SageClient,
+        double Score);
 }

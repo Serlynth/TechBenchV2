@@ -23,12 +23,7 @@ GRANT EXECUTE ON OBJECT::[tb_app].[AdminSaveClient]
     TO [tb_role_admin];
 
 GRANT EXECUTE ON OBJECT::[tb_app].[ReadAuditEvents]
-    TO [tb_role_auditor];
-GRANT EXECUTE ON OBJECT::[tb_app].[ReadAuditEvents]
-    TO [tb_role_deployer];
-
-GRANT CONTROL ON DATABASE::[$(DatabaseName)]
-    TO [tb_role_deployer];
+    TO [tb_role_admin];
 
 PRINT N'TechBench stored-procedure-only grants applied.';
 GO

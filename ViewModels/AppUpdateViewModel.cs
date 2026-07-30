@@ -9,11 +9,11 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
     internal static readonly TimeSpan AutomaticCheckInterval = TimeSpan.FromHours(1);
 
     private readonly IAppUpdateService _updateService;
-    private readonly Func<DatabaseBackupResult> _createPreUpdateBackup;
     private readonly Action _prepareForRestart;
     private readonly Action _shutdownApplication;
     private readonly Func<bool> _canInstall;
     private readonly Action<string> _notifyUpdateAvailable;
+    private readonly LocalPreferences? _localPreferences;
     private readonly DispatcherTimer _automaticCheckTimer = new();
     private AppUpdateRelease? _availableUpdate;
     private bool _isChecking;
@@ -26,20 +26,20 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
 
     public AppUpdateViewModel(
         IAppUpdateService updateService,
-        Func<DatabaseBackupResult> createPreUpdateBackup,
         Action prepareForRestart,
         Action shutdownApplication,
         Func<bool> canInstall,
-        Action<string>? notifyUpdateAvailable = null)
+        Action<string>? notifyUpdateAvailable = null,
+        LocalPreferences? localPreferences = null)
     {
         _updateService = updateService;
-        _createPreUpdateBackup = createPreUpdateBackup;
         _prepareForRestart = prepareForRestart;
         _shutdownApplication = shutdownApplication;
         _canInstall = canInstall;
         _notifyUpdateAvailable = notifyUpdateAvailable ?? (_ => { });
+        _localPreferences = localPreferences;
         _statusText = updateService.IsInstalled
-            ? "TechBench checks for stable updates automatically."
+            ? BuildChannelStatusText(updateService)
             : "Install TechBench with Setup.exe to enable automatic updates.";
 
         CheckForUpdatesCommand = new AsyncRelayCommand(
@@ -68,6 +68,7 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
     public bool IsInstalled => _updateService.IsInstalled;
     public bool IsChecking => _isChecking;
     public bool IsDownloading => _isDownloading;
+    public bool CanChangeUpdateChannel => !IsChecking && !IsDownloading;
     public bool HasAvailableUpdate => _availableUpdate is not null;
     public bool IsUpdateCompletion => !string.IsNullOrWhiteSpace(_completedVersion);
     public bool CanInstallUpdate =>
@@ -105,6 +106,8 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
 
     public void StartAutomaticChecks()
     {
+        _ = CleanupDownloadedUpdatesSilentlyAsync();
+
         if (!IsInstalled || _automaticCheckTimer.IsEnabled)
         {
             return;
@@ -121,6 +124,11 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         }
 
         _completedVersion = version.Trim();
+        if (_localPreferences is not null)
+        {
+            _localPreferences.SkippedUpdateVersion = null;
+            TrySaveLocalPreferences();
+        }
         _isBannerDismissed = false;
         StatusText = $"Updated successfully to version {_completedVersion}.";
         RaiseDisplayProperties();
@@ -129,6 +137,20 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
     public void RefreshCommandStates()
     {
         InstallUpdateCommand.RaiseCanExecuteChanged();
+    }
+
+    public void HandleReleaseChannelChanged(string releaseChannel)
+    {
+        _availableUpdate = null;
+        _completedVersion = null;
+        _isBannerDismissed = false;
+        _lastNotifiedVersion = null;
+        StatusText = releaseChannel.Equals(
+                V2AppUpdateService.InventoryBetaReleaseChannel,
+                StringComparison.OrdinalIgnoreCase)
+            ? "Inventory Beta selected. Select Check for Updates to look for beta builds."
+            : "Stable selected. Select Check for Updates to return to stable releases.";
+        RaiseDisplayProperties();
     }
 
     public void Dispose()
@@ -164,8 +186,12 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
             _completedVersion = null;
             _isBannerDismissed = update is not null
                 && !userInitiated
-                && string.Equals(previousVersion, update.Version, StringComparison.OrdinalIgnoreCase)
-                && _isBannerDismissed;
+                && ((string.Equals(previousVersion, update.Version, StringComparison.OrdinalIgnoreCase)
+                        && _isBannerDismissed)
+                    || string.Equals(
+                        _localPreferences?.SkippedUpdateVersion,
+                        update.Version,
+                        StringComparison.OrdinalIgnoreCase));
             StatusText = update is null
                 ? $"TechBench {_updateService.CurrentVersion} is up to date."
                 : $"Version {update.Version} is ready to download.";
@@ -178,6 +204,11 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            if (_localPreferences is not null)
+            {
+                _localPreferences.LastUpdateCheckAtUtc = DateTime.UtcNow;
+                TrySaveLocalPreferences();
+            }
             SetChecking(false);
         }
     }
@@ -198,14 +229,8 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
             var progress = new Progress<int>(SetDownloadProgress);
             await _updateService.DownloadUpdateAsync(progress);
 
-            StatusText = "Saving your draft and creating a verified database backup...";
+            StatusText = "Saving your draft and preparing to restart...";
             _prepareForRestart();
-            var backup = _createPreUpdateBackup();
-            if (!backup.Succeeded)
-            {
-                StatusText = $"Update stopped: {backup.Message}";
-                return;
-            }
 
             StatusText = "Installing the update and restarting TechBench...";
             _updateService.BeginApplyAndRestart();
@@ -214,6 +239,7 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             StatusText = $"Update failed: {ex.Message}";
+            await CleanupDownloadedUpdatesSilentlyAsync();
         }
         finally
         {
@@ -232,7 +258,37 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
     private void DismissBanner()
     {
         _isBannerDismissed = true;
+        if (_localPreferences is not null && _availableUpdate is not null)
+        {
+            _localPreferences.SkippedUpdateVersion = _availableUpdate.Version;
+            TrySaveLocalPreferences();
+        }
         RaiseDisplayProperties();
+    }
+
+    private void TrySaveLocalPreferences()
+    {
+        try
+        {
+            LocalPreferenceStore.Save(_localPreferences!);
+        }
+        catch
+        {
+            // Update checks must remain usable if local preference persistence fails.
+        }
+    }
+
+    private async Task CleanupDownloadedUpdatesSilentlyAsync()
+    {
+        try
+        {
+            await _updateService.CleanupDownloadedUpdatesAsync();
+        }
+        catch
+        {
+            // Update-cache cleanup is best effort. It must never prevent startup,
+            // update checks, or recovery from a failed download.
+        }
     }
 
     private void ShowUpdateBanner()
@@ -267,6 +323,7 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
 
         _isChecking = value;
         OnPropertyChanged(nameof(IsChecking));
+        OnPropertyChanged(nameof(CanChangeUpdateChannel));
         RaiseCommandStates();
     }
 
@@ -279,6 +336,7 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
 
         _isDownloading = value;
         OnPropertyChanged(nameof(IsDownloading));
+        OnPropertyChanged(nameof(CanChangeUpdateChannel));
         OnPropertyChanged(nameof(IsProgressVisible));
         OnPropertyChanged(nameof(BannerDetail));
         OnPropertyChanged(nameof(HeaderUpdateLabel));
@@ -322,4 +380,14 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         ShowUpdateBannerCommand.RaiseCanExecuteChanged();
         OnPropertyChanged(nameof(CanInstallUpdate));
     }
+
+    private static string BuildChannelStatusText(
+        IAppUpdateService updateService) =>
+        updateService is IAppUpdateChannelService
+        {
+            SelectedReleaseChannel:
+                V2AppUpdateService.InventoryBetaReleaseChannel
+        }
+            ? "TechBench checks for Inventory Beta updates automatically."
+            : "TechBench checks for stable updates automatically.";
 }

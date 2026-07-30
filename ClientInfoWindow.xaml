@@ -1,0 +1,773 @@
+<Window x:Class="TechBench.ClientInfoWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:conv="clr-namespace:TechBench.Converters"
+        xmlns:controls="clr-namespace:TechBench.Controls"
+        Title="{Binding WindowTitle}"
+        Icon="Assets/csri-techbench-icon.ico"
+        Width="1180"
+        Height="780"
+        MinWidth="880"
+        MinHeight="600"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        PreviewKeyDown="Window_PreviewKeyDown">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+        <conv:InverseBooleanToVisibilityConverter x:Key="InverseBooleanToVisibilityConverter" />
+
+        <Style x:Key="ProfileBadgeStyle" TargetType="{x:Type Border}">
+            <Setter Property="Background" Value="#243B5A" />
+            <Setter Property="BorderBrush" Value="#41658F" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="11,5" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+
+        <Style x:Key="ProfileFieldValueStyle" TargetType="{x:Type TextBox}">
+            <Setter Property="IsReadOnly" Value="True" />
+            <Setter Property="FontFamily" Value="Consolas" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="MinHeight" Value="38" />
+            <Setter Property="Padding" Value="11,7" />
+        </Style>
+
+        <Style x:Key="ProfileContactValueStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="Margin" Value="0,3,16,0" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="248" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="58" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,0,0,1">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#0D2340" Offset="0" />
+                    <GradientStop Color="#152B47" Offset="0.58" />
+                    <GradientStop Color="#0B1728" Offset="1" />
+                </LinearGradientBrush>
+            </Border.Background>
+            <Grid Margin="34,22,34,20">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="118" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Width="86"
+                            Height="86"
+                            CornerRadius="43"
+                            Background="{DynamicResource AccentBrush}"
+                            BorderBrush="#88B9FF"
+                            BorderThickness="2"
+                            VerticalAlignment="Center">
+                        <TextBlock Text="{Binding ClientInitials}"
+                                   Foreground="White"
+                                   FontSize="30"
+                                   FontWeight="Bold"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center" />
+                    </Border>
+
+                    <StackPanel Grid.Column="1" Margin="24,0,24,0" VerticalAlignment="Center">
+                        <TextBlock Text="COMPLETE CLIENT PROFILE"
+                                   Foreground="#8DBEFF"
+                                   FontSize="11"
+                                   FontWeight="Bold"
+                                   Margin="0,0,0,5" />
+                        <TextBlock Text="{Binding ClientName}"
+                                   Foreground="White"
+                                   FontSize="31"
+                                   FontWeight="SemiBold"
+                                   TextWrapping="NoWrap"
+                                   TextTrimming="CharacterEllipsis"
+                                   Margin="0,0,0,11" />
+                        <WrapPanel>
+                            <Border Style="{StaticResource ProfileBadgeStyle}">
+                                <TextBlock Text="{Binding FieldCountLabel}" Foreground="#EAF3FF" FontSize="12" />
+                            </Border>
+                            <Border Style="{StaticResource ProfileBadgeStyle}">
+                                <TextBlock Text="{Binding GroupCountLabel}" Foreground="#EAF3FF" FontSize="12" />
+                            </Border>
+                            <Border Style="{StaticResource ProfileBadgeStyle}"
+                                    Visibility="{Binding HasClientUsers, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <TextBlock Text="{Binding ClientUserCountLabel}" Foreground="#EAF3FF" FontSize="12" />
+                            </Border>
+                            <Border Style="{StaticResource ProfileBadgeStyle}">
+                                <TextBlock Text="{Binding LastSyncedLabel}" Foreground="#EAF3FF" FontSize="12" />
+                            </Border>
+                        </WrapPanel>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                        <Border Background="#112D25"
+                                BorderBrush="{DynamicResource SuccessBrush}"
+                                BorderThickness="1"
+                                CornerRadius="13"
+                                Padding="12,6"
+                                HorizontalAlignment="Right"
+                                Margin="0,0,0,14">
+                            <TextBlock Text="{Binding VisibilityLabel}"
+                                       Foreground="#BDF7DC"
+                                       FontWeight="SemiBold"
+                                       FontSize="12" />
+                        </Border>
+                        <WrapPanel HorizontalAlignment="Right">
+                            <Button Content="Hide"
+                                    Command="{Binding HideCommand}"
+                                    MinWidth="88"
+                                    Margin="0,0,8,0" />
+                            <Button Content="Reveal All"
+                                    Command="{Binding RevealCommand}"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    MinWidth="112" />
+                        </WrapPanel>
+                    </StackPanel>
+                </Grid>
+
+                <Border Grid.Row="1"
+                        Background="#10253E"
+                        BorderBrush="#31567E"
+                        BorderThickness="1"
+                        CornerRadius="10"
+                        Padding="16,11">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.15*" />
+                            <ColumnDefinition Width="1.1*" />
+                            <ColumnDefinition Width="1.35*" />
+                            <ColumnDefinition Width="1.0*" />
+                            <ColumnDefinition Width="1.8*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                            <TextBlock Text="WEB HELP DESK MATCH"
+                                       Foreground="#79AEF4"
+                                       FontSize="10"
+                                       FontWeight="Bold" />
+                            <TextBlock Text="{Binding WhdMatchLabel}"
+                                       Style="{StaticResource ProfileContactValueStyle}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Visibility="{Binding HasWhdContactName, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="MAIN CONTACT" Foreground="#8EA9C7" FontSize="10" FontWeight="Bold" />
+                            <TextBlock Text="{Binding WhdContactName}"
+                                       Style="{StaticResource ProfileContactValueStyle}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2"
+                                    VerticalAlignment="Center"
+                                    Visibility="{Binding HasWhdContactEmail, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="EMAIL" Foreground="#8EA9C7" FontSize="10" FontWeight="Bold" />
+                            <TextBlock Text="{Binding WhdContactEmail}"
+                                       Style="{StaticResource ProfileContactValueStyle}"
+                                       ToolTip="{Binding WhdContactEmail}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="3"
+                                    VerticalAlignment="Center"
+                                    Visibility="{Binding HasWhdPhone, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="PHONE" Foreground="#8EA9C7" FontSize="10" FontWeight="Bold" />
+                            <TextBlock Text="{Binding WhdPhone}"
+                                       Style="{StaticResource ProfileContactValueStyle}"
+                                       ToolTip="{Binding WhdPhone}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="4"
+                                    VerticalAlignment="Center"
+                                    Visibility="{Binding HasWhdAddress, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="ADDRESS" Foreground="#8EA9C7" FontSize="10" FontWeight="Bold" />
+                            <TextBlock Text="{Binding WhdAddress}"
+                                       Style="{StaticResource ProfileContactValueStyle}"
+                                       ToolTip="{Binding WhdAddress}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1">
+            <TextBlock Text="No synchronized client information is available."
+                       Foreground="{DynamicResource MutedTextBrush}"
+                       FontSize="15"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Visibility="{Binding HasProfileContent, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Padding="28,26,16,22"
+                          Visibility="{Binding HasProfileContent, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <StackPanel>
+                    <StackPanel Margin="0,0,0,24"
+                                Visibility="{Binding HasEquipment, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Grid Margin="2,0,18,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="CLIENT INVENTORY"
+                                           Foreground="{DynamicResource AccentHoverBrush}"
+                                           FontSize="11"
+                                           FontWeight="Bold" />
+                                <TextBlock Text="Equipment currently assigned to this client"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           FontSize="13"
+                                           Margin="0,3,0,0" />
+                            </StackPanel>
+                            <Border Grid.Column="1"
+                                    Height="1"
+                                    Margin="16,0"
+                                    VerticalAlignment="Center"
+                                    Background="{DynamicResource BorderBrush}" />
+                            <Border Grid.Column="2"
+                                    Background="{DynamicResource AccentSoftBrush}"
+                                    CornerRadius="12"
+                                    Padding="11,5"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="{Binding EquipmentCountLabel}"
+                                           Foreground="{DynamicResource AccentHoverBrush}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold" />
+                            </Border>
+                        </Grid>
+                        <ItemsControl ItemsSource="{Binding Equipment}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Width="344"
+                                            MinHeight="150"
+                                            Margin="0,0,16,16"
+                                            Padding="0"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            Cursor="Hand"
+                                            ToolTip="Show equipment details"
+                                            Command="{Binding DataContext.OpenEquipmentDetailsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}">
+                                      <Border Background="{DynamicResource PanelBackgroundBrush}"
+                                              BorderBrush="{DynamicResource BorderBrush}"
+                                              BorderThickness="1"
+                                              CornerRadius="12"
+                                              Padding="16,14">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="*" />
+                                            </Grid.RowDefinitions>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="48" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Width="38"
+                                                        Height="38"
+                                                        CornerRadius="10"
+                                                        Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                        BorderBrush="{Binding DeviceBadgeColor}"
+                                                        BorderThickness="1">
+                                                    <TextBlock Text="{Binding DeviceGlyph}"
+                                                               FontFamily="Segoe MDL2 Assets"
+                                                               Foreground="{Binding DeviceBadgeColor}"
+                                                               FontSize="19"
+                                                               HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center" />
+                                                </Border>
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock Text="{Binding Name}"
+                                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                                               FontSize="15"
+                                                               FontWeight="SemiBold"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding ModelLine}"
+                                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                                               FontSize="12"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               Margin="0,2,0,0" />
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="2"
+                                                           Text="{Binding DeviceTypeLabel}"
+                                                           Foreground="{Binding DeviceBadgeColor}"
+                                                           FontSize="10"
+                                                           FontWeight="Bold"
+                                                           Margin="10,2,0,0" />
+                                            </Grid>
+                                            <WrapPanel Grid.Row="1" Margin="48,10,0,0">
+                                                <Border Style="{StaticResource BadgeStyle}"
+                                                        Visibility="{Binding HasAssetTag, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <TextBlock Text="{Binding AssetTag, StringFormat=Asset {0}}" FontSize="11" />
+                                                </Border>
+                                                <Border Style="{StaticResource BadgeStyle}"
+                                                        Visibility="{Binding HasSerialNumber, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <TextBlock Text="{Binding SerialNumber, StringFormat=Serial {0}}" FontSize="11" />
+                                                </Border>
+                                                <Border Style="{StaticResource BadgeStyle}"
+                                                        Visibility="{Binding HasIpAddress, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <TextBlock Text="{Binding IpAddress, StringFormat=IP {0}}" FontSize="11" />
+                                                </Border>
+                                            </WrapPanel>
+                                            <Grid Grid.Row="2" Margin="48,8,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding ClientUserDisplayName}"
+                                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                                               FontSize="12"
+                                                               FontWeight="SemiBold"
+                                                               Visibility="{Binding HasClientUser, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                    <TextBlock Text="{Binding LocationName}"
+                                                               Foreground="{DynamicResource MutedTextBrush}"
+                                                               FontSize="11"
+                                                               Margin="0,2,0,0" />
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding StatusLabel}"
+                                                           Foreground="{Binding StatusColor}"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           VerticalAlignment="Bottom"
+                                                           Margin="10,0,0,0" />
+                                            </Grid>
+                                        </Grid>
+                                      </Border>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <StackPanel Margin="0,0,0,24"
+                                Visibility="{Binding HasClientUsers, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Grid Margin="2,0,18,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="CLIENT USERS"
+                                           Foreground="{DynamicResource AccentHoverBrush}"
+                                           FontSize="11"
+                                           FontWeight="Bold" />
+                                <TextBlock Text="Select a user to view their synchronized contact and account details"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           FontSize="13"
+                                           Margin="0,3,0,0" />
+                            </StackPanel>
+                            <Border Grid.Column="1"
+                                    Height="1"
+                                    Margin="16,0"
+                                    VerticalAlignment="Center"
+                                    Background="{DynamicResource BorderBrush}" />
+                            <Border Grid.Column="2"
+                                    Background="{DynamicResource AccentSoftBrush}"
+                                    CornerRadius="12"
+                                    Padding="11,5"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="{Binding ClientUserCountLabel}"
+                                           Foreground="{DynamicResource AccentHoverBrush}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold" />
+                            </Border>
+                        </Grid>
+
+                        <Grid Height="430" Margin="0,0,16,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="350" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0"
+                                    Background="{DynamicResource PanelBackgroundBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="12"
+                                    Padding="10">
+                                <ListBox ItemsSource="{Binding ClientUsers}"
+                                         SelectedItem="{Binding SelectedClientUser}"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="{x:Type ListBoxItem}">
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                            <Setter Property="Padding" Value="0" />
+                                            <Setter Property="Margin" Value="0,0,0,8" />
+                                            <Setter Property="Background" Value="Transparent" />
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                    BorderBrush="{DynamicResource BorderBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="9"
+                                                    Padding="13,11">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding DisplayName}"
+                                                                   Foreground="{DynamicResource PrimaryTextBrush}"
+                                                                   FontWeight="SemiBold"
+                                                                   FontSize="14"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Text="{Binding RoleDepartment}"
+                                                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                                                   FontSize="12"
+                                                                   Margin="0,3,0,0"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Text="{Binding Email}"
+                                                                   Foreground="{DynamicResource MutedTextBrush}"
+                                                                   FontSize="11"
+                                                                   Margin="0,2,0,0"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+                                                    <Border Grid.Column="1"
+                                                            Background="{DynamicResource AccentSoftBrush}"
+                                                            CornerRadius="10"
+                                                            Padding="9,3"
+                                                            Margin="10,0,0,0"
+                                                            VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding AccountCount, StringFormat={}{0} accounts}"
+                                                                   Foreground="{DynamicResource AccentHoverBrush}"
+                                                                   FontSize="10"
+                                                                   FontWeight="SemiBold" />
+                                                    </Border>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Border>
+
+                            <Border Grid.Column="2"
+                                    Background="{DynamicResource PanelBackgroundBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="12"
+                                    Padding="16">
+                                <Grid>
+                                    <TextBlock Text="Select a user on the left to view their details."
+                                               Foreground="{DynamicResource MutedTextBrush}"
+                                               FontSize="13"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"
+                                               Visibility="{Binding HasSelectedClientUser, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+
+                                    <Grid Visibility="{Binding HasSelectedClientUser, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding SelectedClientUser.DisplayName}"
+                                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                                           FontSize="21"
+                                                           FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding SelectedClientUser.LocationName}"
+                                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                                           FontSize="12"
+                                                           Margin="0,3,0,0" />
+                                            </StackPanel>
+                                            <WrapPanel Grid.Column="1">
+                                                <Button Content="Hide Values"
+                                                        Command="{Binding HideClientUserCommand}"
+                                                        Margin="0,0,8,0" />
+                                                <Button Content="Reveal Accounts"
+                                                        Command="{Binding RevealClientUserCommand}"
+                                                        Style="{StaticResource PrimaryButtonStyle}" />
+                                            </WrapPanel>
+                                        </Grid>
+
+                                        <Border Grid.Row="1"
+                                                Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                BorderBrush="{DynamicResource BorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="9"
+                                                Padding="12"
+                                                Margin="0,12,0,12">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="1.2*" />
+                                                    <ColumnDefinition Width="1.35*" />
+                                                    <ColumnDefinition Width="0.8*" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="ROLE / DEPARTMENT"
+                                                               Foreground="{DynamicResource MutedTextBrush}"
+                                                               FontSize="10"
+                                                               FontWeight="Bold" />
+                                                    <TextBlock Text="{Binding SelectedClientUser.RoleDepartment}"
+                                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                                               FontSize="13"
+                                                               Margin="0,3,12,0" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock Text="EMAIL"
+                                                               Foreground="{DynamicResource MutedTextBrush}"
+                                                               FontSize="10"
+                                                               FontWeight="Bold" />
+                                                    <TextBlock Text="{Binding SelectedClientUser.Email}"
+                                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                                               FontSize="13"
+                                                               Margin="0,3,12,0"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2">
+                                                    <TextBlock Text="PHONE"
+                                                               Foreground="{DynamicResource MutedTextBrush}"
+                                                               FontSize="10"
+                                                               FontWeight="Bold" />
+                                                    <TextBlock Text="{Binding SelectedClientUser.Phone}"
+                                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                                               FontSize="13"
+                                                               Margin="0,3,0,0" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+
+                                        <ScrollViewer Grid.Row="2"
+                                                      VerticalScrollBarVisibility="Auto"
+                                                      HorizontalScrollBarVisibility="Disabled">
+                                            <ItemsControl ItemsSource="{Binding ClientUserAccountGroups}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Margin="0,0,0,15">
+                                                            <Grid Margin="2,0,2,7">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="{Binding Name}"
+                                                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                                                           FontSize="15"
+                                                                           FontWeight="SemiBold" />
+                                                                <Border Grid.Column="1"
+                                                                        Height="1"
+                                                                        Margin="12,0,0,0"
+                                                                        VerticalAlignment="Center"
+                                                                        Background="{DynamicResource BorderBrush}" />
+                                                            </Grid>
+                                                            <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                                    BorderBrush="{DynamicResource BorderBrush}"
+                                                                    BorderThickness="1"
+                                                                    CornerRadius="9"
+                                                                    Padding="4">
+                                                                <ItemsControl ItemsSource="{Binding Fields}">
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate>
+                                                                            <Border Padding="9,7"
+                                                                                    BorderBrush="{DynamicResource BorderBrush}"
+                                                                                    BorderThickness="0,0,0,1">
+                                                                                <Grid>
+                                                                                    <Grid.ColumnDefinitions>
+                                                                                        <ColumnDefinition Width="145" />
+                                                                                        <ColumnDefinition Width="*" />
+                                                                                        <ColumnDefinition Width="Auto" />
+                                                                                    </Grid.ColumnDefinitions>
+                                                                                    <TextBlock Text="{Binding Label}"
+                                                                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                                                                               FontSize="11"
+                                                                                               FontWeight="SemiBold"
+                                                                                               VerticalAlignment="Center"
+                                                                                               TextWrapping="Wrap"
+                                                                                               Margin="0,0,9,0" />
+                                                                                    <TextBox Grid.Column="1"
+                                                                                             Text="{Binding Value}"
+                                                                                             Style="{StaticResource ProfileFieldValueStyle}"
+                                                                                             MinHeight="34"
+                                                                                             Padding="9,5" />
+                                                                                    <Button Grid.Column="2"
+                                                                                            Content="Copy"
+                                                                                            Command="{Binding DataContext.CopyClientUserFieldCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                            CommandParameter="{Binding}"
+                                                                                            Padding="10,5"
+                                                                                            MinWidth="54"
+                                                                                            Margin="7,0,0,0"
+                                                                                            Visibility="{Binding DataContext.IsClientUserRevealed, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                                                </Grid>
+                                                                            </Border>
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
+                                                            </Border>
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </StackPanel>
+
+                    <ItemsControl ItemsSource="{Binding CredentialGroups}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Width="520"
+                                    Margin="0,0,16,16"
+                                    Background="{DynamicResource PanelBackgroundBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="12">
+                                <Border.Effect>
+                                    <DropShadowEffect Color="#000000"
+                                                      BlurRadius="16"
+                                                      ShadowDepth="4"
+                                                      Opacity="0.2" />
+                                </Border.Effect>
+                                <StackPanel>
+                                    <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="0,0,0,1"
+                                            CornerRadius="12,12,0,0"
+                                            Padding="17,13">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding Name}"
+                                                       FontSize="18"
+                                                       FontWeight="SemiBold"
+                                                       VerticalAlignment="Center" />
+                                            <Border Grid.Column="1"
+                                                    Background="{DynamicResource AccentSoftBrush}"
+                                                    CornerRadius="10"
+                                                    Padding="9,3">
+                                                <TextBlock Text="{Binding Fields.Count, StringFormat={}{0} fields}"
+                                                           Foreground="{DynamicResource AccentHoverBrush}"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold" />
+                                            </Border>
+                                        </Grid>
+                                    </Border>
+
+                                    <ItemsControl ItemsSource="{Binding Fields}" Margin="7,5,7,8">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Padding="10,9"
+                                                        BorderBrush="{DynamicResource BorderBrush}"
+                                                        BorderThickness="0,0,0,1">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="154" />
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Grid.Column="0"
+                                                                   Text="{Binding Label}"
+                                                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                                                   FontSize="12"
+                                                                   FontWeight="SemiBold"
+                                                                   VerticalAlignment="Center"
+                                                                   TextWrapping="Wrap"
+                                                                   Margin="0,0,10,0" />
+                                                        <TextBox Grid.Column="1"
+                                                                 Text="{Binding Value}"
+                                                                 Style="{StaticResource ProfileFieldValueStyle}" />
+                                                        <Button Grid.Column="2"
+                                                                Content="Copy"
+                                                                Command="{Binding DataContext.CopyFieldCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}"
+                                                                Padding="11,6"
+                                                                MinWidth="58"
+                                                                Margin="8,0,0,0"
+                                                                Visibility="{Binding DataContext.IsRevealed, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </ScrollViewer>
+
+        </Grid>
+
+        <Border Grid.Row="2"
+                Background="{DynamicResource HeaderBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,1,0,0">
+            <Grid Margin="28,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse Width="8"
+                             Height="8"
+                             Fill="{DynamicResource SuccessBrush}"
+                             Margin="0,0,10,0" />
+                    <TextBlock Text="{Binding StatusMessage}"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               FontSize="12"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <Button Grid.Column="1"
+                        Content="Close"
+                        MinWidth="88"
+                        VerticalAlignment="Center"
+                        Click="CloseButton_Click" />
+            </Grid>
+        </Border>
+
+        <controls:ClientEquipmentDetailsDrawer Grid.Row="0"
+                                               Grid.RowSpan="3"
+                                               Panel.ZIndex="50"
+                                               Visibility="{Binding IsEquipmentDetailsVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
+    </Grid>
+</Window>

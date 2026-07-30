@@ -1,5 +1,7 @@
 using TechBench.Data;
 using TechBench.Models;
+using TechBench.Services;
+using TechBench.ViewModels;
 using Microsoft.Data.Sqlite;
 
 namespace TechBench.Tests;
@@ -120,7 +122,7 @@ public sealed class TechBenchRepositoryTests
                 CreatedAt = DateTime.Now,
                 UpdatedAt = DateTime.Now
             };
-            TechBenchRepository.UpdatePostingStatus(entry);
+            WorkEntryPostingStatusCalculator.Update(entry);
             repository.SaveWorkEntry(entry);
             repository.AddPostingLog(new PostingLog
             {
@@ -226,7 +228,7 @@ public sealed class TechBenchRepositoryTests
             repository.SaveWorkEntry(entry);
             entry.SagePosted = true;
             entry.SagePostedAt = DateTime.Now;
-            TechBenchRepository.UpdatePostingStatus(entry);
+            WorkEntryPostingStatusCalculator.Update(entry);
             repository.SaveWorkEntry(entry);
 
             entry.Note = "Changed after billing";
@@ -263,6 +265,41 @@ public sealed class TechBenchRepositoryTests
     }
 
     [Fact]
+    public void WhdPostedEntryCanBeDeletedOnlyAfterVerifiedTrackedTechNoteIsMissing()
+    {
+        WithRepository((repository, _) =>
+        {
+            var entry = new WorkEntry
+            {
+                WorkDate = new DateTime(2026, 7, 22),
+                ManualClientName = "Deleted WHD Test Note",
+                TicketNumberText = "31689",
+                DurationMinutes = 15,
+                Note = "test",
+                WhdPosted = true,
+                WhdPostedAt = DateTime.Now.AddMinutes(-5),
+                LastError = "WHD sync pending: Web Help Desk ticket #31689 is available, but TechNote #52445 was not found."
+            };
+            repository.SaveWorkEntry(entry);
+            repository.AddPostingLog(new PostingLog
+            {
+                WorkEntryId = entry.Id,
+                Destination = "WHD",
+                Payload = "test",
+                Success = false,
+                Message = entry.LastError,
+                ExternalReference = "WHD-TECHNOTE-52445"
+            });
+
+            Assert.Throws<InvalidOperationException>(() => repository.DeleteWorkEntry(entry.Id));
+
+            repository.DeleteWorkEntry(entry.Id, confirmMissingWhdTechNote: true);
+
+            Assert.Null(repository.GetWorkEntry(entry.Id));
+        });
+    }
+
+    [Fact]
     public void RemovesLegacyMockSettingsAndRestoresMockOnlyPostingStateToLivePending()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"TechBenchTests-{Guid.NewGuid():N}");
@@ -283,7 +320,7 @@ public sealed class TechBenchRepositoryTests
                 CreatedAt = DateTime.Now,
                 UpdatedAt = DateTime.Now
             };
-            TechBenchRepository.UpdatePostingStatus(entry);
+            WorkEntryPostingStatusCalculator.Update(entry);
             repository.SaveWorkEntry(entry);
             repository.AddPostingLog(new PostingLog
             {
@@ -619,7 +656,7 @@ public sealed class TechBenchRepositoryTests
     }
 
     [Fact]
-    public void CommonLinksProtectBuiltInsAndSupportCustomLinkLifecycle()
+    public void CommonLinksAllowBuiltInEditsProtectDeletionAndSupportCustomLinkLifecycle()
     {
         WithRepository((repository, _) =>
         {
@@ -674,12 +711,22 @@ public sealed class TechBenchRepositoryTests
                 });
 
             Assert.All(defaults, link => Assert.True(link.IsBuiltIn));
-            Assert.Throws<InvalidOperationException>(() => repository.SaveCommonLink(defaults[0]));
+            defaults[0].Name = "WatchGuard Admin Portal";
+            defaults[0].Url = "https://watchguard.example.com/";
+            repository.SaveCommonLink(defaults[0]);
+            var editedBuiltIn = repository.GetCommonLinks()
+                .Single(link => link.Id == defaults[0].Id);
+            Assert.Equal("WatchGuard Admin Portal", editedBuiltIn.Name);
+            Assert.Equal("https://watchguard.example.com/", editedBuiltIn.Url);
+            Assert.Equal("watchguard-cloud", editedBuiltIn.BuiltInKey);
             Assert.Throws<InvalidOperationException>(() => repository.DeleteCommonLink(defaults[0].Id));
-            var watchGuardUpdatedAt = defaults[0].UpdatedAt;
+            var watchGuardUpdatedAt = editedBuiltIn.UpdatedAt;
             repository.Initialize();
             var initializedLinks = repository.GetCommonLinks();
             Assert.Equal(7, initializedLinks.Count(link => link.IsBuiltIn));
+            Assert.Equal(
+                "WatchGuard Admin Portal",
+                initializedLinks.Single(link => link.BuiltInKey == "watchguard-cloud").Name);
             Assert.Equal(
                 watchGuardUpdatedAt,
                 initializedLinks.Single(link => link.BuiltInKey == "watchguard-cloud").UpdatedAt);
@@ -1100,12 +1147,37 @@ public sealed class TechBenchRepositoryTests
         });
     }
 
-    private static WhdSyncedTicket BuildWhdTicket(string id) => new()
+    [Fact]
+    public void RepositoryTicketSnapshotUpdatesExplicitClosedStateWithoutClosingAnAbsentTicket()
+    {
+        WithRepository((repository, _) =>
+        {
+            var returned = BuildWhdTicket("201");
+            var laterAbsent = BuildWhdTicket("202");
+            repository.SynchronizeWhdTickets(
+                [returned, laterAbsent],
+                DateTime.Now,
+                reconcileMissing: false);
+
+            var returnedClosed = BuildWhdTicket("201", isClosed: true);
+            repository.SynchronizeWhdTickets(
+                [returnedClosed],
+                DateTime.Now,
+                reconcileMissing: false);
+
+            var tickets = repository.GetTickets(includeClosed: true);
+            Assert.True(tickets.Single(ticket => ticket.TicketNumber == "201").IsClosed);
+            Assert.False(tickets.Single(ticket => ticket.TicketNumber == "202").IsClosed);
+        });
+    }
+
+    private static WhdSyncedTicket BuildWhdTicket(string id, bool isClosed = false) => new()
     {
         ExternalId = $"WHD-{id}",
         TicketNumber = id,
         Subject = $"Ticket {id}",
-        Status = "Open",
+        Status = isClosed ? "Closed" : "Open",
+        IsClosed = isClosed,
         Client = new WhdSyncedClient
         {
             ExternalId = "WHD-CLIENT-1",

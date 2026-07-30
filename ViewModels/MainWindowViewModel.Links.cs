@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Windows.Data;
-using Microsoft.Data.Sqlite;
 using TechBench.Models;
 using TechBench.Services;
 
@@ -9,22 +8,11 @@ namespace TechBench.ViewModels;
 
 public sealed partial class MainWindowViewModel
 {
-    private const string MicrosoftAdminIncognitoSettingKey = "CommonLinks.Microsoft365Admin.OpenInChromeIncognito";
-    private int _editingCommonLinkId;
-    private bool _isCommonLinkEditorOpen;
     private bool _microsoftAdminOpenInChromeIncognito;
-    private string _commonLinkName = string.Empty;
-    private string _commonLinkUrl = string.Empty;
-    private string _commonLinkValidationMessage = string.Empty;
 
     public ObservableCollection<CommonLink> CommonLinks { get; } = new();
     public ICollectionView CommonLinksView { get; private set; } = null!;
 
-    public RelayCommand NewCommonLinkCommand { get; private set; } = null!;
-    public RelayCommand EditCommonLinkCommand { get; private set; } = null!;
-    public RelayCommand SaveCommonLinkCommand { get; private set; } = null!;
-    public RelayCommand CancelCommonLinkCommand { get; private set; } = null!;
-    public RelayCommand DeleteCommonLinkCommand { get; private set; } = null!;
     public RelayCommand OpenCommonLinkCommand { get; private set; } = null!;
 
     public bool HasCommonLinks => CommonLinks.Count > 0;
@@ -39,59 +27,12 @@ public sealed partial class MainWindowViewModel
                 return;
             }
 
-            _repository.SaveSetting(MicrosoftAdminIncognitoSettingKey, value.ToString());
+            _localPreferences.MicrosoftAdminOpenInChromeIncognito = value;
+            LocalPreferenceStore.Save(_localPreferences);
             StatusMessage = value
                 ? "Microsoft 365 Admin will open in Chrome Incognito."
                 : "Microsoft 365 Admin will open in the default browser.";
         }
-    }
-
-    public bool IsCommonLinkEditorOpen
-    {
-        get => _isCommonLinkEditorOpen;
-        private set
-        {
-            if (SetProperty(ref _isCommonLinkEditorOpen, value))
-            {
-                OnPropertyChanged(nameof(CommonLinkEditorTitle));
-                SaveCommonLinkCommand.RaiseCanExecuteChanged();
-                CancelCommonLinkCommand.RaiseCanExecuteChanged();
-            }
-        }
-    }
-
-    public string CommonLinkEditorTitle => _editingCommonLinkId > 0 ? "Edit Link" : "Add Link";
-
-    public string CommonLinkName
-    {
-        get => _commonLinkName;
-        set
-        {
-            if (SetProperty(ref _commonLinkName, value))
-            {
-                CommonLinkValidationMessage = string.Empty;
-                SaveCommonLinkCommand.RaiseCanExecuteChanged();
-            }
-        }
-    }
-
-    public string CommonLinkUrl
-    {
-        get => _commonLinkUrl;
-        set
-        {
-            if (SetProperty(ref _commonLinkUrl, value))
-            {
-                CommonLinkValidationMessage = string.Empty;
-                SaveCommonLinkCommand.RaiseCanExecuteChanged();
-            }
-        }
-    }
-
-    public string CommonLinkValidationMessage
-    {
-        get => _commonLinkValidationMessage;
-        private set => SetProperty(ref _commonLinkValidationMessage, value);
     }
 
     private void InitializeCommonLinks()
@@ -106,18 +47,8 @@ public sealed partial class MainWindowViewModel
         CommonLinksView.SortDescriptions.Add(
             new SortDescription(nameof(CommonLink.Name), ListSortDirection.Ascending));
 
-        _microsoftAdminOpenInChromeIncognito = _repository
-            .GetSetting(MicrosoftAdminIncognitoSettingKey, "false")
-            .Equals("true", StringComparison.OrdinalIgnoreCase);
-        NewCommonLinkCommand = new RelayCommand(_ => StartNewCommonLink());
-        EditCommonLinkCommand = new RelayCommand(
-            EditCommonLink,
-            parameter => parameter is CommonLink { Id: > 0, IsBuiltIn: false });
-        SaveCommonLinkCommand = new RelayCommand(_ => SaveCommonLink(), _ => CanSaveCommonLink());
-        CancelCommonLinkCommand = new RelayCommand(_ => CloseCommonLinkEditor(), _ => IsCommonLinkEditorOpen);
-        DeleteCommonLinkCommand = new RelayCommand(
-            DeleteCommonLink,
-            parameter => parameter is CommonLink { Id: > 0, IsBuiltIn: false });
+        _microsoftAdminOpenInChromeIncognito =
+            _localPreferences.MicrosoftAdminOpenInChromeIncognito;
         OpenCommonLinkCommand = new RelayCommand(OpenCommonLink, parameter => parameter is CommonLink { Id: > 0 });
         RefreshCommonLinks();
     }
@@ -138,107 +69,6 @@ public sealed partial class MainWindowViewModel
         {
             target.Add(link);
         }
-    }
-
-    private void StartNewCommonLink()
-    {
-        _editingCommonLinkId = 0;
-        CommonLinkName = string.Empty;
-        CommonLinkUrl = string.Empty;
-        CommonLinkValidationMessage = string.Empty;
-        IsCommonLinkEditorOpen = true;
-        OnPropertyChanged(nameof(CommonLinkEditorTitle));
-    }
-
-    private void EditCommonLink(object? parameter)
-    {
-        if (parameter is not CommonLink { Id: > 0, IsBuiltIn: false } link)
-        {
-            return;
-        }
-
-        _editingCommonLinkId = link.Id;
-        CommonLinkName = link.Name;
-        CommonLinkUrl = link.Url;
-        CommonLinkValidationMessage = string.Empty;
-        IsCommonLinkEditorOpen = true;
-        OnPropertyChanged(nameof(CommonLinkEditorTitle));
-    }
-
-    private bool CanSaveCommonLink()
-    {
-        return IsCommonLinkEditorOpen
-            && !string.IsNullOrWhiteSpace(CommonLinkName)
-            && !string.IsNullOrWhiteSpace(CommonLinkUrl);
-    }
-
-    private void SaveCommonLink()
-    {
-        var name = CommonLinkName.Trim();
-        if (name.Length > 80)
-        {
-            CommonLinkValidationMessage = "Keep the link name to 80 characters or fewer.";
-            return;
-        }
-
-        if (!TryNormalizeCommonLinkUrl(CommonLinkUrl, out var normalizedUrl, out var validationMessage))
-        {
-            CommonLinkValidationMessage = validationMessage;
-            return;
-        }
-
-        if (CommonLinks.Any(link =>
-                link.Id != _editingCommonLinkId
-                && link.Url.Equals(normalizedUrl, StringComparison.OrdinalIgnoreCase)))
-        {
-            CommonLinkValidationMessage = "That address is already in Common Links.";
-            return;
-        }
-
-        try
-        {
-            _repository.SaveCommonLink(new CommonLink
-            {
-                Id = _editingCommonLinkId,
-                Name = name,
-                Url = normalizedUrl
-            });
-        }
-        catch (Exception ex) when (ex is SqliteException or InvalidOperationException or ArgumentException)
-        {
-            CommonLinkValidationMessage = $"Could not save this link: {ex.Message}";
-            return;
-        }
-
-        RefreshCommonLinks();
-        CloseCommonLinkEditor();
-        StatusMessage = $"Saved common link: {name}.";
-    }
-
-    private void DeleteCommonLink(object? parameter)
-    {
-        if (parameter is not CommonLink { Id: > 0, IsBuiltIn: false } link)
-        {
-            return;
-        }
-
-        if (!_dialogService.Confirm(
-                "Remove common link",
-                $"Remove {link.Name} from Common Links?",
-                "Remove",
-                "Keep"))
-        {
-            return;
-        }
-
-        _repository.DeleteCommonLink(link.Id);
-        if (_editingCommonLinkId == link.Id)
-        {
-            CloseCommonLinkEditor();
-        }
-
-        RefreshCommonLinks();
-        StatusMessage = $"Removed common link: {link.Name}.";
     }
 
     private void OpenCommonLink(object? parameter)
@@ -271,16 +101,6 @@ public sealed partial class MainWindowViewModel
                 "Open common link",
                 $"Could not open {link.Name}: {launchResult.ErrorMessage}");
         }
-    }
-
-    private void CloseCommonLinkEditor()
-    {
-        _editingCommonLinkId = 0;
-        IsCommonLinkEditorOpen = false;
-        CommonLinkName = string.Empty;
-        CommonLinkUrl = string.Empty;
-        CommonLinkValidationMessage = string.Empty;
-        OnPropertyChanged(nameof(CommonLinkEditorTitle));
     }
 
     private static bool TryNormalizeCommonLinkUrl(
