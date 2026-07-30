@@ -5,7 +5,8 @@ namespace TechBench.Data;
 
 public sealed partial class SqlServerTechBenchRepository
 {
-    private const int UnexpectedStoredProcedureParameterErrorNumber = 8146;
+    private const int TooManyStoredProcedureArgumentsErrorNumber = 8144;
+    private const int StoredProcedureAcceptsNoArgumentsErrorNumber = 8146;
     private const int InvalidEquipmentWorkflowStageErrorNumber = 52211;
 
     public IReadOnlyList<EquipmentItem> GetEquipmentBoard()
@@ -15,7 +16,7 @@ public sealed partial class SqlServerTechBenchRepository
             return GetEquipmentBoard(includeDeployedParameter: true);
         }
         catch (SqlException ex)
-            when (ex.Number == UnexpectedStoredProcedureParameterErrorNumber)
+            when (HasLegacyEquipmentProcedureSignature(ex))
         {
             // Schema 15 installations deployed before 0.5.109 do not expose
             // @IncludeDeployed yet. Keep the Board usable until its SQL update
@@ -132,7 +133,7 @@ public sealed partial class SqlServerTechBenchRepository
                 includeDeployedParameter: true);
         }
         catch (SqlException ex)
-            when (ex.Number == UnexpectedStoredProcedureParameterErrorNumber)
+            when (HasLegacyEquipmentProcedureSignature(ex))
         {
             try
             {
@@ -196,6 +197,12 @@ public sealed partial class SqlServerTechBenchRepository
         string targetWorkflowStage) =>
         exception.Number == InvalidEquipmentWorkflowStageErrorNumber
         && EquipmentWorkflowStages.IsDeployed(targetWorkflowStage);
+
+    private static bool HasLegacyEquipmentProcedureSignature(
+        SqlException exception) =>
+        exception.Number is
+            TooManyStoredProcedureArgumentsErrorNumber
+            or StoredProcedureAcceptsNoArgumentsErrorNumber;
 
     private static InvalidOperationException
         CreateMissingDeployedLifecycleException(SqlException innerException) =>

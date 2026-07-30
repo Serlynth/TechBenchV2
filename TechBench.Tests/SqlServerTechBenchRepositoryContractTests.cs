@@ -181,7 +181,15 @@ public sealed class SqlServerTechBenchRepositoryContractTests
             repositorySource,
             StringComparison.Ordinal);
         Assert.Contains(
-            "UnexpectedStoredProcedureParameterErrorNumber = 8146",
+            "TooManyStoredProcedureArgumentsErrorNumber = 8144",
+            repositorySource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "StoredProcedureAcceptsNoArgumentsErrorNumber = 8146",
+            repositorySource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "when (HasLegacyEquipmentProcedureSignature(ex))",
             repositorySource,
             StringComparison.Ordinal);
         Assert.Contains(
