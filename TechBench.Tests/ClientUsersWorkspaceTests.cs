@@ -20,7 +20,7 @@ public sealed class ClientUsersWorkspaceTests
             "CommandParameter=\"Posting History\"",
             StringComparison.Ordinal);
         var clients = xaml.IndexOf(
-            "Header=\"CLIENTS\"",
+            "Header=\"FIREDRILL\"",
             StringComparison.Ordinal);
         var clientInfo = xaml.IndexOf(
             "CommandParameter=\"Client Info\"",

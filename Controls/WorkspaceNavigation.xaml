@@ -279,7 +279,7 @@
                         </StackPanel>
                         </Expander>
 
-                        <Expander Header="CLIENTS"
+                        <Expander Header="FIREDRILL"
                               Style="{StaticResource WorkspaceGroupStyle}">
                         <StackPanel>
                             <Button Content="Overview"
@@ -294,36 +294,24 @@
                                     Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Client Users}"
                                     Style="{StaticResource WorkspaceNavItemStyle}"
                                     Visibility="{Binding CanAccessClientUsers, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                            <Button Content="WiFi"
-                                    Command="{Binding NavigateCommand}"
-                                    CommandParameter="Client WiFi"
-                                    Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Client WiFi}"
-                                    Style="{StaticResource WorkspaceNavItemStyle}"
-                                    Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                            <Button Content="Domain &amp; AD"
-                                    Command="{Binding NavigateCommand}"
-                                    CommandParameter="Domain/AD"
-                                    Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Domain/AD}"
-                                    Style="{StaticResource WorkspaceNavItemStyle}"
-                                    Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                            <Button Content="Connections"
-                                    Command="{Binding NavigateCommand}"
-                                    CommandParameter="Connection"
-                                    Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Connection}"
-                                    Style="{StaticResource WorkspaceNavItemStyle}"
-                                    Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                            <Button Content="Veeam"
-                                    Command="{Binding NavigateCommand}"
-                                    CommandParameter="Veeam"
-                                    Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Veeam}"
-                                    Style="{StaticResource WorkspaceNavItemStyle}"
-                                    Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                            <Button Content="Miscellaneous"
-                                    Command="{Binding NavigateCommand}"
-                                    CommandParameter="Misc Info"
-                                    Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Misc Info}"
-                                    Style="{StaticResource WorkspaceNavItemStyle}"
-                                    Visibility="{Binding CanAccessFireDrill, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <ItemsControl ItemsSource="{Binding FireDrillWorkspaceSections}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Content="{Binding DisplayName}"
+                                                Command="{Binding DataContext.NavigateCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding SectionKey}"
+                                                Style="{StaticResource WorkspaceNavItemStyle}">
+                                            <Button.Tag>
+                                                <MultiBinding Converter="{StaticResource SectionActiveConverter}">
+                                                    <Binding Path="DataContext.CurrentSection"
+                                                             RelativeSource="{RelativeSource AncestorType=UserControl}" />
+                                                    <Binding Path="SectionKey" />
+                                                </MultiBinding>
+                                            </Button.Tag>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                             <Button Content="Common Links"
                                     Command="{Binding NavigateCommand}"
                                     CommandParameter="Common Links"

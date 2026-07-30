@@ -33,3 +33,10 @@ public sealed record FireDrillCredentialFieldGroup(
     string Name,
     int SortOrder,
     IReadOnlyList<FireDrillCredentialField> Fields);
+
+public sealed record FireDrillWorkspaceSection(
+    string GroupName,
+    string DisplayName,
+    string SectionKey,
+    int SortOrder,
+    IReadOnlyList<string> FieldKeys);

@@ -423,7 +423,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _ => "PRIVATE BETA MODULE"
     };
     public string WorkspaceHeaderTitle => HasModuleWorkspace
-        ? CurrentSection
+        ? IsCredentialWorkspaceSection
+            ? CredentialWorkspaceTitle
+            : CurrentSection
         : ModuleBrandName;
     public string ModuleWelcomeTitle => $"{ModuleBrandName} is ready";
     public string ModuleWelcomeDescription =>
@@ -472,7 +474,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     public string WindowTitle => HasModuleWorkspace
-        ? $"{ModuleBrandName} - {CurrentSection}"
+        ? $"{ModuleBrandName} - {(IsCredentialWorkspaceSection ? CredentialWorkspaceTitle : CurrentSection)}"
         : $"{ModuleBrandName} - Private Beta";
 
     public string StatusMessage
@@ -1073,8 +1075,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         StatusMessage = GetSectionStatusMessage(section);
     }
 
-    private string GetSectionStatusMessage(string section) =>
-        section switch
+    private string GetSectionStatusMessage(string section)
+    {
+        var fireDrillSection =
+            FireDrillWorkspaceSections.FirstOrDefault(item =>
+                item.SectionKey.Equals(
+                    section,
+                    StringComparison.Ordinal));
+        if (fireDrillSection is not null)
+        {
+            return $"Showing synchronized {fireDrillSection.DisplayName} information";
+        }
+
+        return section switch
         {
             "Today" => $"Showing worklog for {SelectedDate:dddd, MMM d}",
             "This Week" => "Showing weekly grouped worklog",
@@ -1085,20 +1098,22 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Client Users" => "Showing synchronized users and accounts for each client",
             "Ticket List" => "Showing my assigned and group non-closed tickets",
             "Common Links" => "Showing commonly used websites",
-            "Client Info" => "Showing all synchronized client information",
-            "Client WiFi" => "Showing synchronized client WiFi information",
-            "Domain/AD" => "Showing synchronized local domain and Active Directory information",
-            "Connection" => "Showing synchronized WatchGuard connection information",
-            "Veeam" => "Showing synchronized Veeam backup information",
-            "Misc Info" => "Showing remaining synchronized client information",
+            "Client Info" => "Showing all synchronized FireDrill client information",
             "Inventory" => "Showing equipment currently available in Stock Room",
             "Equipment Board" => "Showing stock, technician assignments, and deployment order",
             "Admin Center" => "Showing server synchronization and active TechBench clients",
             _ => $"Showing {section}"
         };
+    }
 
     private void RefreshCurrentSectionData()
     {
+        if (IsCredentialWorkspaceSection)
+        {
+            RefreshFireDrillCredentials();
+            return;
+        }
+
         switch (CurrentSection)
         {
             case "Today":
@@ -1130,14 +1145,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 break;
             case "Common Links":
                 RefreshCommonLinks();
-                break;
-            case "Client Info":
-            case "Client WiFi":
-            case "Domain/AD":
-            case "Connection":
-            case "Veeam":
-            case "Misc Info":
-                RefreshFireDrillCredentials();
                 break;
             case "Inventory":
             case "Equipment Board":
