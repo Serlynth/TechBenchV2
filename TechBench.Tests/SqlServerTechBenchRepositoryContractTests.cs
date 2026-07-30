@@ -180,6 +180,26 @@ public sealed class SqlServerTechBenchRepositoryContractTests
             "AddBit(command, \"@IncludeDeployed\", true)",
             repositorySource,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "UnexpectedStoredProcedureParameterErrorNumber = 8146",
+            repositorySource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "GetEquipmentBoard(includeDeployedParameter: false)",
+            repositorySource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "MoveEquipment(\n                    equipment,\n"
+            + "                    targetWindowsLoginName,\n"
+            + "                    targetWorkflowStage,\n"
+            + "                    targetIndex,\n"
+            + "                    includeDeployedParameter: false)",
+            repositorySource.ReplaceLineEndings("\n"),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Mark Deployed requires the matching TechBench server/SQL update.",
+            repositorySource,
+            StringComparison.Ordinal);
     }
 
     [Fact]

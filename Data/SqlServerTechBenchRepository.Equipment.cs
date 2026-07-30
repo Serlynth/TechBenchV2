@@ -1,13 +1,36 @@
+using Microsoft.Data.SqlClient;
 using TechBench.Models;
 
 namespace TechBench.Data;
 
 public sealed partial class SqlServerTechBenchRepository
 {
-    public IReadOnlyList<EquipmentItem> GetEquipmentBoard() =>
+    private const int UnexpectedStoredProcedureParameterErrorNumber = 8146;
+    private const int InvalidEquipmentWorkflowStageErrorNumber = 52211;
+
+    public IReadOnlyList<EquipmentItem> GetEquipmentBoard()
+    {
+        try
+        {
+            return GetEquipmentBoard(includeDeployedParameter: true);
+        }
+        catch (SqlException ex)
+            when (ex.Number == UnexpectedStoredProcedureParameterErrorNumber)
+        {
+            // Schema 15 installations deployed before 0.5.109 do not expose
+            // @IncludeDeployed yet. Keep the Board usable until its SQL update
+            // is applied; the older procedure naturally returns active lanes.
+            return GetEquipmentBoard(includeDeployedParameter: false);
+        }
+    }
+
+    private IReadOnlyList<EquipmentItem> GetEquipmentBoard(
+        bool includeDeployedParameter) =>
         QueryAsync(
             Procedures.GetEquipmentBoard,
-            command => AddBit(command, "@IncludeDeployed", true),
+            includeDeployedParameter
+                ? command => AddBit(command, "@IncludeDeployed", true)
+                : null,
             (reader, token) => ReadListAsync(reader, token, ReadEquipmentItem),
             CancellationToken.None).GetAwaiter().GetResult();
 
@@ -99,7 +122,50 @@ public sealed partial class SqlServerTechBenchRepository
                 nameof(equipment));
         }
 
-        return QueryAsync(
+        try
+        {
+            return MoveEquipment(
+                equipment,
+                targetWindowsLoginName,
+                targetWorkflowStage,
+                targetIndex,
+                includeDeployedParameter: true);
+        }
+        catch (SqlException ex)
+            when (ex.Number == UnexpectedStoredProcedureParameterErrorNumber)
+        {
+            try
+            {
+                return MoveEquipment(
+                    equipment,
+                    targetWindowsLoginName,
+                    targetWorkflowStage,
+                    targetIndex,
+                    includeDeployedParameter: false);
+            }
+            catch (SqlException fallbackException)
+                when (IsMissingDeployedLifecycle(
+                    fallbackException,
+                    targetWorkflowStage))
+            {
+                throw CreateMissingDeployedLifecycleException(
+                    fallbackException);
+            }
+        }
+        catch (SqlException ex)
+            when (IsMissingDeployedLifecycle(ex, targetWorkflowStage))
+        {
+            throw CreateMissingDeployedLifecycleException(ex);
+        }
+    }
+
+    private IReadOnlyList<EquipmentItem> MoveEquipment(
+        EquipmentItem equipment,
+        string? targetWindowsLoginName,
+        string targetWorkflowStage,
+        int targetIndex,
+        bool includeDeployedParameter) =>
+        QueryAsync(
             Procedures.MoveEquipment,
             command =>
             {
@@ -115,12 +181,28 @@ public sealed partial class SqlServerTechBenchRepository
                     24,
                     targetWorkflowStage);
                 AddInt(command, "@TargetIndex", Math.Max(0, targetIndex));
-                AddBit(command, "@IncludeDeployed", true);
+                if (includeDeployedParameter)
+                {
+                    AddBit(command, "@IncludeDeployed", true);
+                }
+
                 AddBinary(command, "@ExpectedRowVersion", 8, equipment.RowVersion);
             },
             (reader, token) => ReadListAsync(reader, token, ReadEquipmentItem),
             CancellationToken.None).GetAwaiter().GetResult();
-    }
+
+    private static bool IsMissingDeployedLifecycle(
+        SqlException exception,
+        string targetWorkflowStage) =>
+        exception.Number == InvalidEquipmentWorkflowStageErrorNumber
+        && EquipmentWorkflowStages.IsDeployed(targetWorkflowStage);
+
+    private static InvalidOperationException
+        CreateMissingDeployedLifecycleException(SqlException innerException) =>
+        new(
+            "Mark Deployed requires the matching TechBench server/SQL update. "
+            + "Install the current beta server package, then refresh Inventory.",
+            innerException);
 
     public void ArchiveEquipment(EquipmentItem equipment)
     {
