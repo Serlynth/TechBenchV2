@@ -1,3 +1,4 @@
+using System.IO;
 using Microsoft.Data.SqlClient;
 using TechBench.Services;
 
@@ -13,6 +14,8 @@ public sealed partial class MainWindowViewModel
     public RelayCommand UseSuggestedClientNameCommand { get; private set; } = null!;
 
     public RelayCommand SaveClientNameCommand { get; private set; } = null!;
+
+    public RelayCommand ExportClientMatchWorkbookCommand { get; private set; } = null!;
 
     public string ClientNameEditText
     {
@@ -41,6 +44,9 @@ public sealed partial class MainWindowViewModel
         SaveClientNameCommand = new RelayCommand(
             _ => SaveClientName(),
             _ => CanSaveClientName());
+        ExportClientMatchWorkbookCommand = new RelayCommand(
+            _ => ExportClientMatchWorkbook(),
+            _ => _currentUser.CanManageClients);
     }
 
     private void ResetClientNameEditor()
@@ -160,6 +166,47 @@ public sealed partial class MainWindowViewModel
             ClientNameEditText = previousName;
             StatusMessage = ex.Message;
             _dialogService.Error("Client name", ex.Message);
+        }
+    }
+
+    private void ExportClientMatchWorkbook()
+    {
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Export client match audit",
+            FileName =
+                $"TechBench-client-match-audit-{DateTime.Today:yyyy-MM-dd}.xlsx",
+            Filter = "Excel workbooks (*.xlsx)|*.xlsx|All files (*.*)|*.*",
+            AddExtension = true,
+            DefaultExt = ".xlsx"
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var clients = _repository.GetClients(includeInactive: true);
+            var workbook = ClientMatchExcelExportService.BuildWorkbook(clients);
+            File.WriteAllBytes(dialog.FileName, workbook);
+            StatusMessage =
+                $"Exported {clients.Count} client record(s) to {Path.GetFileName(dialog.FileName)}.";
+        }
+        catch (IOException ex)
+        {
+            StatusMessage = ex.Message;
+            _dialogService.Error("Client export", ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            StatusMessage = ex.Message;
+            _dialogService.Error("Client export", ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            StatusMessage = ex.Message;
+            _dialogService.Error("Client export", ex.Message);
         }
     }
 }

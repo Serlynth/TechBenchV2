@@ -1903,6 +1903,35 @@
                                         Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="Client exports"
+                                                       Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBlock Text="Create an Excel audit workbook with Summary, Matched, WHD Only, Sage Only, Manual/Other, and All Clients tabs."
+                                                       Style="{StaticResource MutedTextStyle}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,4,12,0" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1"
+                                                Content="Export Excel workbook"
+                                                Command="{Binding ExportClientMatchWorkbookCommand}"
+                                                Style="{StaticResource PrimaryButtonStyle}"
+                                                MinWidth="170"
+                                                VerticalAlignment="Center" />
+                                    </Grid>
+                                </Border>
+
+                                <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="12"
+                                        Margin="0,0,0,12"
+                                        Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="1.2*" />
                                             <ColumnDefinition Width="16" />
                                             <ColumnDefinition Width="1.4*" />

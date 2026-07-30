@@ -14,7 +14,12 @@ public sealed class ClientCanonicalNameWorkspaceTests
         Assert.Contains("ClientNameEditText", xaml, StringComparison.Ordinal);
         Assert.Contains("UseSuggestedClientNameCommand", xaml, StringComparison.Ordinal);
         Assert.Contains("SaveClientNameCommand", xaml, StringComparison.Ordinal);
+        Assert.Contains("ExportClientMatchWorkbookCommand", xaml, StringComparison.Ordinal);
         Assert.Contains("_repository.SaveClient(client)", viewModel, StringComparison.Ordinal);
+        Assert.Contains(
+            "ClientMatchExcelExportService.BuildWorkbook",
+            viewModel,
+            StringComparison.Ordinal);
         Assert.Contains("WHD and Sage links were preserved", viewModel, StringComparison.Ordinal);
     }
 
