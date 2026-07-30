@@ -1909,7 +1909,7 @@
                                         <StackPanel Grid.Column="0">
                                             <TextBlock Text="Client exports"
                                                        Style="{StaticResource FieldLabelStyle}" />
-                                            <TextBlock Text="Create an Excel audit workbook with Summary, Matched, WHD Only, Sage Only, Manual/Other, and All Clients tabs."
+                                            <TextBlock Text="Create an Excel audit workbook with current WHD and Sage totals plus Summary, Matched, WHD Only, Sage Only, Manual/Other, and All Clients tabs."
                                                        Style="{StaticResource MutedTextStyle}"
                                                        TextWrapping="Wrap"
                                                        Margin="0,4,12,0" />

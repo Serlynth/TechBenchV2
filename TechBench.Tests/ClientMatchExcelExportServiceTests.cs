@@ -98,6 +98,78 @@ public sealed class ClientMatchExcelExportServiceTests
             sheetNames);
     }
 
+    [Fact]
+    public void SummaryCountsMatchedClientsInBothSourceImportTotals()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var workbook = ClientMatchExcelExportService.BuildWorkbook(TestClients());
+
+        using var stream = new MemoryStream(workbook);
+        using var reader = ExcelReaderFactory.CreateOpenXmlReader(stream);
+        var summaryTotals = new Dictionary<string, int>(StringComparer.Ordinal);
+        while (reader.Read())
+        {
+            var label = reader.GetValue(0)?.ToString();
+            if (!string.IsNullOrWhiteSpace(label)
+                && !label.Equals("Category", StringComparison.Ordinal)
+                && reader.GetValue(1) is not null)
+            {
+                summaryTotals[label] = Convert.ToInt32(reader.GetValue(1));
+            }
+        }
+
+        Assert.Equal(2, summaryTotals["Imported from WHD (includes matched)"]);
+        Assert.Equal(2, summaryTotals["Imported from Sage (includes matched)"]);
+        Assert.Equal(1, summaryTotals["Matched"]);
+        Assert.Equal(1, summaryTotals["WHD only"]);
+        Assert.Equal(1, summaryTotals["Sage only"]);
+    }
+
+    [Fact]
+    public void SummaryOmitsInactiveCountsWhileDetailSheetsRetainInactiveRows()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var workbook = ClientMatchExcelExportService.BuildWorkbook(TestClients());
+
+        using var stream = new MemoryStream(workbook);
+        using var reader = ExcelReaderFactory.CreateOpenXmlReader(stream);
+        var summaryRows = new List<string>();
+        while (reader.Read())
+        {
+            summaryRows.Add(
+                string.Join(
+                    "|",
+                    Enumerable.Range(0, reader.FieldCount)
+                        .Select(index => reader.GetValue(index)?.ToString() ?? string.Empty)));
+        }
+
+        Assert.Contains("Category|Current total", summaryRows);
+        Assert.DoesNotContain(
+            summaryRows,
+            row => row.Contains("Inactive", StringComparison.OrdinalIgnoreCase)
+                && !row.Contains(
+                    "Inactive records remain on the detail tabs",
+                    StringComparison.Ordinal));
+
+        while (reader.NextResult())
+        {
+            if (!reader.Name.Equals("All Clients", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var foundInactiveClient = false;
+            while (reader.Read())
+            {
+                foundInactiveClient |=
+                    reader.GetValue(0)?.ToString() == "Manual Client"
+                    && reader.GetValue(3)?.ToString() == "No";
+            }
+
+            Assert.True(foundInactiveClient);
+        }
+    }
+
     private static XDocument ReadXml(ZipArchive archive, string path)
     {
         var entry = archive.GetEntry(path)

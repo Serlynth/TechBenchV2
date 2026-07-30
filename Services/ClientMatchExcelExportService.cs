@@ -146,10 +146,21 @@ public static class ClientMatchExcelExportService
             new(
                 [$"Generated {generatedAt:yyyy-MM-dd h:mm tt zzz}"],
                 0),
+            new(
+                ["Summary totals count active clients. Inactive records remain on the detail tabs."],
+                0),
             new([], 0),
-            new(["Category", "Active", "Inactive", "Total"], 1)
+            new(["Category", "Current total"], 1)
         };
 
+        AddSummaryRow(
+            rows,
+            "Imported from WHD (includes matched)",
+            clients.Where(HasWhdSource));
+        AddSummaryRow(
+            rows,
+            "Imported from Sage (includes matched)",
+            clients.Where(HasSageSource));
         AddSummaryRow(rows, "Matched", clients.Where(client =>
             GetCategory(client) == ClientMatchExportCategory.Matched));
         AddSummaryRow(rows, "WHD only", clients.Where(client =>
@@ -163,9 +174,9 @@ public static class ClientMatchExcelExportService
         return new WorkbookSheet(
             "Summary",
             rows,
-            [30d, 12d, 12d, 12d],
-            FreezeRow: 4,
-            AutoFilterRow: 4);
+            [42d, 16d],
+            FreezeRow: 5,
+            AutoFilterRow: 5);
     }
 
     private static void AddSummaryRow(
@@ -178,14 +189,19 @@ public static class ClientMatchExcelExportService
             [
                 label,
                 categoryClients.Count(static client => client.IsActive)
-                    .ToString(CultureInfo.InvariantCulture),
-                categoryClients.Count(static client => !client.IsActive)
-                    .ToString(CultureInfo.InvariantCulture),
-                categoryClients.Count.ToString(CultureInfo.InvariantCulture)
+                    .ToString(CultureInfo.InvariantCulture)
             ],
             0,
-            NumericColumns: [1, 2, 3]));
+            NumericColumns: [1]));
     }
+
+    private static bool HasWhdSource(Client client) =>
+        client.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase)
+        || client.Source.Equals("Both", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasSageSource(Client client) =>
+        client.Source.Equals("Sage", StringComparison.OrdinalIgnoreCase)
+        || client.Source.Equals("Both", StringComparison.OrdinalIgnoreCase);
 
     private static WorkbookSheet BuildClientSheet(
         string name,
