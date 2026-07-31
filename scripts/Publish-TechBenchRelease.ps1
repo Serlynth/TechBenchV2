@@ -217,9 +217,7 @@ try {
     }
 
     $hasExistingChannelRelease = @($existingReleases | Where-Object {
-        if ($releaseChannel -eq 'client-info-beta') {
-            $false
-        } elseif ($isBetaChannel) {
+        if ($isBetaChannel) {
             $_.tagName -match '^v\d+\.\d+\.\d+-beta\.'
         } else {
             $_.tagName -match '^v0\.' -and $_.tagName -notmatch '-beta\.'

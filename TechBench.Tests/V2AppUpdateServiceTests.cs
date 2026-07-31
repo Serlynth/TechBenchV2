@@ -85,6 +85,11 @@ public sealed class V2AppUpdateServiceTests
             "\"-p:TechBenchReleaseChannel=$releaseChannel\"",
             source,
             StringComparison.Ordinal);
+        Assert.Contains("'download', 'github'", source, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "if ($releaseChannel -eq 'client-info-beta')",
+            source,
+            StringComparison.Ordinal);
     }
 
     [Fact]
