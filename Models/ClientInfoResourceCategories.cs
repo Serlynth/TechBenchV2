@@ -3,7 +3,8 @@ namespace TechBench.Models;
 public static class ClientInfoResourceCategories
 {
     public const string ServersInfrastructure = "Servers & Infrastructure";
-    public const string NetworkInternet = "Network & Internet";
+    public const string ConnectionInternet = "Connection & Internet";
+    public const string LegacyNetworkInternet = "Network & Internet";
     public const string ApplicationsCloud = "Applications & Cloud";
     public const string DomainsEmail = "Domains & Email";
     public const string BackupSecurity = "Backup & Security";
@@ -13,7 +14,7 @@ public static class ClientInfoResourceCategories
     public static readonly string[] All =
     [
         ServersInfrastructure,
-        NetworkInternet,
+        ConnectionInternet,
         ApplicationsCloud,
         DomainsEmail,
         BackupSecurity,
@@ -25,6 +26,13 @@ public static class ClientInfoResourceCategories
     {
         var normalizedCategory = NormalizeCategory(category);
         var normalizedType = GetTypeLabel(type).Trim();
+        if (ContainsAny(
+                normalizedType.ToLowerInvariant(),
+                "switch",
+                "switching"))
+        {
+            normalizedCategory = ServersInfrastructure;
+        }
         if (normalizedCategory == NeedsSorting)
         {
             return string.IsNullOrWhiteSpace(normalizedType)
@@ -56,7 +64,31 @@ public static class ClientInfoResourceCategories
             }
         }
 
+        var legacyNetworkPrefix = $"{LegacyNetworkInternet} / ";
+        if (value.StartsWith(
+                legacyNetworkPrefix,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            var legacyType = value[legacyNetworkPrefix.Length..];
+            return ContainsAny(legacyType.ToLowerInvariant(), "switch", "switching")
+                ? ServersInfrastructure
+                : ConnectionInternet;
+        }
+
+        if (string.Equals(
+                value,
+                LegacyNetworkInternet,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return ConnectionInternet;
+        }
+
         var lower = value.ToLowerInvariant();
+        if (ContainsAny(lower, "switch", "switching"))
+        {
+            return ServersInfrastructure;
+        }
+
         if (ContainsAny(
                 lower,
                 "antivirus", "anti-virus", "edr", "endpoint", "security",
@@ -77,12 +109,12 @@ public static class ClientInfoResourceCategories
 
         if (ContainsAny(
                 lower,
-                "firewall", "router", "switch", "wireless", "wi-fi",
+                "firewall", "router", "wireless", "wi-fi",
                 "wifi", "access point", "internet", "isp", "circuit",
                 "vlan", "vpn", "public ip", "modem", "gateway",
                 "network"))
         {
-            return NetworkInternet;
+            return ConnectionInternet;
         }
 
         if (ContainsAny(
@@ -125,6 +157,14 @@ public static class ClientInfoResourceCategories
             {
                 return value[prefix.Length..].Trim();
             }
+        }
+
+        var legacyNetworkPrefix = $"{LegacyNetworkInternet} / ";
+        if (value.StartsWith(
+                legacyNetworkPrefix,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return value[legacyNetworkPrefix.Length..].Trim();
         }
 
         return value;

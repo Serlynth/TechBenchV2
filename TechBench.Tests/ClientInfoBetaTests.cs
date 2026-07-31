@@ -44,7 +44,7 @@ public sealed class ClientInfoBetaTests
                     "Locations",
                     "People",
                     "Servers & Infrastructure",
-                    "Network & Internet",
+                    "Connection & Internet",
                     "Applications & Cloud",
                     "Domains & Email",
                     "Backup & Security",
@@ -89,7 +89,7 @@ public sealed class ClientInfoBetaTests
                 "Verified");
             AppendRow(
                 path,
-                "Network & Internet",
+                "Connection & Internet",
                 "Firewall", "WatchGuard", "WatchGuard", "https://firewall.test",
                 "Main Office", "Active", "Primary firewall", "Verified");
             AppendRow(
@@ -137,7 +137,7 @@ public sealed class ClientInfoBetaTests
             using var resourcePayload =
                 System.Text.Json.JsonDocument.Parse(resource.PayloadJson);
             Assert.Equal(
-                "Network & Internet / Firewall",
+                "Connection & Internet / Firewall",
                 resourcePayload.RootElement
                     .GetProperty("resourceType")
                     .GetString());
@@ -155,7 +155,11 @@ public sealed class ClientInfoBetaTests
     [Theory]
     [InlineData("Antivirus / EDR", "Backup & Security")]
     [InlineData("CrowdStrike", "Backup & Security")]
-    [InlineData("Firewall", "Network & Internet")]
+    [InlineData("Firewall", "Connection & Internet")]
+    [InlineData("Switch", "Servers & Infrastructure")]
+    [InlineData("Network Switch", "Servers & Infrastructure")]
+    [InlineData("Network & Internet / Switch", "Servers & Infrastructure")]
+    [InlineData("Network & Internet / Firewall", "Connection & Internet")]
     [InlineData("Microsoft 365", "Applications & Cloud")]
     [InlineData("Domain Registrar", "Domains & Email")]
     [InlineData("Hyper-V Host", "Servers & Infrastructure")]
@@ -182,11 +186,50 @@ public sealed class ClientInfoBetaTests
             var path = Path.Combine(directory, "Previous Migration.xlsx");
             var service = new ClientInfoWorkbookService();
             service.CreateTemplate(path, 477, "Acme Legal");
-            ConvertGeneratedWorkbookToPreviousVersion(path);
+            ConvertGeneratedWorkbookToFriendlyVersion(path);
             AppendRow(
                 path,
                 "Systems & Services",
                 "Firewall", "WatchGuard", "WatchGuard", "", "", "Active",
+                "Previous beta workbook", "Verified");
+
+            var package = service.Read(path);
+
+            Assert.Equal(
+                ClientInfoWorkbookService.FriendlyTemplateVersion,
+                package.TemplateVersion);
+            var resource = Assert.Single(
+                package.Records,
+                record => record.RecordType == "Resource");
+            Assert.Contains(
+                "\"resourceType\":\"Firewall\"",
+                resource.PayloadJson,
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void PreviousCategorizedWorkbookVersionRemainsImportable()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "TechBenchClientInfoTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "Previous Categorized.xlsx");
+            var service = new ClientInfoWorkbookService();
+            service.CreateTemplate(path, 477, "Acme Legal");
+            ConvertGeneratedWorkbookToPreviousCategorizedVersion(path);
+            AppendRow(
+                path,
+                "Network & Internet",
+                "Switch", "Core Switch", "Cisco", "", "", "Active",
                 "Previous beta workbook", "Verified");
 
             var package = service.Read(path);
@@ -197,10 +240,11 @@ public sealed class ClientInfoBetaTests
             var resource = Assert.Single(
                 package.Records,
                 record => record.RecordType == "Resource");
-            Assert.Contains(
-                "\"resourceType\":\"Firewall\"",
-                resource.PayloadJson,
-                StringComparison.Ordinal);
+            Assert.Equal(
+                "Servers & Infrastructure",
+                TechBench.Models.ClientInfoResourceCategories.Classify(
+                    System.Text.Json.JsonDocument.Parse(resource.PayloadJson)
+                        .RootElement.GetProperty("resourceType").GetString()));
         }
         finally
         {
@@ -302,7 +346,7 @@ public sealed class ClientInfoBetaTests
                      "People &amp; Locations",
                      "Equipment",
                      "Servers &amp; Infrastructure",
-                     "Network &amp; Internet",
+                     "Connection &amp; Internet",
                      "Applications &amp; Cloud",
                      "Domains &amp; Email",
                      "Backup &amp; Security",
@@ -319,6 +363,8 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("SaveClientInfoPerson", viewModel, StringComparison.Ordinal);
         Assert.Contains("SaveClientInfoResource", viewModel, StringComparison.Ordinal);
         Assert.Contains("RefreshResourceGroups", viewModel, StringComparison.Ordinal);
+        Assert.Contains("Computers, printers", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Computers, servers", xaml, StringComparison.Ordinal);
         Assert.Contains("SaveClientInfoCredential", viewModel, StringComparison.Ordinal);
         Assert.Contains("CompareClientInfoImportToFireDrill", viewModel, StringComparison.Ordinal);
         Assert.Contains("Another editor saved first", viewModel, StringComparison.Ordinal);
@@ -493,24 +539,17 @@ public sealed class ClientInfoBetaTests
         part.Worksheet.Save();
     }
 
-    private static void ConvertGeneratedWorkbookToPreviousVersion(string path)
+    private static void ConvertGeneratedWorkbookToFriendlyVersion(string path)
     {
         using var workbook = SpreadsheetDocument.Open(path, true);
         var workbookPart = workbook.WorkbookPart!;
         var sheets = workbookPart.Workbook.Sheets!.Elements<Sheet>().ToList();
-        var startHere = sheets.Single(sheet => sheet.Name?.Value == "Start Here");
-        var startPart = (WorksheetPart)workbookPart.GetPartById(startHere.Id!);
-        var versionCell = startPart.Worksheet.GetFirstChild<SheetData>()!
-            .Elements<Row>()
-            .Single(row => row.RowIndex?.Value == 5U)
-            .Elements<Cell>()
-            .Single(cell => cell.CellReference?.Value == "B5");
-        versionCell.DataType = CellValues.InlineString;
-        versionCell.InlineString = new InlineString(
-            new Text(ClientInfoWorkbookService.PreviousTemplateVersion));
-        startPart.Worksheet.Save();
+        SetTemplateVersion(
+            workbookPart,
+            sheets,
+            ClientInfoWorkbookService.FriendlyTemplateVersion);
 
-        sheets.Single(sheet => sheet.Name?.Value == "Network & Internet").Name =
+        sheets.Single(sheet => sheet.Name?.Value == "Connection & Internet").Name =
             "Systems & Services";
         foreach (var name in new[]
                  {
@@ -525,6 +564,38 @@ public sealed class ClientInfoBetaTests
         }
 
         workbookPart.Workbook.Save();
+    }
+
+    private static void ConvertGeneratedWorkbookToPreviousCategorizedVersion(
+        string path)
+    {
+        using var workbook = SpreadsheetDocument.Open(path, true);
+        var workbookPart = workbook.WorkbookPart!;
+        var sheets = workbookPart.Workbook.Sheets!.Elements<Sheet>().ToList();
+        SetTemplateVersion(
+            workbookPart,
+            sheets,
+            ClientInfoWorkbookService.PreviousTemplateVersion);
+        sheets.Single(sheet => sheet.Name?.Value == "Connection & Internet").Name =
+            "Network & Internet";
+        workbookPart.Workbook.Save();
+    }
+
+    private static void SetTemplateVersion(
+        WorkbookPart workbookPart,
+        IReadOnlyList<Sheet> sheets,
+        string version)
+    {
+        var startHere = sheets.Single(sheet => sheet.Name?.Value == "Start Here");
+        var startPart = (WorksheetPart)workbookPart.GetPartById(startHere.Id!);
+        var versionCell = startPart.Worksheet.GetFirstChild<SheetData>()!
+            .Elements<Row>()
+            .Single(row => row.RowIndex?.Value == 5U)
+            .Elements<Cell>()
+            .Single(cell => cell.CellReference?.Value == "B5");
+        versionCell.DataType = CellValues.InlineString;
+        versionCell.InlineString = new InlineString(new Text(version));
+        startPart.Worksheet.Save();
     }
 
     private static string TestColumnName(int column)

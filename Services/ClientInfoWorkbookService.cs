@@ -13,8 +13,9 @@ namespace TechBench.Services;
 
 public sealed class ClientInfoWorkbookService
 {
-    public const string TemplateVersion = "TB-CI-3";
-    public const string PreviousTemplateVersion = "TB-CI-2";
+    public const string TemplateVersion = "TB-CI-4";
+    public const string PreviousTemplateVersion = "TB-CI-3";
+    public const string FriendlyTemplateVersion = "TB-CI-2";
     public const string LegacyTemplateVersion = "TB-CI-1";
 
     private static readonly string[] ReviewStatuses =
@@ -45,7 +46,7 @@ public sealed class ClientInfoWorkbookService
             "Start Here",
             [
                 ["TechBench Client Info Migration Workbook", ""],
-                ["What to do", "Copy the useful, cleaned information from the client's current workbook into the matching category tabs. Leave tabs that do not apply blank."],
+                ["What to do", "Copy cleaned information into the matching category tabs. Switches go under Servers & Infrastructure; antivirus and EDR go under Backup & Security."],
                 ["Review each row", "Choose Verified, Keep as-is, Needs review, or Do not import. A workbook cannot be approved while a populated row is blank or still Needs review."],
                 ["Passwords", "Put passwords and other secrets only on the Passwords tab. They are encrypted when imported and are never written to import logs."],
                 ["Template Version", TemplateVersion],
@@ -94,7 +95,7 @@ public sealed class ClientInfoWorkbookService
             workbookPart,
             sheets,
             ref sheetId,
-            "Network & Internet",
+            "Connection & Internet",
             [
                 ["Type", "Name", "Provider", "Address/URL", "Location", "Status",
                  "Notes", "Review Status"]
@@ -192,11 +193,15 @@ public sealed class ClientInfoWorkbookService
                 StringComparison.OrdinalIgnoreCase)
             && !string.Equals(
                 version,
+                FriendlyTemplateVersion,
+                StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(
+                version,
                 LegacyTemplateVersion,
                 StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException(
-                $"Template version '{version}' is not supported. Expected {TemplateVersion}, {PreviousTemplateVersion}, or {LegacyTemplateVersion}.");
+                $"Template version '{version}' is not supported. Expected {TemplateVersion}, {PreviousTemplateVersion}, {FriendlyTemplateVersion}, or {LegacyTemplateVersion}.");
         }
 
         if (!Guid.TryParse(GetRequired(info, "Workbook ID"), out var workbookId))
@@ -233,8 +238,18 @@ public sealed class ClientInfoWorkbookService
         if (string.Equals(
                 version,
                 TemplateVersion,
+                StringComparison.OrdinalIgnoreCase)
+            || string.Equals(
+                version,
+                PreviousTemplateVersion,
                 StringComparison.OrdinalIgnoreCase))
         {
+            var connectionSheetName = string.Equals(
+                version,
+                TemplateVersion,
+                StringComparison.OrdinalIgnoreCase)
+                ? "Connection & Internet"
+                : "Network & Internet";
             var locationKeys = ParseSimpleLocations(
                 GetSheet(tables, "Locations"),
                 records);
@@ -253,12 +268,12 @@ public sealed class ClientInfoWorkbookService
                 "Servers & Infrastructure",
                 "infrastructure");
             ParseSimpleResources(
-                GetSheet(tables, "Network & Internet"),
+                GetSheet(tables, connectionSheetName),
                 records,
                 locationKeys,
                 resourceKeys,
-                ClientInfoResourceCategories.NetworkInternet,
-                "Network & Internet",
+                ClientInfoResourceCategories.ConnectionInternet,
+                connectionSheetName,
                 "network");
             ParseSimpleResources(
                 GetSheet(tables, "Applications & Cloud"),
@@ -302,7 +317,7 @@ public sealed class ClientInfoWorkbookService
         }
         else if (string.Equals(
                      version,
-                     PreviousTemplateVersion,
+                     FriendlyTemplateVersion,
                      StringComparison.OrdinalIgnoreCase))
         {
             var locationKeys = ParseSimpleLocations(

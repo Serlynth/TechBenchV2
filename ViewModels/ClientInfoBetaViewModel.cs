@@ -184,9 +184,9 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     public ClientInfoResourceGroup ServerInfrastructureGroup { get; } = new(
         ClientInfoResourceCategories.ServersInfrastructure,
         "Servers, virtual machines, hypervisors, storage, directory services, and infrastructure roles.");
-    public ClientInfoResourceGroup NetworkInternetGroup { get; } = new(
-        ClientInfoResourceCategories.NetworkInternet,
-        "Firewalls, switches, Wi-Fi, ISPs, circuits, VLANs, VPNs, and public IP information.");
+    public ClientInfoResourceGroup ConnectionInternetGroup { get; } = new(
+        ClientInfoResourceCategories.ConnectionInternet,
+        "Firewalls, Wi-Fi, ISPs, circuits, VLANs, VPNs, and public IP information.");
     public ClientInfoResourceGroup ApplicationsCloudGroup { get; } = new(
         ClientInfoResourceCategories.ApplicationsCloud,
         "Microsoft 365, line-of-business applications, SaaS products, cloud services, and licensing.");
@@ -545,7 +545,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         foreach (var group in new[]
                  {
                      ServerInfrastructureGroup,
-                     NetworkInternetGroup,
+                     ConnectionInternetGroup,
                      ApplicationsCloudGroup,
                      DomainsEmailGroup,
                      BackupSecurityGroup,
