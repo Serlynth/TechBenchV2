@@ -131,7 +131,8 @@ public partial class App : System.Windows.Application
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         var connectionWindow = new DatabaseConnectionWindow(
             connectionOptions,
-            connectionStatus);
+            connectionStatus,
+            forceForeground: !string.IsNullOrWhiteSpace(UpdateCompletionVersion));
         if (connectionWindow.ShowDialog() != true
             || connectionWindow.ConnectionFactory is null
             || connectionWindow.CurrentUser is null)
@@ -161,6 +162,10 @@ public partial class App : System.Windows.Application
         MainWindow.ShowActivated = false;
 #endif
         MainWindow.Show();
+        if (!string.IsNullOrWhiteSpace(UpdateCompletionVersion))
+        {
+            WindowActivationService.BringToForeground(MainWindow);
+        }
         ShutdownMode = ShutdownMode.OnMainWindowClose;
     }
 

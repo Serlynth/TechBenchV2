@@ -52,11 +52,32 @@ public sealed class DatabaseConnectionUpdateRecoveryTests
             repositoryRoot,
             "DatabaseConnectionWindow.xaml.cs"));
 
-        Assert.Contains("Source=\"Assets/csri-techbench-logo.png\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ModuleLogoImage\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ModuleBranding.LogoSource(savedModule)", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("ThemeService.Apply(", codeBehind, StringComparison.Ordinal);
         Assert.Contains("Content=\"Connect\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("PreviewAnotherUser", xaml + codeBehind, StringComparison.Ordinal);
         Assert.DoesNotContain("TrustServerCertificateCheckBox", xaml + codeBehind, StringComparison.Ordinal);
         Assert.Contains("TrustServerCertificate: true", codeBehind, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PostUpdateLaunch_ForegroundsTheConnectionAndWorkspaceWindows()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var app = File.ReadAllText(Path.Combine(repositoryRoot, "App.xaml.cs"));
+        var connection = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "DatabaseConnectionWindow.xaml.cs"));
+        var activation = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "Services",
+            "WindowActivationService.cs"));
+
+        Assert.Contains("forceForeground: !string.IsNullOrWhiteSpace(UpdateCompletionVersion)", app, StringComparison.Ordinal);
+        Assert.Contains("WindowActivationService.BringToForeground(MainWindow)", app, StringComparison.Ordinal);
+        Assert.Contains("WindowActivationService.BringToForeground(this)", connection, StringComparison.Ordinal);
+        Assert.Contains("SetForegroundWindow", activation, StringComparison.Ordinal);
     }
 
     [Fact]
