@@ -29,6 +29,7 @@ public sealed partial class MainWindowViewModel
         IsClientWifiSection ||
         IsDomainAdSection ||
         IsConnectionSection ||
+        IsVeeamSection ||
         IsMiscInfoSection;
     public bool IsClientWifiSection =>
         CurrentSection.Equals("Client WiFi", StringComparison.Ordinal);
@@ -36,6 +37,8 @@ public sealed partial class MainWindowViewModel
         CurrentSection.Equals("Domain/AD", StringComparison.Ordinal);
     public bool IsConnectionSection =>
         CurrentSection.Equals("Connection", StringComparison.Ordinal);
+    public bool IsVeeamSection =>
+        CurrentSection.Equals("Veeam", StringComparison.Ordinal);
     public bool IsMiscInfoSection =>
         CurrentSection.Equals("Misc Info", StringComparison.Ordinal);
     public string CredentialWorkspaceTitle => CurrentSection;
@@ -44,7 +47,8 @@ public sealed partial class MainWindowViewModel
         "Client WiFi" => "Search synchronized client WiFi information. WiFi values remain hidden until you explicitly reveal a client.",
         "Domain/AD" => "Search synchronized local domain and Active Directory information. Values remain hidden until you explicitly reveal a client.",
         "Connection" => "Search synchronized WatchGuard connection information. Values remain hidden until you explicitly reveal a client.",
-        "Misc Info" => "Search synchronized client information that is not WiFi, Domain/AD, or WatchGuard connection data. Values remain hidden until you explicitly reveal a client.",
+        "Veeam" => "Search synchronized Veeam backup information. Values remain hidden until you explicitly reveal a client.",
+        "Misc Info" => "Search synchronized client information that is not WiFi, Domain/AD, WatchGuard connection, or Veeam data. Values remain hidden until you explicitly reveal a client.",
         _ => "Search all synchronized client information. Values remain hidden until you explicitly reveal a client."
     };
     public string CredentialEmptyText => CurrentSection switch
@@ -52,6 +56,7 @@ public sealed partial class MainWindowViewModel
         "Client WiFi" => "No matching clients have WiFi fields.",
         "Domain/AD" => "No matching clients have Domain/AD fields.",
         "Connection" => "No matching clients have WatchGuard connection fields.",
+        "Veeam" => "No matching clients have Veeam fields.",
         "Misc Info" => "No matching clients have miscellaneous information.",
         _ => "No matching client information."
     };
@@ -60,6 +65,7 @@ public sealed partial class MainWindowViewModel
         "Client WiFi" => "Reveal WiFi",
         "Domain/AD" => "Reveal Domain/AD",
         "Connection" => "Reveal Connection",
+        "Veeam" => "Reveal Veeam",
         "Misc Info" => "Reveal Misc Info",
         _ => "Reveal Client Info"
     };
@@ -68,6 +74,7 @@ public sealed partial class MainWindowViewModel
         "Client WiFi" => "Select a client to view its WiFi fields.",
         "Domain/AD" => "Select a client to view its local domain and Active Directory fields.",
         "Connection" => "Select a client to view its WatchGuard connection fields.",
+        "Veeam" => "Select a client to view its Veeam fields.",
         "Misc Info" => "Select a client to view its miscellaneous information.",
         _ => "Select a client to view all synchronized information."
     };
@@ -122,6 +129,8 @@ public sealed partial class MainWindowViewModel
         FireDrillCredentialSummary summary)
     {
         Client? whdMatch = null;
+        IReadOnlyList<EquipmentItem> equipment = [];
+        IReadOnlyList<ClientUserSummary> clientUsers = [];
         try
         {
             whdMatch = ClientProfileWhdMatcher.FindConfidentMatch(
@@ -134,10 +143,63 @@ public sealed partial class MainWindowViewModel
             // must never prevent the synchronized profile from opening.
         }
 
+        try
+        {
+            if (whdMatch is not null)
+            {
+                equipment = _repository.GetEquipmentInventory(clientId: whdMatch.Id);
+            }
+
+            if (equipment.Count == 0)
+            {
+                equipment = _repository.GetEquipmentInventory(clientName: summary.ClientName);
+            }
+        }
+        catch
+        {
+            // Inventory enrichment is best-effort. The profile remains useful
+            // while the matching SQL installer is being applied.
+            equipment = [];
+        }
+
+        try
+        {
+            equipment = EquipmentDeploymentState.Apply(
+                equipment,
+                EquipmentDeploymentState.ReadFromSettings(
+                    _repository.GetSettings()));
+        }
+        catch
+        {
+            // Lifecycle enrichment is best-effort. Equipment details remain
+            // available even if shared settings are temporarily unavailable.
+        }
+
+        try
+        {
+            clientUsers = whdMatch is not null
+                ? _repository.SearchClientUsers(clientId: whdMatch.Id)
+                : _repository.SearchClientUsers(searchTerm: summary.ClientName)
+                    .Where(user => string.Equals(
+                        user.ClientName.Trim(),
+                        summary.ClientName.Trim(),
+                        StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+        }
+        catch
+        {
+            // User enrichment is best-effort. The rest of the synchronized
+            // client profile still opens if an older installer is present.
+            clientUsers = [];
+        }
+
         return new ClientInfoProfileViewModel(
             summary,
             _repository.RevealFireDrillCredential,
-            whdMatch);
+            whdMatch,
+            equipment,
+            clientUsers,
+            _repository.RevealClientUser);
     }
 
     private void RefreshFireDrillCredentials()
@@ -216,6 +278,7 @@ public sealed partial class MainWindowViewModel
         "Client WiFi" => CredentialFieldGrouper.IsWirelessField(field),
         "Domain/AD" => CredentialFieldGrouper.IsDomainOrAdField(field),
         "Connection" => CredentialFieldGrouper.IsConnectionField(field),
+        "Veeam" => CredentialFieldGrouper.IsVeeamField(field),
         "Misc Info" => CredentialFieldGrouper.IsMiscInfoField(field),
         _ => true
     };

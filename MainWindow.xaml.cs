@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
+using TechBench.Controls;
 using TechBench.Data;
 using TechBench.Models;
 using TechBench.Providers;
@@ -18,6 +19,501 @@ public partial class MainWindow : Window
     private DateTime _previewExpiryDeadlineUtc;
     private bool _previewExpiryHandled;
     private MarkdownEditorWindow? _markdownEditorWindow;
+    private System.Windows.Point _equipmentDragStartPoint;
+    private EquipmentItem? _pendingEquipmentDragItem;
+    private bool _equipmentDragStarted;
+    private EquipmentDragPreview? _equipmentDragPreview;
+    private System.Windows.Point _equipmentLaneDragStartPoint;
+    private EquipmentLane? _pendingEquipmentLaneDrag;
+    private EquipmentLaneDragPreview? _equipmentLaneDragPreview;
+    private FrameworkElement? _equipmentLaneDragSourceElement;
+    private FrameworkElement? _equipmentLaneDragTargetElement;
+    private ScrollViewer? _equipmentLaneDragScrollViewer;
+    private bool _equipmentLaneDragStarted;
+    private GridLength _expandedEquipmentDeploymentHeight =
+        new(230, GridUnitType.Pixel);
+
+    private void HideEquipmentLane_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: EquipmentLane lane }
+            && DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.HideEquipmentTechnicianLane(lane);
+        }
+    }
+
+    private void ShowHiddenEquipmentLanes_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.ShowAllHiddenEquipmentTechnicians();
+        }
+    }
+
+    private void EquipmentLaneHeader_PreviewMouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is DependencyObject source
+            && FindVisualAncestor<System.Windows.Controls.Button>(source) is not null)
+        {
+            _pendingEquipmentLaneDrag = null;
+            return;
+        }
+
+        _pendingEquipmentLaneDrag = sender is FrameworkElement
+            {
+                DataContext: EquipmentLane { IsReorderable: true } lane
+            }
+            ? lane
+            : null;
+        _equipmentLaneDragStartPoint = e.GetPosition(null);
+        if (_pendingEquipmentLaneDrag is not null
+            && sender is FrameworkElement sourceElement)
+        {
+            _equipmentLaneDragSourceElement = sourceElement;
+            _equipmentLaneDragScrollViewer =
+                FindVisualAncestor<ScrollViewer>(sourceElement);
+            sourceElement.CaptureMouse();
+        }
+    }
+
+    private void EquipmentLaneHeader_PreviewMouseMove(
+        object sender,
+        System.Windows.Input.MouseEventArgs e)
+    {
+        if (_pendingEquipmentLaneDrag is null)
+        {
+            return;
+        }
+
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            EndEquipmentLaneDrag();
+            return;
+        }
+
+        var currentPosition = e.GetPosition(null);
+        if (!_equipmentLaneDragStarted)
+        {
+            if (Math.Abs(currentPosition.X - _equipmentLaneDragStartPoint.X)
+                    < SystemParameters.MinimumHorizontalDragDistance
+                && Math.Abs(currentPosition.Y - _equipmentLaneDragStartPoint.Y)
+                    < SystemParameters.MinimumVerticalDragDistance)
+            {
+                return;
+            }
+
+            if (_equipmentLaneDragSourceElement is not { } sourceElement)
+            {
+                EndEquipmentLaneDrag();
+                return;
+            }
+
+            _equipmentLaneDragStarted = true;
+            _equipmentLaneDragPreview =
+                new EquipmentLaneDragPreview(sourceElement);
+            _equipmentLaneDragPreview.Show();
+        }
+
+        _equipmentLaneDragPreview?.UpdatePosition();
+        UpdateEquipmentLaneDragTarget();
+        e.Handled = true;
+    }
+
+    private void EquipmentLaneHeader_PreviewMouseLeftButtonUp(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        var sourceLane = _pendingEquipmentLaneDrag;
+        var targetLane =
+            _equipmentLaneDragTargetElement?.DataContext as EquipmentLane;
+        var viewModel = DataContext as MainWindowViewModel;
+        if (_equipmentLaneDragStarted
+            && sourceLane is not null
+            && targetLane is null
+            && viewModel is not null)
+        {
+            targetLane = ResolveEquipmentLaneDragTarget(
+                viewModel,
+                sourceLane,
+                e);
+        }
+
+        var shouldReorder =
+            _equipmentLaneDragStarted
+            && sourceLane is not null
+            && targetLane is not null
+            && !string.Equals(
+                sourceLane.AssignedToLoginName,
+                targetLane.AssignedToLoginName,
+                StringComparison.OrdinalIgnoreCase);
+
+        EndEquipmentLaneDrag();
+        if (shouldReorder
+            && viewModel is not null)
+        {
+            viewModel.ReorderEquipmentTechnicianLane(
+                sourceLane!,
+                targetLane!);
+            e.Handled = true;
+        }
+    }
+
+    private EquipmentLane? ResolveEquipmentLaneDragTarget(
+        MainWindowViewModel viewModel,
+        EquipmentLane sourceLane,
+        MouseButtonEventArgs e)
+    {
+        var sourceWorkLane = viewModel.EquipmentLanes.FirstOrDefault(lane =>
+            string.Equals(
+                lane.AssignedToLoginName,
+                sourceLane.AssignedToLoginName,
+                StringComparison.OrdinalIgnoreCase));
+        if (sourceWorkLane is null)
+        {
+            return null;
+        }
+
+        var sourceIndex =
+            viewModel.EquipmentLanes.IndexOf(sourceWorkLane);
+        var targetIndex = _equipmentLaneDragScrollViewer is { } scrollViewer
+            ? EquipmentLaneDragPlacement.ResolveTargetIndexFromBoardPosition(
+                e.GetPosition(scrollViewer).X
+                    + scrollViewer.HorizontalOffset,
+                viewModel.EquipmentLanes.Count)
+            : EquipmentLaneDragPlacement.ResolveTargetIndex(
+                sourceIndex,
+                e.GetPosition(null).X
+                    - _equipmentLaneDragStartPoint.X,
+                viewModel.EquipmentLanes.Count);
+        return targetIndex == sourceIndex
+            ? null
+            : viewModel.EquipmentLanes[targetIndex];
+    }
+
+    private void UpdateEquipmentLaneDragTarget()
+    {
+        var hit = InputHitTest(
+            System.Windows.Input.Mouse.GetPosition(this))
+            as DependencyObject;
+        var targetElement = FindEquipmentLaneElementAncestor(hit);
+        var targetLane = targetElement?.DataContext as EquipmentLane;
+        if (targetLane is null
+            || _pendingEquipmentLaneDrag is not { } sourceLane
+            || string.Equals(
+                sourceLane.AssignedToLoginName,
+                targetLane.AssignedToLoginName,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            targetElement = null;
+        }
+
+        if (ReferenceEquals(
+                targetElement,
+                _equipmentLaneDragTargetElement))
+        {
+            return;
+        }
+
+        if (_equipmentLaneDragTargetElement is not null)
+        {
+            _equipmentLaneDragTargetElement.Opacity = 1;
+        }
+
+        _equipmentLaneDragTargetElement = targetElement;
+        if (_equipmentLaneDragTargetElement is not null)
+        {
+            _equipmentLaneDragTargetElement.Opacity = 0.62;
+        }
+    }
+
+    private void EndEquipmentLaneDrag()
+    {
+        if (_equipmentLaneDragTargetElement is not null)
+        {
+            _equipmentLaneDragTargetElement.Opacity = 1;
+        }
+
+        _equipmentLaneDragPreview?.Dispose();
+        _equipmentLaneDragPreview = null;
+        _equipmentLaneDragTargetElement = null;
+        _equipmentLaneDragScrollViewer = null;
+        _pendingEquipmentLaneDrag = null;
+        _equipmentLaneDragStarted = false;
+
+        var sourceElement = _equipmentLaneDragSourceElement;
+        _equipmentLaneDragSourceElement = null;
+        if (sourceElement?.IsMouseCaptured == true)
+        {
+            sourceElement.ReleaseMouseCapture();
+        }
+    }
+
+    private static FrameworkElement? FindEquipmentLaneElementAncestor(
+        DependencyObject? source)
+    {
+        FrameworkElement? match = null;
+        while (source is not null)
+        {
+            if (source is FrameworkElement
+            {
+                DataContext:
+                    EquipmentLane { IsReorderable: true }
+            } element)
+            {
+                match = element;
+            }
+
+            source = System.Windows.Media.VisualTreeHelper.GetParent(source);
+        }
+
+        return match;
+    }
+
+    private void EquipmentDeploymentExpander_Collapsed(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (EquipmentDeploymentRow is null
+            || EquipmentDeploymentSplitter is null)
+        {
+            return;
+        }
+
+        if (EquipmentDeploymentRow.ActualHeight > 90)
+        {
+            _expandedEquipmentDeploymentHeight =
+                new GridLength(
+                    EquipmentDeploymentRow.ActualHeight,
+                    GridUnitType.Pixel);
+        }
+
+        EquipmentDeploymentSplitter.Visibility = Visibility.Collapsed;
+        EquipmentDeploymentRow.Height = GridLength.Auto;
+    }
+
+    private void EquipmentDeploymentExpander_Expanded(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (EquipmentDeploymentRow is null
+            || EquipmentDeploymentSplitter is null)
+        {
+            return;
+        }
+
+        EquipmentDeploymentRow.Height = _expandedEquipmentDeploymentHeight;
+        EquipmentDeploymentSplitter.Visibility = Visibility.Visible;
+    }
+
+    private void EquipmentLaneListBox_PreviewMouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        _equipmentDragStartPoint = e.GetPosition(null);
+        _equipmentDragStarted = false;
+        _pendingEquipmentDragItem =
+            FindVisualAncestor<ListBoxItem>(
+                e.OriginalSource as DependencyObject)?.DataContext as EquipmentItem;
+        if (_pendingEquipmentDragItem is not null
+            && sender is System.Windows.Controls.ListBox listBox)
+        {
+            listBox.CaptureMouse();
+        }
+    }
+
+    private void EquipmentLaneListBox_PreviewMouseLeftButtonUp(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (sender is System.Windows.Controls.ListBox listBox
+            && listBox.IsMouseCaptured)
+        {
+            listBox.ReleaseMouseCapture();
+        }
+
+        if (!_equipmentDragStarted
+            && _pendingEquipmentDragItem is { } equipment
+            && DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.SelectedEquipment = equipment;
+        }
+
+        _pendingEquipmentDragItem = null;
+        _equipmentDragStarted = false;
+    }
+
+    private void EquipmentLaneListBox_PreviewMouseMove(
+        object sender,
+        System.Windows.Input.MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed
+            || sender is not System.Windows.Controls.ListBox listBox)
+        {
+            return;
+        }
+
+        var currentPosition = e.GetPosition(null);
+        if (Math.Abs(currentPosition.X - _equipmentDragStartPoint.X)
+                < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(currentPosition.Y - _equipmentDragStartPoint.Y)
+                < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        if (_pendingEquipmentDragItem is not { } equipment)
+        {
+            return;
+        }
+
+        _equipmentDragStarted = true;
+        if (listBox.IsMouseCaptured)
+        {
+            listBox.ReleaseMouseCapture();
+        }
+        listBox.SelectedItem = equipment;
+        using var preview = new EquipmentDragPreview(listBox, equipment);
+        _equipmentDragPreview = preview;
+        listBox.GiveFeedback += EquipmentDragSource_GiveFeedback;
+        preview.Show();
+        try
+        {
+            DragDrop.DoDragDrop(
+                listBox,
+                new System.Windows.DataObject(typeof(EquipmentItem), equipment),
+                System.Windows.DragDropEffects.Move);
+        }
+        finally
+        {
+            listBox.GiveFeedback -= EquipmentDragSource_GiveFeedback;
+            _equipmentDragPreview = null;
+            _pendingEquipmentDragItem = null;
+            _equipmentDragStarted = false;
+        }
+    }
+
+    private void EquipmentDragSource_GiveFeedback(
+        object sender,
+        System.Windows.GiveFeedbackEventArgs e)
+    {
+        _equipmentDragPreview?.UpdatePosition();
+        e.UseDefaultCursors = true;
+        e.Handled = true;
+    }
+
+    private void EquipmentLaneListBox_DragOver(
+        object sender,
+        System.Windows.DragEventArgs e)
+    {
+        if (sender is System.Windows.Controls.ListBox listBox
+            && listBox.DataContext is EquipmentLane
+            && e.Data.GetDataPresent(typeof(EquipmentItem)))
+        {
+            e.Effects = System.Windows.DragDropEffects.Move;
+            listBox.Background =
+                System.Windows.Application.Current.TryFindResource("AccentSoftBrush")
+                    as System.Windows.Media.Brush
+                ?? System.Windows.Media.Brushes.Transparent;
+            listBox.BorderBrush =
+                System.Windows.Application.Current.TryFindResource("AccentBrush")
+                    as System.Windows.Media.Brush
+                ?? System.Windows.Media.Brushes.DodgerBlue;
+            listBox.BorderThickness = new Thickness(2);
+        }
+        else
+        {
+            e.Effects = System.Windows.DragDropEffects.None;
+        }
+        e.Handled = true;
+    }
+
+    private void EquipmentLaneListBox_DragLeave(
+        object sender,
+        System.Windows.DragEventArgs e) =>
+        ResetEquipmentDropTarget(sender);
+
+    private async void EquipmentLaneListBox_Drop(
+        object sender,
+        System.Windows.DragEventArgs e)
+    {
+        if (e.Handled)
+        {
+            return;
+        }
+
+        if (sender is not System.Windows.Controls.ListBox listBox
+            || listBox.DataContext is not EquipmentLane targetLane
+            || e.Data.GetData(typeof(EquipmentItem)) is not EquipmentItem equipment
+            || DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        ResetEquipmentDropTarget(sender);
+        await viewModel.AssignEquipmentAsync(
+            equipment,
+            targetLane,
+            GetEquipmentDropIndex(listBox, e, targetLane));
+    }
+
+    private static int GetEquipmentDropIndex(
+        System.Windows.Controls.ListBox listBox,
+        System.Windows.DragEventArgs e,
+        EquipmentLane targetLane)
+    {
+        var hit = listBox.InputHitTest(e.GetPosition(listBox)) as DependencyObject;
+        var container = FindVisualAncestor<ListBoxItem>(hit);
+        if (container?.DataContext is not EquipmentItem targetEquipment)
+        {
+            return targetLane.Items.Count;
+        }
+
+        var index = targetLane.Items.IndexOf(targetEquipment);
+        if (index < 0)
+        {
+            return targetLane.Items.Count;
+        }
+
+        var position = e.GetPosition(container);
+        return position.Y > container.ActualHeight / 2
+            ? index + 1
+            : index;
+    }
+
+    private static void ResetEquipmentDropTarget(object sender)
+    {
+        if (sender is not System.Windows.Controls.ListBox listBox)
+        {
+            return;
+        }
+
+        listBox.Background = System.Windows.Media.Brushes.Transparent;
+        listBox.BorderBrush = System.Windows.Media.Brushes.Transparent;
+        listBox.BorderThickness = new Thickness(0);
+    }
+
+    private static T? FindVisualAncestor<T>(DependencyObject? source)
+        where T : DependencyObject
+    {
+        while (source is not null)
+        {
+            if (source is T match)
+            {
+                return match;
+            }
+
+            source = System.Windows.Media.VisualTreeHelper.GetParent(source);
+        }
+
+        return null;
+    }
 
     private void FireDrillCredentialsListBox_MouseDoubleClick(
         object sender,
@@ -42,6 +538,18 @@ public partial class MainWindow : Window
         profileWindow.Show();
         profileWindow.Activate();
         e.Handled = true;
+    }
+
+    private async void OpenEquipmentFromInventory_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button { DataContext: EquipmentItem equipment }
+            && DataContext is MainWindowViewModel viewModel)
+        {
+            await viewModel.OpenEquipmentFromInventoryAsync(equipment);
+            e.Handled = true;
+        }
     }
 
     public MainWindow(
@@ -79,7 +587,7 @@ public partial class MainWindow : Window
             credentialStore,
             currentUser,
             _localPreferences,
-            new V2AppUpdateService(),
+            new V2AppUpdateService(_localPreferences.UpdateChannel),
             () => System.Windows.Application.Current.Shutdown());
 
         viewModel.ActiveClientSessionSelectionRestoreRequested +=
@@ -301,6 +809,15 @@ public partial class MainWindow : Window
     private void NewEntryButton_Click(object sender, RoutedEventArgs e)
     {
         FocusEditorClient();
+    }
+
+    private void OpenEquipmentBoardDemo_Click(object sender, RoutedEventArgs e)
+    {
+        var demoWindow = new EquipmentBoardDemoWindow
+        {
+            Owner = this
+        };
+        demoWindow.ShowDialog();
     }
 
     private void EditorClientComboBox_TextChanged(object sender, TextChangedEventArgs e)

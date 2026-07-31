@@ -48,6 +48,48 @@ public sealed class ClientMatchingServiceTests
     }
 
     [Fact]
+    public void SuggestsCurrentSageNameForAnAlreadyMatchedRenamedClient()
+    {
+        var client = new Client
+        {
+            Id = 463,
+            Name = "Teeters Harvey Marrone & O'Rourke LLP",
+            Source = "Both",
+            WhdLocationName = "Marrone & O'Rourke LLP",
+            SageCustomerId = "69832",
+            SageCustomerName = "Marrone & O'Rourke"
+        };
+
+        var suggestion = ClientMatchingService.SuggestCanonicalName(client);
+
+        Assert.Equal("Marrone & O'Rourke", suggestion);
+    }
+
+    [Fact]
+    public void SuggestsCandidateNameOnlyAfterAReasonableWhdNameMatch()
+    {
+        var whd = new Client
+        {
+            Id = 1,
+            Name = "Marrone & O'Rourke LLP",
+            Source = "WHD",
+            WhdLocationName = "Marrone & O'Rourke LLP"
+        };
+        var sage = new Client
+        {
+            Id = 2,
+            Name = "Marrone & O'Rourke",
+            Source = "Sage",
+            SageCustomerId = "69832",
+            SageCustomerName = "Marrone & O'Rourke"
+        };
+
+        Assert.Equal(
+            "Marrone & O'Rourke",
+            ClientMatchingService.SuggestCanonicalName(whd, sage));
+    }
+
+    [Fact]
     public void AutomaticallyMatchesUniqueDelanceyAndDevineLocationPairs()
     {
         var whdClients = new[]

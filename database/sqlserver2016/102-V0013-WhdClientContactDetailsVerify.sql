@@ -38,8 +38,10 @@ DECLARE @ApplyDefinition nvarchar(max) =
     OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyWhdClientSnapshot', N'P'));
 
 IF CHARINDEX(N'CONVERT(int, 13) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition, N'')) = 0
+   AND CHARINDEX(N'CONVERT(int, 14) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition, N'')) = 0
+   AND CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition, N'')) = 0
 BEGIN
-    PRINT N'FAIL: repository capabilities do not report schema version 13.';
+    PRINT N'FAIL: repository capabilities do not report schema version 13 or 14.';
     SET @FailureCount += 1;
 END;
 

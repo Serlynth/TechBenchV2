@@ -5,31 +5,97 @@ using Velopack.Sources;
 
 namespace TechBench.Services;
 
-public sealed class V2AppUpdateService : IAppUpdateService
+public sealed class V2AppUpdateService :
+    IAppUpdateService,
+    IAppUpdateChannelService
 {
     public const string ReleaseRepositoryUrl =
         "https://github.com/Serlynth/TechBenchV2-Releases";
-    public const string ReleaseChannel = "v2";
+    public const string StableReleaseChannel = "v2";
+    public const string InventoryBetaReleaseChannel = "inventory-beta";
+#if TECHBENCH_INVENTORY_BETA
+    public const string CompiledReleaseChannel = InventoryBetaReleaseChannel;
+#else
+    public const string CompiledReleaseChannel = StableReleaseChannel;
+#endif
 
-    private readonly UpdateManager _updateManager;
+    private UpdateManager _updateManager;
     private readonly SemaphoreSlim _operationGate = new(1, 1);
     private UpdateInfo? _pendingUpdate;
 
-    public V2AppUpdateService()
+    public V2AppUpdateService(string? releaseChannel = null)
     {
-        _updateManager = new UpdateManager(
+        SelectedReleaseChannel = ResolveReleaseChannel(
+            releaseChannel,
+            CompiledReleaseChannel);
+        _updateManager = CreateUpdateManager(SelectedReleaseChannel);
+    }
+
+    public string SelectedReleaseChannel { get; private set; }
+
+    public void SelectReleaseChannel(string releaseChannel)
+    {
+        var selected = ResolveReleaseChannel(
+            releaseChannel,
+            CompiledReleaseChannel);
+        if (selected.Equals(
+                SelectedReleaseChannel,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (_operationGate.CurrentCount == 0)
+        {
+            throw new InvalidOperationException(
+                "Wait for the current update operation to finish before changing update channels.");
+        }
+
+        _pendingUpdate = null;
+        SelectedReleaseChannel = selected;
+        _updateManager = CreateUpdateManager(selected);
+    }
+
+    public static string ResolveReleaseChannel(
+        string? releaseChannel,
+        string? fallbackChannel = null)
+    {
+        var selected = releaseChannel?.Trim();
+        if (selected?.Equals(
+                InventoryBetaReleaseChannel,
+                StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return InventoryBetaReleaseChannel;
+        }
+
+        if (selected?.Equals(
+                StableReleaseChannel,
+                StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return StableReleaseChannel;
+        }
+
+        return fallbackChannel?.Equals(
+                InventoryBetaReleaseChannel,
+                StringComparison.OrdinalIgnoreCase) == true
+            ? InventoryBetaReleaseChannel
+            : StableReleaseChannel;
+    }
+
+    private static UpdateManager CreateUpdateManager(string releaseChannel) =>
+        new(
             new GithubSource(
                 ReleaseRepositoryUrl,
                 accessToken: null,
                 prerelease: true),
             new UpdateOptions
             {
-                ExplicitChannel = ReleaseChannel,
+                ExplicitChannel = releaseChannel,
                 // 5.0.1/5.0.2 were published before the intended 0.5.x numbering
-                // was clarified. Permit the one-time move to the corrected line.
+                // was clarified. It also permits an intentional beta-to-stable
+                // channel switch when the stable version is numerically lower.
                 AllowVersionDowngrade = true
             });
-    }
 
     public bool IsInstalled => _updateManager.IsInstalled;
 

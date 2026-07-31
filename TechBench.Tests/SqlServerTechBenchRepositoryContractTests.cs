@@ -7,9 +7,10 @@ namespace TechBench.Tests;
 public sealed class SqlServerTechBenchRepositoryContractTests
 {
     [Fact]
-    public void ClientTargetsV0012Schema()
+    public void ClientTargetsV0015Schema()
     {
-        Assert.Equal(13, SqlServerConnectionFactory.SupportedSchemaVersion);
+        Assert.Equal(15, SqlServerConnectionFactory.SupportedSchemaVersion);
+        Assert.Equal(13, SqlServerConnectionFactory.MinimumSupportedSchemaVersion);
     }
 
     [Fact]
@@ -150,6 +151,34 @@ public sealed class SqlServerTechBenchRepositoryContractTests
         Assert.Contains(
             "AddRequiredText(command, \"@RequestType\", 40, \"Full\")",
             source,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EquipmentBoardWritesRemainAdminOnlyAndProfilesUseSharedInventoryRead()
+    {
+        Assert.Equal(
+            "[tb_app].[GetEquipmentInventory]",
+            SqlServerTechBenchRepository.Procedures.GetEquipmentInventory);
+        Assert.Equal(
+            "[tb_app].[AdminGetEquipmentBoard]",
+            SqlServerTechBenchRepository.Procedures.GetEquipmentBoard);
+        Assert.Equal(
+            "[tb_app].[AdminSaveEquipment]",
+            SqlServerTechBenchRepository.Procedures.SaveEquipment);
+        Assert.Equal(
+            "[tb_app].[AdminMoveEquipment]",
+            SqlServerTechBenchRepository.Procedures.MoveEquipment);
+        Assert.Equal(
+            "[tb_app].[AdminArchiveEquipment]",
+            SqlServerTechBenchRepository.Procedures.ArchiveEquipment);
+
+        var repositorySource = File.ReadAllText(FindRepositoryFile(
+            "Data",
+            "SqlServerTechBenchRepository.Equipment.cs"));
+        Assert.DoesNotContain(
+            "@IncludeDeployed",
+            repositorySource,
             StringComparison.Ordinal);
     }
 

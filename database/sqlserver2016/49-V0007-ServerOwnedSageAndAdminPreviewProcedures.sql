@@ -116,6 +116,26 @@ BEGIN
     BEGIN TRY
         BEGIN TRANSACTION;
 
+        /*
+            Active Directory can legitimately issue a new SID for a reused login
+            name. Only an authorized application user may release the stale row.
+            Preserve that row and its foreign-key relationships while freeing the
+            unique login name for the authenticated SID.
+        */
+        IF @HasApplicationRole = 1
+        BEGIN
+            UPDATE conflicting_user WITH (UPDLOCK, HOLDLOCK)
+            SET [LoginName] = LEFT
+                (
+                    N'Retired:' + CONVERT(nvarchar(170), conflicting_user.[WindowsSid], 1)
+                        + N':' + conflicting_user.[LoginName],
+                    256
+                )
+            FROM [tb_security].[Users] AS conflicting_user
+            WHERE conflicting_user.[LoginName] = @LoginName
+              AND conflicting_user.[WindowsSid] <> @UserSid;
+        END;
+
         UPDATE [tb_security].[Users] WITH (UPDLOCK, HOLDLOCK)
         SET
             [LoginName] = @LoginName,

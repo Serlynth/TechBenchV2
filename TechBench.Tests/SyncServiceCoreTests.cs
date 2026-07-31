@@ -18,6 +18,57 @@ public sealed class SyncServiceCoreTests
     }
 
     [Fact]
+    public void ManualFullRequestUsesSuccessfulTicketCursorInsteadOfHistoricalRescan()
+    {
+        var cursor = new DateTimeOffset(2026, 7, 29, 16, 26, 0, TimeSpan.Zero);
+        var work = new WhdSyncWork(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "Tickets",
+            IsFullSync: true,
+            CursorUtc: null,
+            RequestId: Guid.NewGuid(),
+            LeaseExpiresUtc: cursor.AddMinutes(5));
+        var configuration = Configuration(
+            "https://whd.example.test",
+            "sync-user",
+            cursor);
+
+        Assert.Equal(cursor, WhdSyncEngine.ResolveTicketCursor(work, configuration));
+    }
+
+    [Fact]
+    public void FirstTicketSyncWithoutCursorStillUsesHistoricalBootstrap()
+    {
+        var work = new WhdSyncWork(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "Tickets",
+            IsFullSync: true,
+            CursorUtc: null,
+            RequestId: Guid.NewGuid(),
+            LeaseExpiresUtc: DateTimeOffset.UtcNow.AddMinutes(5));
+
+        Assert.Null(WhdSyncEngine.ResolveTicketCursor(
+            work,
+            Configuration("https://whd.example.test", "sync-user")));
+    }
+
+    [Fact]
+    public void RunningWhdStatusDoesNotPresentPreviousFailureAsCurrentResult()
+    {
+        var status = new WhdSyncServiceStatus
+        {
+            Health = "Error",
+            Message = "Web Help Desk sync failed: The operation was canceled.",
+            IsRunning = true,
+            QueueDepth = 1
+        };
+
+        Assert.Equal("Running: Synchronization is in progress.", status.Summary);
+    }
+
+    [Fact]
     public void SageServiceConfigurationRequiresDsnAndUsername()
     {
         Assert.True(new SageSyncConfiguration("techbench", "sage-user").IsConfigured);
@@ -51,7 +102,7 @@ public sealed class SyncServiceCoreTests
         Assert.Equal(120, options.EffectiveLeaseSeconds);
         Assert.Equal(TimeSpan.FromMinutes(60), options.DeltaOverlap);
         Assert.Equal(30, options.EffectiveCommandTimeoutSeconds);
-        Assert.Equal(TimeSpan.FromSeconds(15), options.WhdRequestTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(300), options.WhdRequestTimeout);
         Assert.Equal(TimeSpan.FromSeconds(30), options.SageOdbcTimeout);
         Assert.Equal(TimeSpan.FromSeconds(5), options.FinalizationTimeout);
         Assert.Equal(Path.GetFullPath(customPath), options.ResolveSecretPath());
@@ -187,13 +238,16 @@ public sealed class SyncServiceCoreTests
         Assert.DoesNotContain("secret", error.Message, StringComparison.Ordinal);
     }
 
-    private static WhdServiceConfiguration Configuration(string baseUrl, string username) => new(
+    private static WhdServiceConfiguration Configuration(
+        string baseUrl,
+        string username,
+        DateTimeOffset? cursorUtc = null) => new(
         baseUrl,
         username,
         WhdAuthenticationMode.ApplicationApiKey,
         AutoSyncEnabled: true,
         AutoSyncMinutes: 5,
-        CursorUtc: null);
+        CursorUtc: cursorUtc);
 
     private static WhdSecretStore CreateSecretStore(string path) => new(
         Options.Create(new SyncServiceOptions { SecretPath = path }));

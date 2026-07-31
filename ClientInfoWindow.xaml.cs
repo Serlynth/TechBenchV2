@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using TechBench.ViewModels;
 
 namespace TechBench;
 
@@ -18,6 +19,17 @@ public partial class ClientInfoWindow : Window
     {
         if (e.Key != Key.Escape)
             return;
+
+        if (DataContext is ClientInfoProfileViewModel
+            {
+                IsEquipmentDetailsVisible: true
+            } viewModel)
+        {
+            viewModel.CloseEquipmentDetailsCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
+
         Close();
         e.Handled = true;
     }

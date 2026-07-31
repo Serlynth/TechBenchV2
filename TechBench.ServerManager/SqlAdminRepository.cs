@@ -1,11 +1,14 @@
 using System.Data;
 using System.Security.Principal;
+using System.Text.Json;
 using Microsoft.Data.SqlClient;
 
 namespace TechBench.ServerManager;
 
 internal sealed class SqlAdminRepository(AppPaths paths)
 {
+    internal const int MinimumSupportedSchemaVersion = 13;
+    internal const int MaximumSupportedSchemaVersion = 15;
     public SynchronizationConfiguration Load()
     {
         using var connection = OpenAdminConnection();
@@ -146,6 +149,43 @@ internal sealed class SqlAdminRepository(AppPaths paths)
         }
     }
 
+    public int ReconcileAuthorizedUsers(IReadOnlyCollection<DirectoryUser> users)
+    {
+        ArgumentNullException.ThrowIfNull(users);
+        if (users.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "Active Directory returned no authorized TechBench users. "
+                + "No SQL users were changed.");
+        }
+
+        var snapshot = users
+            .OrderBy(static user => user.LoginName, StringComparer.OrdinalIgnoreCase)
+            .Select(static user => new
+            {
+                loginName = user.LoginName,
+                displayName = user.DisplayName,
+                isAdmin = user.IsAdmin,
+                windowsSid = user.WindowsSidHex
+            })
+            .ToArray();
+        var json = JsonSerializer.Serialize(snapshot);
+
+        using var connection = OpenAdminConnection();
+        using var command = StoredProcedure(
+            connection,
+            "tb_app.AdminReconcileWhdAuthorizedUsers");
+        command.Parameters.Add("@AuthorizedUsersJson", SqlDbType.NVarChar, -1).Value = json;
+        using var reader = command.ExecuteReader();
+        if (!reader.Read())
+        {
+            throw new InvalidOperationException(
+                "SQL Server did not return the authorized-user reconciliation result.");
+        }
+
+        return ReadInt(reader, "RetiredCount");
+    }
+
     public int VerifyRequiredSchema(int requiredVersion)
     {
         using var connection = OpenAdminConnection(requireExactVersion: false);
@@ -183,8 +223,15 @@ internal sealed class SqlAdminRepository(AppPaths paths)
             var schema = ReadInt(reader, "SchemaVersion");
             var isAdmin = ReadBool(reader, "IsAdmin");
             var login = ReadString(reader, "AuthenticatedLoginName");
-            if (requireExactVersion && schema != 13)
-                throw new InvalidOperationException($"Server Manager requires database schema 13; SQL Server reports {schema}.");
+            if (requireExactVersion
+                && (schema < MinimumSupportedSchemaVersion
+                    || schema > MaximumSupportedSchemaVersion))
+            {
+                throw new InvalidOperationException(
+                    $"Server Manager supports database schemas "
+                    + $"{MinimumSupportedSchemaVersion} through {MaximumSupportedSchemaVersion}; "
+                    + $"SQL Server reports {schema}.");
+            }
             if (!isAdmin)
                 throw new UnauthorizedAccessException($"'{login}' is not a TechBench Admin. Add this Windows account to CSRI\\TechBench_Admins.");
             return connection;

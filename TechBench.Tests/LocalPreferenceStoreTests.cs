@@ -32,6 +32,20 @@ public sealed class LocalPreferenceStoreTests
                 0,
                 DateTimeKind.Utc);
             created.SkippedUpdateVersion = "2.0.0-alpha.2";
+            created.UpdateChannel =
+                V2AppUpdateService.InventoryBetaReleaseChannel;
+            created.EquipmentDetailsPanelVisible = false;
+            created.EquipmentTechnicianOrder =
+            [
+                "CSRI\\rskoog",
+                "CSRI\\kallen"
+            ];
+            created.HiddenEquipmentTechnicians =
+            [
+                "CSRI\\swunderlin"
+            ];
+            created.EquipmentTechnicianPriorityLoginName =
+                "CSRI\\rskoog";
 
             LocalPreferenceStore.Save(created, path);
             var loaded = LocalPreferenceStore.LoadOrCreate(path);
@@ -47,6 +61,19 @@ public sealed class LocalPreferenceStoreTests
             Assert.True(loaded.MicrosoftAdminOpenInChromeIncognito);
             Assert.Equal(created.LastUpdateCheckAtUtc, loaded.LastUpdateCheckAtUtc);
             Assert.Equal("2.0.0-alpha.2", loaded.SkippedUpdateVersion);
+            Assert.Equal(
+                V2AppUpdateService.InventoryBetaReleaseChannel,
+                loaded.UpdateChannel);
+            Assert.False(loaded.EquipmentDetailsPanelVisible);
+            Assert.Equal(
+                ["CSRI\\rskoog", "CSRI\\kallen"],
+                loaded.EquipmentTechnicianOrder);
+            Assert.Equal(
+                ["CSRI\\swunderlin"],
+                loaded.HiddenEquipmentTechnicians);
+            Assert.Equal(
+                "CSRI\\rskoog",
+                loaded.EquipmentTechnicianPriorityLoginName);
         }
         finally
         {
@@ -65,7 +92,23 @@ public sealed class LocalPreferenceStoreTests
                 Theme = "unexpected",
                 WindowState = "Fullscreen",
                 RefreshIntervalMinutes = -10,
-                SkippedUpdateVersion = "   "
+                SkippedUpdateVersion = "   ",
+                UpdateChannel = "unexpected",
+                EquipmentTechnicianOrder =
+                [
+                    " CSRI\\rskoog ",
+                    "",
+                    "csri\\RSKOOG",
+                    "CSRI\\kallen"
+                ],
+                HiddenEquipmentTechnicians =
+                [
+                    " CSRI\\swunderlin ",
+                    "",
+                    "csri\\SWUNDERLIN"
+                ],
+                EquipmentTechnicianPriorityLoginName =
+                    " CSRI\\rskoog "
             }, path);
 
             var loaded = LocalPreferenceStore.LoadOrCreate(path);
@@ -73,6 +116,16 @@ public sealed class LocalPreferenceStoreTests
             Assert.Equal("Normal", loaded.WindowState);
             Assert.Equal(1, loaded.RefreshIntervalMinutes);
             Assert.Null(loaded.SkippedUpdateVersion);
+            Assert.Equal(string.Empty, loaded.UpdateChannel);
+            Assert.Equal(
+                ["CSRI\\rskoog", "CSRI\\kallen"],
+                loaded.EquipmentTechnicianOrder);
+            Assert.Equal(
+                ["CSRI\\swunderlin"],
+                loaded.HiddenEquipmentTechnicians);
+            Assert.Equal(
+                "CSRI\\rskoog",
+                loaded.EquipmentTechnicianPriorityLoginName);
 
             using var document = JsonDocument.Parse(File.ReadAllText(path));
             var propertyNames = document.RootElement

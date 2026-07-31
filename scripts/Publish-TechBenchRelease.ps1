@@ -10,6 +10,9 @@ param(
 
     [string]$RepositoryUrl = 'https://github.com/Serlynth/TechBenchV2-Releases',
 
+    [ValidateSet('v2', 'inventory-beta')]
+    [string]$Channel = 'v2',
+
     [switch]$Publish,
 
     [switch]$AllowDirty
@@ -27,7 +30,12 @@ $iconPath = Join-Path $repoRoot 'Assets\csri-techbench-icon.ico'
 $splashPath = Join-Path $repoRoot 'Assets\csri-techbench-logo.png'
 $numericVersion = ($Version -split '-', 2)[0]
 $isPrerelease = $Version.Contains('-')
-$releaseChannel = if ($Version -match '^0\.') { 'v2' } else { 'win' }
+$releaseChannel = $Channel
+$installerFileName = if ($releaseChannel -eq 'inventory-beta') {
+    'TechBenchInventoryBetaSetup.exe'
+} else {
+    'TechBenchV2Setup.exe'
+}
 
 if ([string]::IsNullOrWhiteSpace($ReleaseNotesPath)) {
     $ReleaseNotesPath = Join-Path $repoRoot "release-notes\$Version.md"
@@ -206,10 +214,10 @@ try {
     }
 
     $hasExistingChannelRelease = @($existingReleases | Where-Object {
-        if ($releaseChannel -eq 'v2') {
-            $_.tagName -match '^v0\.'
+        if ($releaseChannel -eq 'inventory-beta') {
+            $_.tagName -match '^v\d+\.\d+\.\d+-beta\.'
         } else {
-            $_.tagName -match '^v(?:2\.|5\.)'
+            $_.tagName -match '^v0\.' -and $_.tagName -notmatch '-beta\.'
         }
     }).Count -gt 0
     if ($Publish -and $existingReleases.tagName -contains "v$Version") {
@@ -222,7 +230,8 @@ try {
             'download', 'github',
             '--outputDir', $releaseDirectory,
             '--channel', $releaseChannel,
-            '--repoUrl', $RepositoryUrl
+            '--repoUrl', $RepositoryUrl,
+            '--pre', ($releaseChannel -eq 'inventory-beta').ToString().ToLowerInvariant()
         )
     }
 
@@ -236,6 +245,7 @@ try {
         '-p:PublishSingleFile=false',
         '-p:DebugType=None',
         '-p:DebugSymbols=false',
+        "-p:TechBenchReleaseChannel=$releaseChannel",
         "-p:Version=$Version",
         "-p:AssemblyVersion=$numericVersion.0",
         "-p:FileVersion=$numericVersion.0"
@@ -276,7 +286,7 @@ try {
         throw 'Velopack did not produce a Setup executable.'
     }
 
-    $distSetupPath = Join-Path $distDirectory 'TechBenchV2Setup.exe'
+    $distSetupPath = Join-Path $distDirectory $installerFileName
     Copy-Item -LiteralPath $setup.FullName -Destination $distSetupPath -Force
     $distChecksumPath = "$distSetupPath.sha256"
     $setupHash = (Get-FileHash -LiteralPath $distSetupPath -Algorithm SHA256).Hash
@@ -329,8 +339,8 @@ try {
         }
 
         Write-Host "Published TechBench V2 $Version to $RepositoryUrl/releases/tag/v$Version"
-        Write-Host "Stable installer: $RepositoryUrl/releases/download/v$Version/TechBenchV2Setup.exe"
-        Write-Host "Installer checksum: $RepositoryUrl/releases/download/v$Version/TechBenchV2Setup.exe.sha256"
+        Write-Host "Installer: $RepositoryUrl/releases/download/v$Version/$installerFileName"
+        Write-Host "Installer checksum: $RepositoryUrl/releases/download/v$Version/$installerFileName.sha256"
     } else {
         Write-Host "Built TechBench V2 $Version locally. Configure a V2 repository before using -Publish."
     }

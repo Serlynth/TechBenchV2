@@ -162,7 +162,18 @@ public sealed class LocalPreferences
 
     public string? SkippedUpdateVersion { get; set; }
 
+    public string UpdateChannel { get; set; } = string.Empty;
+
     public bool MicrosoftAdminOpenInChromeIncognito { get; set; }
+
+    public bool EquipmentDetailsPanelVisible { get; set; } = true;
+
+    public List<string> EquipmentTechnicianOrder { get; set; } = [];
+
+    public List<string> HiddenEquipmentTechnicians { get; set; } = [];
+
+    public string EquipmentTechnicianPriorityLoginName { get; set; } =
+        string.Empty;
 
     internal LocalPreferences Normalize()
     {
@@ -181,6 +192,26 @@ public sealed class LocalPreferences
         SkippedUpdateVersion = string.IsNullOrWhiteSpace(SkippedUpdateVersion)
             ? null
             : SkippedUpdateVersion.Trim();
+        UpdateChannel = UpdateChannel?.Trim() switch
+        {
+            V2AppUpdateService.StableReleaseChannel =>
+                V2AppUpdateService.StableReleaseChannel,
+            V2AppUpdateService.InventoryBetaReleaseChannel =>
+                V2AppUpdateService.InventoryBetaReleaseChannel,
+            _ => string.Empty
+        };
+        EquipmentTechnicianOrder = (EquipmentTechnicianOrder ?? [])
+            .Where(static loginName => !string.IsNullOrWhiteSpace(loginName))
+            .Select(static loginName => loginName.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        HiddenEquipmentTechnicians = (HiddenEquipmentTechnicians ?? [])
+            .Where(static loginName => !string.IsNullOrWhiteSpace(loginName))
+            .Select(static loginName => loginName.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        EquipmentTechnicianPriorityLoginName =
+            EquipmentTechnicianPriorityLoginName?.Trim() ?? string.Empty;
         return this;
     }
 }

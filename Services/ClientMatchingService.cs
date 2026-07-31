@@ -80,6 +80,44 @@ public static class ClientMatchingService
         return new ClientMatchSuggestion(top.Candidate, top.Score, description);
     }
 
+    public static string? SuggestCanonicalName(
+        Client client,
+        Client? selectedSageCandidate = null)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+
+        var sageName = !string.IsNullOrWhiteSpace(client.SageCustomerName)
+            ? client.SageCustomerName.Trim()
+            : null;
+        if (sageName is not null
+            && (!string.IsNullOrWhiteSpace(client.SageCustomerId)
+                || client.Source.Equals("Sage", StringComparison.OrdinalIgnoreCase)
+                || client.Source.Equals("Both", StringComparison.OrdinalIgnoreCase)))
+        {
+            // A stored Sage customer ID is the durable match. Prefer its current
+            // source name as the editable canonical-name suggestion even when
+            // the company has changed its name substantially.
+            return sageName;
+        }
+
+        if (selectedSageCandidate is not null
+            && IsSageMatchCandidate(selectedSageCandidate))
+        {
+            var candidateName = ResolveSageName(selectedSageCandidate).Trim();
+            var whdName = ResolveWhdName(client);
+            if (ScoreNames(whdName, candidateName) >= 0.68)
+            {
+                return candidateName;
+            }
+        }
+
+        return !string.IsNullOrWhiteSpace(client.WhdLocationName)
+            ? client.WhdLocationName.Trim()
+            : string.IsNullOrWhiteSpace(client.Name)
+                ? null
+                : client.Name.Trim();
+    }
+
     public static IReadOnlyList<ClientAutomaticMatch> FindSafeAutomaticMatches(
         IEnumerable<Client> whdClients,
         IEnumerable<Client> sageClients)

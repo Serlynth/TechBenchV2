@@ -94,7 +94,36 @@ public sealed record FireDrillCredentialFieldRow(
     int SortOrder,
     string? Value);
 
+public sealed record CredentialsWorkbookContents(
+    IReadOnlyList<FireDrillCredentialRow> Credentials,
+    IReadOnlyList<CredentialsClientUserRow>? ClientUsers);
+
+public sealed record CredentialsClientUserRow(
+    string SourceKey,
+    string ClientName,
+    string DisplayName,
+    string? RoleDepartment,
+    string? Email,
+    string? LocationName,
+    bool IsActive,
+    string RowHashHex,
+    IReadOnlyList<CredentialsClientUserAccountRow> Accounts);
+
+public sealed record CredentialsClientUserAccountRow(
+    string SourceKey,
+    string AccountSystem,
+    string RowHashHex,
+    IReadOnlyList<FireDrillCredentialFieldRow> Fields);
+
 public sealed record FireDrillSyncCounts(int ReadCount, int SavedCount, int StaleCount);
+
+public sealed record CredentialsClientUserSyncCounts(
+    int UserReadCount,
+    int UserSavedCount,
+    int UserStaleCount,
+    int AccountReadCount,
+    int AccountSavedCount,
+    int AccountStaleCount);
 
 public sealed record FireDrillSyncExecutionResult(
     FireDrillSyncCounts Counts,

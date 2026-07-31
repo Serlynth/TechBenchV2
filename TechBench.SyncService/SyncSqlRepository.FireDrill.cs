@@ -56,6 +56,35 @@ public sealed partial class SyncSqlRepository
             GetInt32(reader, "ReadCount", 0), GetInt32(reader, "SavedCount", 0), GetInt32(reader, "StaleCount", 0));
     }
 
+    public async Task<CredentialsClientUserSyncCounts> ApplyCredentialsClientUserSnapshotAsync(
+        FireDrillSyncWork work,
+        Guid workerId,
+        string rowsJson,
+        DateTimeOffset sourceModifiedAtUtc,
+        DateTimeOffset syncedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = CreateCommand(
+            connection,
+            "[tb_service].[ApplyCredentialsClientUserSnapshot]");
+        AddFireDrillIdentity(command, work, workerId);
+        Add(command, "@RowsJson", SqlDbType.NVarChar, rowsJson, -1);
+        Add(command, "@SourceModifiedAtUtc", SqlDbType.DateTime2, sourceModifiedAtUtc.UtcDateTime);
+        Add(command, "@SyncedAtUtc", SqlDbType.DateTime2, syncedAtUtc.UtcDateTime);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            throw new InvalidOperationException(
+                "SQL Server returned no result for the Credentials client-user snapshot.");
+        return new CredentialsClientUserSyncCounts(
+            GetInt32(reader, "UserReadCount", 0),
+            GetInt32(reader, "UserSavedCount", 0),
+            GetInt32(reader, "UserStaleCount", 0),
+            GetInt32(reader, "AccountReadCount", 0),
+            GetInt32(reader, "AccountSavedCount", 0),
+            GetInt32(reader, "AccountStaleCount", 0));
+    }
+
     public async Task CompleteFireDrillWorkAsync(
         FireDrillSyncWork work, Guid workerId, bool succeeded, string? message,
         DateTimeOffset? sourceModifiedAtUtc, CancellationToken cancellationToken)

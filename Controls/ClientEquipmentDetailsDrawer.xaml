@@ -1,0 +1,73 @@
+<UserControl x:Class="TechBench.Controls.ClientEquipmentDetailsDrawer"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:TechBench.Controls"
+             Width="520"
+             HorizontalAlignment="Right"
+             VerticalAlignment="Stretch"
+             Focusable="False">
+    <Border Background="{DynamicResource PanelBackgroundBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="1,0,0,0"
+            Padding="22">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="Equipment Details"
+                               Foreground="{DynamicResource PrimaryTextBrush}"
+                               FontSize="21"
+                               FontWeight="SemiBold" />
+                    <TextBlock Foreground="{DynamicResource SecondaryTextBrush}"
+                               Margin="0,3,0,0">
+                        <Run Text="Assigned to " />
+                        <Run Text="{Binding SelectedEquipment.AssignmentLabel, Mode=OneWay}"
+                             FontWeight="SemiBold" />
+                    </TextBlock>
+                </StackPanel>
+                <Button Grid.Column="1"
+                        Content="Close"
+                        Command="{Binding CloseEquipmentDetailsCommand}"
+                        Style="{DynamicResource SecondaryButtonStyle}"
+                        VerticalAlignment="Top" />
+            </Grid>
+
+            <ScrollViewer Grid.Row="1"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="0,0,8,8">
+                    <Border Background="{DynamicResource AccentSoftBrush}"
+                            BorderBrush="{DynamicResource AccentBrush}"
+                            BorderThickness="1"
+                            CornerRadius="9"
+                            Padding="11"
+                            Margin="0,0,0,12">
+                        <TextBlock Text="Read-only client profile view. The same equipment fields and order are used throughout TechBench."
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="10"
+                                   TextWrapping="Wrap" />
+                    </Border>
+
+                    <local:EquipmentDetailsContent Equipment="{Binding SelectedEquipment}"
+                                                   LaunchAnyDeskCommand="{Binding LaunchAnyDeskCommand}" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <Button Grid.Row="2"
+                    Content="Back to client overview"
+                    Command="{Binding CloseEquipmentDetailsCommand}"
+                    Style="{DynamicResource SecondaryButtonStyle}"
+                    HorizontalAlignment="Stretch"
+                    Margin="0,12,0,0" />
+        </Grid>
+    </Border>
+</UserControl>

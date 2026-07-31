@@ -10,6 +10,10 @@ internal static class ClientProfileWhdMatcher
         "CO", "COMPANY", "CORP", "CORPORATION", "INC", "INCORPORATED",
         "LLC", "LLP", "LTD", "LIMITED", "PC", "PLLC"
     ];
+    private static readonly HashSet<string> JoinWords =
+    [
+        "AND"
+    ];
 
     public static Client? FindConfidentMatch(
         string credentialClientName,
@@ -91,7 +95,7 @@ internal static class ClientProfileWhdMatcher
                 continue;
             if (character == '&')
             {
-                builder.Append(" AND ");
+                builder.Append(' ');
                 continue;
             }
 
@@ -103,6 +107,7 @@ internal static class ClientProfileWhdMatcher
             .ToList();
         if (words.Count > 1 && words[0] == "THE")
             words.RemoveAt(0);
+        words.RemoveAll(JoinWords.Contains);
         while (words.Count > 0 && LegalSuffixes.Contains(words[^1]))
             words.RemoveAt(words.Count - 1);
         return string.Join(' ', words);

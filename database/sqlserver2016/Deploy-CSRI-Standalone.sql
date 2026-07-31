@@ -3268,6 +3268,515 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 33-V0014-EquipmentBoardSchema.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.WhdClientContactDetails.0013'
+      AND [SchemaVersion] = 13
+)
+BEGIN
+    RAISERROR(N'V0013 must be installed before equipment-board schema version 14.', 16, 1);
+    RETURN;
+END;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF SCHEMA_ID(N'tb_inventory') IS NULL
+        EXEC(N'CREATE SCHEMA [tb_inventory] AUTHORIZATION [dbo];');
+
+    IF OBJECT_ID(N'tb_inventory.ClientUsers', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_inventory].[ClientUsers]
+        (
+            [ClientUserId] bigint IDENTITY(1,1) NOT NULL,
+            [ClientId] int NOT NULL,
+            [DisplayName] nvarchar(240) NOT NULL,
+            [RoleDepartment] nvarchar(240) NULL,
+            [Email] nvarchar(320) NULL,
+            [Phone] nvarchar(80) NULL,
+            [LocationName] nvarchar(240) NULL,
+            [SourceSystem] nvarchar(80) NOT NULL
+                CONSTRAINT [DF_ClientUsers_SourceSystem]
+                DEFAULT (N'CredentialsWorkbook'),
+            [SourceKey] nvarchar(500) NULL,
+            [SourceRowHash] binary(32) NULL,
+            [IsActive] bit NOT NULL
+                CONSTRAINT [DF_ClientUsers_IsActive] DEFAULT (1),
+            [LastSyncedAtUtc] datetime2(3) NULL,
+            [CreatedByWindowsSid] varbinary(85) NOT NULL,
+            [UpdatedByWindowsSid] varbinary(85) NOT NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientUsers_CreatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientUsers_UpdatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_ClientUsers]
+                PRIMARY KEY CLUSTERED ([ClientUserId]),
+            CONSTRAINT [FK_ClientUsers_Client]
+                FOREIGN KEY ([ClientId])
+                REFERENCES [tb_data].[Clients]([Id]),
+            CONSTRAINT [FK_ClientUsers_CreatedBy]
+                FOREIGN KEY ([CreatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_ClientUsers_UpdatedBy]
+                FOREIGN KEY ([UpdatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [CK_ClientUsers_DisplayName_NotBlank]
+                CHECK (LEN(LTRIM(RTRIM([DisplayName]))) > 0)
+        );
+
+        CREATE INDEX [IX_ClientUsers_ClientActiveName]
+            ON [tb_inventory].[ClientUsers]
+                ([ClientId], [IsActive], [DisplayName], [ClientUserId])
+            INCLUDE ([RoleDepartment], [Email], [Phone], [LocationName]);
+
+        CREATE UNIQUE INDEX [UX_ClientUsers_SourceKey]
+            ON [tb_inventory].[ClientUsers]([SourceSystem], [SourceKey])
+            WHERE [SourceKey] IS NOT NULL;
+    END;
+
+    IF COL_LENGTH(N'tb_inventory.ClientUsers', N'SourceRowHash') IS NULL
+        ALTER TABLE [tb_inventory].[ClientUsers]
+            ADD [SourceRowHash] binary(32) NULL;
+
+    IF OBJECT_ID(N'tb_inventory.ClientUserAccounts', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_inventory].[ClientUserAccounts]
+        (
+            [ClientUserAccountId] bigint IDENTITY(1,1) NOT NULL,
+            [ClientUserId] bigint NOT NULL,
+            [AccountSystem] nvarchar(240) NOT NULL,
+            [SourceKey] nvarchar(500) NOT NULL,
+            [SourceRowHash] binary(32) NOT NULL,
+            [SourceModifiedAtUtc] datetime2(3) NULL,
+            [LastSyncedAtUtc] datetime2(3) NULL,
+            [IsCurrent] bit NOT NULL
+                CONSTRAINT [DF_ClientUserAccounts_IsCurrent] DEFAULT (1),
+            [CreatedByWindowsSid] varbinary(85) NOT NULL,
+            [UpdatedByWindowsSid] varbinary(85) NOT NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientUserAccounts_CreatedAtUtc]
+                DEFAULT (SYSUTCDATETIME()),
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientUserAccounts_UpdatedAtUtc]
+                DEFAULT (SYSUTCDATETIME()),
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_ClientUserAccounts]
+                PRIMARY KEY CLUSTERED ([ClientUserAccountId]),
+            CONSTRAINT [UX_ClientUserAccounts_SourceKey]
+                UNIQUE ([SourceKey]),
+            CONSTRAINT [FK_ClientUserAccounts_ClientUser]
+                FOREIGN KEY ([ClientUserId])
+                REFERENCES [tb_inventory].[ClientUsers]([ClientUserId]),
+            CONSTRAINT [FK_ClientUserAccounts_CreatedBy]
+                FOREIGN KEY ([CreatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_ClientUserAccounts_UpdatedBy]
+                FOREIGN KEY ([UpdatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [CK_ClientUserAccounts_System_NotBlank]
+                CHECK (LEN(LTRIM(RTRIM([AccountSystem]))) > 0),
+            CONSTRAINT [CK_ClientUserAccounts_SourceKey_NotBlank]
+                CHECK (LEN(LTRIM(RTRIM([SourceKey]))) > 0)
+        );
+
+        CREATE INDEX [IX_ClientUserAccounts_UserCurrent]
+            ON [tb_inventory].[ClientUserAccounts]
+                ([ClientUserId], [IsCurrent], [AccountSystem], [ClientUserAccountId]);
+    END;
+
+    IF OBJECT_ID(N'tb_inventory.ClientUserAccountFields', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_inventory].[ClientUserAccountFields]
+        (
+            [ClientUserAccountId] bigint NOT NULL,
+            [FieldKey] nvarchar(200) NOT NULL,
+            [FieldLabel] nvarchar(200) NOT NULL,
+            [SortOrder] int NOT NULL,
+            [ValueEncrypted] varbinary(max) NULL,
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_ClientUserAccountFields]
+                PRIMARY KEY CLUSTERED ([ClientUserAccountId], [FieldKey]),
+            CONSTRAINT [UQ_ClientUserAccountFields_Order]
+                UNIQUE ([ClientUserAccountId], [SortOrder]),
+            CONSTRAINT [FK_ClientUserAccountFields_Account]
+                FOREIGN KEY ([ClientUserAccountId])
+                REFERENCES [tb_inventory].[ClientUserAccounts]([ClientUserAccountId])
+                ON DELETE CASCADE,
+            CONSTRAINT [CK_ClientUserAccountFields_Key]
+                CHECK (LEN(LTRIM(RTRIM([FieldKey]))) > 0),
+            CONSTRAINT [CK_ClientUserAccountFields_Label]
+                CHECK (LEN(LTRIM(RTRIM([FieldLabel]))) > 0),
+            CONSTRAINT [CK_ClientUserAccountFields_Order]
+                CHECK ([SortOrder] > 0)
+        );
+    END;
+
+    IF OBJECT_ID(N'tb_inventory.Equipment', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_inventory].[Equipment]
+        (
+            [EquipmentId] bigint IDENTITY(1,1) NOT NULL,
+            [AssetTag] nvarchar(80) NULL,
+            [DeviceType] nvarchar(80) NOT NULL,
+            [Name] nvarchar(180) NOT NULL,
+            [SerialNumber] nvarchar(120) NULL,
+            [PartNumber] nvarchar(120) NULL,
+            [IpAddress] nvarchar(80) NULL,
+            [Manufacturer] nvarchar(120) NULL,
+            [Model] nvarchar(120) NULL,
+            [ClientId] int NULL,
+            [ClientName] nvarchar(240) NULL,
+            [ClientUserId] bigint NULL,
+            [LocationName] nvarchar(240) NULL,
+            [Notes] nvarchar(max) NULL,
+            [WorkflowStage] nvarchar(24) NOT NULL
+                CONSTRAINT [DF_Equipment_WorkflowStage] DEFAULT (N'Stock'),
+            [AssignedToWindowsSid] varbinary(85) NULL,
+            [SortOrder] int NOT NULL
+                CONSTRAINT [DF_Equipment_SortOrder] DEFAULT (0),
+            [AssignedAtUtc] datetime2(3) NULL,
+            [IsArchived] bit NOT NULL
+                CONSTRAINT [DF_Equipment_IsArchived] DEFAULT (0),
+            [CreatedByWindowsSid] varbinary(85) NOT NULL,
+            [UpdatedByWindowsSid] varbinary(85) NOT NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_Equipment_CreatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_Equipment_UpdatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_Equipment] PRIMARY KEY CLUSTERED ([EquipmentId]),
+            CONSTRAINT [CK_Equipment_DeviceType_NotBlank]
+                CHECK (LEN(LTRIM(RTRIM([DeviceType]))) > 0),
+            CONSTRAINT [CK_Equipment_Name_NotBlank]
+                CHECK (LEN(LTRIM(RTRIM([Name]))) > 0),
+            CONSTRAINT [CK_Equipment_WorkflowStage]
+                CHECK ([WorkflowStage] IN
+                    (N'Stock', N'Assigned', N'Deployment', N'Deployed')),
+            CONSTRAINT [FK_Equipment_AssignedUser]
+                FOREIGN KEY ([AssignedToWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_Equipment_Client]
+                FOREIGN KEY ([ClientId])
+                REFERENCES [tb_data].[Clients]([Id]),
+            CONSTRAINT [FK_Equipment_ClientUser]
+                FOREIGN KEY ([ClientUserId])
+                REFERENCES [tb_inventory].[ClientUsers]([ClientUserId])
+        );
+    END;
+
+    IF COL_LENGTH(N'tb_inventory.Equipment', N'AssetTag') IS NULL
+        ALTER TABLE [tb_inventory].[Equipment] ADD [AssetTag] nvarchar(80) NULL;
+
+    IF COL_LENGTH(N'tb_inventory.Equipment', N'ClientId') IS NULL
+        ALTER TABLE [tb_inventory].[Equipment] ADD [ClientId] int NULL;
+
+    IF COL_LENGTH(N'tb_inventory.Equipment', N'ClientUserId') IS NULL
+        ALTER TABLE [tb_inventory].[Equipment] ADD [ClientUserId] bigint NULL;
+
+    IF COL_LENGTH(N'tb_inventory.Equipment', N'LocationName') IS NULL
+        ALTER TABLE [tb_inventory].[Equipment] ADD [LocationName] nvarchar(240) NULL;
+
+    IF COL_LENGTH(N'tb_inventory.Equipment', N'WorkflowStage') IS NULL
+        ALTER TABLE [tb_inventory].[Equipment]
+            ADD [WorkflowStage] nvarchar(24) NOT NULL
+                CONSTRAINT [DF_Equipment_WorkflowStage] DEFAULT (N'Stock')
+                WITH VALUES;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.check_constraints
+        WHERE [parent_object_id] = OBJECT_ID(N'tb_inventory.Equipment', N'U')
+          AND [name] = N'CK_Equipment_WorkflowStage'
+    )
+        ALTER TABLE [tb_inventory].[Equipment] WITH CHECK
+            ADD CONSTRAINT [CK_Equipment_WorkflowStage]
+                CHECK ([WorkflowStage] IN
+                    (N'Stock', N'Assigned', N'Deployment', N'Deployed'));
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.foreign_keys
+        WHERE [parent_object_id] = OBJECT_ID(N'tb_inventory.Equipment', N'U')
+          AND [name] = N'FK_Equipment_Client'
+    )
+        ALTER TABLE [tb_inventory].[Equipment] WITH CHECK
+            ADD CONSTRAINT [FK_Equipment_Client]
+                FOREIGN KEY ([ClientId])
+                REFERENCES [tb_data].[Clients]([Id]);
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.foreign_keys
+        WHERE [parent_object_id] = OBJECT_ID(N'tb_inventory.Equipment', N'U')
+          AND [name] = N'FK_Equipment_ClientUser'
+    )
+        ALTER TABLE [tb_inventory].[Equipment] WITH CHECK
+            ADD CONSTRAINT [FK_Equipment_ClientUser]
+                FOREIGN KEY ([ClientUserId])
+                REFERENCES [tb_inventory].[ClientUsers]([ClientUserId]);
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM sys.indexes
+        WHERE [object_id] = OBJECT_ID(N'tb_inventory.Equipment', N'U')
+          AND [name] = N'IX_Equipment_Board'
+    )
+        DROP INDEX [IX_Equipment_Board] ON [tb_inventory].[Equipment];
+
+    CREATE INDEX [IX_Equipment_Board]
+        ON [tb_inventory].[Equipment]
+            ([IsArchived], [WorkflowStage], [AssignedToWindowsSid], [SortOrder], [EquipmentId])
+        INCLUDE
+        (
+            [AssetTag], [DeviceType], [Name], [SerialNumber], [IpAddress],
+            [ClientId], [ClientUserId], [ClientName], [LocationName]
+        );
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.indexes
+        WHERE [object_id] = OBJECT_ID(N'tb_inventory.Equipment', N'U')
+          AND [name] = N'UX_Equipment_AssetTag'
+    )
+        CREATE UNIQUE INDEX [UX_Equipment_AssetTag]
+            ON [tb_inventory].[Equipment]([AssetTag])
+            WHERE [AssetTag] IS NOT NULL AND [IsArchived] = 0;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.indexes
+        WHERE [object_id] = OBJECT_ID(N'tb_inventory.Equipment', N'U')
+          AND [name] = N'IX_Equipment_SerialNumber'
+    )
+        CREATE INDEX [IX_Equipment_SerialNumber]
+            ON [tb_inventory].[Equipment]([SerialNumber])
+            WHERE [SerialNumber] IS NOT NULL;
+
+    IF OBJECT_ID(N'tb_inventory.EquipmentAssignmentHistory', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_inventory].[EquipmentAssignmentHistory]
+        (
+            [EquipmentAssignmentHistoryId] bigint IDENTITY(1,1) NOT NULL,
+            [EquipmentId] bigint NOT NULL,
+            [EventType] nvarchar(80) NOT NULL,
+            [WorkflowStage] nvarchar(24) NOT NULL,
+            [AssignedToWindowsSid] varbinary(85) NULL,
+            [ClientId] int NULL,
+            [ClientUserId] bigint NULL,
+            [LocationName] nvarchar(240) NULL,
+            [Notes] nvarchar(1000) NULL,
+            [ChangedByWindowsSid] varbinary(85) NOT NULL,
+            [ChangedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_EquipmentAssignmentHistory_ChangedAtUtc]
+                DEFAULT (SYSUTCDATETIME()),
+            CONSTRAINT [PK_EquipmentAssignmentHistory]
+                PRIMARY KEY CLUSTERED ([EquipmentAssignmentHistoryId]),
+            CONSTRAINT [FK_EquipmentAssignmentHistory_Equipment]
+                FOREIGN KEY ([EquipmentId])
+                REFERENCES [tb_inventory].[Equipment]([EquipmentId]),
+            CONSTRAINT [FK_EquipmentAssignmentHistory_AssignedUser]
+                FOREIGN KEY ([AssignedToWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_EquipmentAssignmentHistory_Client]
+                FOREIGN KEY ([ClientId])
+                REFERENCES [tb_data].[Clients]([Id]),
+            CONSTRAINT [FK_EquipmentAssignmentHistory_ClientUser]
+                FOREIGN KEY ([ClientUserId])
+                REFERENCES [tb_inventory].[ClientUsers]([ClientUserId]),
+            CONSTRAINT [FK_EquipmentAssignmentHistory_ChangedBy]
+                FOREIGN KEY ([ChangedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [CK_EquipmentAssignmentHistory_WorkflowStage]
+                CHECK ([WorkflowStage] IN
+                    (N'Stock', N'Assigned', N'Deployment', N'Deployed'))
+        );
+
+        CREATE INDEX [IX_EquipmentAssignmentHistory_Equipment]
+            ON [tb_inventory].[EquipmentAssignmentHistory]
+                ([EquipmentId], [ChangedAtUtc] DESC, [EquipmentAssignmentHistoryId] DESC)
+            INCLUDE
+                ([EventType], [WorkflowStage], [AssignedToWindowsSid],
+                 [ClientId], [ClientUserId], [LocationName]);
+    END;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_deploy].[SchemaMigrations]
+        WHERE [MigrationId] = N'SqlServer2016.EquipmentBoard.0014'
+    )
+        INSERT INTO [tb_deploy].[SchemaMigrations]
+            ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+        VALUES
+            (N'SqlServer2016.EquipmentBoard.0014', 14, N'0.5.57', NULL);
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+PRINT N'SqlServer2016.EquipmentBoard.0014 installed.';
+GO
+
+-- ============================================================================
+-- END 33-V0014-EquipmentBoardSchema.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 34-V0015-EquipmentAnyDeskSchema.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.EquipmentBoard.0014'
+      AND [SchemaVersion] = 14
+)
+BEGIN
+    RAISERROR(N'V0014 must be installed before equipment AnyDesk schema version 15.', 16, 1);
+    RETURN;
+END;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF COL_LENGTH(N'tb_inventory.Equipment', N'AnyDeskNumber') IS NULL
+        ALTER TABLE [tb_inventory].[Equipment]
+            ADD [AnyDeskNumber] nvarchar(80) NULL;
+
+    IF COL_LENGTH(N'tb_inventory.Equipment', N'AnyDeskPasswordEncrypted') IS NULL
+        ALTER TABLE [tb_inventory].[Equipment]
+            ADD [AnyDeskPasswordEncrypted] varbinary(max) NULL;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_deploy].[SchemaMigrations]
+        WHERE [MigrationId] = N'SqlServer2016.EquipmentAnyDesk.0015'
+    )
+        INSERT INTO [tb_deploy].[SchemaMigrations]
+            ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+        VALUES
+            (N'SqlServer2016.EquipmentAnyDesk.0015', 15, N'0.5.76', NULL);
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+PRINT N'SqlServer2016.EquipmentAnyDesk.0015 installed.';
+GO
+
+-- ============================================================================
+-- END 34-V0015-EquipmentAnyDeskSchema.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 35-V0015-EquipmentDeploymentLifecycle.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.EquipmentAnyDesk.0015'
+      AND [SchemaVersion] = 15
+)
+BEGIN
+    RAISERROR(N'V0015 must be installed before the equipment deployment lifecycle extension.', 16, 1);
+    RETURN;
+END;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM sys.check_constraints
+        WHERE [parent_object_id] = OBJECT_ID(N'tb_inventory.Equipment', N'U')
+          AND [name] = N'CK_Equipment_WorkflowStage'
+    )
+        ALTER TABLE [tb_inventory].[Equipment]
+            DROP CONSTRAINT [CK_Equipment_WorkflowStage];
+
+    ALTER TABLE [tb_inventory].[Equipment] WITH CHECK
+        ADD CONSTRAINT [CK_Equipment_WorkflowStage]
+            CHECK ([WorkflowStage] IN
+                (N'Stock', N'Assigned', N'Deployment', N'Deployed'));
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM sys.check_constraints
+        WHERE [parent_object_id] =
+            OBJECT_ID(N'tb_inventory.EquipmentAssignmentHistory', N'U')
+          AND [name] = N'CK_EquipmentAssignmentHistory_WorkflowStage'
+    )
+        ALTER TABLE [tb_inventory].[EquipmentAssignmentHistory]
+            DROP CONSTRAINT [CK_EquipmentAssignmentHistory_WorkflowStage];
+
+    ALTER TABLE [tb_inventory].[EquipmentAssignmentHistory] WITH CHECK
+        ADD CONSTRAINT [CK_EquipmentAssignmentHistory_WorkflowStage]
+            CHECK ([WorkflowStage] IN
+                (N'Stock', N'Assigned', N'Deployment', N'Deployed'));
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+PRINT N'Schema-15-compatible equipment deployment lifecycle extension installed.';
+GO
+
+-- ============================================================================
+-- END 35-V0015-EquipmentDeploymentLifecycle.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 30-Security.sql
 -- ============================================================================
 
@@ -3614,6 +4123,22 @@ BEGIN
 
     BEGIN TRY
         BEGIN TRANSACTION;
+
+        /*
+            Active Directory can legitimately issue a new SID for a reused login
+            name. Preserve the historical row and its foreign-key relationships,
+            but release the unique login name before registering the current SID.
+        */
+        UPDATE conflicting_user WITH (UPDLOCK, HOLDLOCK)
+        SET [LoginName] = LEFT
+            (
+                N'Retired:' + CONVERT(nvarchar(170), conflicting_user.[WindowsSid], 1)
+                    + N':' + conflicting_user.[LoginName],
+                256
+            )
+        FROM [tb_security].[Users] AS conflicting_user
+        WHERE conflicting_user.[LoginName] = @LoginName
+          AND conflicting_user.[WindowsSid] <> @UserSid;
 
         UPDATE [tb_security].[Users] WITH (UPDLOCK, HOLDLOCK)
         SET
@@ -17098,6 +17623,239 @@ BEGIN
  SET NOCOUNT ON; IF IS_ROLEMEMBER(N'tb_role_admin')<>1 THROW 51823,N'Only a TechBench Admin may manage WHD user mappings.',1; SELECT COALESCE(m.[Id],0) [Id],CONVERT(varchar(170),u.[WindowsSid],1) [UserSid],u.[LoginName],u.[DisplayName],u.[IsAdmin],m.[TechnicianExternalId],t.[DisplayName] [TechnicianDisplayName],m.[UpdatedAtUtc] FROM [tb_security].[Users] u LEFT JOIN [tb_whd].[UserTechnicianMappings] m ON m.[WindowsSid]=u.[WindowsSid] LEFT JOIN [tb_whd].[Technicians] t ON t.[ExternalId]=m.[TechnicianExternalId] WHERE u.[IsTechnician]=1 ORDER BY u.[DisplayName],u.[LoginName]; END;
 GO
 
+IF OBJECT_ID(N'tb_app.AdminReconcileWhdAuthorizedUsers', N'P') IS NOT NULL DROP PROCEDURE [tb_app].[AdminReconcileWhdAuthorizedUsers];
+GO
+CREATE PROCEDURE [tb_app].[AdminReconcileWhdAuthorizedUsers]
+    @AuthorizedUsersJson nvarchar(max)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @Actor varbinary(85), @ActorLogin nvarchar(256), @ActorName nvarchar(160);
+    DECLARE @ActorIsTechnician bit, @ActorIsManager bit, @ActorIsAdmin bit, @ActorIsSyncOperator bit;
+    EXEC [tb_security].[EnsureCurrentUser]
+        @UserSid = @Actor OUTPUT,
+        @LoginName = @ActorLogin OUTPUT,
+        @DisplayName = @ActorName OUTPUT,
+        @IsTechnician = @ActorIsTechnician OUTPUT,
+        @IsManager = @ActorIsManager OUTPUT,
+        @IsAdmin = @ActorIsAdmin OUTPUT,
+        @IsSyncOperator = @ActorIsSyncOperator OUTPUT;
+
+    IF @ActorIsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 51827, N'Only a TechBench Admin may reconcile authorized users.', 1;
+
+    SET @AuthorizedUsersJson = NULLIF(LTRIM(RTRIM(@AuthorizedUsersJson)), N'');
+    IF @AuthorizedUsersJson IS NULL
+       OR ISJSON(@AuthorizedUsersJson) <> 1
+       OR LEFT(@AuthorizedUsersJson, 1) <> N'['
+        THROW 51828, N'The authorized-user snapshot must be a JSON array.', 1;
+
+    DECLARE @RawUsers TABLE
+    (
+        [LoginName] nvarchar(256) NULL,
+        [DisplayName] nvarchar(160) NULL,
+        [IsAdmin] bit NULL,
+        [WindowsSidHex] nvarchar(172) NULL
+    );
+
+    INSERT INTO @RawUsers([LoginName], [DisplayName], [IsAdmin], [WindowsSidHex])
+    SELECT
+        NULLIF(LTRIM(RTRIM([LoginName])), N''),
+        NULLIF(LTRIM(RTRIM([DisplayName])), N''),
+        COALESCE([IsAdmin], 0),
+        NULLIF(LTRIM(RTRIM([WindowsSidHex])), N'')
+    FROM OPENJSON(@AuthorizedUsersJson)
+    WITH
+    (
+        [LoginName] nvarchar(256) N'$.loginName',
+        [DisplayName] nvarchar(160) N'$.displayName',
+        [IsAdmin] bit N'$.isAdmin',
+        [WindowsSidHex] nvarchar(172) N'$.windowsSid'
+    );
+
+    IF NOT EXISTS (SELECT 1 FROM @RawUsers)
+        THROW 51829, N'An empty authorized-user snapshot cannot be applied.', 1;
+
+    IF EXISTS (SELECT 1 FROM @RawUsers WHERE [LoginName] IS NULL)
+        THROW 51830, N'Every authorized user must have a Windows login name.', 1;
+
+    IF EXISTS
+    (
+        SELECT [LoginName]
+        FROM @RawUsers
+        GROUP BY [LoginName]
+        HAVING COUNT(*) > 1
+    )
+        THROW 51831, N'The authorized-user snapshot contains a duplicate login name.', 1;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM @RawUsers
+        WHERE COALESCE
+              (
+                  TRY_CONVERT(varbinary(85), [WindowsSidHex], 1),
+                  SUSER_SID([LoginName], 0)
+              ) IS NULL
+           OR DATALENGTH
+              (
+                  COALESCE
+                  (
+                      TRY_CONVERT(varbinary(85), [WindowsSidHex], 1),
+                      SUSER_SID([LoginName], 0)
+                  )
+              ) NOT BETWEEN 8 AND 85
+    )
+        THROW 51832, N'An authorized Windows user could not be resolved in Active Directory.', 1;
+
+    DECLARE @AuthorizedUsers TABLE
+    (
+        [WindowsSid] varbinary(85) NOT NULL PRIMARY KEY,
+        [LoginName] nvarchar(256) NOT NULL UNIQUE,
+        [DisplayName] nvarchar(160) NOT NULL,
+        [IsAdmin] bit NOT NULL
+    );
+
+    INSERT INTO @AuthorizedUsers([WindowsSid], [LoginName], [DisplayName], [IsAdmin])
+    SELECT
+        COALESCE
+        (
+            TRY_CONVERT(varbinary(85), raw_user.[WindowsSidHex], 1),
+            SUSER_SID(raw_user.[LoginName], 0)
+        ),
+        raw_user.[LoginName],
+        LEFT
+        (
+            COALESCE
+            (
+                raw_user.[DisplayName],
+                CASE
+                    WHEN CHARINDEX(N'\', raw_user.[LoginName]) > 0
+                        THEN RIGHT
+                        (
+                            raw_user.[LoginName],
+                            LEN(raw_user.[LoginName]) - CHARINDEX(N'\', raw_user.[LoginName])
+                        )
+                    ELSE raw_user.[LoginName]
+                END
+            ),
+            160
+        ),
+        raw_user.[IsAdmin]
+    FROM @RawUsers AS raw_user;
+
+    DECLARE @RetiredUsers TABLE
+    (
+        [WindowsSid] varbinary(85) NOT NULL PRIMARY KEY,
+        [LoginName] nvarchar(256) NOT NULL,
+        [DisplayName] nvarchar(160) NOT NULL
+    );
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        /* Release a reused login name before its current AD SID is registered. */
+        UPDATE existing_user
+        SET [LoginName] = LEFT
+            (
+                N'Retired:' + CONVERT(nvarchar(170), existing_user.[WindowsSid], 1)
+                    + N':' + existing_user.[LoginName],
+                256
+            )
+        FROM [tb_security].[Users] AS existing_user
+        INNER JOIN @AuthorizedUsers AS authorized_user
+            ON authorized_user.[LoginName] = existing_user.[LoginName]
+           AND authorized_user.[WindowsSid] <> existing_user.[WindowsSid];
+
+        MERGE [tb_security].[Users] AS target
+        USING @AuthorizedUsers AS source
+            ON target.[WindowsSid] = source.[WindowsSid]
+        WHEN MATCHED THEN
+            UPDATE SET
+                [LoginName] = source.[LoginName],
+                [DisplayName] = source.[DisplayName],
+                [IsTechnician] = 1,
+                [IsManager] = source.[IsAdmin],
+                [IsAdmin] = source.[IsAdmin],
+                [IsSyncOperator] = source.[IsAdmin]
+        WHEN NOT MATCHED THEN
+            INSERT
+            (
+                [WindowsSid], [LoginName], [DisplayName], [IsTechnician],
+                [IsManager], [IsAdmin], [IsSyncOperator]
+            )
+            VALUES
+            (
+                source.[WindowsSid], source.[LoginName], source.[DisplayName], 1,
+                source.[IsAdmin], source.[IsAdmin], source.[IsAdmin]
+            );
+
+        INSERT INTO @RetiredUsers([WindowsSid], [LoginName], [DisplayName])
+        SELECT [WindowsSid], [LoginName], [DisplayName]
+        FROM [tb_security].[Users] AS registered_user
+        WHERE registered_user.[IsTechnician] = 1
+          AND NOT EXISTS
+          (
+              SELECT 1
+              FROM @AuthorizedUsers AS authorized_user
+              WHERE authorized_user.[WindowsSid] = registered_user.[WindowsSid]
+          );
+
+        DELETE mapping_row
+        FROM [tb_whd].[UserTechnicianMappings] AS mapping_row
+        INNER JOIN @RetiredUsers AS retired_user
+            ON retired_user.[WindowsSid] = mapping_row.[WindowsSid];
+
+        UPDATE registered_user
+        SET
+            [IsTechnician] = 0,
+            [IsManager] = 0,
+            [IsAdmin] = 0,
+            [IsSyncOperator] = 0
+        FROM [tb_security].[Users] AS registered_user
+        INNER JOIN @RetiredUsers AS retired_user
+            ON retired_user.[WindowsSid] = registered_user.[WindowsSid];
+
+        DECLARE @ActiveCount int = (SELECT COUNT(*) FROM @AuthorizedUsers);
+        DECLARE @RetiredCount int = (SELECT COUNT(*) FROM @RetiredUsers);
+        DECLARE @AuditJson nvarchar(max) =
+        (
+            SELECT
+                @ActiveCount AS [activeCount],
+                @RetiredCount AS [retiredCount],
+                JSON_QUERY
+                (
+                    (
+                        SELECT [LoginName] AS [loginName], [DisplayName] AS [displayName]
+                        FROM @RetiredUsers
+                        ORDER BY [DisplayName], [LoginName]
+                        FOR JSON PATH
+                    )
+                ) AS [retiredUsers]
+            FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+        );
+
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action = N'AuthorizedUserSnapshotApplied',
+            @EntityType = N'TechBenchUsers',
+            @EntityId = N'ActiveDirectory',
+            @RequestId = NULL,
+            @DataJson = @AuditJson;
+
+        COMMIT TRANSACTION;
+
+        SELECT @ActiveCount AS [ActiveCount], @RetiredCount AS [RetiredCount];
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+GO
+
 IF OBJECT_ID(N'tb_app.AdminSaveWhdUserMapping', N'P') IS NOT NULL DROP PROCEDURE [tb_app].[AdminSaveWhdUserMapping];
 GO
 CREATE PROCEDURE [tb_app].[AdminSaveWhdUserMapping]
@@ -17492,6 +18250,26 @@ BEGIN
 
     BEGIN TRY
         BEGIN TRANSACTION;
+
+        /*
+            Active Directory can legitimately issue a new SID for a reused login
+            name. Only an authorized application user may release the stale row.
+            Preserve that row and its foreign-key relationships while freeing the
+            unique login name for the authenticated SID.
+        */
+        IF @HasApplicationRole = 1
+        BEGIN
+            UPDATE conflicting_user WITH (UPDLOCK, HOLDLOCK)
+            SET [LoginName] = LEFT
+                (
+                    N'Retired:' + CONVERT(nvarchar(170), conflicting_user.[WindowsSid], 1)
+                        + N':' + conflicting_user.[LoginName],
+                    256
+                )
+            FROM [tb_security].[Users] AS conflicting_user
+            WHERE conflicting_user.[LoginName] = @LoginName
+              AND conflicting_user.[WindowsSid] <> @UserSid;
+        END;
 
         UPDATE [tb_security].[Users] WITH (UPDLOCK, HOLDLOCK)
         SET
@@ -20441,7 +21219,7 @@ BEGIN
     EXEC [tb_security].[GetCurrentAccess]
         @UserSid=@UserSid OUTPUT, @IsManager=@IsManager OUTPUT,
         @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
-    SELECT CONVERT(int, 13) AS [SchemaVersion], CONVERT(bit, 0) AS [FullTextSearchAvailable],
+    SELECT CONVERT(int, 14) AS [SchemaVersion], CONVERT(bit, 0) AS [FullTextSearchAvailable],
         CONVERT(bit, 1) AS [SupportsTickets], CONVERT(bit, 1) AS [SupportsWorkEntries],
         CONVERT(bit, 1) AS [SupportsPrivateNotes], CONVERT(bit, 1) AS [SupportsPostingLeases],
         CONVERT(bit, 1) AS [SupportsSyncLeases], CONVERT(bit, 1) AS [SupportsImports],
@@ -20811,6 +21589,1591 @@ GO
 
 -- ============================================================================
 -- END 53-V0012-FlexibleCredentialFieldsProcedures.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 54-V0014-EquipmentBoardProcedures.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+GO
+
+ALTER PROCEDURE [tb_app].[GetRepositoryCapabilities]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@UserSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    SELECT
+        CONVERT(int, 15) AS [SchemaVersion],
+        CONVERT(bit, 0) AS [FullTextSearchAvailable],
+        CONVERT(bit, 1) AS [SupportsTickets],
+        CONVERT(bit, 1) AS [SupportsWorkEntries],
+        CONVERT(bit, 1) AS [SupportsPrivateNotes],
+        CONVERT(bit, 1) AS [SupportsPostingLeases],
+        CONVERT(bit, 1) AS [SupportsSyncLeases],
+        CONVERT(bit, 1) AS [SupportsImports],
+        CONVERT(bit, 1) AS [SupportsTechBenchV1Import],
+        CONVERT(bit, 1) AS [SupportsServerSageSync],
+        CONVERT(bit, 1) AS [SupportsAdminUserPreview],
+        CONVERT(bit, 1) AS [SupportsFireDrillCredentials],
+        CONVERT(bit, 1) AS [EquipmentBoardAvailable];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminGetInventoryClients', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminGetInventoryClients];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminGetInventoryClients]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 52213, N'Only a TechBench Admin may view inventory clients and users.', 1;
+
+    SELECT
+        client.[Id] AS [ClientId],
+        client.[Name] AS [ClientName],
+        COALESCE(
+            NULLIF(client_user.[LocationName], N''),
+            NULLIF(client.[WhdLocationName], N''),
+            client.[Name]) AS [PrimaryLocation],
+        client_user.[ClientUserId],
+        client_user.[DisplayName] AS [ClientUserDisplayName],
+        client_user.[RoleDepartment],
+        client_user.[Email],
+        client_user.[Phone],
+        client_user.[LocationName],
+        client_user.[IsActive]
+    FROM [tb_data].[Clients] AS client
+    LEFT JOIN [tb_inventory].[ClientUsers] AS client_user
+        ON client_user.[ClientId] = client.[Id]
+       AND client_user.[IsActive] = 1
+    WHERE client.[IsActive] = 1
+    ORDER BY
+        client.[Name],
+        client_user.[DisplayName],
+        client_user.[ClientUserId];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.GetEquipmentInventory', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[GetEquipmentInventory];
+GO
+
+CREATE PROCEDURE [tb_app].[GetEquipmentInventory]
+    @ClientId int = NULL,
+    @ClientUserId bigint = NULL,
+    @ClientName nvarchar(240) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF USER_NAME() = N'tb_preview_reader'
+        THROW 52250, N'Equipment inventory is unavailable in Admin user-preview mode.', 1;
+
+    DECLARE @Sid varbinary(85), @Login nvarchar(256), @Display nvarchar(160),
+            @Tech bit, @Manager bit, @Admin bit, @Sync bit;
+    EXEC [tb_security].[EnsureCurrentUser] @Sid OUTPUT, @Login OUTPUT, @Display OUTPUT,
+        @Tech OUTPUT, @Manager OUTPUT, @Admin OUTPUT, @Sync OUTPUT;
+
+    SET @ClientId = NULLIF(@ClientId, 0);
+    SET @ClientUserId = NULLIF(@ClientUserId, 0);
+    SET @ClientName = NULLIF(LTRIM(RTRIM(@ClientName)), N'');
+
+    IF @ClientId IS NULL AND @ClientUserId IS NULL AND @ClientName IS NULL
+        THROW 52251, N'A client or client user is required to read equipment inventory.', 1;
+
+    SELECT
+        equipment.[EquipmentId],
+        equipment.[AssetTag],
+        equipment.[DeviceType],
+        equipment.[Name],
+        equipment.[SerialNumber],
+        equipment.[PartNumber],
+        equipment.[IpAddress],
+        equipment.[Manufacturer],
+        equipment.[Model],
+        equipment.[AnyDeskNumber],
+        CAST(N'' AS nvarchar(max)) AS [AnyDeskPassword],
+        equipment.[ClientId],
+        COALESCE(client.[Name], equipment.[ClientName]) AS [ClientName],
+        equipment.[ClientUserId],
+        client_user.[DisplayName] AS [ClientUserDisplayName],
+        client_user.[Email] AS [ClientUserEmail],
+        equipment.[LocationName],
+        equipment.[Notes],
+        equipment.[WorkflowStage],
+        user_row.[LoginName] AS [AssignedToLoginName],
+        user_row.[DisplayName] AS [AssignedToDisplayName],
+        equipment.[SortOrder],
+        equipment.[AssignedAtUtc],
+        equipment.[CreatedAtUtc],
+        equipment.[UpdatedAtUtc],
+        equipment.[RowVersion]
+    FROM [tb_inventory].[Equipment] AS equipment
+    LEFT JOIN [tb_security].[Users] AS user_row
+        ON user_row.[WindowsSid] = equipment.[AssignedToWindowsSid]
+    LEFT JOIN [tb_data].[Clients] AS client
+        ON client.[Id] = equipment.[ClientId]
+    LEFT JOIN [tb_inventory].[ClientUsers] AS client_user
+        ON client_user.[ClientUserId] = equipment.[ClientUserId]
+    WHERE equipment.[IsArchived] = 0
+      AND (@ClientId IS NULL OR equipment.[ClientId] = @ClientId)
+      AND (@ClientUserId IS NULL OR equipment.[ClientUserId] = @ClientUserId)
+      AND
+      (
+          @ClientName IS NULL
+          OR COALESCE(client.[Name], equipment.[ClientName]) = @ClientName
+      )
+    ORDER BY
+        equipment.[DeviceType],
+        equipment.[Name],
+        equipment.[AssetTag],
+        equipment.[EquipmentId];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminGetEquipmentBoard', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminGetEquipmentBoard];
+GO
+
+IF OBJECT_ID(N'tb_app.AdminGetEquipmentBoardSecure', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminGetEquipmentBoardSecure];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoardSecure]
+    @IncludeDeployed bit = 0
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    SELECT
+        equipment.[EquipmentId],
+        equipment.[AssetTag],
+        equipment.[DeviceType],
+        equipment.[Name],
+        equipment.[SerialNumber],
+        equipment.[PartNumber],
+        equipment.[IpAddress],
+        equipment.[Manufacturer],
+        equipment.[Model],
+        equipment.[AnyDeskNumber],
+        CONVERT(nvarchar(max), DecryptByKeyAutoCert(
+            CERT_ID(N'tb_FireDrillCredentialCertificate'),
+            NULL,
+            equipment.[AnyDeskPasswordEncrypted],
+            1,
+            CONVERT(nvarchar(20), equipment.[EquipmentId]))) AS [AnyDeskPassword],
+        equipment.[ClientId],
+        COALESCE(client.[Name], equipment.[ClientName]) AS [ClientName],
+        equipment.[ClientUserId],
+        client_user.[DisplayName] AS [ClientUserDisplayName],
+        client_user.[Email] AS [ClientUserEmail],
+        equipment.[LocationName],
+        equipment.[Notes],
+        equipment.[WorkflowStage],
+        user_row.[LoginName] AS [AssignedToLoginName],
+        user_row.[DisplayName] AS [AssignedToDisplayName],
+        equipment.[SortOrder],
+        equipment.[AssignedAtUtc],
+        equipment.[CreatedAtUtc],
+        equipment.[UpdatedAtUtc],
+        equipment.[RowVersion]
+    FROM [tb_inventory].[Equipment] AS equipment
+    LEFT JOIN [tb_security].[Users] AS user_row
+        ON user_row.[WindowsSid] = equipment.[AssignedToWindowsSid]
+    LEFT JOIN [tb_data].[Clients] AS client
+        ON client.[Id] = equipment.[ClientId]
+    LEFT JOIN [tb_inventory].[ClientUsers] AS client_user
+        ON client_user.[ClientUserId] = equipment.[ClientUserId]
+    WHERE equipment.[IsArchived] = 0
+      AND (@IncludeDeployed = 1 OR equipment.[WorkflowStage] <> N'Deployed')
+    ORDER BY
+        CASE equipment.[WorkflowStage]
+            WHEN N'Stock' THEN 0
+            WHEN N'Assigned' THEN 1
+            ELSE 2
+        END,
+        user_row.[DisplayName],
+        user_row.[LoginName],
+        equipment.[SortOrder],
+        equipment.[EquipmentId];
+END;
+GO
+
+CREATE PROCEDURE [tb_app].[AdminGetEquipmentBoard]
+    @IncludeDeployed bit = 0
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 52200, N'Only a TechBench Admin may view the equipment board.', 1;
+
+    EXEC [tb_app].[AdminGetEquipmentBoardSecure]
+        @IncludeDeployed=@IncludeDeployed;
+END;
+GO
+
+IF OBJECT_ID(N'tb_security.EncryptEquipmentAnyDeskPassword', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_security].[EncryptEquipmentAnyDeskPassword];
+GO
+
+CREATE PROCEDURE [tb_security].[EncryptEquipmentAnyDeskPassword]
+    @EquipmentId bigint,
+    @PlainText nvarchar(max),
+    @EncryptedValue varbinary(max) OUTPUT
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    SET @EncryptedValue = NULL;
+    IF @PlainText IS NULL
+        RETURN;
+
+    DECLARE @OpenedHere bit = CONVERT(bit, CASE WHEN EXISTS
+    (
+        SELECT 1
+        FROM sys.openkeys
+        WHERE [key_name] = N'tb_FireDrillCredentialKey'
+    ) THEN 0 ELSE 1 END);
+
+    BEGIN TRY
+        IF @OpenedHere = 1
+            OPEN SYMMETRIC KEY [tb_FireDrillCredentialKey]
+                DECRYPTION BY CERTIFICATE [tb_FireDrillCredentialCertificate];
+
+        SET @EncryptedValue = EncryptByKey(
+            Key_GUID(N'tb_FireDrillCredentialKey'),
+            CONVERT(varbinary(max), @PlainText),
+            1,
+            CONVERT(nvarchar(20), @EquipmentId));
+
+        IF @OpenedHere = 1
+            CLOSE SYMMETRIC KEY [tb_FireDrillCredentialKey];
+    END TRY
+    BEGIN CATCH
+        IF EXISTS
+        (
+            SELECT 1
+            FROM sys.openkeys
+            WHERE [key_name] = N'tb_FireDrillCredentialKey'
+        ) AND @OpenedHere = 1
+            CLOSE SYMMETRIC KEY [tb_FireDrillCredentialKey];
+        THROW;
+    END CATCH;
+
+    IF @EncryptedValue IS NULL
+        THROW 52219, N'The AnyDesk password could not be encrypted.', 1;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminSaveEquipment', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminSaveEquipment];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminSaveEquipment]
+    @EquipmentId bigint = NULL,
+    @AssetTag nvarchar(80) = NULL,
+    @DeviceType nvarchar(80),
+    @Name nvarchar(180),
+    @SerialNumber nvarchar(120) = NULL,
+    @PartNumber nvarchar(120) = NULL,
+    @IpAddress nvarchar(80) = NULL,
+    @Manufacturer nvarchar(120) = NULL,
+    @Model nvarchar(120) = NULL,
+    @AnyDeskNumber nvarchar(80) = NULL,
+    @AnyDeskPassword nvarchar(max) = NULL,
+    @ClientId int = NULL,
+    @ClientUserId bigint = NULL,
+    @LocationName nvarchar(240) = NULL,
+    @Notes nvarchar(max) = NULL,
+    @ExpectedRowVersion binary(8) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 52201, N'Only a TechBench Admin may save equipment.', 1;
+
+    SET @EquipmentId = NULLIF(@EquipmentId, 0);
+    SET @AssetTag = NULLIF(LTRIM(RTRIM(@AssetTag)), N'');
+    SET @DeviceType = NULLIF(LTRIM(RTRIM(@DeviceType)), N'');
+    SET @Name = NULLIF(LTRIM(RTRIM(@Name)), N'');
+    SET @SerialNumber = NULLIF(LTRIM(RTRIM(@SerialNumber)), N'');
+    SET @PartNumber = NULLIF(LTRIM(RTRIM(@PartNumber)), N'');
+    SET @IpAddress = NULLIF(LTRIM(RTRIM(@IpAddress)), N'');
+    SET @Manufacturer = NULLIF(LTRIM(RTRIM(@Manufacturer)), N'');
+    SET @Model = NULLIF(LTRIM(RTRIM(@Model)), N'');
+    SET @AnyDeskNumber = NULLIF(LTRIM(RTRIM(@AnyDeskNumber)), N'');
+    SET @AnyDeskPassword = NULLIF(@AnyDeskPassword, N'');
+    SET @ClientId = NULLIF(@ClientId, 0);
+    SET @ClientUserId = NULLIF(@ClientUserId, 0);
+    SET @LocationName = NULLIF(LTRIM(RTRIM(@LocationName)), N'');
+    SET @Notes = NULLIF(LTRIM(RTRIM(@Notes)), N'');
+
+    IF @DeviceType IS NULL OR @Name IS NULL
+        THROW 52202, N'Device type and equipment name are required.', 1;
+
+    IF @ClientId IS NOT NULL
+       AND NOT EXISTS
+       (
+           SELECT 1
+           FROM [tb_data].[Clients]
+           WHERE [Id] = @ClientId AND [IsActive] = 1
+       )
+        THROW 52214, N'The selected client is not available for inventory assignment.', 1;
+
+    IF @ClientUserId IS NOT NULL
+       AND NOT EXISTS
+       (
+           SELECT 1
+           FROM [tb_inventory].[ClientUsers]
+           WHERE [ClientUserId] = @ClientUserId
+             AND [ClientId] = @ClientId
+             AND [IsActive] = 1
+       )
+        THROW 52215, N'The selected client user does not belong to the selected client.', 1;
+
+    DECLARE @ClientName nvarchar(240) =
+    (
+        SELECT [Name]
+        FROM [tb_data].[Clients]
+        WHERE [Id] = @ClientId
+    );
+    DECLARE @AnyDeskPasswordEncrypted varbinary(max);
+
+    BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF @EquipmentId IS NULL
+    BEGIN
+        DECLARE @NextStockOrder int =
+        (
+            SELECT COALESCE(MAX([SortOrder]), -10) + 10
+            FROM [tb_inventory].[Equipment] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [IsArchived] = 0
+              AND [WorkflowStage] = N'Stock'
+        );
+
+        INSERT INTO [tb_inventory].[Equipment]
+        (
+            [AssetTag], [DeviceType], [Name], [SerialNumber], [PartNumber], [IpAddress],
+            [Manufacturer], [Model], [ClientId], [ClientName], [ClientUserId],
+            [LocationName], [Notes], [WorkflowStage], [SortOrder],
+            [CreatedByWindowsSid], [UpdatedByWindowsSid]
+        )
+        VALUES
+        (
+            @AssetTag, @DeviceType, @Name, @SerialNumber, @PartNumber, @IpAddress,
+            @Manufacturer, @Model, @ClientId, @ClientName, @ClientUserId,
+            @LocationName, @Notes, N'Stock', @NextStockOrder,
+            @ActorSid, @ActorSid
+        );
+
+        SET @EquipmentId = SCOPE_IDENTITY();
+
+        EXEC [tb_security].[EncryptEquipmentAnyDeskPassword]
+            @EquipmentId=@EquipmentId,
+            @PlainText=@AnyDeskPassword,
+            @EncryptedValue=@AnyDeskPasswordEncrypted OUTPUT;
+
+        UPDATE [tb_inventory].[Equipment]
+        SET
+            [AnyDeskNumber] = @AnyDeskNumber,
+            [AnyDeskPasswordEncrypted] = @AnyDeskPasswordEncrypted
+        WHERE [EquipmentId] = @EquipmentId;
+
+        INSERT INTO [tb_inventory].[EquipmentAssignmentHistory]
+        (
+            [EquipmentId], [EventType], [WorkflowStage],
+            [AssignedToWindowsSid], [ClientId], [ClientUserId],
+            [LocationName], [Notes], [ChangedByWindowsSid]
+        )
+        VALUES
+        (
+            @EquipmentId, N'Created', N'Stock',
+            NULL, @ClientId, @ClientUserId,
+            @LocationName, N'Equipment record created.', @ActorSid
+        );
+    END
+    ELSE
+    BEGIN
+        DECLARE
+            @PreviousClientId int,
+            @PreviousClientUserId bigint,
+            @PreviousLocationName nvarchar(240),
+            @PreviousWorkflowStage nvarchar(24),
+            @PreviousAssignedToWindowsSid varbinary(85);
+
+        SELECT
+            @PreviousClientId = [ClientId],
+            @PreviousClientUserId = [ClientUserId],
+            @PreviousLocationName = [LocationName],
+            @PreviousWorkflowStage = [WorkflowStage],
+            @PreviousAssignedToWindowsSid = [AssignedToWindowsSid]
+        FROM [tb_inventory].[Equipment]
+        WHERE [EquipmentId] = @EquipmentId
+          AND [IsArchived] = 0;
+
+        EXEC [tb_security].[EncryptEquipmentAnyDeskPassword]
+            @EquipmentId=@EquipmentId,
+            @PlainText=@AnyDeskPassword,
+            @EncryptedValue=@AnyDeskPasswordEncrypted OUTPUT;
+
+        UPDATE [tb_inventory].[Equipment]
+        SET
+            [AssetTag]=@AssetTag,
+            [DeviceType]=@DeviceType,
+            [Name]=@Name,
+            [SerialNumber]=@SerialNumber,
+            [PartNumber]=@PartNumber,
+            [IpAddress]=@IpAddress,
+            [Manufacturer]=@Manufacturer,
+            [Model]=@Model,
+            [AnyDeskNumber]=@AnyDeskNumber,
+            [AnyDeskPasswordEncrypted]=@AnyDeskPasswordEncrypted,
+            [ClientId]=@ClientId,
+            [ClientName]=@ClientName,
+            [ClientUserId]=@ClientUserId,
+            [LocationName]=@LocationName,
+            [Notes]=@Notes,
+            [UpdatedByWindowsSid]=@ActorSid,
+            [UpdatedAtUtc]=SYSUTCDATETIME()
+        WHERE [EquipmentId]=@EquipmentId
+          AND [IsArchived]=0
+          AND (@ExpectedRowVersion IS NULL OR [RowVersion]=@ExpectedRowVersion);
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+            IF NOT EXISTS
+            (
+                SELECT 1
+                FROM [tb_inventory].[Equipment]
+                WHERE [EquipmentId]=@EquipmentId AND [IsArchived]=0
+            )
+                THROW 52203, N'The equipment record no longer exists.', 1;
+            THROW 52204, N'The equipment record changed on another workstation. Refresh and try again.', 1;
+        END;
+
+        IF ISNULL(@PreviousClientId, -1) <> ISNULL(@ClientId, -1)
+           OR ISNULL(@PreviousClientUserId, -1) <> ISNULL(@ClientUserId, -1)
+           OR ISNULL(@PreviousLocationName, N'') <> ISNULL(@LocationName, N'')
+        BEGIN
+            INSERT INTO [tb_inventory].[EquipmentAssignmentHistory]
+            (
+                [EquipmentId], [EventType], [WorkflowStage],
+                [AssignedToWindowsSid], [ClientId], [ClientUserId],
+                [LocationName], [Notes], [ChangedByWindowsSid]
+            )
+            VALUES
+            (
+                @EquipmentId, N'ClientAssignmentChanged', @PreviousWorkflowStage,
+                @PreviousAssignedToWindowsSid, @ClientId, @ClientUserId,
+                @LocationName, N'Client, user, or deployment location changed.', @ActorSid
+            );
+        END;
+    END;
+
+    COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        equipment.[EquipmentId],
+        equipment.[AssetTag],
+        equipment.[DeviceType],
+        equipment.[Name],
+        equipment.[SerialNumber],
+        equipment.[PartNumber],
+        equipment.[IpAddress],
+        equipment.[Manufacturer],
+        equipment.[Model],
+        equipment.[AnyDeskNumber],
+        @AnyDeskPassword AS [AnyDeskPassword],
+        equipment.[ClientId],
+        COALESCE(client.[Name], equipment.[ClientName]) AS [ClientName],
+        equipment.[ClientUserId],
+        client_user.[DisplayName] AS [ClientUserDisplayName],
+        client_user.[Email] AS [ClientUserEmail],
+        equipment.[LocationName],
+        equipment.[Notes],
+        equipment.[WorkflowStage],
+        user_row.[LoginName] AS [AssignedToLoginName],
+        user_row.[DisplayName] AS [AssignedToDisplayName],
+        equipment.[SortOrder],
+        equipment.[AssignedAtUtc],
+        equipment.[CreatedAtUtc],
+        equipment.[UpdatedAtUtc],
+        equipment.[RowVersion]
+    FROM [tb_inventory].[Equipment] AS equipment
+    LEFT JOIN [tb_security].[Users] AS user_row
+        ON user_row.[WindowsSid] = equipment.[AssignedToWindowsSid]
+    LEFT JOIN [tb_data].[Clients] AS client
+        ON client.[Id] = equipment.[ClientId]
+    LEFT JOIN [tb_inventory].[ClientUsers] AS client_user
+        ON client_user.[ClientUserId] = equipment.[ClientUserId]
+    WHERE equipment.[EquipmentId] = @EquipmentId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminGetEquipmentAssignmentHistory', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminGetEquipmentAssignmentHistory];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminGetEquipmentAssignmentHistory]
+    @EquipmentId bigint
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 52216, N'Only a TechBench Admin may view equipment assignment history.', 1;
+
+    SELECT
+        history.[EquipmentAssignmentHistoryId],
+        history.[EquipmentId],
+        history.[EventType],
+        history.[WorkflowStage],
+        assigned_user.[LoginName] AS [AssignedToLoginName],
+        assigned_user.[DisplayName] AS [AssignedToDisplayName],
+        history.[ClientId],
+        history.[ClientUserId],
+        client.[Name] AS [ClientName],
+        client_user.[DisplayName] AS [ClientUserDisplayName],
+        history.[LocationName],
+        history.[Notes],
+        history.[ChangedAtUtc]
+    FROM [tb_inventory].[EquipmentAssignmentHistory] AS history
+    LEFT JOIN [tb_security].[Users] AS assigned_user
+        ON assigned_user.[WindowsSid] = history.[AssignedToWindowsSid]
+    LEFT JOIN [tb_data].[Clients] AS client
+        ON client.[Id] = history.[ClientId]
+    LEFT JOIN [tb_inventory].[ClientUsers] AS client_user
+        ON client_user.[ClientUserId] = history.[ClientUserId]
+    WHERE history.[EquipmentId] = @EquipmentId
+    ORDER BY
+        history.[ChangedAtUtc] DESC,
+        history.[EquipmentAssignmentHistoryId] DESC;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminMoveEquipment', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminMoveEquipment];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminMoveEquipment]
+    @EquipmentId bigint,
+    @TargetWindowsLoginName nvarchar(256) = NULL,
+    @TargetWorkflowStage nvarchar(24),
+    @TargetIndex int = NULL,
+    @IncludeDeployed bit = 0,
+    @ExpectedRowVersion binary(8) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 52205, N'Only a TechBench Admin may assign equipment.', 1;
+
+    SET @TargetWindowsLoginName =
+        NULLIF(LTRIM(RTRIM(@TargetWindowsLoginName)), N'');
+    SET @TargetWorkflowStage =
+        NULLIF(LTRIM(RTRIM(@TargetWorkflowStage)), N'');
+
+    IF @TargetWorkflowStage IS NULL
+       OR @TargetWorkflowStage NOT IN
+            (N'Stock', N'Assigned', N'Deployment', N'Deployed')
+        THROW 52211, N'The selected equipment workflow stage is invalid.', 1;
+
+    SET @TargetWorkflowStage =
+        CASE
+            WHEN @TargetWorkflowStage = N'Stock' THEN N'Stock'
+            WHEN @TargetWorkflowStage = N'Assigned' THEN N'Assigned'
+            WHEN @TargetWorkflowStage = N'Deployment' THEN N'Deployment'
+            ELSE N'Deployed'
+        END;
+
+    IF @TargetWorkflowStage = N'Assigned'
+       AND @TargetWindowsLoginName IS NULL
+        THROW 52212, N'A technician is required for the Assigned equipment stage.', 1;
+
+    DECLARE @TargetSid varbinary(85) = NULL;
+    IF @TargetWorkflowStage IN (N'Assigned', N'Deployment', N'Deployed')
+       AND @TargetWindowsLoginName IS NOT NULL
+    BEGIN
+        SELECT @TargetSid=[WindowsSid]
+        FROM [tb_security].[Users]
+        WHERE [LoginName]=@TargetWindowsLoginName
+          AND [IsTechnician]=1;
+
+        IF @TargetSid IS NULL
+            THROW 52206, N'The selected TechBench user is not available for equipment assignment.', 1;
+    END;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        DECLARE
+            @SourceSid varbinary(85),
+            @SourceStage nvarchar(24),
+            @SourceAssignedAtUtc datetime2(3),
+            @SourceClientId int,
+            @SourceClientUserId bigint,
+            @SourceLocationName nvarchar(240);
+
+        SELECT
+            @SourceSid=[AssignedToWindowsSid],
+            @SourceStage=[WorkflowStage],
+            @SourceAssignedAtUtc=[AssignedAtUtc],
+            @SourceClientId=[ClientId],
+            @SourceClientUserId=[ClientUserId],
+            @SourceLocationName=[LocationName]
+        FROM [tb_inventory].[Equipment] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [EquipmentId]=@EquipmentId
+          AND [IsArchived]=0
+          AND (@ExpectedRowVersion IS NULL OR [RowVersion]=@ExpectedRowVersion);
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+            IF NOT EXISTS
+            (
+                SELECT 1
+                FROM [tb_inventory].[Equipment]
+                WHERE [EquipmentId]=@EquipmentId AND [IsArchived]=0
+            )
+                THROW 52207, N'The equipment record no longer exists.', 1;
+            THROW 52208, N'The equipment assignment changed on another workstation. Refresh and try again.', 1;
+        END;
+
+        DECLARE @SameLane bit =
+            CASE
+                WHEN @SourceStage=@TargetWorkflowStage
+                 AND
+                 (
+                     @SourceStage NOT IN (N'Assigned', N'Deployment', N'Deployed')
+                     OR @SourceSid=@TargetSid
+                     OR (@SourceSid IS NULL AND @TargetSid IS NULL)
+                 )
+                    THEN 1
+                ELSE 0
+            END;
+
+        DECLARE @TargetCount int =
+        (
+            SELECT COUNT(*)
+            FROM [tb_inventory].[Equipment] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [IsArchived]=0
+              AND [EquipmentId]<>@EquipmentId
+              AND [WorkflowStage]=@TargetWorkflowStage
+              AND
+                  (
+                      @TargetWorkflowStage NOT IN
+                        (N'Assigned', N'Deployment', N'Deployed')
+                      OR [AssignedToWindowsSid]=@TargetSid
+                      OR ([AssignedToWindowsSid] IS NULL AND @TargetSid IS NULL)
+                  )
+        );
+
+        SET @TargetIndex = COALESCE(@TargetIndex, @TargetCount);
+        IF @TargetIndex < 0 SET @TargetIndex = 0;
+        IF @TargetIndex > @TargetCount SET @TargetIndex = @TargetCount;
+
+        ;WITH TargetPriority AS
+        (
+            SELECT
+                [EquipmentId],
+                [SortOrder],
+                (ROW_NUMBER() OVER (ORDER BY [SortOrder], [EquipmentId]) - 1)
+                    AS [ExistingIndex]
+            FROM [tb_inventory].[Equipment]
+            WHERE [IsArchived]=0
+              AND [EquipmentId]<>@EquipmentId
+              AND [WorkflowStage]=@TargetWorkflowStage
+              AND
+                  (
+                      @TargetWorkflowStage NOT IN
+                        (N'Assigned', N'Deployment', N'Deployed')
+                      OR [AssignedToWindowsSid]=@TargetSid
+                      OR ([AssignedToWindowsSid] IS NULL AND @TargetSid IS NULL)
+                  )
+        ),
+        TargetPriorityWithGap AS
+        (
+            SELECT
+                [EquipmentId],
+                CASE
+                    WHEN [ExistingIndex] >= @TargetIndex
+                        THEN ([ExistingIndex] + 1) * 10
+                    ELSE [ExistingIndex] * 10
+                END AS [NewSortOrder]
+            FROM TargetPriority
+        )
+        UPDATE equipment
+        SET
+            [SortOrder]=priority.[NewSortOrder],
+            [UpdatedByWindowsSid]=@ActorSid,
+            [UpdatedAtUtc]=SYSUTCDATETIME()
+        FROM [tb_inventory].[Equipment] equipment
+        INNER JOIN TargetPriorityWithGap priority
+            ON priority.[EquipmentId]=equipment.[EquipmentId]
+        WHERE equipment.[SortOrder]<>priority.[NewSortOrder];
+
+        UPDATE [tb_inventory].[Equipment]
+        SET
+            [WorkflowStage]=@TargetWorkflowStage,
+            [AssignedToWindowsSid]=
+                CASE
+                    WHEN @TargetWorkflowStage=N'Stock' THEN NULL
+                    ELSE @TargetSid
+                END,
+            [SortOrder]=@TargetIndex * 10,
+            [AssignedAtUtc]=
+                CASE
+                    WHEN @TargetWorkflowStage=N'Stock' THEN NULL
+                    WHEN @SourceStage IN
+                        (N'Assigned', N'Deployment', N'Deployed')
+                     AND
+                     (
+                         @SourceSid=@TargetSid
+                         OR (@SourceSid IS NULL AND @TargetSid IS NULL)
+                     )
+                        THEN @SourceAssignedAtUtc
+                    ELSE SYSUTCDATETIME()
+                END,
+            [UpdatedByWindowsSid]=@ActorSid,
+            [UpdatedAtUtc]=SYSUTCDATETIME()
+        WHERE [EquipmentId]=@EquipmentId
+          AND [IsArchived]=0;
+
+        IF @SameLane = 0
+           OR @SourceStage <> @TargetWorkflowStage
+           OR ISNULL(@SourceSid, 0x) <> ISNULL(@TargetSid, 0x)
+        BEGIN
+            INSERT INTO [tb_inventory].[EquipmentAssignmentHistory]
+            (
+                [EquipmentId], [EventType], [WorkflowStage],
+                [AssignedToWindowsSid], [ClientId], [ClientUserId],
+                [LocationName], [Notes], [ChangedByWindowsSid]
+            )
+            VALUES
+            (
+                @EquipmentId,
+                CASE
+                    WHEN @TargetWorkflowStage = N'Deployed'
+                        THEN N'Deployed'
+                    ELSE N'WorkflowMoved'
+                END,
+                @TargetWorkflowStage,
+                CASE
+                    WHEN @TargetWorkflowStage = N'Stock' THEN NULL
+                    ELSE @TargetSid
+                END,
+                @SourceClientId, @SourceClientUserId,
+                @SourceLocationName,
+                CASE
+                    WHEN @TargetWorkflowStage = N'Deployed'
+                        THEN N'Equipment deployment completed.'
+                    ELSE N'Equipment moved between inventory workflow lanes.'
+                END,
+                @ActorSid
+            );
+        END;
+
+        IF @SameLane=0
+        BEGIN
+            ;WITH SourcePriority AS
+            (
+                SELECT
+                    [EquipmentId],
+                    [SortOrder],
+                    (ROW_NUMBER() OVER (ORDER BY [SortOrder], [EquipmentId]) - 1) * 10
+                        AS [NewSortOrder]
+                FROM [tb_inventory].[Equipment]
+                WHERE [IsArchived]=0
+                  AND [WorkflowStage]=@SourceStage
+                  AND
+                      (
+                          @SourceStage NOT IN
+                            (N'Assigned', N'Deployment', N'Deployed')
+                          OR [AssignedToWindowsSid]=@SourceSid
+                          OR ([AssignedToWindowsSid] IS NULL AND @SourceSid IS NULL)
+                      )
+            )
+            UPDATE equipment
+            SET
+                [SortOrder]=priority.[NewSortOrder],
+                [UpdatedByWindowsSid]=@ActorSid,
+                [UpdatedAtUtc]=SYSUTCDATETIME()
+            FROM [tb_inventory].[Equipment] equipment
+            INNER JOIN SourcePriority priority
+                ON priority.[EquipmentId]=equipment.[EquipmentId]
+            WHERE equipment.[SortOrder]<>priority.[NewSortOrder];
+        END;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    EXEC [tb_app].[AdminGetEquipmentBoard]
+        @IncludeDeployed=@IncludeDeployed;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminArchiveEquipment', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminArchiveEquipment];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminArchiveEquipment]
+    @EquipmentId bigint,
+    @ExpectedRowVersion binary(8) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 52209, N'Only a TechBench Admin may archive equipment.', 1;
+
+    INSERT INTO [tb_inventory].[EquipmentAssignmentHistory]
+    (
+        [EquipmentId], [EventType], [WorkflowStage],
+        [AssignedToWindowsSid], [ClientId], [ClientUserId],
+        [LocationName], [Notes], [ChangedByWindowsSid]
+    )
+    SELECT
+        [EquipmentId], N'Archived', [WorkflowStage],
+        [AssignedToWindowsSid], [ClientId], [ClientUserId],
+        [LocationName], N'Equipment record archived.', @ActorSid
+    FROM [tb_inventory].[Equipment]
+    WHERE [EquipmentId]=@EquipmentId
+      AND [IsArchived]=0
+      AND (@ExpectedRowVersion IS NULL OR [RowVersion]=@ExpectedRowVersion);
+
+    UPDATE [tb_inventory].[Equipment]
+    SET
+        [IsArchived]=1,
+        [UpdatedByWindowsSid]=@ActorSid,
+        [UpdatedAtUtc]=SYSUTCDATETIME()
+    WHERE [EquipmentId]=@EquipmentId
+      AND [IsArchived]=0
+      AND (@ExpectedRowVersion IS NULL OR [RowVersion]=@ExpectedRowVersion);
+
+    IF @@ROWCOUNT = 0
+        THROW 52210, N'The equipment record changed or no longer exists. Refresh and try again.', 1;
+END;
+GO
+
+IF OBJECT_ID(N'tb_service.ApplyCredentialsClientUserSnapshot', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_service].[ApplyCredentialsClientUserSnapshot];
+GO
+
+CREATE PROCEDURE [tb_service].[ApplyCredentialsClientUserSnapshot]
+    @RequestId uniqueidentifier,
+    @LeaseId uniqueidentifier,
+    @WorkerId uniqueidentifier,
+    @RowsJson nvarchar(max),
+    @SourceModifiedAtUtc datetime2(3),
+    @SyncedAtUtc datetime2(3)
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF ISJSON(@RowsJson) <> 1
+        THROW 52220, N'The Credentials client-user snapshot is not valid JSON.', 1;
+
+    CREATE TABLE #People
+    (
+        [SourceKey] nvarchar(500) NOT NULL PRIMARY KEY,
+        [ClientName] nvarchar(240) NOT NULL,
+        [DisplayName] nvarchar(240) NOT NULL,
+        [RoleDepartment] nvarchar(240) NULL,
+        [Email] nvarchar(320) NULL,
+        [LocationName] nvarchar(240) NULL,
+        [IsActive] bit NOT NULL,
+        [RowHash] binary(32) NULL,
+        [AccountsJson] nvarchar(max) NOT NULL,
+        [ClientId] int NULL
+    );
+
+    INSERT INTO #People
+    (
+        [SourceKey], [ClientName], [DisplayName], [RoleDepartment],
+        [Email], [LocationName], [IsActive], [RowHash], [AccountsJson]
+    )
+    SELECT
+        LTRIM(RTRIM(source_row.[SourceKey])),
+        LTRIM(RTRIM(source_row.[ClientName])),
+        LTRIM(RTRIM(source_row.[DisplayName])),
+        NULLIF(LTRIM(RTRIM(source_row.[RoleDepartment])), N''),
+        NULLIF(LTRIM(RTRIM(source_row.[Email])), N''),
+        NULLIF(LTRIM(RTRIM(source_row.[LocationName])), N''),
+        source_row.[IsActive],
+        TRY_CONVERT(binary(32), source_row.[RowHashHex], 2),
+        source_row.[AccountsJson]
+    FROM OPENJSON(@RowsJson)
+    WITH
+    (
+        [SourceKey] nvarchar(500) N'$.sourceKey',
+        [ClientName] nvarchar(240) N'$.clientName',
+        [DisplayName] nvarchar(240) N'$.displayName',
+        [RoleDepartment] nvarchar(240) N'$.roleDepartment',
+        [Email] nvarchar(320) N'$.email',
+        [LocationName] nvarchar(240) N'$.locationName',
+        [IsActive] bit N'$.isActive',
+        [RowHashHex] nvarchar(64) N'$.rowHashHex',
+        [AccountsJson] nvarchar(max) N'$.accounts' AS JSON
+    ) source_row;
+
+    IF NOT EXISTS (SELECT 1 FROM #People)
+        THROW 52221, N'The Client Users worksheet contained no people; existing data was not changed.', 1;
+    IF EXISTS
+    (
+        SELECT 1
+        FROM #People
+        WHERE LEN([SourceKey])=0 OR LEN([ClientName])=0
+           OR LEN([DisplayName])=0 OR [RowHash] IS NULL
+           OR ISJSON([AccountsJson])<>1
+    )
+        THROW 52222, N'A Client Users person row is invalid.', 1;
+
+    UPDATE person_row
+    SET [ClientId]=client_match.[Id]
+    FROM #People person_row
+    CROSS APPLY
+    (
+        SELECT TOP (1) client.[Id]
+        FROM [tb_data].[Clients] client
+        WHERE client.[IsActive]=1
+          AND
+          (
+              LOWER(LTRIM(RTRIM(client.[Name])))
+                  = LOWER(LTRIM(RTRIM(person_row.[ClientName])))
+              OR LOWER(LTRIM(RTRIM(ISNULL(client.[WhdLocationName],N''))))
+                  = LOWER(LTRIM(RTRIM(person_row.[ClientName])))
+              OR LOWER(LTRIM(RTRIM(ISNULL(client.[SageCustomerName],N''))))
+                  = LOWER(LTRIM(RTRIM(person_row.[ClientName])))
+              OR EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientAliases] alias
+                  WHERE alias.[ClientId]=client.[Id]
+                    AND alias.[ScopeType]=N'Organization'
+                    AND LOWER(LTRIM(RTRIM(alias.[Alias])))
+                        = LOWER(LTRIM(RTRIM(person_row.[ClientName])))
+              )
+          )
+        ORDER BY
+            CASE
+                WHEN LOWER(LTRIM(RTRIM(client.[Name])))
+                     = LOWER(LTRIM(RTRIM(person_row.[ClientName]))) THEN 0
+                WHEN LOWER(LTRIM(RTRIM(ISNULL(client.[WhdLocationName],N''))))
+                     = LOWER(LTRIM(RTRIM(person_row.[ClientName]))) THEN 1
+                WHEN LOWER(LTRIM(RTRIM(ISNULL(client.[SageCustomerName],N''))))
+                     = LOWER(LTRIM(RTRIM(person_row.[ClientName]))) THEN 2
+                ELSE 3
+            END,
+            client.[Id]
+    ) client_match;
+
+    IF EXISTS (SELECT 1 FROM #People WHERE [ClientId] IS NULL)
+        THROW 52223, N'One or more Client Users rows could not be matched to a TechBench client. Add an organization client alias or correct the Client value; no data was changed.', 1;
+
+    CREATE TABLE #Accounts
+    (
+        [SourceKey] nvarchar(500) NOT NULL PRIMARY KEY,
+        [PersonSourceKey] nvarchar(500) NOT NULL,
+        [AccountSystem] nvarchar(240) NOT NULL,
+        [RowHash] binary(32) NULL,
+        [FieldsJson] nvarchar(max) NOT NULL
+    );
+
+    INSERT INTO #Accounts
+        ([SourceKey], [PersonSourceKey], [AccountSystem], [RowHash], [FieldsJson])
+    SELECT
+        LTRIM(RTRIM(account_row.[SourceKey])),
+        person_row.[SourceKey],
+        LTRIM(RTRIM(account_row.[AccountSystem])),
+        TRY_CONVERT(binary(32), account_row.[RowHashHex], 2),
+        account_row.[FieldsJson]
+    FROM #People person_row
+    CROSS APPLY OPENJSON(person_row.[AccountsJson])
+    WITH
+    (
+        [SourceKey] nvarchar(500) N'$.sourceKey',
+        [AccountSystem] nvarchar(240) N'$.accountSystem',
+        [RowHashHex] nvarchar(64) N'$.rowHashHex',
+        [FieldsJson] nvarchar(max) N'$.fields' AS JSON
+    ) account_row;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM #Accounts
+        WHERE LEN([SourceKey])=0 OR LEN([AccountSystem])=0
+           OR [RowHash] IS NULL OR ISJSON([FieldsJson])<>1
+    )
+        THROW 52224, N'A Client Users account row is invalid.', 1;
+
+    CREATE TABLE #AccountFields
+    (
+        [AccountSourceKey] nvarchar(500) NOT NULL,
+        [FieldKey] nvarchar(200) NOT NULL,
+        [FieldLabel] nvarchar(200) NOT NULL,
+        [SortOrder] int NOT NULL,
+        [FieldValue] nvarchar(3000) NULL,
+        CONSTRAINT [PK_CredentialsClientUserFields]
+            PRIMARY KEY ([AccountSourceKey], [FieldKey]),
+        CONSTRAINT [UQ_CredentialsClientUserFieldOrder]
+            UNIQUE ([AccountSourceKey], [SortOrder])
+    );
+
+    INSERT INTO #AccountFields
+        ([AccountSourceKey], [FieldKey], [FieldLabel], [SortOrder], [FieldValue])
+    SELECT account_row.[SourceKey],
+        LTRIM(RTRIM(field_row.[FieldKey])),
+        LTRIM(RTRIM(field_row.[FieldLabel])),
+        field_row.[SortOrder],
+        field_row.[FieldValue]
+    FROM #Accounts account_row
+    CROSS APPLY OPENJSON(account_row.[FieldsJson])
+    WITH
+    (
+        [FieldKey] nvarchar(200) N'$.fieldKey',
+        [FieldLabel] nvarchar(200) N'$.label',
+        [SortOrder] int N'$.sortOrder',
+        [FieldValue] nvarchar(3000) N'$.value'
+    ) field_row;
+
+    IF EXISTS
+    (
+        SELECT 1 FROM #AccountFields
+        WHERE LEN([FieldKey])=0 OR LEN([FieldLabel])=0 OR [SortOrder]<1
+    )
+        THROW 52225, N'A Client Users account field is invalid.', 1;
+
+    DECLARE @ActorSid varbinary(85)=SUSER_SID(ORIGINAL_LOGIN());
+    IF @ActorSid IS NULL
+       OR NOT EXISTS
+       (
+           SELECT 1
+           FROM [tb_security].[Users]
+           WHERE [WindowsSid]=@ActorSid
+             AND [LoginName]=CONVERT(nvarchar(256),ORIGINAL_LOGIN())
+       )
+        THROW 52226, N'The TechBench sync service actor is not registered.', 1;
+
+    DECLARE @UserReadCount int=(SELECT COUNT(*) FROM #People),
+            @UserSavedCount int=0,
+            @UserStaleCount int=0,
+            @AccountReadCount int=(SELECT COUNT(*) FROM #Accounts),
+            @AccountSavedCount int=0,
+            @AccountStaleCount int=0;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_sync].[FireDrillSyncLeases]
+            WHERE [RequestId]=@RequestId
+              AND [LeaseId]=@LeaseId
+              AND [WorkerId]=@WorkerId
+              AND [ExpiresAtUtc]>SYSUTCDATETIME()
+        )
+            THROW 52227, N'The Credentials synchronization lease is no longer valid.', 1;
+
+        UPDATE target
+        SET [ClientId]=source_row.[ClientId],
+            [DisplayName]=source_row.[DisplayName],
+            [RoleDepartment]=source_row.[RoleDepartment],
+            [Email]=source_row.[Email],
+            [LocationName]=source_row.[LocationName],
+            [SourceRowHash]=source_row.[RowHash],
+            [IsActive]=source_row.[IsActive],
+            [LastSyncedAtUtc]=@SyncedAtUtc,
+            [UpdatedByWindowsSid]=@ActorSid,
+            [UpdatedAtUtc]=SYSUTCDATETIME()
+        FROM [tb_inventory].[ClientUsers] target
+        INNER JOIN #People source_row
+            ON target.[SourceSystem]=N'CredentialsWorkbook'
+           AND target.[SourceKey]=source_row.[SourceKey]
+        WHERE target.[SourceRowHash]<>source_row.[RowHash]
+           OR target.[SourceRowHash] IS NULL
+           OR target.[IsActive]<>source_row.[IsActive]
+           OR target.[ClientId]<>source_row.[ClientId];
+        SET @UserSavedCount=@@ROWCOUNT;
+
+        INSERT INTO [tb_inventory].[ClientUsers]
+        (
+            [ClientId], [DisplayName], [RoleDepartment], [Email],
+            [LocationName], [SourceSystem], [SourceKey], [SourceRowHash],
+            [IsActive], [LastSyncedAtUtc],
+            [CreatedByWindowsSid], [UpdatedByWindowsSid]
+        )
+        SELECT source_row.[ClientId], source_row.[DisplayName],
+            source_row.[RoleDepartment], source_row.[Email],
+            source_row.[LocationName], N'CredentialsWorkbook',
+            source_row.[SourceKey], source_row.[RowHash],
+            source_row.[IsActive], @SyncedAtUtc, @ActorSid, @ActorSid
+        FROM #People source_row
+        WHERE NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_inventory].[ClientUsers] target
+            WHERE target.[SourceSystem]=N'CredentialsWorkbook'
+              AND target.[SourceKey]=source_row.[SourceKey]
+        );
+        SET @UserSavedCount+=@@ROWCOUNT;
+
+        UPDATE target
+        SET [IsActive]=0,
+            [LastSyncedAtUtc]=@SyncedAtUtc,
+            [UpdatedByWindowsSid]=@ActorSid,
+            [UpdatedAtUtc]=SYSUTCDATETIME()
+        FROM [tb_inventory].[ClientUsers] target
+        WHERE target.[SourceSystem]=N'CredentialsWorkbook'
+          AND target.[IsActive]=1
+          AND NOT EXISTS
+          (
+              SELECT 1 FROM #People source_row
+              WHERE source_row.[SourceKey]=target.[SourceKey]
+          );
+        SET @UserStaleCount=@@ROWCOUNT;
+
+        CREATE TABLE #ChangedAccounts
+        (
+            [SourceKey] nvarchar(500) NOT NULL PRIMARY KEY
+        );
+
+        INSERT INTO #ChangedAccounts([SourceKey])
+        SELECT source_row.[SourceKey]
+        FROM #Accounts source_row
+        LEFT JOIN [tb_inventory].[ClientUserAccounts] target
+            ON target.[SourceKey]=source_row.[SourceKey]
+        WHERE target.[ClientUserAccountId] IS NULL
+           OR target.[SourceRowHash]<>source_row.[RowHash]
+           OR target.[IsCurrent]=0;
+        SET @AccountSavedCount=@@ROWCOUNT;
+
+        UPDATE target
+        SET [ClientUserId]=client_user.[ClientUserId],
+            [AccountSystem]=source_row.[AccountSystem],
+            [SourceRowHash]=source_row.[RowHash],
+            [SourceModifiedAtUtc]=@SourceModifiedAtUtc,
+            [LastSyncedAtUtc]=@SyncedAtUtc,
+            [IsCurrent]=1,
+            [UpdatedByWindowsSid]=@ActorSid,
+            [UpdatedAtUtc]=SYSUTCDATETIME()
+        FROM [tb_inventory].[ClientUserAccounts] target
+        INNER JOIN #Accounts source_row
+            ON source_row.[SourceKey]=target.[SourceKey]
+        INNER JOIN #ChangedAccounts changed_row
+            ON changed_row.[SourceKey]=source_row.[SourceKey]
+        INNER JOIN [tb_inventory].[ClientUsers] client_user
+            ON client_user.[SourceSystem]=N'CredentialsWorkbook'
+           AND client_user.[SourceKey]=source_row.[PersonSourceKey];
+
+        INSERT INTO [tb_inventory].[ClientUserAccounts]
+        (
+            [ClientUserId], [AccountSystem], [SourceKey], [SourceRowHash],
+            [SourceModifiedAtUtc], [LastSyncedAtUtc], [IsCurrent],
+            [CreatedByWindowsSid], [UpdatedByWindowsSid]
+        )
+        SELECT client_user.[ClientUserId], source_row.[AccountSystem],
+            source_row.[SourceKey], source_row.[RowHash],
+            @SourceModifiedAtUtc, @SyncedAtUtc, 1, @ActorSid, @ActorSid
+        FROM #Accounts source_row
+        INNER JOIN [tb_inventory].[ClientUsers] client_user
+            ON client_user.[SourceSystem]=N'CredentialsWorkbook'
+           AND client_user.[SourceKey]=source_row.[PersonSourceKey]
+        WHERE NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_inventory].[ClientUserAccounts] target
+            WHERE target.[SourceKey]=source_row.[SourceKey]
+        );
+
+        DELETE stored_field
+        FROM [tb_inventory].[ClientUserAccountFields] stored_field
+        INNER JOIN [tb_inventory].[ClientUserAccounts] account
+            ON account.[ClientUserAccountId]=stored_field.[ClientUserAccountId]
+        INNER JOIN #ChangedAccounts changed_row
+            ON changed_row.[SourceKey]=account.[SourceKey];
+
+        OPEN SYMMETRIC KEY [tb_FireDrillCredentialKey]
+            DECRYPTION BY CERTIFICATE [tb_FireDrillCredentialCertificate];
+
+        INSERT INTO [tb_inventory].[ClientUserAccountFields]
+            ([ClientUserAccountId], [FieldKey], [FieldLabel], [SortOrder], [ValueEncrypted])
+        SELECT account.[ClientUserAccountId], source_field.[FieldKey],
+            source_field.[FieldLabel], source_field.[SortOrder],
+            CASE WHEN source_field.[FieldValue] IS NULL THEN NULL ELSE
+                EncryptByKey
+                (
+                    Key_GUID(N'tb_FireDrillCredentialKey'),
+                    CONVERT(varbinary(max),source_field.[FieldValue]),
+                    1,
+                    CONVERT
+                    (
+                        nvarchar(64),
+                        HASHBYTES
+                        (
+                            'SHA2_256',
+                            CONVERT
+                            (
+                                varbinary(max),
+                                CONVERT(nvarchar(30),account.[ClientUserAccountId])
+                                    + N'|' + source_field.[FieldKey]
+                            )
+                        ),
+                        2
+                    )
+                )
+            END
+        FROM #AccountFields source_field
+        INNER JOIN #ChangedAccounts changed_row
+            ON changed_row.[SourceKey]=source_field.[AccountSourceKey]
+        INNER JOIN [tb_inventory].[ClientUserAccounts] account
+            ON account.[SourceKey]=source_field.[AccountSourceKey];
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM #AccountFields source_field
+            INNER JOIN #ChangedAccounts changed_row
+                ON changed_row.[SourceKey]=source_field.[AccountSourceKey]
+            INNER JOIN [tb_inventory].[ClientUserAccounts] account
+                ON account.[SourceKey]=source_field.[AccountSourceKey]
+            INNER JOIN [tb_inventory].[ClientUserAccountFields] stored_field
+                ON stored_field.[ClientUserAccountId]=account.[ClientUserAccountId]
+               AND stored_field.[FieldKey]=source_field.[FieldKey]
+            WHERE source_field.[FieldValue] IS NOT NULL
+              AND stored_field.[ValueEncrypted] IS NULL
+        )
+            THROW 52228, N'A Client Users account field could not be encrypted.', 1;
+
+        CLOSE SYMMETRIC KEY [tb_FireDrillCredentialKey];
+
+        UPDATE target
+        SET [IsCurrent]=0,
+            [LastSyncedAtUtc]=@SyncedAtUtc,
+            [UpdatedByWindowsSid]=@ActorSid,
+            [UpdatedAtUtc]=SYSUTCDATETIME()
+        FROM [tb_inventory].[ClientUserAccounts] target
+        INNER JOIN [tb_inventory].[ClientUsers] client_user
+            ON client_user.[ClientUserId]=target.[ClientUserId]
+           AND client_user.[SourceSystem]=N'CredentialsWorkbook'
+        WHERE target.[IsCurrent]=1
+          AND NOT EXISTS
+          (
+              SELECT 1 FROM #Accounts source_row
+              WHERE source_row.[SourceKey]=target.[SourceKey]
+          );
+        SET @AccountStaleCount=@@ROWCOUNT;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF EXISTS
+        (
+            SELECT 1 FROM sys.openkeys
+            WHERE [key_name]=N'tb_FireDrillCredentialKey'
+        )
+            CLOSE SYMMETRIC KEY [tb_FireDrillCredentialKey];
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT @UserReadCount AS [UserReadCount],
+        @UserSavedCount AS [UserSavedCount],
+        @UserStaleCount AS [UserStaleCount],
+        @AccountReadCount AS [AccountReadCount],
+        @AccountSavedCount AS [AccountSavedCount],
+        @AccountStaleCount AS [AccountStaleCount];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SearchClientUsers', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SearchClientUsers];
+GO
+
+CREATE PROCEDURE [tb_app].[SearchClientUsers]
+    @ClientId int = NULL,
+    @Search nvarchar(240) = NULL,
+    @Limit int = 500
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF USER_NAME() = N'tb_preview_reader'
+        THROW 52240, N'Client users are unavailable in Admin user-preview mode.', 1;
+
+    DECLARE @Sid varbinary(85), @Login nvarchar(256), @Display nvarchar(160),
+            @Tech bit, @Manager bit, @Admin bit, @Sync bit;
+    EXEC [tb_security].[EnsureCurrentUser] @Sid OUTPUT, @Login OUTPUT, @Display OUTPUT,
+        @Tech OUTPUT, @Manager OUTPUT, @Admin OUTPUT, @Sync OUTPUT;
+
+    SET @Search=NULLIF(LTRIM(RTRIM(@Search)), N'');
+    SET @Limit=CASE WHEN @Limit IS NULL OR @Limit<1 THEN 500
+                    WHEN @Limit>1000 THEN 1000 ELSE @Limit END;
+
+    SELECT TOP (@Limit)
+        client_user.[ClientUserId],
+        client_user.[ClientId],
+        client.[Name] AS [ClientName],
+        client_user.[DisplayName],
+        COALESCE(client_user.[RoleDepartment], N'') AS [RoleDepartment],
+        COALESCE(client_user.[Email], N'') AS [Email],
+        COALESCE(client_user.[Phone], N'') AS [Phone],
+        COALESCE(client_user.[LocationName], N'') AS [LocationName],
+        COALESCE(client_user.[LastSyncedAtUtc], client_user.[UpdatedAtUtc]) AS [LastSyncedAtUtc],
+        (
+            SELECT COUNT(*)
+            FROM [tb_inventory].[ClientUserAccounts] account
+            WHERE account.[ClientUserId]=client_user.[ClientUserId]
+              AND account.[IsCurrent]=1
+        ) AS [AccountCount],
+        COALESCE
+        (
+            (
+                SELECT account.[AccountSystem] AS [name],
+                    CONVERT(int, ROW_NUMBER() OVER
+                        (ORDER BY account.[AccountSystem], account.[ClientUserAccountId]))
+                        AS [sortOrder],
+                    JSON_QUERY
+                    (
+                        COALESCE
+                        (
+                            (
+                                SELECT field.[FieldLabel] AS [label],
+                                    field.[FieldKey] AS [fieldName],
+                                    field.[SortOrder] AS [sortOrder],
+                                    CONVERT(nvarchar(1), N'') AS [value]
+                                FROM [tb_inventory].[ClientUserAccountFields] field
+                                WHERE field.[ClientUserAccountId]=account.[ClientUserAccountId]
+                                ORDER BY field.[SortOrder], field.[FieldKey]
+                                FOR JSON PATH
+                            ),
+                            N'[]'
+                        )
+                    ) AS [fields]
+                FROM [tb_inventory].[ClientUserAccounts] account
+                WHERE account.[ClientUserId]=client_user.[ClientUserId]
+                  AND account.[IsCurrent]=1
+                ORDER BY account.[AccountSystem], account.[ClientUserAccountId]
+                FOR JSON PATH
+            ),
+            N'[]'
+        ) AS [AccountsJson]
+    FROM [tb_inventory].[ClientUsers] client_user
+    INNER JOIN [tb_data].[Clients] client
+        ON client.[Id]=client_user.[ClientId]
+       AND client.[IsActive]=1
+    WHERE client_user.[IsActive]=1
+      AND (@ClientId IS NULL OR client_user.[ClientId]=@ClientId)
+      AND
+      (
+          @Search IS NULL
+          OR client.[Name] LIKE N'%' + @Search + N'%'
+          OR client_user.[DisplayName] LIKE N'%' + @Search + N'%'
+          OR client_user.[Email] LIKE N'%' + @Search + N'%'
+          OR client_user.[RoleDepartment] LIKE N'%' + @Search + N'%'
+          OR client_user.[LocationName] LIKE N'%' + @Search + N'%'
+      )
+    ORDER BY client.[Name], client_user.[DisplayName], client_user.[ClientUserId];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.RevealClientUser', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[RevealClientUser];
+GO
+
+CREATE PROCEDURE [tb_app].[RevealClientUser]
+    @ClientUserId bigint
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    IF SESSION_CONTEXT(N'TechBench.PreviewSessionId') IS NOT NULL
+        THROW 52241, N'Client users are unavailable in Admin user-preview mode.', 1;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_inventory].[ClientUsers]
+        WHERE [ClientUserId]=@ClientUserId AND [IsActive]=1
+    )
+        THROW 52242, N'The client user was not found or is no longer current.', 1;
+
+    SELECT client_user.[ClientUserId],
+        client_user.[ClientId],
+        client.[Name] AS [ClientName],
+        client_user.[DisplayName],
+        COALESCE(client_user.[RoleDepartment], N'') AS [RoleDepartment],
+        COALESCE(client_user.[Email], N'') AS [Email],
+        COALESCE(client_user.[Phone], N'') AS [Phone],
+        COALESCE(client_user.[LocationName], N'') AS [LocationName],
+        COALESCE(client_user.[LastSyncedAtUtc], client_user.[UpdatedAtUtc]) AS [LastSyncedAtUtc],
+        (
+            SELECT COUNT(*)
+            FROM [tb_inventory].[ClientUserAccounts] account
+            WHERE account.[ClientUserId]=client_user.[ClientUserId]
+              AND account.[IsCurrent]=1
+        ) AS [AccountCount],
+        COALESCE
+        (
+            (
+                SELECT account.[AccountSystem] AS [name],
+                    CONVERT(int, ROW_NUMBER() OVER
+                        (ORDER BY account.[AccountSystem], account.[ClientUserAccountId]))
+                        AS [sortOrder],
+                    JSON_QUERY
+                    (
+                        COALESCE
+                        (
+                            (
+                                SELECT field.[FieldLabel] AS [label],
+                                    field.[FieldKey] AS [fieldName],
+                                    field.[SortOrder] AS [sortOrder],
+                                    COALESCE
+                                    (
+                                        CONVERT
+                                        (
+                                            nvarchar(max),
+                                            DecryptByKeyAutoCert
+                                            (
+                                                CERT_ID(N'tb_FireDrillCredentialCertificate'),
+                                                NULL,
+                                                field.[ValueEncrypted],
+                                                1,
+                                                CONVERT
+                                                (
+                                                    nvarchar(64),
+                                                    HASHBYTES
+                                                    (
+                                                        'SHA2_256',
+                                                        CONVERT
+                                                        (
+                                                            varbinary(max),
+                                                            CONVERT(nvarchar(30),account.[ClientUserAccountId])
+                                                                + N'|' + field.[FieldKey]
+                                                        )
+                                                    ),
+                                                    2
+                                                )
+                                            )
+                                        ),
+                                        N''
+                                    ) AS [value]
+                                FROM [tb_inventory].[ClientUserAccountFields] field
+                                WHERE field.[ClientUserAccountId]=account.[ClientUserAccountId]
+                                ORDER BY field.[SortOrder], field.[FieldKey]
+                                FOR JSON PATH
+                            ),
+                            N'[]'
+                        )
+                    ) AS [fields]
+                FROM [tb_inventory].[ClientUserAccounts] account
+                WHERE account.[ClientUserId]=client_user.[ClientUserId]
+                  AND account.[IsCurrent]=1
+                ORDER BY account.[AccountSystem], account.[ClientUserAccountId]
+                FOR JSON PATH
+            ),
+            N'[]'
+        ) AS [AccountsJson]
+    FROM [tb_inventory].[ClientUsers] client_user
+    INNER JOIN [tb_data].[Clients] client
+        ON client.[Id]=client_user.[ClientId]
+       AND client.[IsActive]=1
+    WHERE client_user.[ClientUserId]=@ClientUserId
+      AND client_user.[IsActive]=1;
+END;
+GO
+
+PRINT N'TechBench V0014 equipment-board procedures created.';
+GO
+
+-- ============================================================================
+-- END 54-V0014-EquipmentBoardProcedures.sql
 -- ============================================================================
 
 -- ============================================================================
@@ -21342,6 +23705,7 @@ REVOKE EXECUTE ON OBJECT::[tb_app].[SyncUpsertClient] FROM [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[AdminRequestWhdSync] TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[GetWhdSyncStatus] TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetWhdUserMappings] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminReconcileWhdAuthorizedUsers] TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[AdminSaveWhdUserMapping] TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetWhdTechnicians] TO [tb_role_admin];
 
@@ -21585,6 +23949,84 @@ GO
 
 -- ============================================================================
 -- END 59-V0012-FlexibleCredentialFieldsGrants.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 60-V0014-EquipmentBoardGrants.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentBoard] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetInventoryClients] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentAssignmentHistory] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminSaveEquipment] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminMoveEquipment] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminArchiveEquipment] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[SearchClientUsers] TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[SearchClientUsers] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[RevealClientUser] TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[RevealClientUser] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetEquipmentInventory] TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetEquipmentInventory] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_service].[ApplyCredentialsClientUserSnapshot]
+    TO [tb_role_sync_service];
+
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentBoard] FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetInventoryClients] FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentAssignmentHistory] FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminSaveEquipment] FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminMoveEquipment] FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminArchiveEquipment] FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentBoard] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetInventoryClients] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentAssignmentHistory] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminSaveEquipment] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminMoveEquipment] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminArchiveEquipment] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SearchClientUsers] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[RevealClientUser] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[GetEquipmentInventory] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SearchClientUsers] FROM [tb_role_sync_service];
+REVOKE EXECUTE ON OBJECT::[tb_app].[RevealClientUser] FROM [tb_role_sync_service];
+REVOKE EXECUTE ON OBJECT::[tb_app].[GetEquipmentInventory] FROM [tb_role_sync_service];
+REVOKE EXECUTE ON OBJECT::[tb_service].[ApplyCredentialsClientUserSnapshot]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_service].[ApplyCredentialsClientUserSnapshot]
+    FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_service].[ApplyCredentialsClientUserSnapshot]
+    FROM [tb_preview_reader];
+
+/* Encryption helpers are reachable only through their caller-authorized
+   public procedures and never receive a direct application-role grant. */
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentBoardSecure]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentBoardSecure]
+    FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentBoardSecure]
+    FROM [tb_role_sync_service];
+REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentBoardSecure]
+    FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_security].[EncryptEquipmentAnyDeskPassword]
+    FROM [tb_role_user];
+REVOKE EXECUTE ON OBJECT::[tb_security].[EncryptEquipmentAnyDeskPassword]
+    FROM [tb_role_admin];
+REVOKE EXECUTE ON OBJECT::[tb_security].[EncryptEquipmentAnyDeskPassword]
+    FROM [tb_role_sync_service];
+REVOKE EXECUTE ON OBJECT::[tb_security].[EncryptEquipmentAnyDeskPassword]
+    FROM [tb_preview_reader];
+
+PRINT N'TechBench V0014 equipment-board grants applied.';
+GO
+
+-- ============================================================================
+-- END 60-V0014-EquipmentBoardGrants.sql
 -- ============================================================================
 
 -- ============================================================================
@@ -22017,7 +24459,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)
+IF @InstalledSchemaVersion NOT IN (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: V0002 verification supports installed schema version 2, 3, 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -22773,7 +25215,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)
+IF @InstalledSchemaVersion NOT IN (3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: V0003 verification supports installed schema version 3, 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -23257,7 +25699,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13)
+IF @InstalledSchemaVersion NOT IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: V0004 verification supports installed schema version 4, 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -23975,7 +26417,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10, 11, 12, 13)
+IF @InstalledSchemaVersion NOT IN (5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: V0005 verification supports installed schema version 5, 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -25182,7 +27624,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (6, 7, 8, 9, 10, 11, 12, 13)
+IF @InstalledSchemaVersion NOT IN (6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: V0006 verification supports installed schema version 6, 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -25216,6 +27658,7 @@ INSERT INTO @RequiredObjects([ObjectName], [ObjectType]) VALUES
     (N'tb_app.AdminRequestWhdSync', N'P'),
     (N'tb_app.GetWhdSyncStatus', N'P'),
     (N'tb_app.AdminGetWhdUserMappings', N'P'),
+    (N'tb_app.AdminReconcileWhdAuthorizedUsers', N'P'),
     (N'tb_app.AdminSaveWhdUserMapping', N'P'),
     (N'tb_app.AdminGetWhdTechnicians', N'P');
 
@@ -25321,6 +27764,7 @@ INSERT INTO @RequiredParameters([ProcedureName], [ParameterName]) VALUES
     (N'tb_service.CompleteWhdSyncWork', N'@Succeeded'),
     (N'tb_app.AdminRequestWhdSync', N'@RequestType'),
     (N'tb_app.AdminRequestWhdSync', N'@RequestId'),
+    (N'tb_app.AdminReconcileWhdAuthorizedUsers', N'@AuthorizedUsersJson'),
     (N'tb_app.AdminSaveWhdUserMapping', N'@WindowsLoginName'),
     (N'tb_app.AdminSaveWhdUserMapping', N'@DisplayName'),
     (N'tb_app.AdminSaveWhdUserMapping', N'@IsAdmin'),
@@ -25448,6 +27892,12 @@ BEGIN
         (N'tb_service.CompleteFireDrillSyncWork');
 END;
 
+IF @InstalledSchemaVersion >= 14
+BEGIN
+    INSERT INTO @ServiceProcedures([ObjectName]) VALUES
+        (N'tb_service.ApplyCredentialsClientUserSnapshot');
+END;
+
 IF EXISTS
 (
     SELECT 1
@@ -25547,6 +27997,7 @@ END;
 
 DECLARE @ClaimDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ClaimWhdSyncWork'));
 DECLARE @CompleteDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_service.CompleteWhdSyncWork'));
+DECLARE @UserReconciliationDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminReconcileWhdAuthorizedUsers'));
 DECLARE @MappingDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminSaveWhdUserMapping'));
 DECLARE @TechnicianListDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminGetWhdTechnicians'));
 DECLARE @SearchDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SearchTickets'));
@@ -25555,6 +28006,7 @@ DECLARE @TicketApplyDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_
 
 SELECT @ClaimDefinition = REPLACE(REPLACE(REPLACE(@ClaimDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @CompleteDefinition = REPLACE(REPLACE(REPLACE(@CompleteDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @UserReconciliationDefinition = REPLACE(REPLACE(REPLACE(@UserReconciliationDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @MappingDefinition = REPLACE(REPLACE(REPLACE(@MappingDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @TechnicianListDefinition = REPLACE(REPLACE(REPLACE(@TechnicianListDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @SearchDefinition = REPLACE(REPLACE(REPLACE(@SearchDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
@@ -25575,6 +28027,17 @@ IF CHARINDEX(N'@WorkType<>N''Tickets''', @CompleteDefinition) = 0
    OR CHARINDEX(N'@HasPendingWork=0', @CompleteDefinition) = 0
 BEGIN
     PRINT N'FAIL: CompleteWhdSyncWork lacks ticket-only valid cursor or request-level health protection.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'OPENJSON(@AuthorizedUsersJson)', @UserReconciliationDefinition) = 0
+   OR CHARINDEX(N'IFNOTEXISTS(SELECT1FROM@RawUsers)', @UserReconciliationDefinition) = 0
+   OR CHARINDEX(N'$.windowsSid', @UserReconciliationDefinition) = 0
+   OR CHARINDEX(N'TRY_CONVERT(varbinary(85),[WindowsSidHex],1)', @UserReconciliationDefinition) = 0
+   OR CHARINDEX(N'DELETEmapping_row', @UserReconciliationDefinition) = 0
+   OR CHARINDEX(N'[IsTechnician]=0', @UserReconciliationDefinition) = 0
+BEGIN
+    PRINT N'FAIL: authorized-user reconciliation is not fail-closed or does not retire stale mappings and roles.';
     SET @FailureCount += 1;
 END;
 
@@ -25748,7 +28211,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF @InstalledSchemaVersion NOT IN (7, 8, 9, 10, 11, 12, 13)
+IF @InstalledSchemaVersion NOT IN (7, 8, 9, 10, 11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: V0007 verification supports installed schema version 7, 8, or 9.';
     SET @FailureCount += 1;
@@ -26050,6 +28513,12 @@ BEGIN
         (N'tb_service.RenewFireDrillSyncLease'),
         (N'tb_service.ApplyFireDrillCredentialSnapshot'),
         (N'tb_service.CompleteFireDrillSyncWork');
+END;
+
+IF @InstalledSchemaVersion >= 14
+BEGIN
+    INSERT INTO @ServiceProcedures([ObjectName]) VALUES
+        (N'tb_service.ApplyCredentialsClientUserSnapshot');
 END;
 
 IF EXISTS
@@ -26410,7 +28879,7 @@ IF NOT EXISTS
 )
 BEGIN PRINT N'FAIL: V0008 migration marker is missing or invalid.'; SET @FailureCount+=1; END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (8, 9, 10, 11, 12, 13)
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (8, 9, 10, 11, 12, 13, 14, 15)
 BEGIN PRINT N'FAIL: installed schema version is not supported by V0008 verification.'; SET @FailureCount+=1; END;
 
 DECLARE @Objects TABLE([Name] nvarchar(300) PRIMARY KEY,[Type] char(2));
@@ -26519,7 +28988,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (9, 10, 11, 12, 13)
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (9, 10, 11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: installed schema version is not 9.';
     SET @FailureCount += 1;
@@ -26553,6 +29022,8 @@ END;
 IF CHARINDEX(N'CONVERT(int, 11) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
    AND CHARINDEX(N'CONVERT(int, 12) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
    AND CHARINDEX(N'CONVERT(int, 13) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+   AND CHARINDEX(N'CONVERT(int, 14) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+   AND CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]', OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
 BEGIN
     PRINT N'FAIL: GetRepositoryCapabilities does not report the final schema version.';
     SET @FailureCount += 1;
@@ -26598,7 +29069,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (10, 11, 12, 13)
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (10, 11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: installed schema version is not 10 or 11.';
     SET @FailureCount += 1;
@@ -26710,6 +29181,10 @@ IF CHARINDEX(N'CONVERT(int, 11) AS [SchemaVersion]',
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
    AND CHARINDEX(N'CONVERT(int, 13) AS [SchemaVersion]',
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+   AND CHARINDEX(N'CONVERT(int, 14) AS [SchemaVersion]',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+   AND CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
 BEGIN
     PRINT N'FAIL: GetRepositoryCapabilities does not report a supported final schema version.';
     SET @FailureCount += 1;
@@ -26755,7 +29230,7 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
-IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (11, 12, 13)
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations]) NOT IN (11, 12, 13, 14, 15)
 BEGIN
     PRINT N'FAIL: installed schema version is not 11 or 12.';
     SET @FailureCount += 1;
@@ -26828,6 +29303,10 @@ IF CHARINDEX(N'CONVERT(int, 11) AS [SchemaVersion]',
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
    AND CHARINDEX(N'CONVERT(int, 13) AS [SchemaVersion]',
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+   AND CHARINDEX(N'CONVERT(int, 14) AS [SchemaVersion]',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
+   AND CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]',
+       OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P'))) = 0
 BEGIN
     PRINT N'FAIL: GetRepositoryCapabilities does not report a supported final schema version.';
     SET @FailureCount += 1;
@@ -26888,6 +29367,8 @@ DECLARE @RevealDefinition nvarchar(max)=
 
 IF CHARINDEX(N'CONVERT(int, 12) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition,N''))=0
    AND CHARINDEX(N'CONVERT(int, 13) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition,N''))=0
+   AND CHARINDEX(N'CONVERT(int, 14) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition,N''))=0
+   AND CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition,N''))=0
 BEGIN
     PRINT N'FAIL: repository capabilities do not report a supported final schema version.';
     SET @FailureCount+=1;
@@ -27002,8 +29483,10 @@ DECLARE @ApplyDefinition nvarchar(max) =
     OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyWhdClientSnapshot', N'P'));
 
 IF CHARINDEX(N'CONVERT(int, 13) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition, N'')) = 0
+   AND CHARINDEX(N'CONVERT(int, 14) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition, N'')) = 0
+   AND CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]', COALESCE(@CapabilitiesDefinition, N'')) = 0
 BEGIN
-    PRINT N'FAIL: repository capabilities do not report schema version 13.';
+    PRINT N'FAIL: repository capabilities do not report schema version 13 or 14.';
     SET @FailureCount += 1;
 END;
 
@@ -27033,6 +29516,619 @@ GO
 
 -- ============================================================================
 -- END 102-V0013-WhdClientContactDetailsVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 103-V0014-EquipmentBoardVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @FailureCount int=0;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId]=N'SqlServer2016.EquipmentBoard.0014'
+      AND [SchemaVersion]=14
+)
+BEGIN
+    PRINT N'FAIL: V0014 equipment-board migration is not installed.';
+    SET @FailureCount+=1;
+END;
+
+IF OBJECT_ID(N'tb_inventory.Equipment', N'U') IS NULL
+BEGIN
+    PRINT N'FAIL: the equipment table is missing.';
+    SET @FailureCount+=1;
+END;
+
+IF OBJECT_ID(N'tb_inventory.ClientUsers', N'U') IS NULL
+BEGIN
+    PRINT N'FAIL: the inventory client-user table is missing.';
+    SET @FailureCount+=1;
+END;
+
+IF OBJECT_ID(N'tb_inventory.ClientUserAccounts', N'U') IS NULL
+BEGIN
+    PRINT N'FAIL: the inventory client-user account table is missing.';
+    SET @FailureCount+=1;
+END;
+
+IF OBJECT_ID(N'tb_inventory.ClientUserAccountFields', N'U') IS NULL
+BEGIN
+    PRINT N'FAIL: the encrypted client-user account-field table is missing.';
+    SET @FailureCount+=1;
+END;
+
+IF OBJECT_ID(N'tb_inventory.EquipmentAssignmentHistory', N'U') IS NULL
+BEGIN
+    PRINT N'FAIL: the equipment assignment-history table is missing.';
+    SET @FailureCount+=1;
+END;
+
+IF COL_LENGTH(N'tb_inventory.ClientUsers', N'SourceRowHash') IS NULL
+BEGIN
+    PRINT N'FAIL: client users cannot track workbook row changes.';
+    SET @FailureCount+=1;
+END;
+
+IF COL_LENGTH(N'tb_inventory.Equipment', N'WorkflowStage') IS NULL
+   OR COL_LENGTH(N'tb_inventory.Equipment', N'AssetTag') IS NULL
+   OR COL_LENGTH(N'tb_inventory.Equipment', N'ClientId') IS NULL
+   OR COL_LENGTH(N'tb_inventory.Equipment', N'ClientUserId') IS NULL
+   OR COL_LENGTH(N'tb_inventory.Equipment', N'LocationName') IS NULL
+BEGIN
+    PRINT N'FAIL: one or more client/user-aware equipment columns are missing.';
+    SET @FailureCount+=1;
+END;
+
+DECLARE @RequiredProcedures TABLE ([ObjectName] nvarchar(256) NOT NULL PRIMARY KEY);
+INSERT INTO @RequiredProcedures([ObjectName]) VALUES
+    (N'tb_app.AdminGetEquipmentBoard'),
+    (N'tb_app.AdminGetInventoryClients'),
+    (N'tb_app.AdminGetEquipmentAssignmentHistory'),
+    (N'tb_app.AdminSaveEquipment'),
+    (N'tb_app.AdminMoveEquipment'),
+    (N'tb_app.AdminArchiveEquipment');
+
+IF EXISTS
+(
+    SELECT 1
+    FROM @RequiredProcedures
+    WHERE OBJECT_ID([ObjectName], N'P') IS NULL
+)
+BEGIN
+    PRINT N'FAIL: one or more equipment-board procedures are missing.';
+    SET @FailureCount+=1;
+END;
+
+IF OBJECT_ID(N'tb_service.ApplyCredentialsClientUserSnapshot', N'P') IS NULL
+BEGIN
+    PRINT N'FAIL: the Credentials client-user import procedure is missing.';
+    SET @FailureCount+=1;
+END
+ELSE IF CHARINDEX(
+    N'OPENJSON(person_row.[AccountsJson])',
+    COALESCE(
+        OBJECT_DEFINITION(
+            OBJECT_ID(N'tb_service.ApplyCredentialsClientUserSnapshot', N'P')),
+        N''))=0
+    OR CHARINDEX(
+        N'[tb_inventory].[ClientUserAccounts]',
+        COALESCE(
+            OBJECT_DEFINITION(
+                OBJECT_ID(N'tb_service.ApplyCredentialsClientUserSnapshot', N'P')),
+            N''))=0
+    OR CHARINDEX(
+        N'[tb_inventory].[ClientUserAccountFields]',
+        COALESCE(
+            OBJECT_DEFINITION(
+                OBJECT_ID(N'tb_service.ApplyCredentialsClientUserSnapshot', N'P')),
+            N''))=0
+    OR CHARINDEX(
+        N'EncryptByKey',
+        COALESCE(
+            OBJECT_DEFINITION(
+                OBJECT_ID(N'tb_service.ApplyCredentialsClientUserSnapshot', N'P')),
+            N''))=0
+BEGIN
+    PRINT N'FAIL: the Credentials client-user import does not parse and encrypt account fields.';
+    SET @FailureCount+=1;
+END;
+
+IF OBJECT_ID(N'tb_service.ApplyCredentialsClientUserSnapshot', N'P') IS NOT NULL
+   AND NOT EXISTS
+   (
+       SELECT 1
+       FROM sys.database_permissions
+       WHERE [grantee_principal_id]=DATABASE_PRINCIPAL_ID(N'tb_role_sync_service')
+         AND [major_id]=OBJECT_ID(N'tb_service.ApplyCredentialsClientUserSnapshot')
+         AND [permission_name]=N'EXECUTE'
+         AND [state] IN (N'G',N'W')
+   )
+BEGIN
+    PRINT N'FAIL: the Sync Service cannot import Credentials client users.';
+    SET @FailureCount+=1;
+END;
+
+DECLARE @ClientUserReadProcedures TABLE ([ObjectName] nvarchar(256) NOT NULL PRIMARY KEY);
+INSERT INTO @ClientUserReadProcedures([ObjectName]) VALUES
+    (N'tb_app.SearchClientUsers'),
+    (N'tb_app.RevealClientUser'),
+    (N'tb_app.GetEquipmentInventory');
+
+IF EXISTS
+(
+    SELECT 1 FROM @ClientUserReadProcedures
+    WHERE OBJECT_ID([ObjectName], N'P') IS NULL
+)
+BEGIN
+    PRINT N'FAIL: one or more client-user read procedures are missing.';
+    SET @FailureCount+=1;
+END;
+
+IF EXISTS
+(
+    SELECT role_name.[RoleName], required.[ObjectName]
+    FROM (VALUES (N'tb_role_user'), (N'tb_role_admin')) role_name([RoleName])
+    CROSS JOIN @ClientUserReadProcedures required
+    WHERE NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.database_permissions
+        WHERE [grantee_principal_id]=DATABASE_PRINCIPAL_ID(role_name.[RoleName])
+          AND [major_id]=OBJECT_ID(required.[ObjectName])
+          AND [permission_name]=N'EXECUTE'
+          AND [state] IN (N'G',N'W')
+    )
+)
+BEGIN
+    PRINT N'FAIL: one or more client-user read grants are missing.';
+    SET @FailureCount+=1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions permission_row
+    INNER JOIN @ClientUserReadProcedures required
+        ON OBJECT_ID(required.[ObjectName])=permission_row.[major_id]
+    WHERE permission_row.[grantee_principal_id] IN
+    (
+        DATABASE_PRINCIPAL_ID(N'tb_preview_reader'),
+        DATABASE_PRINCIPAL_ID(N'tb_role_sync_service')
+    )
+      AND permission_row.[permission_name]=N'EXECUTE'
+      AND permission_row.[state] IN (N'G',N'W')
+)
+BEGIN
+    PRINT N'FAIL: preview or Sync Service can execute a client-user read procedure.';
+    SET @FailureCount+=1;
+END;
+
+IF CHARINDEX(
+    N'DecryptByKeyAutoCert',
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientUser', N'P')), N''))=0
+   OR CHARINDEX(
+    N'ClientUserAccountId',
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientUser', N'P')), N''))=0
+BEGIN
+    PRINT N'FAIL: client-user reveal does not decrypt account fields with their account authenticator.';
+    SET @FailureCount+=1;
+END;
+
+DECLARE @EquipmentInventoryDefinition nvarchar(max)=
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetEquipmentInventory', N'P')), N'');
+
+IF CHARINDEX(N'@ClientId', @EquipmentInventoryDefinition)=0
+   OR CHARINDEX(N'@ClientUserId', @EquipmentInventoryDefinition)=0
+   OR CHARINDEX(N'@ClientName', @EquipmentInventoryDefinition)=0
+   OR CHARINDEX(N'equipment.[IsArchived] = 0', @EquipmentInventoryDefinition)=0
+BEGIN
+    PRINT N'FAIL: the shared equipment inventory read is not client-scoped and archive-safe.';
+    SET @FailureCount+=1;
+END;
+
+DECLARE @RepositoryCapabilitiesDefinition nvarchar(max)=
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P')), N'');
+
+IF CHARINDEX(N'CONVERT(int, 14) AS [SchemaVersion]', @RepositoryCapabilitiesDefinition)=0
+   AND CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]', @RepositoryCapabilitiesDefinition)=0
+BEGIN
+    PRINT N'FAIL: repository capabilities do not report schema version 14.';
+    SET @FailureCount+=1;
+END;
+
+DECLARE @RequiredCapabilityTokens TABLE ([Token] nvarchar(128) NOT NULL PRIMARY KEY);
+INSERT INTO @RequiredCapabilityTokens([Token]) VALUES
+    (N'[FullTextSearchAvailable]'),
+    (N'[SupportsTickets]'),
+    (N'[SupportsWorkEntries]'),
+    (N'[SupportsPrivateNotes]'),
+    (N'[SupportsPostingLeases]'),
+    (N'[SupportsSyncLeases]'),
+    (N'[SupportsImports]'),
+    (N'[SupportsTechBenchV1Import]'),
+    (N'[SupportsServerSageSync]'),
+    (N'[SupportsAdminUserPreview]'),
+    (N'[SupportsFireDrillCredentials]'),
+    (N'[EquipmentBoardAvailable]');
+
+IF EXISTS
+(
+    SELECT 1
+    FROM @RequiredCapabilityTokens
+    WHERE CHARINDEX([Token], @RepositoryCapabilitiesDefinition)=0
+)
+BEGIN
+    PRINT N'FAIL: repository capabilities dropped one or more capabilities introduced by an earlier schema version.';
+    SET @FailureCount+=1;
+END;
+
+IF CHARINDEX(
+    N'@TargetWorkflowStage',
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminMoveEquipment', N'P')), N''))=0
+BEGIN
+    PRINT N'FAIL: equipment assignment does not persist Stock, Assigned, and Deployment stages.';
+    SET @FailureCount+=1;
+END;
+
+IF CHARINDEX(
+    N'@SourceStage NOT IN (N''Assigned'', N''Deployment'')',
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminMoveEquipment', N'P')), N''))=0
+BEGIN
+    PRINT N'FAIL: equipment priority maintenance does not isolate each technician deployment lane.';
+    SET @FailureCount+=1;
+END;
+
+IF CHARINDEX(
+    N'@ClientUserId',
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminSaveEquipment', N'P')), N''))=0
+   OR CHARINDEX(
+    N'[tb_inventory].[EquipmentAssignmentHistory]',
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminSaveEquipment', N'P')), N''))=0
+BEGIN
+    PRINT N'FAIL: equipment saves do not validate client users or record assignment history.';
+    SET @FailureCount+=1;
+END;
+
+IF EXISTS
+(
+    SELECT required.[ObjectName]
+    FROM @RequiredProcedures AS required
+    WHERE NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.database_permissions
+        WHERE [grantee_principal_id]=DATABASE_PRINCIPAL_ID(N'tb_role_admin')
+          AND [major_id]=OBJECT_ID(required.[ObjectName])
+          AND [permission_name]=N'EXECUTE'
+          AND [state] IN (N'G',N'W')
+    )
+)
+BEGIN
+    PRINT N'FAIL: one or more Admin equipment-board grants are missing.';
+    SET @FailureCount+=1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions AS permission_row
+    INNER JOIN @RequiredProcedures AS required
+        ON OBJECT_ID(required.[ObjectName])=permission_row.[major_id]
+    WHERE permission_row.[grantee_principal_id] IN
+    (
+        DATABASE_PRINCIPAL_ID(N'tb_role_user'),
+        DATABASE_PRINCIPAL_ID(N'tb_preview_reader')
+    )
+      AND permission_row.[permission_name]=N'EXECUTE'
+      AND permission_row.[state] IN (N'G',N'W')
+)
+BEGIN
+    PRINT N'FAIL: a non-Admin principal can execute an equipment-board procedure.';
+    SET @FailureCount+=1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions
+    WHERE [grantee_principal_id] IN
+    (
+        DATABASE_PRINCIPAL_ID(N'tb_role_user'),
+        DATABASE_PRINCIPAL_ID(N'tb_role_admin'),
+        DATABASE_PRINCIPAL_ID(N'tb_role_sync_service'),
+        DATABASE_PRINCIPAL_ID(N'tb_preview_reader')
+    )
+      AND [major_id] IN
+      (
+          OBJECT_ID(N'tb_inventory.Equipment'),
+          OBJECT_ID(N'tb_inventory.ClientUsers'),
+          OBJECT_ID(N'tb_inventory.ClientUserAccounts'),
+          OBJECT_ID(N'tb_inventory.ClientUserAccountFields'),
+          OBJECT_ID(N'tb_inventory.EquipmentAssignmentHistory')
+      )
+      AND [permission_name] IN (N'SELECT',N'INSERT',N'UPDATE',N'DELETE',N'CONTROL',N'ALTER')
+      AND [state] IN (N'G',N'W')
+)
+BEGIN
+    PRINT N'FAIL: a TechBench principal has a direct inventory-table grant.';
+    SET @FailureCount+=1;
+END;
+
+IF CHARINDEX(
+    N'IS_ROLEMEMBER(N''tb_role_admin'')',
+    REPLACE(
+        COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminMoveEquipment', N'P')), N''),
+        N' ',
+        N''))=0
+BEGIN
+    PRINT N'FAIL: equipment assignment does not enforce Admin access.';
+    SET @FailureCount+=1;
+END;
+
+IF @FailureCount>0
+    THROW 52220, N'TechBench V0014 equipment-board verification failed.', 1;
+
+PRINT N'TechBench V0014 equipment-board verification passed.';
+GO
+
+-- ============================================================================
+-- END 103-V0014-EquipmentBoardVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 104-V0015-EquipmentAnyDeskVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @FailureCount int=0;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId]=N'SqlServer2016.EquipmentAnyDesk.0015'
+      AND [SchemaVersion]=15
+)
+BEGIN
+    PRINT N'FAIL: V0015 equipment AnyDesk migration is not installed.';
+    SET @FailureCount+=1;
+END;
+
+IF COL_LENGTH(N'tb_inventory.Equipment', N'AnyDeskNumber') IS NULL
+   OR COL_LENGTH(N'tb_inventory.Equipment', N'AnyDeskPasswordEncrypted') IS NULL
+BEGIN
+    PRINT N'FAIL: one or more equipment AnyDesk columns are missing.';
+    SET @FailureCount+=1;
+END;
+
+DECLARE @CapabilitiesDefinition nvarchar(max)=
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P')), N'');
+IF CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]', @CapabilitiesDefinition)=0
+BEGIN
+    PRINT N'FAIL: repository capabilities do not report schema version 15.';
+    SET @FailureCount+=1;
+END;
+
+DECLARE @InventoryDefinition nvarchar(max)=
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetEquipmentInventory', N'P')), N'');
+IF CHARINDEX(N'equipment.[AnyDeskNumber]', @InventoryDefinition)=0
+   OR CHARINDEX(N'CAST(N'''' AS nvarchar(max)) AS [AnyDeskPassword]', @InventoryDefinition)=0
+   OR CHARINDEX(N'DecryptByKey', @InventoryDefinition)>0
+   OR CHARINDEX(N'[AnyDeskPasswordEncrypted]', @InventoryDefinition)>0
+BEGIN
+    PRINT N'FAIL: shared inventory reads do not expose the number while keeping the AnyDesk password private.';
+    SET @FailureCount+=1;
+END;
+
+DECLARE @AdminReadDefinition nvarchar(max)=
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminGetEquipmentBoard', N'P')), N'');
+DECLARE @SecureReadDefinition nvarchar(max)=
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminGetEquipmentBoardSecure', N'P')), N'');
+DECLARE @AdminSaveDefinition nvarchar(max)=
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminSaveEquipment', N'P')), N'');
+DECLARE @EncryptDefinition nvarchar(max)=
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_security.EncryptEquipmentAnyDeskPassword', N'P')), N'');
+DECLARE @EnsureCurrentUserDefinition nvarchar(max)=
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_security.EnsureCurrentUser', N'P')), N'');
+
+IF CHARINDEX(N'IS_ROLEMEMBER(N''tb_role_admin'')', @AdminReadDefinition)=0
+   OR CHARINDEX(N'AdminGetEquipmentBoardSecure', @AdminReadDefinition)=0
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER', @AdminReadDefinition)>0
+   OR CHARINDEX(N'equipment.[AnyDeskNumber]', @SecureReadDefinition)=0
+   OR CHARINDEX(N'DecryptByKeyAutoCert', @SecureReadDefinition)=0
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER', @SecureReadDefinition)=0
+   OR CHARINDEX(N'@AnyDeskNumber nvarchar(80)', @AdminSaveDefinition)=0
+   OR CHARINDEX(N'@AnyDeskPassword nvarchar(max)', @AdminSaveDefinition)=0
+   OR CHARINDEX(N'IS_ROLEMEMBER(N''tb_role_admin'')', @AdminSaveDefinition)=0
+   OR CHARINDEX(N'EncryptEquipmentAnyDeskPassword', @AdminSaveDefinition)=0
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER', @AdminSaveDefinition)>0
+   OR CHARINDEX(N'[AnyDeskPasswordEncrypted]', @AdminSaveDefinition)=0
+   OR CHARINDEX(N'EncryptByKey', @EncryptDefinition)=0
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER', @EncryptDefinition)=0
+BEGIN
+    PRINT N'FAIL: caller-authorized Admin equipment procedures do not securely delegate AnyDesk cryptography to owner-executed helpers.';
+    SET @FailureCount+=1;
+END;
+
+IF CHARINDEX(
+    N'IS_ROLEMEMBER(N''tb_role_admin'')',
+    @EnsureCurrentUserDefinition)=0
+   OR CHARINDEX(
+        N'IS_ROLEMEMBER(N''tb_role_admin'', ORIGINAL_LOGIN())',
+        @EnsureCurrentUserDefinition)>0
+BEGIN
+    PRINT N'FAIL: current-user role detection is not running in the authenticated caller context required for Windows group membership.';
+    SET @FailureCount+=1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions AS permission
+    WHERE permission.[class]=1
+      AND permission.[major_id] IN
+      (
+          OBJECT_ID(N'tb_app.AdminGetEquipmentBoardSecure', N'P'),
+          OBJECT_ID(N'tb_security.EncryptEquipmentAnyDeskPassword', N'P')
+      )
+      AND permission.[permission_name]=N'EXECUTE'
+      AND permission.[state] IN (N'G', N'W')
+      AND permission.[grantee_principal_id] IN
+      (
+          USER_ID(N'tb_role_user'),
+          USER_ID(N'tb_role_admin'),
+          USER_ID(N'tb_role_sync_service'),
+          USER_ID(N'tb_preview_reader')
+      )
+)
+BEGIN
+    PRINT N'FAIL: an owner-executed equipment encryption helper has a direct application-role grant.';
+    SET @FailureCount+=1;
+END;
+
+IF CHARINDEX(N'[AnyDeskPassword] nvarchar', @AdminSaveDefinition)>0
+   OR COL_LENGTH(N'tb_inventory.Equipment', N'AnyDeskPassword') IS NOT NULL
+BEGIN
+    PRINT N'FAIL: an AnyDesk password can be persisted as plaintext.';
+    SET @FailureCount+=1;
+END;
+
+IF @FailureCount>0
+    THROW 52221, N'TechBench V0015 equipment AnyDesk verification failed.', 1;
+
+PRINT N'TechBench V0015 equipment AnyDesk verification passed.';
+GO
+
+-- ============================================================================
+-- END 104-V0015-EquipmentAnyDeskVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 105-V0015-EquipmentDeploymentLifecycleVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+
+DECLARE @Failures int = 0;
+
+DECLARE @EquipmentConstraint nvarchar(max) =
+    COALESCE
+    (
+        (
+            SELECT [definition]
+            FROM sys.check_constraints
+            WHERE [parent_object_id] =
+                OBJECT_ID(N'tb_inventory.Equipment', N'U')
+              AND [name] = N'CK_Equipment_WorkflowStage'
+        ),
+        N''
+    );
+DECLARE @HistoryConstraint nvarchar(max) =
+    COALESCE
+    (
+        (
+            SELECT [definition]
+            FROM sys.check_constraints
+            WHERE [parent_object_id] =
+                OBJECT_ID(N'tb_inventory.EquipmentAssignmentHistory', N'U')
+              AND [name] =
+                N'CK_EquipmentAssignmentHistory_WorkflowStage'
+        ),
+        N''
+    );
+
+IF CHARINDEX(N'Deployed', @EquipmentConstraint) = 0
+BEGIN
+    PRINT N'FAIL: Equipment workflow constraint does not allow Deployed.';
+    SET @Failures += 1;
+END;
+
+IF CHARINDEX(N'Deployed', @HistoryConstraint) = 0
+BEGIN
+    PRINT N'FAIL: Equipment history workflow constraint does not allow Deployed.';
+    SET @Failures += 1;
+END;
+
+DECLARE @CapabilitiesDefinition nvarchar(max) =
+    COALESCE
+    (
+        OBJECT_DEFINITION(
+            OBJECT_ID(N'tb_app.GetRepositoryCapabilities', N'P')),
+        N''
+    );
+IF CHARINDEX(
+       N'CONVERT(int, 15) AS [SchemaVersion]',
+       @CapabilitiesDefinition) = 0
+BEGIN
+    PRINT N'FAIL: Repository capabilities do not preserve schema version 15.';
+    SET @Failures += 1;
+END;
+
+DECLARE @MoveDefinition nvarchar(max) =
+    COALESCE
+    (
+        OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminMoveEquipment', N'P')),
+        N''
+    );
+IF CHARINDEX(N'N''Deployed''', @MoveDefinition) = 0
+   OR CHARINDEX(N'N''Equipment deployment completed.''', @MoveDefinition) = 0
+BEGIN
+    PRINT N'FAIL: Equipment move procedure does not persist and log deployed completion.';
+    SET @Failures += 1;
+END;
+
+DECLARE @BoardDefinition nvarchar(max) =
+    COALESCE
+    (
+        OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminGetEquipmentBoard', N'P')),
+        N''
+    );
+DECLARE @SecureBoardDefinition nvarchar(max) =
+    COALESCE
+    (
+        OBJECT_DEFINITION(
+            OBJECT_ID(N'tb_app.AdminGetEquipmentBoardSecure', N'P')),
+        N''
+    );
+IF CHARINDEX(N'@IncludeDeployed', @BoardDefinition) = 0
+   OR CHARINDEX(N'@IncludeDeployed', @SecureBoardDefinition) = 0
+   OR CHARINDEX(N'[WorkflowStage] <> N''Deployed''', @SecureBoardDefinition) = 0
+BEGIN
+    PRINT N'FAIL: Stable-compatible equipment board filtering is not installed.';
+    SET @Failures += 1;
+END;
+
+IF @Failures > 0
+    THROW 52222, N'TechBench equipment deployment lifecycle verification failed.', 1;
+
+PRINT N'TechBench schema-15-compatible equipment deployment lifecycle verification passed.';
+GO
+
+-- ============================================================================
+-- END 105-V0015-EquipmentDeploymentLifecycleVerify.sql
 -- ============================================================================
 
 PRINT N'TechBench deployment completed successfully on CSRI-SQL.';

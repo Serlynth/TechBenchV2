@@ -12,6 +12,7 @@ public sealed class WhdRestClientTests
     public void DefaultClientAllowsSlowWhdResponses()
     {
         Assert.Equal(TimeSpan.FromSeconds(90), WhdRestClient.DefaultRequestTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(20), WhdRestClient.OptionalClientDetailTimeout);
     }
 
     [Fact]
@@ -168,6 +169,25 @@ public sealed class WhdRestClientTests
                 Uri.UnescapeDataString(request.Uri?.Query ?? string.Empty),
                 StringComparison.Ordinal);
         }
+    }
+
+    [Fact]
+    public async Task OrganizationSyncExplainsTicketRequestTimeout()
+    {
+        var handler = new RecordingHandler(_ =>
+            throw new TaskCanceledException("The operation was canceled."));
+        using var httpClient = new HttpClient(handler)
+        {
+            Timeout = TimeSpan.FromSeconds(90)
+        };
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetOrganizationTicketsAsync(ExplicitSettings());
+
+        Assert.False(result.Success);
+        Assert.Contains("timed out after 90 seconds", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ticket data", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("operation was canceled", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -529,6 +549,149 @@ public sealed class WhdRestClientTests
         Assert.Contains(
             handler.Requests,
             request => request.Uri?.AbsolutePath.EndsWith("/Clients/72", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public async Task FullClientSyncRetainsListContactWhenWhdRejectsLegacyClientDetails()
+    {
+        const string locationResponse = """
+            [
+              {
+                "id": 22,
+                "locationName": "Problem School"
+              }
+            ]
+            """;
+        const string clientListResponse = """
+            [
+              {
+                "id": 486,
+                "firstName": "Legacy",
+                "lastName": "Contact",
+                "location": {"id": 22}
+              }
+            ]
+            """;
+        var handler = new RecordingHandler(request =>
+        {
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            return path.EndsWith("/Clients/486", StringComparison.Ordinal)
+                ? Json(
+                    HttpStatusCode.BadRequest,
+                    """{"message":"The provider e-mail address does not meet RFC 5322."}""")
+                : Json(
+                    HttpStatusCode.OK,
+                    path.EndsWith("/Clients", StringComparison.Ordinal)
+                        ? clientListResponse
+                        : locationResponse);
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetClientsAsync(ExplicitSettings());
+
+        Assert.True(result.Success, result.Message);
+        var location = Assert.Single(result.Clients);
+        Assert.Equal("Legacy Contact", location.ContactName);
+        Assert.True(string.IsNullOrWhiteSpace(location.ContactEmail));
+        Assert.Contains("486", result.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            "list data was retained",
+            result.Message,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task FullClientSyncStillFailsWhenClientDetailServiceIsUnavailable()
+    {
+        const string locationResponse =
+            """[{"id":22,"locationName":"Problem School"}]""";
+        const string clientListResponse =
+            """[{"id":486,"firstName":"Legacy","lastName":"Contact","location":{"id":22}}]""";
+        var handler = new RecordingHandler(request =>
+        {
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            return path.EndsWith("/Clients/486", StringComparison.Ordinal)
+                ? Json(HttpStatusCode.InternalServerError, """{"message":"Unavailable"}""")
+                : Json(
+                    HttpStatusCode.OK,
+                    path.EndsWith("/Clients", StringComparison.Ordinal)
+                        ? clientListResponse
+                        : locationResponse);
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetClientsAsync(ExplicitSettings());
+
+        Assert.False(result.Success);
+        Assert.Contains("client 486", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("HTTP 500", result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FullClientSyncRetainsListContactWhenOptionalClientDetailTimesOut()
+    {
+        const string locationResponse =
+            """[{"id":22,"locationName":"Slow School"}]""";
+        const string clientListResponse =
+            """[{"id":486,"firstName":"Slow","lastName":"Contact","location":{"id":22}}]""";
+        var handler = new RecordingHandler(request =>
+        {
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            if (path.EndsWith("/Clients/486", StringComparison.Ordinal))
+            {
+                throw new TaskCanceledException("Simulated optional detail timeout.");
+            }
+
+            return Json(
+                HttpStatusCode.OK,
+                path.EndsWith("/Clients", StringComparison.Ordinal)
+                    ? clientListResponse
+                    : locationResponse);
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetClientsAsync(ExplicitSettings());
+
+        Assert.True(result.Success, result.Message);
+        var location = Assert.Single(result.Clients);
+        Assert.Equal("Slow Contact", location.ContactName);
+        Assert.Contains("486", result.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            "list data was retained",
+            result.Message,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task FullClientSyncExplainsTimeoutWhenRequiredListDataTimesOut()
+    {
+        var handler = new RecordingHandler(request =>
+        {
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            if (path.EndsWith("/Clients", StringComparison.Ordinal))
+            {
+                throw new TaskCanceledException("The operation was canceled.");
+            }
+
+            return Json(
+                HttpStatusCode.OK,
+                """[{"id":22,"locationName":"Slow School"}]""");
+        });
+        using var httpClient = new HttpClient(handler)
+        {
+            Timeout = TimeSpan.FromSeconds(90)
+        };
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetClientsAsync(ExplicitSettings());
+
+        Assert.False(result.Success);
+        Assert.Contains("timed out after 90 seconds", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("required list data", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("operation was canceled", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -6,21 +6,27 @@ namespace TechBench.Tests;
 public sealed class CredentialWorkspaceLayoutTests
 {
     [Fact]
-    public void SidebarUsesClickableClientInfoParentAndFilteredChildren()
+    public void SidebarGroupsClientWorkspacesUnderOneExpandableArea()
     {
+        var navigation = ReadRepositoryFile(
+            Path.Combine("Controls", "WorkspaceNavigation.xaml"));
         var xaml = ReadRepositoryFile("MainWindow.xaml");
 
         Assert.Contains(
-            "Content=\"CLIENT INFO\" Command=\"{Binding NavigateCommand}\" CommandParameter=\"Client Info\"",
-            xaml,
+            "Header=\"CLIENTS\"",
+            navigation,
             StringComparison.Ordinal);
-        foreach (var section in new[] { "Client WiFi", "Domain/AD", "Connection", "Misc Info" })
+        foreach (var section in new[] { "Client WiFi", "Domain/AD", "Connection", "Veeam", "Misc Info" })
         {
             Assert.Contains(
-                $"Content=\"{section}\" Command=\"{{Binding NavigateCommand}}\" CommandParameter=\"{section}\"",
-                xaml,
+                $"CommandParameter=\"{section}\"",
+                navigation,
                 StringComparison.Ordinal);
         }
+        Assert.Contains(
+            "CommandParameter=\"Client Info\"",
+            navigation,
+            StringComparison.Ordinal);
         Assert.Contains(
             "Visibility=\"{Binding IsCredentialWorkspaceSection, Converter={StaticResource BooleanToVisibilityConverter}}\"",
             xaml,
@@ -30,22 +36,41 @@ public sealed class CredentialWorkspaceLayoutTests
     }
 
     [Fact]
-    public void SidebarNavigationScrollsAndUsesProminentSectionHeaders()
+    public void SidebarNavigationUsesScrollableExpandableGroups()
     {
-        var xaml = ReadRepositoryFile("MainWindow.xaml");
+        var mainWindow = ReadRepositoryFile("MainWindow.xaml");
+        var navigation = ReadRepositoryFile(
+            Path.Combine("Controls", "WorkspaceNavigation.xaml"));
 
-        Assert.Contains("x:Name=\"SidebarNavigationScrollViewer\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("VerticalScrollBarVisibility=\"Hidden\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Text=\"&#x2192;\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Text=\"›\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Text=\"NOTES\" Style=\"{StaticResource SidebarGroupLabelStyle}\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Text=\"WORKLOG\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("x:Key=\"SidebarGroupHeaderStyle\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("x:Key=\"SidebarGroupButtonStyle\"", xaml, StringComparison.Ordinal);
         Assert.Contains(
-            "x:Key=\"NavClientInfoStyle\" TargetType=\"{x:Type Button}\" BasedOn=\"{StaticResource SidebarGroupButtonStyle}\"",
-            xaml,
+            "<controls:WorkspaceNavigation Grid.Column=\"0\"",
+            mainWindow,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "x:Name=\"SidebarNavigationScrollViewer\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "VerticalScrollBarVisibility=\"Auto\"",
+            navigation,
+            StringComparison.Ordinal);
+        foreach (var group in new[] { "NOTES", "CLIENTS", "EQUIPMENT", "SYSTEM" })
+        {
+            Assert.Contains(
+                $"Header=\"{group}\"",
+                navigation,
+                StringComparison.Ordinal);
+        }
+        Assert.DoesNotContain(
+            "Header=\"SERVICE\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains("x:Key=\"WorkspaceNavItemStyle\"", navigation, StringComparison.Ordinal);
+        Assert.Contains(
+            "Converter={StaticResource SectionActiveConverter}",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("x:Key=\"NavTodayStyle\"", navigation, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -55,6 +80,10 @@ public sealed class CredentialWorkspaceLayoutTests
         var viewModel = ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.FireDrill.cs"));
 
         Assert.Contains("Command=\"{Binding SearchFireDrillCommand}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "<KeyBinding Key=\"Enter\" Command=\"{Binding SearchFireDrillCommand}\"",
+            xaml,
+            StringComparison.Ordinal);
         Assert.Contains("Content=\"Clear\" Command=\"{Binding ClearFireDrillSearchCommand}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("FireDrillSearchText = string.Empty;", viewModel, StringComparison.Ordinal);
         Assert.Contains("RefreshFireDrillCredentials();", viewModel, StringComparison.Ordinal);
@@ -124,20 +153,23 @@ public sealed class CredentialWorkspaceLayoutTests
             Field("ESET Password", 10),
             Field("Barracuda Login", 11),
             Field("Barracuda Password", 12),
-            Field("SonicWall Username", 13),
-            Field("SonicWall Password", 14),
-            Field("Unclassified note", 15),
-            Field("Wireless SSID", 16),
-            Field("Wireless Password", 17)
+            Field("Veeam Username", 13),
+            Field("Veeam Password", 14),
+            Field("SonicWall Username", 15),
+            Field("SonicWall Password", 16),
+            Field("Unclassified note", 17),
+            Field("Wireless SSID", 18),
+            Field("Wireless Password", 19)
         ];
 
         var groups = CredentialFieldGrouper.Group(fields);
 
         Assert.Equal(
-            ["Wireless", "WatchGuard", "Microsoft 365", "ESET", "Barracuda", "SonicWall", "Other"],
+            ["Wireless", "WatchGuard", "Microsoft 365", "ESET", "Barracuda", "Veeam", "SonicWall", "Other"],
             groups.Select(group => group.Name));
         Assert.Equal(2, groups.Single(group => group.Name == "Wireless").Fields.Count);
         Assert.Equal(7, groups.Single(group => group.Name == "WatchGuard").Fields.Count);
+        Assert.Equal(2, groups.Single(group => group.Name == "Veeam").Fields.Count);
         Assert.Equal(2, groups.Single(group => group.Name == "SonicWall").Fields.Count);
         Assert.Equal(
             "Unclassified note",
@@ -201,16 +233,19 @@ public sealed class CredentialWorkspaceLayoutTests
         var localDomain = Field("Local Domain", 2);
         var connection = Field("Firebox IP", 3);
         var authPoint = Field("AuthPoint User", 4);
-        var misc = Field("Microsoft 365 Password", 5);
+        var veeam = Field("Veeam Password", 5);
+        var misc = Field("Microsoft 365 Password", 6);
 
         Assert.True(CredentialFieldGrouper.IsWirelessField(wireless));
         Assert.True(CredentialFieldGrouper.IsDomainOrAdField(domain));
         Assert.True(CredentialFieldGrouper.IsDomainOrAdField(localDomain));
         Assert.True(CredentialFieldGrouper.IsConnectionField(connection));
         Assert.True(CredentialFieldGrouper.IsConnectionField(authPoint));
+        Assert.True(CredentialFieldGrouper.IsVeeamField(veeam));
+        Assert.False(CredentialFieldGrouper.IsVeeamField(misc));
         Assert.True(CredentialFieldGrouper.IsMiscInfoField(misc));
 
-        foreach (var field in new[] { wireless, domain, localDomain, connection, authPoint })
+        foreach (var field in new[] { wireless, domain, localDomain, connection, authPoint, veeam })
             Assert.False(CredentialFieldGrouper.IsMiscInfoField(field));
     }
 
@@ -220,12 +255,13 @@ public sealed class CredentialWorkspaceLayoutTests
         var viewModel = ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.FireDrill.cs"));
         var navigation = ReadRepositoryFile(Path.Combine("ViewModels", "MainWindowViewModel.cs"));
 
-        foreach (var section in new[] { "Client Info", "Client WiFi", "Domain/AD", "Connection", "Misc Info" })
+        foreach (var section in new[] { "Client Info", "Client WiFi", "Domain/AD", "Connection", "Veeam", "Misc Info" })
             Assert.Contains($"\"{section}\"", viewModel + navigation, StringComparison.Ordinal);
 
         Assert.Contains("item.Fields.Any(IsFieldVisibleInCurrentCredentialSection)", viewModel, StringComparison.Ordinal);
         Assert.Contains("\"Domain/AD\" => CredentialFieldGrouper.IsDomainOrAdField(field)", viewModel, StringComparison.Ordinal);
         Assert.Contains("\"Connection\" => CredentialFieldGrouper.IsConnectionField(field)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("\"Veeam\" => CredentialFieldGrouper.IsVeeamField(field)", viewModel, StringComparison.Ordinal);
         Assert.Contains("\"Misc Info\" => CredentialFieldGrouper.IsMiscInfoField(field)", viewModel, StringComparison.Ordinal);
     }
 

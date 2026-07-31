@@ -18,7 +18,9 @@ public sealed class WhdRestClient
     private const int PageSize = 100;
     private const int MaximumPageCount = 10_000;
     private const int MaximumConcurrentClientDetailRequests = 6;
+    private const int MaximumConcurrentTechnicianDetailRequests = 6;
     internal static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(90);
+    internal static readonly TimeSpan OptionalClientDetailTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan PostReconciliationWindow = TimeSpan.FromSeconds(20);
     private readonly HttpClient _httpClient;
     private readonly ConcurrentDictionary<string, WhdAuthParameters> _authenticationCache = new(StringComparer.Ordinal);
@@ -139,7 +141,12 @@ public sealed class WhdRestClient
                 tickets,
                 isComplete);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return WhdSyncResult.Failed(
+                $"Web Help Desk sync timed out after {_httpClient.Timeout.TotalSeconds:0} seconds while reading ticket data.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException or UriFormatException)
         {
             return WhdSyncResult.Failed($"Web Help Desk sync failed: {ex.Message}");
         }
@@ -275,22 +282,30 @@ public sealed class WhdRestClient
                 }
             }
 
-            var contactsByLocation = await GetBestLocationContactsAsync(
+            var contactResult = await GetBestLocationContactsAsync(
                 settings,
                 auth,
                 cancellationToken);
             clients = clients
-                .Select(location => EnrichLocation(location, contactsByLocation))
+                .Select(location => EnrichLocation(location, contactResult.Contacts))
                 .ToList();
 
             return WhdClientSyncResult.Succeeded(
                 $"Synced {clients.Count} active Web Help Desk location(s)."
                 + $" Added contact details for {clients.Count(client => !string.IsNullOrWhiteSpace(client.ContactName))} location(s)."
+                + (contactResult.UnavailableClientIds.Count == 0
+                    ? string.Empty
+                    : $" WHD could not return optional details for client(s) {string.Join(", ", contactResult.UnavailableClientIds)}; list data was retained.")
                 + (isComplete ? string.Empty : " Paging stopped because WHD repeated a page; stale-client reconciliation was skipped."),
                 clients,
                 isComplete);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return WhdClientSyncResult.Failed(
+                $"Web Help Desk client sync timed out after {_httpClient.Timeout.TotalSeconds:0} seconds while reading required list data.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException or UriFormatException)
         {
             return WhdClientSyncResult.Failed($"Web Help Desk client sync failed: {ex.Message}");
         }
@@ -344,6 +359,14 @@ public sealed class WhdRestClient
                 }
             }
 
+            technicians = (await EnrichTechnicianDetailsAsync(
+                    settings,
+                    auth,
+                    technicians,
+                    cancellationToken)
+                .ConfigureAwait(false))
+                .ToList();
+
             // WHD 12.x can omit the authenticated administrator from the
             // Techs collection. The documented currentTech resource requires
             // a temporary session key, even when the other API calls use an
@@ -382,7 +405,7 @@ public sealed class WhdRestClient
                 technicians.Add(new WhdSyncedTechnician
                 {
                     ExternalId = ConfiguredOrganizationAccountExternalId,
-                    DisplayName = "Helpdesk Manager (organization-wide account)",
+                    DisplayName = $"Helpdesk Manager ({settings.Username.Trim()}, organization-wide account)",
                     Username = settings.Username.Trim(),
                     IsActive = true
                 });
@@ -923,7 +946,10 @@ public sealed class WhdRestClient
             ["page"] = page.ToString(CultureInfo.InvariantCulture)
         });
 
-        return GetTicketsPageAsync(requestUri, cancellationToken);
+        return GetTicketsPageAsync(
+            requestUri,
+            settings.Username,
+            cancellationToken);
     }
 
     private static string BuildOrganizationTicketQualifier(DateTimeOffset? changedSinceUtc)
@@ -945,6 +971,7 @@ public sealed class WhdRestClient
 
     private async Task<IReadOnlyList<WhdSyncedTicket>> GetTicketsPageAsync(
         Uri requestUri,
+        string configuredOrganizationUsername,
         CancellationToken cancellationToken)
     {
         using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
@@ -959,7 +986,9 @@ public sealed class WhdRestClient
         }
 
         using var document = JsonDocument.Parse(content);
-        return ParseTickets(document.RootElement);
+        return ParseTickets(
+            document.RootElement,
+            configuredOrganizationUsername);
     }
 
     private async Task<IReadOnlyList<WhdSyncedClient>> GetLocationsPageAsync(
@@ -991,7 +1020,7 @@ public sealed class WhdRestClient
         return ParseLocations(document.RootElement);
     }
 
-    private async Task<IReadOnlyDictionary<string, WhdLocationContact>> GetBestLocationContactsAsync(
+    private async Task<WhdLocationContactResult> GetBestLocationContactsAsync(
         WhdConnectionSettings settings,
         WhdAuthParameters auth,
         CancellationToken cancellationToken)
@@ -1038,17 +1067,25 @@ public sealed class WhdRestClient
             {
                 var contact = pair.Value;
                 if (contact.HasCompleteDetails)
-                    return pair;
+                {
+                    return new WhdLocationContactEnrichment(
+                        pair.Key,
+                        contact,
+                        DetailUnavailable: false);
+                }
 
                 await detailGate.WaitAsync(cancellationToken);
                 try
                 {
-                    var detailed = await GetClientContactDetailsAsync(
+                    var detailResult = await GetClientContactDetailsAsync(
                         settings,
                         auth,
                         contact,
                         cancellationToken);
-                    return new KeyValuePair<string, WhdLocationContact>(pair.Key, detailed);
+                    return new WhdLocationContactEnrichment(
+                        pair.Key,
+                        detailResult.Contact,
+                        detailResult.DetailUnavailable);
                 }
                 finally
                 {
@@ -1057,11 +1094,20 @@ public sealed class WhdRestClient
             })
             .ToArray();
 
-        return (await Task.WhenAll(detailTasks))
-            .ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        var enrichments = await Task.WhenAll(detailTasks);
+        return new WhdLocationContactResult(
+            enrichments.ToDictionary(
+                static result => result.LocationExternalId,
+                static result => result.Contact,
+                StringComparer.OrdinalIgnoreCase),
+            enrichments
+                .Where(static result => result.DetailUnavailable)
+                .Select(static result => result.Contact.ExternalId)
+                .OrderBy(static id => id, StringComparer.OrdinalIgnoreCase)
+                .ToArray());
     }
 
-    private async Task<WhdLocationContact> GetClientContactDetailsAsync(
+    private async Task<WhdLocationContactDetailResult> GetClientContactDetailsAsync(
         WhdConnectionSettings settings,
         WhdAuthParameters auth,
         WhdLocationContact listContact,
@@ -1073,26 +1119,60 @@ public sealed class WhdRestClient
             $"Clients/{encodedClientId}",
             auth,
             new Dictionary<string, string>());
-        using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
-        var content = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (response.StatusCode == HttpStatusCode.NotFound)
-            return listContact;
-
-        if (!response.IsSuccessStatusCode)
+        using var detailTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        detailTimeout.CancelAfter(OptionalClientDetailTimeout);
+        try
         {
-            var message = string.IsNullOrWhiteSpace(content) ? response.ReasonPhrase : content.Trim();
-            throw new HttpRequestException(
-                $"HTTP {(int)response.StatusCode} from Web Help Desk client {listContact.ExternalId}: {message}",
-                null,
-                response.StatusCode);
+            using var response = await _httpClient.GetAsync(requestUri, detailTimeout.Token);
+            var content = await response.Content.ReadAsStringAsync(detailTimeout.Token);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return new WhdLocationContactDetailResult(
+                    listContact,
+                    DetailUnavailable: false);
+            }
+
+            if (response.StatusCode == HttpStatusCode.BadRequest)
+            {
+                // WHD can retain legacy client records whose provider email no
+                // longer passes its current RFC validation. The Clients list still
+                // contains enough information to associate the contact with its
+                // location, so keep that data instead of failing the full snapshot.
+                return new WhdLocationContactDetailResult(
+                    listContact,
+                    DetailUnavailable: true);
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var message = string.IsNullOrWhiteSpace(content) ? response.ReasonPhrase : content.Trim();
+                throw new HttpRequestException(
+                    $"HTTP {(int)response.StatusCode} from Web Help Desk client {listContact.ExternalId}: {message}",
+                    null,
+                    response.StatusCode);
+            }
+
+            using var document = JsonDocument.Parse(content);
+            var detailed = ParseClientContacts(document.RootElement).FirstOrDefault();
+            if (detailed is null)
+            {
+                return new WhdLocationContactDetailResult(
+                    listContact,
+                    DetailUnavailable: false);
+            }
+
+            return new WhdLocationContactDetailResult(
+                MergeContactDetails(listContact, detailed),
+                DetailUnavailable: false);
         }
-
-        using var document = JsonDocument.Parse(content);
-        var detailed = ParseClientContacts(document.RootElement).FirstOrDefault();
-        if (detailed is null)
-            return listContact;
-
-        return MergeContactDetails(listContact, detailed);
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Client detail is optional enrichment. A slow legacy record must
+            // not cancel the complete location snapshot.
+            return new WhdLocationContactDetailResult(
+                listContact,
+                DetailUnavailable: true);
+        }
     }
 
     private async Task<IReadOnlyList<WhdLocationContact>> GetClientContactsPageAsync(
@@ -1314,6 +1394,96 @@ public sealed class WhdRestClient
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
         using var document = JsonDocument.Parse(content);
         return ParseTechnicians(document.RootElement).FirstOrDefault();
+    }
+
+    private async Task<IReadOnlyList<WhdSyncedTechnician>> EnrichTechnicianDetailsAsync(
+        WhdConnectionSettings settings,
+        WhdAuthParameters auth,
+        IReadOnlyList<WhdSyncedTechnician> technicians,
+        CancellationToken cancellationToken)
+    {
+        using var detailGate = new SemaphoreSlim(MaximumConcurrentTechnicianDetailRequests);
+        var detailTasks = technicians.Select(async technician =>
+        {
+            if (!IsPlaceholderTechnicianName(technician))
+            {
+                return technician;
+            }
+
+            var rawId = GetRawTechnicianId(technician.ExternalId);
+            if (string.IsNullOrWhiteSpace(rawId))
+            {
+                return technician;
+            }
+
+            await detailGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var detailed = await TryGetTechnicianAsync(
+                        settings,
+                        auth,
+                        $"Techs/{Uri.EscapeDataString(rawId)}",
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (detailed is null
+                    || !string.Equals(
+                        detailed.ExternalId,
+                        technician.ExternalId,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return technician;
+                }
+
+                return new WhdSyncedTechnician
+                {
+                    ExternalId = technician.ExternalId,
+                    DisplayName = IsPlaceholderTechnicianName(detailed)
+                        ? technician.DisplayName
+                        : detailed.DisplayName,
+                    Username = detailed.Username ?? technician.Username,
+                    Email = detailed.Email ?? technician.Email,
+                    IsActive = detailed.IsActive
+                };
+            }
+            catch (Exception ex) when (
+                ex is HttpRequestException
+                    or JsonException
+                    or InvalidOperationException
+                    or UriFormatException
+                || ex is TaskCanceledException && !cancellationToken.IsCancellationRequested)
+            {
+                // A weak list result is still usable for mapping by ID. Do
+                // not fail the complete technician snapshot when one optional
+                // detail resource is unavailable.
+                return technician;
+            }
+            finally
+            {
+                detailGate.Release();
+            }
+        });
+
+        return await Task.WhenAll(detailTasks).ConfigureAwait(false);
+    }
+
+    private static bool IsPlaceholderTechnicianName(WhdSyncedTechnician technician)
+    {
+        var displayName = technician.DisplayName?.Trim();
+        var rawId = GetRawTechnicianId(technician.ExternalId);
+        return string.IsNullOrWhiteSpace(displayName)
+            || displayName.Equals(technician.ExternalId, StringComparison.OrdinalIgnoreCase)
+            || displayName.Equals(rawId, StringComparison.OrdinalIgnoreCase)
+            || displayName.Equals($"Technician {rawId}", StringComparison.OrdinalIgnoreCase)
+            || displayName.StartsWith("WHD-TECH-", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetRawTechnicianId(string externalId)
+    {
+        const string prefix = "WHD-TECH-";
+        var trimmed = externalId.Trim();
+        return trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            ? trimmed[prefix.Length..]
+            : trimmed;
     }
 
     private async Task<IReadOnlyList<WhdSyncedTechnicianGroup>> GetTechnicianGroupsPageAsync(
@@ -1647,7 +1817,9 @@ public sealed class WhdRestClient
         return JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
     }
 
-    private static IReadOnlyList<WhdSyncedTicket> ParseTickets(JsonElement root)
+    private static IReadOnlyList<WhdSyncedTicket> ParseTickets(
+        JsonElement root,
+        string? configuredOrganizationUsername = null)
     {
         var tickets = new List<WhdSyncedTicket>();
 
@@ -1655,19 +1827,19 @@ public sealed class WhdRestClient
         {
             foreach (var ticketElement in root.EnumerateArray())
             {
-                AddTicket(tickets, ticketElement);
+                AddTicket(tickets, ticketElement, configuredOrganizationUsername);
             }
         }
         else if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("records", out var records) && records.ValueKind == JsonValueKind.Array)
         {
             foreach (var ticketElement in records.EnumerateArray())
             {
-                AddTicket(tickets, ticketElement);
+                AddTicket(tickets, ticketElement, configuredOrganizationUsername);
             }
         }
         else if (root.ValueKind == JsonValueKind.Object)
         {
-            AddTicket(tickets, root);
+            AddTicket(tickets, root, configuredOrganizationUsername);
         }
 
         return tickets;
@@ -1779,8 +1951,9 @@ public sealed class WhdRestClient
 
             var username = ReadStringAny(element, "username", "userName", "loginName");
             var email = ReadStringAny(element, "email", "emailAddress");
-            var displayName = ReadStringAny(element, "displayName", "fullName", "name")
+            var displayName = ReadStringAny(element, "displayName", "fullName")
                 ?? BuildName(element)
+                ?? ReadStringAny(element, "name")
                 ?? username
                 ?? email
                 ?? $"Technician {id}";
@@ -2035,7 +2208,10 @@ public sealed class WhdRestClient
         });
     }
 
-    private static void AddTicket(List<WhdSyncedTicket> tickets, JsonElement ticketElement)
+    private static void AddTicket(
+        List<WhdSyncedTicket> tickets,
+        JsonElement ticketElement,
+        string? configuredOrganizationUsername)
     {
         if (ticketElement.ValueKind != JsonValueKind.Object)
         {
@@ -2108,9 +2284,11 @@ public sealed class WhdRestClient
                 "updatedAt",
                 "dateModified",
                 "modified"),
-            AssignedTechnicianExternalId = string.IsNullOrWhiteSpace(assignedTechnicianId)
-                ? null
-                : FormatWhdTechnicianId(assignedTechnicianId),
+            AssignedTechnicianExternalId = ResolveAssignedTechnicianExternalId(
+                assignedTechnicianId,
+                assignedTechnician,
+                ticketElement,
+                configuredOrganizationUsername),
             AssignedTechnicianName = assignedTechnician.HasValue
                 ? ReadStringAny(assignedTechnician.Value, "displayName", "fullName", "name", "username")
                 : ReadStringAny(ticketElement, "assignedTechName", "assignedTechnicianName"),
@@ -2123,6 +2301,98 @@ public sealed class WhdRestClient
             Client = ReadClient(ticketElement)
         });
     }
+
+    private static string? ResolveAssignedTechnicianExternalId(
+        string? assignedTechnicianId,
+        JsonElement? assignedTechnician,
+        JsonElement ticketElement,
+        string? configuredOrganizationUsername)
+    {
+        if (string.IsNullOrWhiteSpace(assignedTechnicianId))
+        {
+            return null;
+        }
+
+        if (IsConfiguredOrganizationAccountAssignment(
+                assignedTechnician,
+                ticketElement,
+                configuredOrganizationUsername))
+        {
+            return ConfiguredOrganizationAccountExternalId;
+        }
+
+        return FormatWhdTechnicianId(assignedTechnicianId);
+    }
+
+    private static bool IsConfiguredOrganizationAccountAssignment(
+        JsonElement? assignedTechnician,
+        JsonElement ticketElement,
+        string? configuredOrganizationUsername)
+    {
+        if (string.IsNullOrWhiteSpace(configuredOrganizationUsername))
+        {
+            return false;
+        }
+
+        var assignedUsername = assignedTechnician.HasValue
+            ? ReadStringAny(
+                assignedTechnician.Value,
+                "username",
+                "userName",
+                "loginName",
+                "login")
+            : null;
+        assignedUsername ??= ReadStringAny(
+            ticketElement,
+            "assignedTechUsername",
+            "assignedTechnicianUsername",
+            "techUsername");
+        if (string.Equals(
+                assignedUsername?.Trim(),
+                configuredOrganizationUsername.Trim(),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // WHD 12.x omits its built-in Helpdesk Manager account from /Techs
+        // when an application API key is used. Ticket payloads still identify
+        // that account as "H. Manager", but may omit its whdmgr login name.
+        // Recognize those equivalent labels so ticket ownership uses the same
+        // stable mapping identity exposed by GetTechniciansAsync.
+        var assignedName = assignedTechnician.HasValue
+            ? ReadStringAny(
+                assignedTechnician.Value,
+                "displayName",
+                "fullName",
+                "name")
+            : ReadStringAny(
+                ticketElement,
+                "assignedTechName",
+                "assignedTechnicianName");
+        return IsHelpdeskManagerUsername(configuredOrganizationUsername)
+            && IsHelpdeskManagerDisplayName(assignedName);
+    }
+
+    private static bool IsHelpdeskManagerUsername(string value)
+    {
+        var normalized = NormalizeIdentityLabel(value);
+        return normalized is "whdmgr" or "helpdeskmanager";
+    }
+
+    private static bool IsHelpdeskManagerDisplayName(string? value)
+    {
+        var normalized = NormalizeIdentityLabel(value);
+        return normalized is "hmanager" or "helpdeskmanager" or "whdmanager";
+    }
+
+    private static string NormalizeIdentityLabel(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : new string(value
+                .Where(char.IsLetterOrDigit)
+                .Select(char.ToLowerInvariant)
+                .ToArray());
 
     private static WhdSyncedClient ReadClient(JsonElement ticketElement)
     {
@@ -2247,6 +2517,19 @@ public sealed class WhdRestClient
             + (string.IsNullOrWhiteSpace(Phone) ? 0 : 1)
             + (string.IsNullOrWhiteSpace(Address) ? 0 : 1);
     }
+
+    private sealed record WhdLocationContactDetailResult(
+        WhdLocationContact Contact,
+        bool DetailUnavailable);
+
+    private sealed record WhdLocationContactEnrichment(
+        string LocationExternalId,
+        WhdLocationContact Contact,
+        bool DetailUnavailable);
+
+    private sealed record WhdLocationContactResult(
+        IReadOnlyDictionary<string, WhdLocationContact> Contacts,
+        IReadOnlyList<string> UnavailableClientIds);
 
     private static string BuildClientDisplayName(string? locationName, string clientName)
     {

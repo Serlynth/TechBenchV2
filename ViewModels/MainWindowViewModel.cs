@@ -29,12 +29,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly ICredentialStore _credentialStore;
     private readonly CurrentUserContext _currentUser;
     private readonly LocalPreferences _localPreferences;
+    private readonly IAppUpdateChannelService? _appUpdateChannelService;
     private readonly Action _shutdownApplication;
     private readonly string _clientVersion;
     private readonly PostingExecutionCoordinator _postingCoordinator = new();
     private readonly DispatcherTimer _sharedDataRefreshTimer = new();
     private readonly HashSet<string> _knownWhdTicketKeys = new(StringComparer.OrdinalIgnoreCase);
     private string _currentSection = "Today";
+    private string _techBenchSection = "Today";
+    private string _adminBenchSection = "Client Match";
     private string _statusMessage = "Ready";
     private DateTime _selectedDate = DateTime.Today;
     private WorkEntry? _selectedEntry;
@@ -91,7 +94,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private bool _isSagePostingRunning;
     private string _sageEmployeeId = string.Empty;
     private string _sageActivityItemId = string.Empty;
+    private BenchModule _activeBenchModule = BenchModule.TechBench;
     private bool _isLightTheme;
+    private bool _isInventoryBetaUpdateChannel;
     private string _refreshIntervalMinutesText =
         DefaultSharedDataRefreshMinutes.ToString();
     private bool _isLoadingSettings;
@@ -130,6 +135,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _credentialStore = credentialStore;
         _currentUser = currentUser;
         _localPreferences = localPreferences;
+        _appUpdateChannelService =
+            appUpdateService as IAppUpdateChannelService;
         _shutdownApplication = shutdownApplication;
         _clientVersion = appUpdateService.CurrentVersion;
         Updates = new AppUpdateViewModel(
@@ -140,6 +147,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _notificationService.ShowUpdateAvailable,
             _localPreferences);
 
+        SwitchBenchModuleCommand = new RelayCommand(SwitchBenchModule);
         NavigateCommand = new RelayCommand(parameter => Navigate(parameter?.ToString() ?? "Today"));
         EditEntryCommand = new RelayCommand(EditEntry, parameter => parameter is WorkEntry { Id: > 0 });
         NewEntryCommand = new RelayCommand(_ => NewEntry(), _ => CanWrite);
@@ -171,6 +179,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ChangeTicketStatusCommand = new AsyncRelayCommand(ChangeTicketStatusAsync, CanChangeTicketStatus);
         SelectEditorClientCommand = new RelayCommand(SelectEditorClient, parameter => parameter is Client);
         ApplyClientMatchCommand = new RelayCommand(_ => ApplyClientMatch(), _ => CanApplyClientMatch());
+        InitializeClientNameEditing();
         SaveSettingsCommand = new RelayCommand(_ => SaveSettings(), _ => CanWrite);
         TestWhdConnectionCommand = new AsyncRelayCommand(TestWhdConnectionAsync, _ => CanWrite);
         TestSageConnectionCommand = new RelayCommand(_ => TestSageConnection(), _ => CanWrite);
@@ -178,6 +187,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         InitializeV1DatabaseImport();
         InitializeCommonLinks();
         InitializeFireDrillCredentials();
+        InitializeClientUsers();
+        InitializeEquipmentBoard();
 
         StatusFilterOptions.Add("Any");
         StatusFilterOptions.Add("Draft");
@@ -258,6 +269,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public ObservableCollection<string> PostingLogResultOptions { get; } = new();
     public ObservableCollection<string> WhdAuthenticationModeOptions { get; } = new();
 
+    public RelayCommand SwitchBenchModuleCommand { get; }
     public RelayCommand NavigateCommand { get; }
     public RelayCommand EditEntryCommand { get; }
     public RelayCommand NewEntryCommand { get; }
@@ -295,7 +307,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public string DatabasePath => _repository.DatabasePath;
     public bool CanWrite => _currentUser.CanWrite;
+    public bool CanAccessBenchModules =>
+        BenchModuleAccess.CanAccessModules(_currentUser);
     public bool CanAccessAdminCenter => _currentUser.IsAdmin && CanWrite;
+    public bool CanAccessEquipmentBoard =>
+        CanAccessAdminCenter && _repository.EquipmentBoardAvailable;
     public bool IsReadOnlyPreview => _currentUser.IsReadOnlyPreview;
     public string ReadOnlyPreviewLabel => _currentUser.IsReadOnlyPreview
         ? $"READ-ONLY PREVIEW: {_currentUser.DisplayName} ({_currentUser.LoginName}) — authenticated as {_currentUser.AuthenticationLabel}"
@@ -351,9 +367,67 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _entryOperationText, value);
     }
 
-    public string WorkspaceStateLabel => IsEntryOperationRunning
-        ? "W O R K I N G"
-        : EditorSaveStatus.ToUpperInvariant();
+    public string WorkspaceStateLabel => !IsTechBenchModule
+        ? "MODULE READY"
+        : IsEntryOperationRunning
+            ? "W O R K I N G"
+            : EditorSaveStatus.ToUpperInvariant();
+
+    public BenchModule ActiveBenchModule
+    {
+        get => _activeBenchModule;
+        private set
+        {
+            if (!SetProperty(ref _activeBenchModule, value))
+            {
+                return;
+            }
+
+            CloseEquipmentEditor();
+            OnPropertyChanged(nameof(ModuleBrandName));
+            OnPropertyChanged(nameof(ModuleLogoSource));
+            OnPropertyChanged(nameof(ModuleLogoDisplayWidth));
+            OnPropertyChanged(nameof(IsTechBenchModule));
+            OnPropertyChanged(nameof(IsSalesBenchModule));
+            OnPropertyChanged(nameof(IsAdminBenchModule));
+            OnPropertyChanged(nameof(HasModuleWorkspace));
+            OnPropertyChanged(nameof(ShowsEmptyModuleShell));
+            OnPropertyChanged(nameof(WorkspaceHeaderEyebrow));
+            OnPropertyChanged(nameof(WorkspaceHeaderTitle));
+            OnPropertyChanged(nameof(ModuleWelcomeTitle));
+            OnPropertyChanged(nameof(ModuleWelcomeDescription));
+            OnPropertyChanged(nameof(WorkspaceStateLabel));
+            OnPropertyChanged(nameof(WindowTitle));
+        }
+    }
+
+    public string ModuleBrandName => ActiveBenchModule.ToString();
+    public string ModuleLogoSource => ActiveBenchModule switch
+    {
+        BenchModule.SalesBench =>
+            "/TechBenchV2;component/Assets/csri-salesbench-logo.png",
+        BenchModule.AdminBench =>
+            "/TechBenchV2;component/Assets/csri-adminbench-logo.png",
+        _ => "/TechBenchV2;component/Assets/csri-techbench-logo.png"
+    };
+    public double ModuleLogoDisplayWidth => 252;
+    public bool IsTechBenchModule => ActiveBenchModule == BenchModule.TechBench;
+    public bool IsSalesBenchModule => ActiveBenchModule == BenchModule.SalesBench;
+    public bool IsAdminBenchModule => ActiveBenchModule == BenchModule.AdminBench;
+    public bool HasModuleWorkspace => IsTechBenchModule || IsAdminBenchModule;
+    public bool ShowsEmptyModuleShell => IsSalesBenchModule;
+    public string WorkspaceHeaderEyebrow => ActiveBenchModule switch
+    {
+        BenchModule.TechBench => "WORKSPACE",
+        BenchModule.AdminBench => "ADMIN WORKSPACE",
+        _ => "PRIVATE BETA MODULE"
+    };
+    public string WorkspaceHeaderTitle => HasModuleWorkspace
+        ? CurrentSection
+        : ModuleBrandName;
+    public string ModuleWelcomeTitle => $"{ModuleBrandName} is ready";
+    public string ModuleWelcomeDescription =>
+        "This module shell is intentionally empty. Its own navigation will appear here as workspaces are added.";
 
     public string CurrentSection
     {
@@ -362,22 +436,44 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _currentSection, value))
             {
+                CloseEquipmentEditor();
+                if (IsTechBenchModule)
+                {
+                    _techBenchSection = value;
+                }
+                else if (IsAdminBenchModule)
+                {
+                    _adminBenchSection = value;
+                }
+
                 OnPropertyChanged(nameof(WindowTitle));
+                OnPropertyChanged(nameof(WorkspaceHeaderTitle));
                 OnPropertyChanged(nameof(IsCredentialWorkspaceSection));
                 OnPropertyChanged(nameof(IsClientWifiSection));
                 OnPropertyChanged(nameof(IsDomainAdSection));
                 OnPropertyChanged(nameof(IsConnectionSection));
+                OnPropertyChanged(nameof(IsVeeamSection));
                 OnPropertyChanged(nameof(IsMiscInfoSection));
                 OnPropertyChanged(nameof(CredentialWorkspaceTitle));
                 OnPropertyChanged(nameof(CredentialWorkspaceDescription));
                 OnPropertyChanged(nameof(CredentialEmptyText));
                 OnPropertyChanged(nameof(CredentialRevealButtonLabel));
                 OnPropertyChanged(nameof(CredentialSelectionPrompt));
+                OnPropertyChanged(nameof(IsEquipmentQuickViewVisible));
+                OnPropertyChanged(nameof(IsEquipmentInventoryEditorVisible));
+                ImportEquipmentBuildSheetCommand?.RaiseCanExecuteChanged();
+                NewEquipmentCommand?.RaiseCanExecuteChanged();
+                SaveEquipmentCommand?.RaiseCanExecuteChanged();
+                ArchiveEquipmentCommand?.RaiseCanExecuteChanged();
+                OnPropertyChanged(nameof(CanMarkSelectedEquipmentDeployed));
+                MarkEquipmentDeployedCommand?.RaiseCanExecuteChanged();
             }
         }
     }
 
-    public string WindowTitle => $"TechBench V2 - {CurrentSection}";
+    public string WindowTitle => HasModuleWorkspace
+        ? $"{ModuleBrandName} - {CurrentSection}"
+        : $"{ModuleBrandName} - Private Beta";
 
     public string StatusMessage
     {
@@ -585,6 +681,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _selectedManagedClient, value))
             {
                 RefreshClientMatchOptions();
+                ResetClientNameEditor();
             }
         }
     }
@@ -605,6 +702,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 }
 
                 ApplyClientMatchCommand.RaiseCanExecuteChanged();
+                RefreshClientNameSuggestion();
             }
         }
     }
@@ -844,10 +942,50 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _isLightTheme, value))
             {
                 MarkSettingsDirty();
-                ThemeService.Apply(value ? AppTheme.Light : AppTheme.Dark);
+                ThemeService.Apply(
+                    value ? AppTheme.Light : AppTheme.Dark,
+                    ActiveBenchModule);
             }
         }
     }
+
+    public bool IsInventoryBetaUpdateChannel
+    {
+        get => _isInventoryBetaUpdateChannel;
+        set
+        {
+            if (!SetProperty(ref _isInventoryBetaUpdateChannel, value))
+            {
+                return;
+            }
+
+            MarkSettingsDirty();
+            var channel = value
+                ? V2AppUpdateService.InventoryBetaReleaseChannel
+                : V2AppUpdateService.StableReleaseChannel;
+            _appUpdateChannelService?.SelectReleaseChannel(channel);
+            _localPreferences.UpdateChannel = channel;
+            try
+            {
+                LocalPreferenceStore.Save(_localPreferences);
+            }
+            catch (Exception ex) when (
+                ex is IOException
+                    or UnauthorizedAccessException
+                    or InvalidOperationException)
+            {
+                StatusMessage =
+                    $"The update channel changed for this session, but the local preference could not be saved: {ex.Message}";
+            }
+            Updates.HandleReleaseChannelChanged(channel);
+            OnPropertyChanged(nameof(UpdateChannelDescription));
+        }
+    }
+
+    public string UpdateChannelDescription =>
+        IsInventoryBetaUpdateChannel
+            ? "Inventory Beta selected. Update checks use the beta channel; switch this off to return to Stable."
+            : "Stable selected. Turn this on to check for Inventory Beta builds.";
 
     public string RefreshIntervalMinutesText
     {
@@ -866,11 +1004,57 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         $"Reload shared clients, tickets, statuses, links, tags, templates, and server status every "
         + $"{ResolveSharedDataRefreshIntervalMinutes()} minutes.";
 
+    private void SwitchBenchModule(object? requestedModule)
+    {
+        var module = BenchModuleAccess.ResolveRequestedModule(
+            requestedModule,
+            _currentUser);
+        if (module == ActiveBenchModule)
+        {
+            return;
+        }
+
+        ActiveBenchModule = module;
+        if (IsTechBenchModule)
+        {
+            CurrentSection = _techBenchSection;
+        }
+        else if (IsAdminBenchModule)
+        {
+            CurrentSection = _adminBenchSection;
+        }
+
+        ThemeService.Apply(
+            IsLightTheme ? AppTheme.Light : AppTheme.Dark,
+            ActiveBenchModule);
+        if (HasModuleWorkspace)
+        {
+            RefreshCurrentSectionData();
+            StatusMessage = GetSectionStatusMessage(CurrentSection);
+        }
+        else
+        {
+            StatusMessage =
+                $"{ModuleBrandName} private beta shell. Navigation is intentionally empty for now.";
+        }
+    }
+
     private void Navigate(string section)
     {
+        if ((section.Equals("Inventory", StringComparison.Ordinal)
+             || section.Equals("Equipment Board", StringComparison.Ordinal))
+            && !CanAccessEquipmentBoard)
+        {
+            StatusMessage = CanAccessAdminCenter
+                ? "Inventory is not installed in this TechBench database yet."
+                : "Only TechBench Admins can open Inventory and Equipment Board.";
+            return;
+        }
+
         if (!section.Equals(CurrentSection, StringComparison.Ordinal))
         {
             ClearRevealedFireDrillCredential();
+            ClearRevealedClientUser();
         }
         if (section == "Today")
         {
@@ -879,25 +1063,32 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         CurrentSection = section;
         RefreshCurrentSectionData();
-        StatusMessage = section switch
+        StatusMessage = GetSectionStatusMessage(section);
+    }
+
+    private string GetSectionStatusMessage(string section) =>
+        section switch
         {
             "Today" => $"Showing worklog for {SelectedDate:dddd, MMM d}",
             "This Week" => "Showing weekly grouped worklog",
             "History" => "Showing historical worklog",
             "Posting Queue" => "Showing entries still pending WHD or Sage posting",
             "Posting History" => "Showing WHD and Sage posting history",
-            "Client List" => "Showing synced/imported clients",
+            "Client Match" => "Showing synchronized WHD and Sage client matches",
+            "Client Users" => "Showing synchronized users and accounts for each client",
             "Ticket List" => "Showing my assigned and group non-closed tickets",
             "Common Links" => "Showing commonly used websites",
             "Client Info" => "Showing all synchronized client information",
             "Client WiFi" => "Showing synchronized client WiFi information",
             "Domain/AD" => "Showing synchronized local domain and Active Directory information",
             "Connection" => "Showing synchronized WatchGuard connection information",
+            "Veeam" => "Showing synchronized Veeam backup information",
             "Misc Info" => "Showing remaining synchronized client information",
+            "Inventory" => "Showing equipment currently available in Stock Room",
+            "Equipment Board" => "Showing stock, technician assignments, and deployment order",
             "Admin Center" => "Showing server synchronization and active TechBench clients",
             _ => $"Showing {section}"
         };
-    }
 
     private void RefreshCurrentSectionData()
     {
@@ -921,8 +1112,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             case "Posting History":
                 RefreshPostingLogs();
                 break;
-            case "Client List":
+            case "Client Match":
                 RefreshClients();
+                break;
+            case "Client Users":
+                RefreshClientUsers();
                 break;
             case "Ticket List":
                 RefreshTicketList();
@@ -934,8 +1128,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             case "Client WiFi":
             case "Domain/AD":
             case "Connection":
+            case "Veeam":
             case "Misc Info":
                 RefreshFireDrillCredentials();
+                break;
+            case "Inventory":
+            case "Equipment Board":
+                _ = RefreshEquipmentBoardAsync();
                 break;
             case "Admin Center":
                 RefreshAdminCenter();
@@ -950,6 +1149,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         RefreshTicketList();
         RefreshCommonLinks();
         RefreshFireDrillCredentials();
+        RefreshClientUsers();
         RefreshTagSuggestions();
         RefreshTodayEntries();
         RefreshWeek();
@@ -1199,6 +1399,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(SelectedSageMatchCandidate));
             ClientMatchSuggestionText = "Select an unmatched WHD location to review its Sage match.";
             ApplyClientMatchCommand.RaiseCanExecuteChanged();
+            RefreshClientNameSuggestion();
             return;
         }
 
@@ -1210,6 +1411,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 ? $"Already linked to {SelectedManagedClient.SageCustomerLabel}."
                 : "This is a Sage-only customer. Select a WHD-only location to create a match.";
             ApplyClientMatchCommand.RaiseCanExecuteChanged();
+            RefreshClientNameSuggestion();
             return;
         }
 
@@ -1223,6 +1425,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             ? "No confident automatic suggestion. Choose the correct Sage customer manually."
             : $"{suggestion.Description} Suggested: {suggestion.Candidate.SageCustomerLabel}";
         ApplyClientMatchCommand.RaiseCanExecuteChanged();
+        RefreshClientNameSuggestion();
     }
 
     private void RefreshEditorClientOptions()
@@ -3036,10 +3239,22 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
             RefreshIntervalMinutesText =
                 _localPreferences.RefreshIntervalMinutes.ToString();
+            var selectedUpdateChannel =
+                V2AppUpdateService.ResolveReleaseChannel(
+                    _localPreferences.UpdateChannel,
+                    V2AppUpdateService.CompiledReleaseChannel);
+            _appUpdateChannelService?.SelectReleaseChannel(
+                selectedUpdateChannel);
+            IsInventoryBetaUpdateChannel =
+                selectedUpdateChannel.Equals(
+                    V2AppUpdateService.InventoryBetaReleaseChannel,
+                    StringComparison.OrdinalIgnoreCase);
             IsLightTheme = _localPreferences.Theme.Equals(
                 "Light",
                 StringComparison.OrdinalIgnoreCase);
-            ThemeService.Apply(IsLightTheme ? AppTheme.Light : AppTheme.Dark);
+            ThemeService.Apply(
+                IsLightTheme ? AppTheme.Light : AppTheme.Dark,
+                ActiveBenchModule);
         }
         finally
         {
@@ -3056,6 +3271,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _repository.DeleteSetting("Sage.DefaultCustomerId");
 
         _localPreferences.Theme = IsLightTheme ? "Light" : "Dark";
+        _localPreferences.UpdateChannel = IsInventoryBetaUpdateChannel
+            ? V2AppUpdateService.InventoryBetaReleaseChannel
+            : V2AppUpdateService.StableReleaseChannel;
         _localPreferences.RefreshIntervalMinutes =
             ResolveSharedDataRefreshIntervalMinutes();
         _isLoadingSettings = true;

@@ -60,6 +60,7 @@ public sealed class ClientInfoProfileWindowTests
         var mainWindowXaml = ReadRepositoryFile("MainWindow.xaml");
         var mainWindowCode = ReadRepositoryFile("MainWindow.xaml.cs");
         var profileXaml = ReadRepositoryFile("ClientInfoWindow.xaml");
+        var profileCode = ReadRepositoryFile("ClientInfoWindow.xaml.cs");
 
         Assert.Contains(
             "MouseDoubleClick=\"FireDrillCredentialsListBox_MouseDoubleClick\"",
@@ -75,6 +76,206 @@ public sealed class ClientInfoProfileWindowTests
         Assert.Contains("WEB HELP DESK MATCH", profileXaml, StringComparison.Ordinal);
         Assert.Contains("MAIN CONTACT", profileXaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"ADDRESS\"", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"CLIENT INVENTORY\"", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding Equipment}\"", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("OpenEquipmentDetailsCommand", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("<controls:ClientEquipmentDetailsDrawer", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("IsEquipmentDetailsVisible", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"CLIENT USERS\"", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding ClientUsers}\"", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("SelectedItem=\"{Binding SelectedClientUser}\"", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Reveal Accounts\"", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding ClientUserAccountGroups}\"", profileXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("EquipmentOpenRequested", mainWindowCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("EquipmentOpenRequested", profileCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("EquipmentCard_Click", profileXaml, StringComparison.Ordinal);
+        Assert.Contains("IsEquipmentDetailsVisible: true", profileCode, StringComparison.Ordinal);
+        Assert.Contains(
+            "CloseEquipmentDetailsCommand.Execute(null)",
+            profileCode,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FullProfileDisplaysTheClientsAssignedInventory()
+    {
+        var summary = new FireDrillCredentialSummary(
+            42,
+            "Acme Test",
+            string.Empty,
+            string.Empty,
+            DateTime.UtcNow,
+            []);
+        var equipment = new EquipmentItem
+        {
+            EquipmentId = 7,
+            Name = "Reception PC",
+            DeviceType = "Desktop",
+            AssetTag = "TB-0007",
+            ClientId = 12,
+            ClientName = "Acme Test",
+            ClientUserId = 99,
+            ClientUserDisplayName = "Jamie Rivera"
+        };
+
+        var profile = new ClientInfoProfileViewModel(
+            summary,
+            _ => null,
+            equipment: [equipment]);
+
+        Assert.True(profile.HasEquipment);
+        Assert.True(profile.HasProfileContent);
+        Assert.False(profile.HasFields);
+        Assert.Equal("1 inventory item", profile.EquipmentCountLabel);
+        Assert.Same(equipment, Assert.Single(profile.Equipment));
+    }
+
+    [Fact]
+    public void EquipmentDetailsStayInsideThePoppedOutClientProfile()
+    {
+        var equipment = new EquipmentItem
+        {
+            EquipmentId = 7,
+            Name = "Reception PC",
+            DeviceType = "Desktop",
+            ClientName = "Acme Test"
+        };
+        var profile = new ClientInfoProfileViewModel(
+            new FireDrillCredentialSummary(
+                42,
+                "Acme Test",
+                string.Empty,
+                string.Empty,
+                DateTime.UtcNow,
+                []),
+            _ => null,
+            equipment: [equipment]);
+
+        profile.OpenEquipmentDetailsCommand.Execute(equipment);
+
+        Assert.True(profile.IsEquipmentDetailsVisible);
+        Assert.Same(equipment, profile.SelectedEquipment);
+        Assert.Contains(
+            "inside the Acme Test client profile",
+            profile.StatusMessage,
+            StringComparison.Ordinal);
+
+        profile.CloseEquipmentDetailsCommand.Execute(null);
+
+        Assert.False(profile.IsEquipmentDetailsVisible);
+        Assert.Null(profile.SelectedEquipment);
+        Assert.Contains(
+            "profile remains open",
+            profile.StatusMessage,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EquipmentDrawerTreatsReadOnlyAssignmentLabelAsOneWay()
+    {
+        var drawerXaml = ReadRepositoryFile(
+            Path.Combine("Controls", "ClientEquipmentDetailsDrawer.xaml"));
+
+        Assert.Contains(
+            "Text=\"{Binding SelectedEquipment.AssignmentLabel, Mode=OneWay}\"",
+            drawerXaml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Text=\"{Binding SelectedEquipment.AssignmentLabel}\"",
+            drawerXaml,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EquipmentDrawerUsesTheFullClientWindowHeight()
+    {
+        var profileXaml = ReadRepositoryFile("ClientInfoWindow.xaml");
+        var drawerXaml = ReadRepositoryFile(
+            Path.Combine("Controls", "ClientEquipmentDetailsDrawer.xaml"));
+
+        Assert.Contains(
+            "<controls:ClientEquipmentDetailsDrawer Grid.Row=\"0\"",
+            profileXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Grid.RowSpan=\"3\"",
+            profileXaml,
+            StringComparison.Ordinal);
+        Assert.Contains("Width=\"520\"", drawerXaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "BorderThickness=\"1,0,0,0\"",
+            drawerXaml,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FullProfileListsClientUsersAndProtectsTheirAccountDetails()
+    {
+        var summary = new FireDrillCredentialSummary(
+            42,
+            "Acme Test",
+            string.Empty,
+            string.Empty,
+            DateTime.UtcNow,
+            []);
+        var maskedUser = new ClientUserSummary(
+            88,
+            12,
+            "Acme Test",
+            "Jamie Rivera",
+            "Operations",
+            "jamie@example.test",
+            "610-555-0188",
+            "Headquarters",
+            DateTime.UtcNow,
+            1,
+            [
+                new ClientUserAccountGroup(
+                    "Microsoft 365",
+                    0,
+                    [Field("Password", 0, string.Empty)])
+            ]);
+        var revealedUser = maskedUser with
+        {
+            Accounts =
+            [
+                new ClientUserAccountGroup(
+                    "Microsoft 365",
+                    0,
+                    [Field("Password", 0, "private-value")])
+            ]
+        };
+        var profile = new ClientInfoProfileViewModel(
+            summary,
+            _ => null,
+            clientUsers: [maskedUser],
+            revealClientUser: _ => revealedUser);
+
+        Assert.True(profile.HasClientUsers);
+        Assert.True(profile.HasProfileContent);
+        Assert.Equal("1 synchronized user", profile.ClientUserCountLabel);
+
+        profile.SelectedClientUser = maskedUser;
+
+        Assert.True(profile.HasSelectedClientUser);
+        Assert.False(profile.IsClientUserRevealed);
+        Assert.All(
+            profile.ClientUserAccountGroups.SelectMany(group => group.Fields),
+            field => Assert.Equal("***", field.Value));
+
+        profile.RevealClientUserCommand.Execute(null);
+
+        Assert.True(profile.IsClientUserRevealed);
+        Assert.Contains(
+            profile.ClientUserAccountGroups.SelectMany(group => group.Fields),
+            field => field.Value == "private-value");
+
+        profile.HideClientUserCommand.Execute(null);
+
+        Assert.False(profile.IsClientUserRevealed);
+        Assert.All(
+            profile.ClientUserAccountGroups.SelectMany(group => group.Fields),
+            field => Assert.Equal("***", field.Value));
     }
 
     [Fact]
@@ -107,6 +308,31 @@ public sealed class ClientInfoProfileWindowTests
         Assert.Equal("jamie@example.test", profile.WhdContactEmail);
         Assert.Equal("610-555-0188", profile.WhdPhone);
         Assert.Equal("100 Main Street, Malvern, PA 19355", profile.WhdAddress);
+    }
+
+    [Fact]
+    public void FullProfileUsesCanonicalClientMatchWhenCredentialNameOmitsConjunction()
+    {
+        var clients = new[]
+        {
+            new Client
+            {
+                Id = 463,
+                Name = "Teeters Harvey Marrone & O’Rourke LLP",
+                Source = "Both",
+                WhdLocationName = "Marrone & O’Rourke LLP",
+                SageCustomerName = "Marrone & O’Rourke"
+            },
+            new Client { Id = 99, Name = "Another Client", Source = "Both" }
+        };
+
+        var match = ClientProfileWhdMatcher.FindConfidentMatch(
+            "Marrone O’Rourke",
+            clients);
+
+        Assert.NotNull(match);
+        Assert.Equal(463, match.Id);
+        Assert.Equal("Teeters Harvey Marrone & O’Rourke LLP", match.Name);
     }
 
     [Fact]

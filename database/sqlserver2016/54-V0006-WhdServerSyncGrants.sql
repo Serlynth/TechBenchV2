@@ -17,6 +17,7 @@ REVOKE EXECUTE ON OBJECT::[tb_app].[SyncUpsertClient] FROM [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[AdminRequestWhdSync] TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[GetWhdSyncStatus] TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetWhdUserMappings] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminReconcileWhdAuthorizedUsers] TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[AdminSaveWhdUserMapping] TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetWhdTechnicians] TO [tb_role_admin];
 

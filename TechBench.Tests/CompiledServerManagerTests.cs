@@ -57,8 +57,15 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("TechBench_Admins", directory, StringComparison.Ordinal);
         Assert.Contains("GetMembers(recursive: true)", directory, StringComparison.Ordinal);
         Assert.Contains("SaveMappings", sql, StringComparison.Ordinal);
-        Assert.Contains("requireExactVersion && schema != 13", sql, StringComparison.Ordinal);
-        Assert.Contains("requires database schema 13", sql, StringComparison.Ordinal);
+        Assert.Contains("ReconcileAuthorizedUsers", sql, StringComparison.Ordinal);
+        Assert.Contains("AdminReconcileWhdAuthorizedUsers", sql, StringComparison.Ordinal);
+        Assert.Contains("ReconcileAuthorizedUsers(directoryUsers)", form, StringComparison.Ordinal);
+        Assert.Contains("authorized-user reconciliation failed", form, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("windowsSid = user.WindowsSidHex", sql, StringComparison.Ordinal);
+        Assert.Contains("ToSqlSidHex(user.Sid)", directory, StringComparison.Ordinal);
+        Assert.Contains("MinimumSupportedSchemaVersion = 13", sql, StringComparison.Ordinal);
+        Assert.Contains("MaximumSupportedSchemaVersion = 15", sql, StringComparison.Ordinal);
+        Assert.Contains("supports database schemas", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("requires database schema 8", sql, StringComparison.Ordinal);
         Assert.Contains("RequestWhdSync(\"Full\")", sql, StringComparison.Ordinal);
         Assert.Contains("RequestWhdTechnicianSync", sql, StringComparison.Ordinal);
@@ -109,6 +116,42 @@ public sealed class CompiledServerManagerTests
                 Assert.False(bob.IsAdmin);
                 Assert.Empty(bob.TechnicianExternalId);
             });
+    }
+
+    [Fact]
+    public void MappedDirectoryNamesReplaceOnlyPlaceholderWhdTechnicianLabels()
+    {
+        var technicians = new[]
+        {
+            new Technician(string.Empty, "No WHD technician (remove mapping)"),
+            new Technician("WHD-TECH-6", "WHD-TECH-6"),
+            new Technician("WHD-TECH-12", "Ken Allen"),
+            new Technician(
+                "WHD-CONFIGURED-ORGANIZATION-ACCOUNT",
+                "Helpdesk Manager (whdmgr, organization-wide account)",
+                "whdmgr")
+        };
+        var mappings = new[]
+        {
+            new UserMapping("CSRI\\cgoemans", "Craig Goemans", false, "WHD-TECH-6"),
+            new UserMapping("CSRI\\kallen", "Kenneth Allen", true, "WHD-TECH-12"),
+            new UserMapping(
+                "CSRI\\dhallen",
+                "David H. Allen",
+                true,
+                "WHD-CONFIGURED-ORGANIZATION-ACCOUNT")
+        };
+
+        var restored = ActiveDirectoryUserProvider.RestoreMappedTechnicianLabels(
+            technicians,
+            mappings);
+
+        Assert.Equal("Craig Goemans", restored.Single(item => item.ExternalId == "WHD-TECH-6").Label);
+        Assert.Equal("Ken Allen", restored.Single(item => item.ExternalId == "WHD-TECH-12").Label);
+        Assert.Equal(
+            "Helpdesk Manager (whdmgr, organization-wide account)",
+            restored.Single(item => item.ExternalId == "WHD-CONFIGURED-ORGANIZATION-ACCOUNT").Label);
+        Assert.Equal("No WHD technician (remove mapping)", restored[0].Label);
     }
 
     [Theory]

@@ -20,6 +20,7 @@ internal static partial class CredentialFieldGrouper
         ]),
         new("ESET", 30, ["eset"]),
         new("Barracuda", 40, ["barracuda"]),
+        new("Veeam", 45, ["veeam"]),
         new("Active Directory", 50,
         [
             "active directory", "domain admin", "domain password",
@@ -92,12 +93,19 @@ internal static partial class CredentialFieldGrouper
         return ResolveGroup(field).Name.Equals("WatchGuard", StringComparison.Ordinal);
     }
 
+    public static bool IsVeeamField(FireDrillCredentialField field)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        return ResolveGroup(field).Name.Equals("Veeam", StringComparison.Ordinal);
+    }
+
     public static bool IsMiscInfoField(FireDrillCredentialField field)
     {
         ArgumentNullException.ThrowIfNull(field);
         return !IsWirelessField(field) &&
                !IsDomainOrAdField(field) &&
-               !IsConnectionField(field);
+               !IsConnectionField(field) &&
+               !IsVeeamField(field);
     }
 
     public static FireDrillCredentialField CreateWirelessDisplayField(

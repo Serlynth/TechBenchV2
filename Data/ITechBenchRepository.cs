@@ -13,6 +13,8 @@ public interface ITechBenchRepository
 
     bool FullTextSearchAvailable { get; }
 
+    bool EquipmentBoardAvailable => false;
+
     void Initialize();
 
     IReadOnlyList<Client> GetClients(bool includeInactive = false, string? searchTerm = null);
@@ -124,6 +126,12 @@ public interface ITechBenchRepository
 
     FireDrillCredential? RevealFireDrillCredential(long credentialId) => null;
 
+    IReadOnlyList<ClientUserSummary> SearchClientUsers(
+        int? clientId = null,
+        string? searchTerm = null) => [];
+
+    ClientUserSummary? RevealClientUser(long clientUserId) => null;
+
     CredentialsSyncServiceStatus GetCredentialsSyncStatus() => new();
 
     CredentialsSyncRequestResult RequestCredentialsSync() =>
@@ -193,6 +201,34 @@ public interface ITechBenchRepository
     IReadOnlyList<WhdTechnician> GetWhdTechnicians();
 
     WhdUserMapping SaveWhdUserMapping(WhdUserMapping mapping);
+
+    IReadOnlyList<EquipmentItem> GetEquipmentBoard() => [];
+
+    IReadOnlyList<EquipmentItem> GetEquipmentInventory(
+        int? clientId = null,
+        long? clientUserId = null,
+        string? clientName = null) => [];
+
+    IReadOnlyList<InventoryClient> GetInventoryClients() => [];
+
+    IReadOnlyList<EquipmentAssignmentHistoryEntry> GetEquipmentAssignmentHistory(
+        long equipmentId) => [];
+
+    EquipmentItem SaveEquipment(EquipmentItem equipment) =>
+        throw new NotSupportedException(
+            "The equipment board requires the shared SQL Server workspace.");
+
+    IReadOnlyList<EquipmentItem> MoveEquipment(
+        EquipmentItem equipment,
+        string? targetWindowsLoginName,
+        string targetWorkflowStage,
+        int targetIndex) =>
+        throw new NotSupportedException(
+            "The equipment board requires the shared SQL Server workspace.");
+
+    void ArchiveEquipment(EquipmentItem equipment) =>
+        throw new NotSupportedException(
+            "The equipment board requires the shared SQL Server workspace.");
 
     void AddPostingLog(PostingLog log);
 

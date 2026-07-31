@@ -520,6 +520,7 @@ internal sealed class ServerManagerForm : Form
         try
         {
             _configuration = await Task.Run(_repository.Load);
+            string? reconciliationError = null;
             try
             {
                 var directoryUsers = await Task.Run(_directoryUsers.LoadAuthorizedUsers);
@@ -528,12 +529,37 @@ internal sealed class ServerManagerForm : Form
                     _configuration.UserMappings);
                 _configuration.UserMappings.Clear();
                 _configuration.UserMappings.AddRange(mergedMappings);
+                var retiredCount = await Task.Run(
+                    () => _repository.ReconcileAuthorizedUsers(directoryUsers));
+                if (retiredCount > 0)
+                {
+                    AddLog(
+                        $"Retired {retiredCount} SQL technician user(s) "
+                        + "that are no longer in the authorized Active Directory groups.");
+                }
             }
             catch (Exception directoryError)
             {
-                AddLog("WARNING: Active Directory users could not be refreshed; showing registered SQL users only. " + directoryError.Message);
+                AddLog(
+                    "ERROR: Active Directory authorized-user reconciliation failed. "
+                    + "The mapping grid uses the current AD snapshot when it was available, "
+                    + "but SQL users were not retired. "
+                    + directoryError.Message);
+                reconciliationError =
+                    "Authorized-user cleanup failed. See Activity, then use Refresh after correcting the error.";
+                if (showErrors)
+                {
+                    ShowError(
+                        "TechBench loaded its SQL configuration, but could not reconcile "
+                        + "the authorized Active Directory users.\r\n\r\n"
+                        + FriendlySqlError(directoryError));
+                }
             }
             ApplyConfiguration(_configuration);
+            if (reconciliationError is not null)
+            {
+                _mappingSyncStatus.Text = reconciliationError;
+            }
             AddLog("Shared WHD and Sage settings refreshed from SQL Server.");
         }
         catch (Exception ex)
@@ -848,7 +874,10 @@ internal sealed class ServerManagerForm : Form
     private void PopulateMappingGrid(SynchronizationConfiguration configuration)
     {
         _mappingGrid.Rows.Clear();
-        var technicians = configuration.Technicians.ToList();
+        var technicians = ActiveDirectoryUserProvider.RestoreMappedTechnicianLabels(
+                configuration.Technicians,
+                configuration.UserMappings)
+            .ToList();
         var technicianColumn = (DataGridViewComboBoxColumn)_mappingGrid.Columns["WHD technician"];
         technicianColumn.DataSource = technicians;
         var activeIds = technicians.Select(static technician => technician.ExternalId).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -1006,14 +1035,24 @@ internal sealed class ServerManagerForm : Form
 
         return $"{Math.Max(0, bytes) / 1024d:0.0} KB";
     }
-    private static string FormatStatus(SyncStatus status, bool sage)
+    internal static string FormatStatus(SyncStatus status, bool sage)
     {
         static string Time(DateTime? value) => value?.ToLocalTime().ToString("g") ?? "Never";
-        var health = string.IsNullOrWhiteSpace(status.LastError) ? status.Status : $"{status.Status}: {status.LastError}";
-        var workLabel = status.Status.Equals("Running", StringComparison.OrdinalIgnoreCase)
+        var isRunning = status.Status.Equals("Running", StringComparison.OrdinalIgnoreCase);
+        var health = isRunning
+            ? "Running: Synchronization is in progress."
+            : string.IsNullOrWhiteSpace(status.LastError)
+                ? status.Status
+                : $"{status.Status}: {status.LastError}";
+        var workLabel = isRunning
             ? $"Work remaining: {status.QueueDepth} (includes the active step)"
             : $"Waiting: {status.QueueDepth}";
         var result = $"Health: {health}\r\n{workLabel} | Last attempt: {Time(status.LastAttemptAtUtc)} | Last success: {Time(status.LastSuccessfulAtUtc)}";
+        if (isRunning && !string.IsNullOrWhiteSpace(status.LastError))
+        {
+            result += $"\r\nPrevious failure: {status.LastError}";
+        }
+
         return sage ? result + $"\r\nLast snapshot: read {status.ReadCount}, saved {status.SavedCount}, stale {status.StaleCount}" : result;
     }
 

@@ -11,6 +11,7 @@ namespace TechBench;
 public partial class DatabaseConnectionWindow : Window
 {
     private readonly IAppUpdateService _updateService;
+    private readonly LocalPreferences _localPreferences;
     private readonly CancellationTokenSource _updateCancellation = new();
     private AppUpdateRelease? _availableUpdate;
     private bool _isCheckingOrInstallingUpdate;
@@ -22,7 +23,22 @@ public partial class DatabaseConnectionWindow : Window
         IAppUpdateService? updateService = null)
     {
         InitializeComponent();
-        _updateService = updateService ?? new V2AppUpdateService();
+        _localPreferences = LoadLocalPreferences();
+        _updateService = updateService
+            ?? new V2AppUpdateService(_localPreferences.UpdateChannel);
+        var selectedChannel =
+            (_updateService as IAppUpdateChannelService)?
+                .SelectedReleaseChannel
+            ?? V2AppUpdateService.ResolveReleaseChannel(
+                _localPreferences.UpdateChannel,
+                V2AppUpdateService.CompiledReleaseChannel);
+        UpdateChannelCheckBox.IsChecked = selectedChannel.Equals(
+            V2AppUpdateService.InventoryBetaReleaseChannel,
+            StringComparison.OrdinalIgnoreCase);
+        UpdateChannelCheckBox.IsEnabled =
+            _updateService is IAppUpdateChannelService;
+        UpdateChannelCheckBox.Click += UpdateChannelCheckBox_Click;
+        RefreshUpdateChannelDescription();
         ServerTextBox.Text =
             initialOptions?.Server ?? SqlServerConnectionOptions.DefaultServerName;
         DatabaseTextBox.Text =
@@ -157,6 +173,45 @@ public partial class DatabaseConnectionWindow : Window
         await DownloadAndInstallUpdateAsync();
     }
 
+    private void UpdateChannelCheckBox_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (_updateService is not IAppUpdateChannelService channelService)
+        {
+            return;
+        }
+
+        var selectedChannel = UpdateChannelCheckBox.IsChecked == true
+            ? V2AppUpdateService.InventoryBetaReleaseChannel
+            : V2AppUpdateService.StableReleaseChannel;
+        try
+        {
+            channelService.SelectReleaseChannel(selectedChannel);
+            _localPreferences.UpdateChannel = selectedChannel;
+            LocalPreferenceStore.Save(_localPreferences);
+            _availableUpdate = null;
+            UpdateButton.Content = "Check for updates";
+            StatusTextBlock.Text =
+                selectedChannel == V2AppUpdateService.InventoryBetaReleaseChannel
+                    ? "Inventory Beta selected. Select Check for updates to look for beta builds."
+                    : "Stable selected. Select Check for updates to return to stable releases.";
+            RefreshUpdateChannelDescription();
+        }
+        catch (Exception ex) when (
+            ex is InvalidOperationException
+                or IOException
+                or UnauthorizedAccessException)
+        {
+            UpdateChannelCheckBox.IsChecked =
+                channelService.SelectedReleaseChannel.Equals(
+                    V2AppUpdateService.InventoryBetaReleaseChannel,
+                    StringComparison.OrdinalIgnoreCase);
+            StatusTextBlock.Text =
+                $"Could not change the update channel: {ex.Message}";
+        }
+    }
+
     private async Task CheckForUpdatesAsync(bool automaticRecovery)
     {
         if (_isCheckingOrInstallingUpdate)
@@ -251,6 +306,8 @@ public partial class DatabaseConnectionWindow : Window
     {
         _isCheckingOrInstallingUpdate = value;
         UpdateButton.IsEnabled = !value;
+        UpdateChannelCheckBox.IsEnabled =
+            !value && _updateService is IAppUpdateChannelService;
         UpdateConnectButtonState();
     }
 
@@ -295,6 +352,34 @@ public partial class DatabaseConnectionWindow : Window
             51913 => "That non-Admin user must have opened TechBench V2 within the past hour and still have TechBench access.",
             _ => $"Could not connect to SQL Server: {exception.Message}"
         };
+    }
+
+    private void RefreshUpdateChannelDescription()
+    {
+        UpdateChannelDescriptionTextBlock.Text =
+            UpdateChannelCheckBox.IsChecked == true
+                ? "Beta builds include features still being tested. Turn this off at any time to check for Stable."
+                : "Stable releases are selected. Turn this on when you want to install or return to Inventory Beta.";
+    }
+
+    private static LocalPreferences LoadLocalPreferences()
+    {
+        try
+        {
+            return LocalPreferenceStore.LoadOrCreate();
+        }
+        catch (InvalidOperationException)
+        {
+            return new LocalPreferences();
+        }
+        catch (IOException)
+        {
+            return new LocalPreferences();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new LocalPreferences();
+        }
     }
 
     private static WindowsAccessDiagnostic GetCurrentWindowsAccess()
