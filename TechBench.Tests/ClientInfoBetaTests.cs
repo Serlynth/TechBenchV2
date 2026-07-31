@@ -43,7 +43,12 @@ public sealed class ClientInfoBetaTests
                     "Start Here",
                     "Locations",
                     "People",
-                    "Systems & Services",
+                    "Servers & Infrastructure",
+                    "Network & Internet",
+                    "Applications & Cloud",
+                    "Domains & Email",
+                    "Backup & Security",
+                    "Vendors & Services",
                     "Equipment",
                     "Passwords",
                     "Other Info"
@@ -84,7 +89,7 @@ public sealed class ClientInfoBetaTests
                 "Verified");
             AppendRow(
                 path,
-                "Systems & Services",
+                "Network & Internet",
                 "Firewall", "WatchGuard", "WatchGuard", "https://firewall.test",
                 "Main Office", "Active", "Primary firewall", "Verified");
             AppendRow(
@@ -129,10 +134,73 @@ public sealed class ClientInfoBetaTests
             Assert.Equal("AcceptedUnverified", fact.ReviewStatus);
             Assert.Equal(location.LocalKey, person.ParentLocalKey);
             Assert.Contains(location.LocalKey, resource.PayloadJson, StringComparison.Ordinal);
+            using var resourcePayload =
+                System.Text.Json.JsonDocument.Parse(resource.PayloadJson);
+            Assert.Equal(
+                "Network & Internet / Firewall",
+                resourcePayload.RootElement
+                    .GetProperty("resourceType")
+                    .GetString());
             Assert.Contains(resource.LocalKey, credential.PayloadJson, StringComparison.Ordinal);
             var secret = Assert.Single(package.Secrets);
             Assert.Equal(credential.LocalKey, secret.CredentialLocalKey);
             Assert.Equal("P@ss word", secret.SecretValue);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("Antivirus / EDR", "Backup & Security")]
+    [InlineData("CrowdStrike", "Backup & Security")]
+    [InlineData("Firewall", "Network & Internet")]
+    [InlineData("Microsoft 365", "Applications & Cloud")]
+    [InlineData("Domain Registrar", "Domains & Email")]
+    [InlineData("Hyper-V Host", "Servers & Infrastructure")]
+    [InlineData("Copier Contract", "Vendors & Services")]
+    public void ExistingResourceTypesArePlacedInUsefulCategories(
+        string resourceType,
+        string expectedCategory)
+    {
+        Assert.Equal(
+            expectedCategory,
+            TechBench.Models.ClientInfoResourceCategories.Classify(resourceType));
+    }
+
+    [Fact]
+    public void PreviousFriendlyWorkbookVersionRemainsImportable()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "TechBenchClientInfoTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "Previous Migration.xlsx");
+            var service = new ClientInfoWorkbookService();
+            service.CreateTemplate(path, 477, "Acme Legal");
+            ConvertGeneratedWorkbookToPreviousVersion(path);
+            AppendRow(
+                path,
+                "Systems & Services",
+                "Firewall", "WatchGuard", "WatchGuard", "", "", "Active",
+                "Previous beta workbook", "Verified");
+
+            var package = service.Read(path);
+
+            Assert.Equal(
+                ClientInfoWorkbookService.PreviousTemplateVersion,
+                package.TemplateVersion);
+            var resource = Assert.Single(
+                package.Records,
+                record => record.RecordType == "Resource");
+            Assert.Contains(
+                "\"resourceType\":\"Firewall\"",
+                resource.PayloadJson,
+                StringComparison.Ordinal);
         }
         finally
         {
@@ -232,9 +300,16 @@ public sealed class ClientInfoBetaTests
                  {
                      "Overview",
                      "People &amp; Locations",
-                     "Systems &amp; Services",
-                     "Credentials",
-                     "Other Info &amp; Notes"
+                     "Equipment",
+                     "Servers &amp; Infrastructure",
+                     "Network &amp; Internet",
+                     "Applications &amp; Cloud",
+                     "Domains &amp; Email",
+                     "Backup &amp; Security",
+                     "Vendors &amp; Services",
+                     "Needs Sorting",
+                     "Passwords",
+                     "Other Information"
                  })
         {
             Assert.Contains($"Header=\"{tab}\"", xaml, StringComparison.Ordinal);
@@ -243,6 +318,7 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("SaveClientInfoLocation", viewModel, StringComparison.Ordinal);
         Assert.Contains("SaveClientInfoPerson", viewModel, StringComparison.Ordinal);
         Assert.Contains("SaveClientInfoResource", viewModel, StringComparison.Ordinal);
+        Assert.Contains("RefreshResourceGroups", viewModel, StringComparison.Ordinal);
         Assert.Contains("SaveClientInfoCredential", viewModel, StringComparison.Ordinal);
         Assert.Contains("CompareClientInfoImportToFireDrill", viewModel, StringComparison.Ordinal);
         Assert.Contains("Another editor saved first", viewModel, StringComparison.Ordinal);
@@ -415,6 +491,40 @@ public sealed class ClientInfoBetaTests
 
         sheetData.Append(row);
         part.Worksheet.Save();
+    }
+
+    private static void ConvertGeneratedWorkbookToPreviousVersion(string path)
+    {
+        using var workbook = SpreadsheetDocument.Open(path, true);
+        var workbookPart = workbook.WorkbookPart!;
+        var sheets = workbookPart.Workbook.Sheets!.Elements<Sheet>().ToList();
+        var startHere = sheets.Single(sheet => sheet.Name?.Value == "Start Here");
+        var startPart = (WorksheetPart)workbookPart.GetPartById(startHere.Id!);
+        var versionCell = startPart.Worksheet.GetFirstChild<SheetData>()!
+            .Elements<Row>()
+            .Single(row => row.RowIndex?.Value == 5U)
+            .Elements<Cell>()
+            .Single(cell => cell.CellReference?.Value == "B5");
+        versionCell.DataType = CellValues.InlineString;
+        versionCell.InlineString = new InlineString(
+            new Text(ClientInfoWorkbookService.PreviousTemplateVersion));
+        startPart.Worksheet.Save();
+
+        sheets.Single(sheet => sheet.Name?.Value == "Network & Internet").Name =
+            "Systems & Services";
+        foreach (var name in new[]
+                 {
+                     "Servers & Infrastructure",
+                     "Applications & Cloud",
+                     "Domains & Email",
+                     "Backup & Security",
+                     "Vendors & Services"
+                 })
+        {
+            sheets.Single(sheet => sheet.Name?.Value == name).Remove();
+        }
+
+        workbookPart.Workbook.Save();
     }
 
     private static string TestColumnName(int column)

@@ -21,6 +21,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     ];
 
     private static readonly string[] BooleanOptions = ["Yes", "No"];
+    private static readonly string[] ResourceCategories =
+        ClientInfoResourceCategories.All;
     private readonly ITechBenchRepository _repository;
     private readonly CurrentUserContext _currentUser;
     private readonly IUserDialogService _dialogs;
@@ -64,7 +66,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             item => EditPerson(item as ClientInfoPerson ?? SelectedPerson),
             _ => CanEdit && SelectedPerson is not null);
         AddResourceCommand = new RelayCommand(
-            _ => EditResource(null),
+            category => EditResource(null, category as string),
             _ => CanEdit);
         EditResourceCommand = new RelayCommand(
             item => EditResource(item as ClientInfoResource ?? SelectedResource),
@@ -178,6 +180,28 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     public ObservableCollection<ClientInfoLocation> Locations { get; } = [];
     public ObservableCollection<ClientInfoPerson> People { get; } = [];
     public ObservableCollection<ClientInfoResource> Resources { get; } = [];
+    public ObservableCollection<EquipmentItem> Equipment { get; } = [];
+    public ClientInfoResourceGroup ServerInfrastructureGroup { get; } = new(
+        ClientInfoResourceCategories.ServersInfrastructure,
+        "Servers, virtual machines, hypervisors, storage, directory services, and infrastructure roles.");
+    public ClientInfoResourceGroup NetworkInternetGroup { get; } = new(
+        ClientInfoResourceCategories.NetworkInternet,
+        "Firewalls, switches, Wi-Fi, ISPs, circuits, VLANs, VPNs, and public IP information.");
+    public ClientInfoResourceGroup ApplicationsCloudGroup { get; } = new(
+        ClientInfoResourceCategories.ApplicationsCloud,
+        "Microsoft 365, line-of-business applications, SaaS products, cloud services, and licensing.");
+    public ClientInfoResourceGroup DomainsEmailGroup { get; } = new(
+        ClientInfoResourceCategories.DomainsEmail,
+        "Domains, DNS, registrars, email tenants, Exchange, and mailbox services.");
+    public ClientInfoResourceGroup BackupSecurityGroup { get; } = new(
+        ClientInfoResourceCategories.BackupSecurity,
+        "Backup systems, antivirus, EDR, MFA, filtering, and other security services.");
+    public ClientInfoResourceGroup VendorsServicesGroup { get; } = new(
+        ClientInfoResourceCategories.VendorsServices,
+        "Support vendors, contracts, phone and copier providers, renewals, and managed services.");
+    public ClientInfoResourceGroup NeedsSortingGroup { get; } = new(
+        ClientInfoResourceCategories.NeedsSorting,
+        "Older or unclear records that still need to be assigned to a category.");
     public ObservableCollection<ClientInfoCredential> Credentials { get; } = [];
     public ObservableCollection<ClientInfoFact> Facts { get; } = [];
     public ObservableCollection<ClientInfoImportBatch> ImportBatches { get; } = [];
@@ -307,6 +331,12 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             Replace(Locations, snapshot.Locations);
             Replace(People, snapshot.People);
             Replace(Resources, snapshot.Resources);
+            Replace(
+                Equipment,
+                _repository.EquipmentBoardAvailable
+                    ? _repository.GetEquipmentInventory(ClientId)
+                    : []);
+            RefreshResourceGroups();
             Replace(Credentials, snapshot.Credentials);
             Replace(Facts, snapshot.Facts);
             Replace(ImportBatches, snapshot.ImportBatches);
@@ -314,7 +344,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             SelectedImportBatch = null;
             StatusMessage =
                 $"Loaded {Locations.Count} locations, {People.Count} people, "
-                + $"{Resources.Count} systems, and {Credentials.Count} credentials.";
+                + $"{Equipment.Count} equipment records, {Resources.Count} technology records, "
+                + $"and {Credentials.Count} passwords.";
         }
         catch (Exception exception)
         {
@@ -446,16 +477,23 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             });
     }
 
-    private void EditResource(ClientInfoResource? current)
+    private void EditResource(
+        ClientInfoResource? current,
+        string? requestedCategory = null)
     {
         var locationOptions = new[] { "(None)" }
             .Concat(Locations.Select(item => item.Name))
             .ToArray();
         var values = ShowEditor(
-            current is null ? "Add system or service" : "Edit system or service",
+            current is null ? "Add technology or service" : "Edit technology or service",
             [
+                new("category", "Category",
+                    current?.Category
+                        ?? ClientInfoResourceCategories.NormalizeCategory(requestedCategory),
+                    true,
+                    Options: ResourceCategories),
                 new("name", "Name", current?.Name ?? "", true),
-                new("type", "Type", current?.ResourceType ?? "Other", true),
+                new("type", "Type", current?.TypeLabel ?? "", true),
                 new("location", "Location", current?.LocationName ?? "(None)",
                     Options: locationOptions),
                 new("provider", "Provider", current?.Provider ?? ""),
@@ -477,7 +515,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             values["location"],
             StringComparison.OrdinalIgnoreCase));
         ExecuteSave(
-            "system or service",
+            "technology or service",
             () =>
             {
                 _repository.SaveClientInfoResource((current ?? new ClientInfoResource
@@ -486,7 +524,9 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 }) with
                 {
                     Name = values["name"],
-                    ResourceType = values["type"],
+                    ResourceType = ClientInfoResourceCategories.Encode(
+                        values["category"],
+                        values["type"]),
                     LocationId = location?.LocationId,
                     LocationName = location?.Name ?? "",
                     Provider = values["provider"],
@@ -498,6 +538,26 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 });
                 Refresh();
             });
+    }
+
+    private void RefreshResourceGroups()
+    {
+        foreach (var group in new[]
+                 {
+                     ServerInfrastructureGroup,
+                     NetworkInternetGroup,
+                     ApplicationsCloudGroup,
+                     DomainsEmailGroup,
+                     BackupSecurityGroup,
+                     VendorsServicesGroup,
+                     NeedsSortingGroup
+                 })
+        {
+            group.Replace(Resources.Where(resource => string.Equals(
+                resource.Category,
+                group.CategoryName,
+                StringComparison.OrdinalIgnoreCase)));
+        }
     }
 
     private void EditCredential(ClientInfoCredential? current)
@@ -935,5 +995,34 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         }
 
         return value;
+    }
+}
+
+public sealed class ClientInfoResourceGroup : ObservableObject
+{
+    public ClientInfoResourceGroup(
+        string categoryName,
+        string description)
+    {
+        CategoryName = categoryName;
+        Description = description;
+        Resources.CollectionChanged += (_, _) =>
+            OnPropertyChanged(nameof(CountLabel));
+    }
+
+    public string CategoryName { get; }
+    public string Description { get; }
+    public string CountLabel => Resources.Count == 1
+        ? "1 record"
+        : $"{Resources.Count} records";
+    public ObservableCollection<ClientInfoResource> Resources { get; } = [];
+
+    public void Replace(IEnumerable<ClientInfoResource> resources)
+    {
+        Resources.Clear();
+        foreach (var resource in resources)
+        {
+            Resources.Add(resource);
+        }
     }
 }

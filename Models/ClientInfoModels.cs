@@ -108,6 +108,10 @@ public sealed record ClientInfoResource
     public DateTime? UpdatedAtUtc { get; init; }
     public byte[]? RowVersion { get; init; }
     public IReadOnlyList<ClientInfoResourceField> Fields { get; init; } = [];
+    public string Category =>
+        ClientInfoResourceCategories.Classify(ResourceType);
+    public string TypeLabel =>
+        ClientInfoResourceCategories.GetTypeLabel(ResourceType);
 }
 
 public sealed record ClientInfoResourceField

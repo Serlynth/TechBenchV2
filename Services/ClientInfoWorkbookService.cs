@@ -13,7 +13,8 @@ namespace TechBench.Services;
 
 public sealed class ClientInfoWorkbookService
 {
-    public const string TemplateVersion = "TB-CI-2";
+    public const string TemplateVersion = "TB-CI-3";
+    public const string PreviousTemplateVersion = "TB-CI-2";
     public const string LegacyTemplateVersion = "TB-CI-1";
 
     private static readonly string[] ReviewStatuses =
@@ -44,7 +45,7 @@ public sealed class ClientInfoWorkbookService
             "Start Here",
             [
                 ["TechBench Client Info Migration Workbook", ""],
-                ["What to do", "Copy the useful, cleaned information from the client's current workbook into the matching tabs. Leave tabs that do not apply blank."],
+                ["What to do", "Copy the useful, cleaned information from the client's current workbook into the matching category tabs. Leave tabs that do not apply blank."],
                 ["Review each row", "Choose Verified, Keep as-is, Needs review, or Do not import. A workbook cannot be approved while a populated row is blank or still Needs review."],
                 ["Passwords", "Put passwords and other secrets only on the Passwords tab. They are encrypted when imported and are never written to import logs."],
                 ["Template Version", TemplateVersion],
@@ -83,7 +84,57 @@ public sealed class ClientInfoWorkbookService
             workbookPart,
             sheets,
             ref sheetId,
-            "Systems & Services",
+            "Servers & Infrastructure",
+            [
+                ["Type", "Name", "Provider", "Address/URL", "Location", "Status",
+                 "Notes", "Review Status"]
+            ],
+            columnWidths: [22, 28, 24, 34, 22, 18, 40, 22]);
+        AddSheet(
+            workbookPart,
+            sheets,
+            ref sheetId,
+            "Network & Internet",
+            [
+                ["Type", "Name", "Provider", "Address/URL", "Location", "Status",
+                 "Notes", "Review Status"]
+            ],
+            columnWidths: [22, 28, 24, 34, 22, 18, 40, 22]);
+        AddSheet(
+            workbookPart,
+            sheets,
+            ref sheetId,
+            "Applications & Cloud",
+            [
+                ["Type", "Name", "Provider", "Address/URL", "Location", "Status",
+                 "Notes", "Review Status"]
+            ],
+            columnWidths: [22, 28, 24, 34, 22, 18, 40, 22]);
+        AddSheet(
+            workbookPart,
+            sheets,
+            ref sheetId,
+            "Domains & Email",
+            [
+                ["Type", "Name", "Provider", "Address/URL", "Location", "Status",
+                 "Notes", "Review Status"]
+            ],
+            columnWidths: [22, 28, 24, 34, 22, 18, 40, 22]);
+        AddSheet(
+            workbookPart,
+            sheets,
+            ref sheetId,
+            "Backup & Security",
+            [
+                ["Type", "Name", "Provider", "Address/URL", "Location", "Status",
+                 "Notes", "Review Status"]
+            ],
+            columnWidths: [22, 28, 24, 34, 22, 18, 40, 22]);
+        AddSheet(
+            workbookPart,
+            sheets,
+            ref sheetId,
+            "Vendors & Services",
             [
                 ["Type", "Name", "Provider", "Address/URL", "Location", "Status",
                  "Notes", "Review Status"]
@@ -137,11 +188,15 @@ public sealed class ClientInfoWorkbookService
         if (!string.Equals(version, TemplateVersion, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(
                 version,
+                PreviousTemplateVersion,
+                StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(
+                version,
                 LegacyTemplateVersion,
                 StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException(
-                $"Template version '{version}' is not supported. Expected {TemplateVersion} or {LegacyTemplateVersion}.");
+                $"Template version '{version}' is not supported. Expected {TemplateVersion}, {PreviousTemplateVersion}, or {LegacyTemplateVersion}.");
         }
 
         if (!Guid.TryParse(GetRequired(info, "Workbook ID"), out var workbookId))
@@ -179,6 +234,76 @@ public sealed class ClientInfoWorkbookService
                 version,
                 TemplateVersion,
                 StringComparison.OrdinalIgnoreCase))
+        {
+            var locationKeys = ParseSimpleLocations(
+                GetSheet(tables, "Locations"),
+                records);
+            ParseSimplePeople(
+                GetSheet(tables, "People"),
+                records,
+                locationKeys);
+            var resourceKeys = new Dictionary<string, string?>(
+                StringComparer.OrdinalIgnoreCase);
+            ParseSimpleResources(
+                GetSheet(tables, "Servers & Infrastructure"),
+                records,
+                locationKeys,
+                resourceKeys,
+                ClientInfoResourceCategories.ServersInfrastructure,
+                "Servers & Infrastructure",
+                "infrastructure");
+            ParseSimpleResources(
+                GetSheet(tables, "Network & Internet"),
+                records,
+                locationKeys,
+                resourceKeys,
+                ClientInfoResourceCategories.NetworkInternet,
+                "Network & Internet",
+                "network");
+            ParseSimpleResources(
+                GetSheet(tables, "Applications & Cloud"),
+                records,
+                locationKeys,
+                resourceKeys,
+                ClientInfoResourceCategories.ApplicationsCloud,
+                "Applications & Cloud",
+                "application");
+            ParseSimpleResources(
+                GetSheet(tables, "Domains & Email"),
+                records,
+                locationKeys,
+                resourceKeys,
+                ClientInfoResourceCategories.DomainsEmail,
+                "Domains & Email",
+                "domain");
+            ParseSimpleResources(
+                GetSheet(tables, "Backup & Security"),
+                records,
+                locationKeys,
+                resourceKeys,
+                ClientInfoResourceCategories.BackupSecurity,
+                "Backup & Security",
+                "security");
+            ParseSimpleResources(
+                GetSheet(tables, "Vendors & Services"),
+                records,
+                locationKeys,
+                resourceKeys,
+                ClientInfoResourceCategories.VendorsServices,
+                "Vendors & Services",
+                "vendor");
+            ParseSimpleEquipment(GetSheet(tables, "Equipment"), records);
+            ParseSimpleCredentials(
+                GetSheet(tables, "Passwords"),
+                records,
+                secrets,
+                resourceKeys);
+            ParseSimpleFacts(GetSheet(tables, "Other Info"), records);
+        }
+        else if (string.Equals(
+                     version,
+                     PreviousTemplateVersion,
+                     StringComparison.OrdinalIgnoreCase))
         {
             var locationKeys = ParseSimpleLocations(
                 GetSheet(tables, "Locations"),
@@ -347,6 +472,26 @@ public sealed class ClientInfoWorkbookService
     {
         var keys = new Dictionary<string, string?>(
             StringComparer.OrdinalIgnoreCase);
+        ParseSimpleResources(
+            rows,
+            records,
+            locationKeys,
+            keys,
+            category: null,
+            sourceSheet: "Systems & Services",
+            keyPrefix: "resource");
+        return keys;
+    }
+
+    private static void ParseSimpleResources(
+        IReadOnlyList<string[]> rows,
+        ICollection<ClientInfoImportRecord> records,
+        IReadOnlyDictionary<string, string?> locationKeys,
+        IDictionary<string, string?> keys,
+        string? category,
+        string sourceSheet,
+        string keyPrefix)
+    {
         foreach (var row in DataRows(rows))
         {
             var name = Value(row.Values, row.Headers, "Name");
@@ -355,9 +500,10 @@ public sealed class ClientInfoWorkbookService
                 continue;
             }
 
-            var localKey = LocalKey(string.Empty, "resource", row.RowNumber);
+            var localKey = LocalKey(string.Empty, keyPrefix, row.RowNumber);
             AddFriendlyLookup(keys, name, localKey);
             var locationName = Value(row.Values, row.Headers, "Location");
+            var type = Value(row.Values, row.Headers, "Type");
             records.Add(new ClientInfoImportRecord(
                 "Resource",
                 localKey,
@@ -368,9 +514,11 @@ public sealed class ClientInfoWorkbookService
                         locationKeys,
                         locationName,
                         "location",
-                        "Systems & Services",
+                        sourceSheet,
                         row.RowNumber),
-                    resourceType = Value(row.Values, row.Headers, "Type"),
+                    resourceType = category is null
+                        ? type
+                        : ClientInfoResourceCategories.Encode(category, type),
                     name,
                     provider = Value(row.Values, row.Headers, "Provider"),
                     addressOrUrl = Value(row.Values, row.Headers, "Address/URL"),
@@ -382,12 +530,10 @@ public sealed class ClientInfoWorkbookService
                         preserveWhitespace: true),
                     isActive = true
                 }),
-                "Systems & Services",
+                sourceSheet,
                 row.RowNumber,
                 NormalizeReviewStatus(Value(row.Values, row.Headers, "Review Status"))));
         }
-
-        return keys;
     }
 
     private static void ParseSimpleEquipment(

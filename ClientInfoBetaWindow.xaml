@@ -39,19 +39,26 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="TabControl">
                         <Grid KeyboardNavigation.TabNavigation="Local">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="*" />
-                            </Grid.RowDefinitions>
-                            <TabPanel Grid.Row="0"
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="230" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0"
+                                    Background="{DynamicResource PanelAltBackgroundBrush}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="10,0,0,10"
+                                    Padding="8">
+                                <TabPanel
                                       IsItemsHost="True"
                                       Background="Transparent"
-                                      Margin="1,0,0,0" />
-                            <Border Grid.Row="1"
+                                      Margin="0" />
+                            </Border>
+                            <Border Grid.Column="1"
                                     Background="{TemplateBinding Background}"
                                     BorderBrush="{TemplateBinding BorderBrush}"
                                     BorderThickness="{TemplateBinding BorderThickness}"
-                                    CornerRadius="0,8,8,8">
+                                    CornerRadius="0,10,10,0">
                                 <ContentPresenter x:Name="PART_SelectedContentHost"
                                                   ContentSource="SelectedContent"
                                                   SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
@@ -66,8 +73,9 @@
             <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
             <Setter Property="Background" Value="{DynamicResource ControlAltBackgroundBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
-            <Setter Property="Padding" Value="14,8" />
-            <Setter Property="Margin" Value="0,0,4,0" />
+            <Setter Property="Padding" Value="13,8" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -76,10 +84,10 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="1"
-                                CornerRadius="7,7,0,0"
+                                CornerRadius="7"
                                 Padding="{TemplateBinding Padding}">
                             <ContentPresenter ContentSource="Header"
-                                              HorizontalAlignment="Center"
+                                              HorizontalAlignment="Stretch"
                                               VerticalAlignment="Center"
                                               TextElement.Foreground="{TemplateBinding Foreground}"
                                               RecognizesAccessKey="True" />
@@ -112,6 +120,72 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <DataTemplate x:Key="ResourceCategoryContentTemplate">
+            <Grid Margin="18">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="{Binding CategoryName}"
+                                   Style="{StaticResource SectionHeaderStyle}" />
+                        <TextBlock Text="{Binding Description}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,3,0,10" />
+                    </StackPanel>
+                    <Button Grid.Column="1"
+                            Content="Add"
+                            Command="{Binding DataContext.AddResourceCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding CategoryName}"
+                            MinWidth="76"
+                            Margin="0,0,8,8" />
+                    <Button Grid.Column="2"
+                            Content="Edit"
+                            Command="{Binding DataContext.EditResourceCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            MinWidth="76"
+                            Margin="0,0,0,8" />
+                </Grid>
+                <DataGrid Grid.Row="1"
+                          ItemsSource="{Binding Resources}"
+                          SelectedItem="{Binding DataContext.SelectedResource, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          CanUserAddRows="False"
+                          MouseDoubleClick="Resources_DoubleClick">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Name"
+                                            Binding="{Binding Name}"
+                                            Width="1.2*" />
+                        <DataGridTextColumn Header="Type"
+                                            Binding="{Binding TypeLabel}"
+                                            Width="0.9*" />
+                        <DataGridTextColumn Header="Provider"
+                                            Binding="{Binding Provider}"
+                                            Width="0.9*" />
+                        <DataGridTextColumn Header="Address / URL"
+                                            Binding="{Binding AddressOrUrl}"
+                                            Width="1.5*" />
+                        <DataGridTextColumn Header="Location"
+                                            Binding="{Binding LocationName}"
+                                            Width="0.9*" />
+                        <DataGridTextColumn Header="Status"
+                                            Binding="{Binding Status}"
+                                            Width="0.7*" />
+                        <DataGridTextColumn Header="Review"
+                                            Binding="{Binding ReviewStatus}"
+                                            Width="0.8*" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
+        </DataTemplate>
 
         <Style TargetType="DataGrid">
             <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
@@ -254,6 +328,7 @@
 
         <TabControl Grid.Row="1"
                     Margin="22,18,22,12"
+                    TabStripPlacement="Left"
                     Background="{DynamicResource PanelBackgroundBrush}">
             <TabItem Header="Overview">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -446,71 +521,84 @@
                 </Grid>
             </TabItem>
 
-            <TabItem Header="Systems &amp; Services">
+            <TabItem Header="Equipment">
                 <Grid Margin="18">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel>
-                            <TextBlock Text="Systems &amp; Services"
-                                       Style="{StaticResource SectionHeaderStyle}" />
-                            <TextBlock Text="Servers, networks, SaaS, vendors, domains, backups, and other client resources."
-                                       Foreground="{DynamicResource SecondaryTextBrush}"
-                                       Margin="0,3,0,10" />
-                        </StackPanel>
-                        <Button Grid.Column="1"
-                                Content="Add"
-                                Command="{Binding AddResourceCommand}"
-                                MinWidth="76"
-                                Margin="0,0,8,8" />
-                        <Button Grid.Column="2"
-                                Content="Edit"
-                                Command="{Binding EditResourceCommand}"
-                                MinWidth="76"
-                                Margin="0,0,0,8" />
-                    </Grid>
+                    <StackPanel>
+                        <TextBlock Text="Equipment"
+                                   Style="{StaticResource SectionHeaderStyle}" />
+                        <TextBlock Text="Computers, servers, printers, network appliances, and other devices assigned to this client. Equipment remains shared with the TechBench Inventory workspace."
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,3,0,10" />
+                    </StackPanel>
                     <DataGrid Grid.Row="1"
-                              ItemsSource="{Binding Resources}"
-                              SelectedItem="{Binding SelectedResource}"
+                              ItemsSource="{Binding Equipment}"
                               AutoGenerateColumns="False"
                               IsReadOnly="True"
-                              CanUserAddRows="False"
-                              MouseDoubleClick="Resources_DoubleClick">
+                              CanUserAddRows="False">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Name"
                                                 Binding="{Binding Name}"
-                                                Width="1.2*" />
+                                                Width="1.1*" />
                             <DataGridTextColumn Header="Type"
-                                                Binding="{Binding ResourceType}"
+                                                Binding="{Binding DeviceType}"
                                                 Width="0.8*" />
-                            <DataGridTextColumn Header="Provider"
-                                                Binding="{Binding Provider}"
+                            <DataGridTextColumn Header="Manufacturer / Model"
+                                                Binding="{Binding ModelLine}"
+                                                Width="1.2*" />
+                            <DataGridTextColumn Header="Serial Number"
+                                                Binding="{Binding SerialNumber}"
+                                                Width="1*" />
+                            <DataGridTextColumn Header="Asset Tag"
+                                                Binding="{Binding AssetTag}"
+                                                Width="0.8*" />
+                            <DataGridTextColumn Header="IP Address"
+                                                Binding="{Binding IpAddress}"
                                                 Width="0.9*" />
-                            <DataGridTextColumn Header="Address / URL"
-                                                Binding="{Binding AddressOrUrl}"
-                                                Width="1.5*" />
                             <DataGridTextColumn Header="Location"
                                                 Binding="{Binding LocationName}"
                                                 Width="0.9*" />
-                            <DataGridTextColumn Header="Status"
-                                                Binding="{Binding Status}"
-                                                Width="0.7*" />
-                            <DataGridTextColumn Header="Review"
-                                                Binding="{Binding ReviewStatus}"
+                            <DataGridTextColumn Header="Assigned To"
+                                                Binding="{Binding ClientUserDisplayName}"
                                                 Width="0.8*" />
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
             </TabItem>
 
-            <TabItem Header="Credentials">
+            <TabItem Header="Servers &amp; Infrastructure"
+                     Content="{Binding ServerInfrastructureGroup}"
+                     ContentTemplate="{StaticResource ResourceCategoryContentTemplate}" />
+
+            <TabItem Header="Network &amp; Internet"
+                     Content="{Binding NetworkInternetGroup}"
+                     ContentTemplate="{StaticResource ResourceCategoryContentTemplate}" />
+
+            <TabItem Header="Applications &amp; Cloud"
+                     Content="{Binding ApplicationsCloudGroup}"
+                     ContentTemplate="{StaticResource ResourceCategoryContentTemplate}" />
+
+            <TabItem Header="Domains &amp; Email"
+                     Content="{Binding DomainsEmailGroup}"
+                     ContentTemplate="{StaticResource ResourceCategoryContentTemplate}" />
+
+            <TabItem Header="Backup &amp; Security"
+                     Content="{Binding BackupSecurityGroup}"
+                     ContentTemplate="{StaticResource ResourceCategoryContentTemplate}" />
+
+            <TabItem Header="Vendors &amp; Services"
+                     Content="{Binding VendorsServicesGroup}"
+                     ContentTemplate="{StaticResource ResourceCategoryContentTemplate}" />
+
+            <TabItem Header="Needs Sorting"
+                     Content="{Binding NeedsSortingGroup}"
+                     ContentTemplate="{StaticResource ResourceCategoryContentTemplate}" />
+
+            <TabItem Header="Passwords">
                 <Grid Margin="18">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="1.45*" />
@@ -527,7 +615,7 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="Credentials"
+                            <TextBlock Text="Passwords"
                                        Style="{StaticResource SectionHeaderStyle}" />
                             <Button Grid.Column="1"
                                     Content="Add"
@@ -632,7 +720,7 @@
                 </Grid>
             </TabItem>
 
-            <TabItem Header="Other Info &amp; Notes">
+            <TabItem Header="Other Information">
                 <Grid Margin="18">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -644,7 +732,7 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Text="Other Info &amp; Notes"
+                        <TextBlock Text="Other Information"
                                    Style="{StaticResource SectionHeaderStyle}" />
                         <Button Grid.Column="1"
                                 Content="Add"

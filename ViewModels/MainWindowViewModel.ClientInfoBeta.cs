@@ -32,7 +32,7 @@ public sealed partial class MainWindowViewModel
 
     public string ClientInfoWorkspaceDescription =>
         "Search client information stored in TechBench SQL. Open a client to view "
-        + "or edit its contacts, locations, systems, credentials, and other information.";
+        + "or edit its contacts, equipment, infrastructure, network, applications, security, passwords, and other information.";
 
     public string ClientInfoImportWorkspaceDescription =>
         "Choose a client, create its prefilled migration workbook, copy in the "
