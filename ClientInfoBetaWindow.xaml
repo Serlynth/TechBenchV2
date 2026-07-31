@@ -29,6 +29,160 @@
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
             <Setter Property="Margin" Value="3,0" />
         </Style>
+
+        <Style TargetType="TabControl">
+            <Setter Property="Background" Value="{DynamicResource PanelBackgroundBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid KeyboardNavigation.TabNavigation="Local">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TabPanel Grid.Row="0"
+                                      IsItemsHost="True"
+                                      Background="Transparent"
+                                      Margin="1,0,0,0" />
+                            <Border Grid.Row="1"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="0,8,8,8">
+                                <ContentPresenter x:Name="PART_SelectedContentHost"
+                                                  ContentSource="SelectedContent"
+                                                  SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="TabItem">
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ControlAltBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="Padding" Value="14,8" />
+            <Setter Property="Margin" Value="0,0,4,0" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="7,7,0,0"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter ContentSource="Header"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"
+                                              RecognizesAccessKey="True" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="TabBorder"
+                                        Property="Background"
+                                        Value="{DynamicResource SurfaceHoverBrush}" />
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource PrimaryTextBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="TabBorder"
+                                        Property="Background"
+                                        Value="{DynamicResource PanelBackgroundBrush}" />
+                                <Setter TargetName="TabBorder"
+                                        Property="BorderBrush"
+                                        Value="{DynamicResource AccentBrush}" />
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource PrimaryTextBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource MutedTextBrush}" />
+                                <Setter Property="Opacity" Value="0.68" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="DataGrid">
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ControlBackgroundBrush}" />
+            <Setter Property="RowBackground" Value="{DynamicResource ControlBackgroundBrush}" />
+            <Setter Property="AlternatingRowBackground" Value="{DynamicResource PanelAltBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="VerticalGridLinesBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="GridLinesVisibility" Value="Horizontal" />
+            <Setter Property="HeadersVisibility" Value="Column" />
+            <Setter Property="RowHeaderWidth" Value="0" />
+            <Setter Property="ColumnHeaderHeight" Value="38" />
+            <Setter Property="RowHeight" Value="38" />
+            <Setter Property="AlternationCount" Value="2" />
+        </Style>
+
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ControlAltBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="0,0,1,1" />
+            <Setter Property="Padding" Value="10,7" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="DataGridColumnHeader">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"
+                                              SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="DataGridRow">
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+                </Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style TargetType="DataGridCell">
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="Transparent" />
+                    <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
 
     <Grid>

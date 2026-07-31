@@ -220,6 +220,41 @@ public sealed class ClientInfoBetaTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void BetaWindowOwnsReadableThemeAwareTabAndGridTemplates()
+    {
+        var xaml = Read("ClientInfoBetaWindow.xaml");
+
+        Assert.Contains(
+            "<Style TargetType=\"TabItem\">",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<ControlTemplate TargetType=\"TabControl\">",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "TextElement.Foreground=\"{TemplateBinding Foreground}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<Style TargetType=\"DataGridColumnHeader\">",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<ControlTemplate TargetType=\"DataGridColumnHeader\">",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Value=\"{DynamicResource ControlAltBackgroundBrush}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Value=\"{DynamicResource PrimaryTextBrush}\"",
+            xaml,
+            StringComparison.Ordinal);
+    }
+
     private static string Read(params string[] parts) =>
         File.ReadAllText(Path.Combine(
             new[] { RepositoryRoot() }.Concat(parts).ToArray()));
