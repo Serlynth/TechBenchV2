@@ -112,6 +112,12 @@ public sealed record ClientInfoResource
         ClientInfoResourceCategories.Classify(ResourceType);
     public string TypeLabel =>
         ClientInfoResourceCategories.GetTypeLabel(ResourceType);
+
+    public string GetFieldValue(string fieldKey) =>
+        Fields.FirstOrDefault(field => string.Equals(
+            field.FieldKey,
+            fieldKey,
+            StringComparison.OrdinalIgnoreCase))?.ValueText ?? string.Empty;
 }
 
 public sealed record ClientInfoResourceField

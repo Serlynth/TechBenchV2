@@ -45,6 +45,8 @@ FROM
         (N'tb_app.SaveClientInfoLocation',N'P'),
         (N'tb_app.SaveClientInfoPerson',N'P'),
         (N'tb_app.SaveClientInfoResource',N'P'),
+        (N'tb_app.SaveClientInfoResourceField',N'P'),
+        (N'tb_app.DeleteClientInfoResourceField',N'P'),
         (N'tb_app.SaveClientInfoFact',N'P'),
         (N'tb_app.SaveClientCredential',N'P'),
         (N'tb_app.SetClientCredentialSecret',N'P'),

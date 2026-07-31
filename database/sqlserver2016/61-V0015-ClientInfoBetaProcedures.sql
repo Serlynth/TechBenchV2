@@ -1094,6 +1094,136 @@ BEGIN
 END;
 GO
 
+IF OBJECT_ID(N'tb_app.SaveClientInfoResourceField', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SaveClientInfoResourceField];
+GO
+
+CREATE PROCEDURE [tb_app].[SaveClientInfoResourceField]
+    @ResourceFieldId bigint = NULL,
+    @ResourceId bigint,
+    @FieldKey nvarchar(120),
+    @FieldLabel nvarchar(200),
+    @ValueText nvarchar(max) = NULL,
+    @ValueType nvarchar(24) = N'Text',
+    @SortOrder int = 0,
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_info_editor')<>1
+        THROW 52320, N'Client Info editor permission is required.', 1;
+
+    SET @FieldKey=NULLIF(LTRIM(RTRIM(@FieldKey)),N'');
+    SET @FieldLabel=NULLIF(LTRIM(RTRIM(@FieldLabel)),N'');
+    IF @FieldKey IS NULL OR @FieldLabel IS NULL
+        THROW 52355,N'Resource field key and label are required.',1;
+    IF @ValueType NOT IN (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress')
+        THROW 52355,N'The resource field value type is invalid.',1;
+    IF NOT EXISTS (SELECT 1 FROM [tb_client].[Resources] WHERE [ResourceId]=@ResourceId)
+        THROW 52356,N'The resource for this field no longer exists.',1;
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(), @Action nvarchar(120);
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        IF @ResourceFieldId IS NULL
+        BEGIN
+            INSERT INTO [tb_client].[ResourceFields]
+            (
+                [ResourceId],[FieldKey],[FieldLabel],[ValueText],[ValueType],
+                [SortOrder],[UpdatedByWindowsSid],[UpdatedAtUtc]
+            )
+            VALUES
+            (
+                @ResourceId,@FieldKey,@FieldLabel,NULLIF(@ValueText,N''),
+                @ValueType,@SortOrder,@ActorSid,@NowUtc
+            );
+            SET @ResourceFieldId=CONVERT(bigint,SCOPE_IDENTITY());
+            SET @Action=N'ClientInfoResourceFieldCreated';
+        END
+        ELSE
+        BEGIN
+            IF @ExpectedRowVersion IS NULL
+                THROW 52357,N'ExpectedRowVersion is required when updating a resource field.',1;
+            UPDATE [tb_client].[ResourceFields]
+            SET [FieldKey]=@FieldKey,[FieldLabel]=@FieldLabel,
+                [ValueText]=NULLIF(@ValueText,N''),[ValueType]=@ValueType,
+                [SortOrder]=@SortOrder,[UpdatedByWindowsSid]=@ActorSid,
+                [UpdatedAtUtc]=@NowUtc
+            WHERE [ResourceFieldId]=@ResourceFieldId
+              AND [ResourceId]=@ResourceId
+              AND [RowVersion]=@ExpectedRowVersion;
+            IF @@ROWCOUNT<>1
+                THROW 52358,N'The resource field changed on another workstation. Refresh and resolve the conflict.',1;
+            SET @Action=N'ClientInfoResourceFieldUpdated';
+        END;
+
+        DECLARE @AuditEntityId nvarchar(120)=
+            CONVERT(nvarchar(120),@ResourceFieldId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=@Action,@EntityType=N'ClientInfoResourceField',
+            @EntityId=@AuditEntityId,@RequestId=@RequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT * FROM [tb_client].[ResourceFields]
+    WHERE [ResourceFieldId]=@ResourceFieldId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.DeleteClientInfoResourceField', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[DeleteClientInfoResourceField];
+GO
+
+CREATE PROCEDURE [tb_app].[DeleteClientInfoResourceField]
+    @ResourceFieldId bigint,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_info_editor')<>1
+        THROW 52320, N'Client Info editor permission is required.', 1;
+    IF @ExpectedRowVersion IS NULL
+        THROW 52357,N'ExpectedRowVersion is required when deleting a resource field.',1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        DELETE FROM [tb_client].[ResourceFields]
+        WHERE [ResourceFieldId]=@ResourceFieldId
+          AND [RowVersion]=@ExpectedRowVersion;
+        IF @@ROWCOUNT<>1
+            THROW 52359,N'The resource field changed on another workstation. Refresh and resolve the conflict.',1;
+
+        DECLARE @AuditEntityId nvarchar(120)=
+            CONVERT(nvarchar(120),@ResourceFieldId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'ClientInfoResourceFieldDeleted',
+            @EntityType=N'ClientInfoResourceField',
+            @EntityId=@AuditEntityId,@RequestId=@RequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+GO
+
 IF OBJECT_ID(N'tb_app.SaveClientInfoFact', N'P') IS NOT NULL
     DROP PROCEDURE [tb_app].[SaveClientInfoFact];
 GO

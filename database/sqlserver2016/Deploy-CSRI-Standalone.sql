@@ -25047,6 +25047,136 @@ BEGIN
 END;
 GO
 
+IF OBJECT_ID(N'tb_app.SaveClientInfoResourceField', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SaveClientInfoResourceField];
+GO
+
+CREATE PROCEDURE [tb_app].[SaveClientInfoResourceField]
+    @ResourceFieldId bigint = NULL,
+    @ResourceId bigint,
+    @FieldKey nvarchar(120),
+    @FieldLabel nvarchar(200),
+    @ValueText nvarchar(max) = NULL,
+    @ValueType nvarchar(24) = N'Text',
+    @SortOrder int = 0,
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_info_editor')<>1
+        THROW 52320, N'Client Info editor permission is required.', 1;
+
+    SET @FieldKey=NULLIF(LTRIM(RTRIM(@FieldKey)),N'');
+    SET @FieldLabel=NULLIF(LTRIM(RTRIM(@FieldLabel)),N'');
+    IF @FieldKey IS NULL OR @FieldLabel IS NULL
+        THROW 52355,N'Resource field key and label are required.',1;
+    IF @ValueType NOT IN (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress')
+        THROW 52355,N'The resource field value type is invalid.',1;
+    IF NOT EXISTS (SELECT 1 FROM [tb_client].[Resources] WHERE [ResourceId]=@ResourceId)
+        THROW 52356,N'The resource for this field no longer exists.',1;
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(), @Action nvarchar(120);
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        IF @ResourceFieldId IS NULL
+        BEGIN
+            INSERT INTO [tb_client].[ResourceFields]
+            (
+                [ResourceId],[FieldKey],[FieldLabel],[ValueText],[ValueType],
+                [SortOrder],[UpdatedByWindowsSid],[UpdatedAtUtc]
+            )
+            VALUES
+            (
+                @ResourceId,@FieldKey,@FieldLabel,NULLIF(@ValueText,N''),
+                @ValueType,@SortOrder,@ActorSid,@NowUtc
+            );
+            SET @ResourceFieldId=CONVERT(bigint,SCOPE_IDENTITY());
+            SET @Action=N'ClientInfoResourceFieldCreated';
+        END
+        ELSE
+        BEGIN
+            IF @ExpectedRowVersion IS NULL
+                THROW 52357,N'ExpectedRowVersion is required when updating a resource field.',1;
+            UPDATE [tb_client].[ResourceFields]
+            SET [FieldKey]=@FieldKey,[FieldLabel]=@FieldLabel,
+                [ValueText]=NULLIF(@ValueText,N''),[ValueType]=@ValueType,
+                [SortOrder]=@SortOrder,[UpdatedByWindowsSid]=@ActorSid,
+                [UpdatedAtUtc]=@NowUtc
+            WHERE [ResourceFieldId]=@ResourceFieldId
+              AND [ResourceId]=@ResourceId
+              AND [RowVersion]=@ExpectedRowVersion;
+            IF @@ROWCOUNT<>1
+                THROW 52358,N'The resource field changed on another workstation. Refresh and resolve the conflict.',1;
+            SET @Action=N'ClientInfoResourceFieldUpdated';
+        END;
+
+        DECLARE @AuditEntityId nvarchar(120)=
+            CONVERT(nvarchar(120),@ResourceFieldId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=@Action,@EntityType=N'ClientInfoResourceField',
+            @EntityId=@AuditEntityId,@RequestId=@RequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT * FROM [tb_client].[ResourceFields]
+    WHERE [ResourceFieldId]=@ResourceFieldId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.DeleteClientInfoResourceField', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[DeleteClientInfoResourceField];
+GO
+
+CREATE PROCEDURE [tb_app].[DeleteClientInfoResourceField]
+    @ResourceFieldId bigint,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_info_editor')<>1
+        THROW 52320, N'Client Info editor permission is required.', 1;
+    IF @ExpectedRowVersion IS NULL
+        THROW 52357,N'ExpectedRowVersion is required when deleting a resource field.',1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        DELETE FROM [tb_client].[ResourceFields]
+        WHERE [ResourceFieldId]=@ResourceFieldId
+          AND [RowVersion]=@ExpectedRowVersion;
+        IF @@ROWCOUNT<>1
+            THROW 52359,N'The resource field changed on another workstation. Refresh and resolve the conflict.',1;
+
+        DECLARE @AuditEntityId nvarchar(120)=
+            CONVERT(nvarchar(120),@ResourceFieldId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'ClientInfoResourceFieldDeleted',
+            @EntityType=N'ClientInfoResourceField',
+            @EntityId=@AuditEntityId,@RequestId=@RequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+GO
+
 IF OBJECT_ID(N'tb_app.SaveClientInfoFact', N'P') IS NOT NULL
     DROP PROCEDURE [tb_app].[SaveClientInfoFact];
 GO
@@ -25598,7 +25728,8 @@ BEGIN
     SET @LocalKey=NULLIF(LTRIM(RTRIM(@LocalKey)),N'');
     SET @ParentLocalKey=NULLIF(LTRIM(RTRIM(@ParentLocalKey)),N'');
     IF @RecordType NOT IN
-        (N'Profile',N'Location',N'Person',N'Resource',N'Credential',N'Fact',N'Equipment')
+        (N'Profile',N'Location',N'Person',N'Resource',N'ResourceField',
+         N'Credential',N'Fact',N'Equipment')
        OR @LocalKey IS NULL OR ISJSON(@PayloadJson)<>1
         THROW 52410,N'The staged Client Info record is invalid.',1;
     IF @ReviewStatus NOT IN
@@ -25798,6 +25929,39 @@ BEGIN
           (
               NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.sectionName'))),N'') IS NULL
               OR NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.fieldLabel'))),N'') IS NULL
+          );
+
+        INSERT INTO [tb_import].[ClientInfoIssues]
+            ([BatchId],[ImportRecordId],[Severity],[IssueCode],[Message])
+        SELECT [BatchId],[ImportRecordId],N'Error',N'RESOURCE_FIELD_INVALID',
+            N'This resource field requires a parent resource, field key, field label, and valid value type.'
+        FROM [tb_import].[ClientInfoRecords]
+        WHERE [BatchId]=@BatchId AND [RecordType]=N'ResourceField'
+          AND
+          (
+              NULLIF(LTRIM(RTRIM([ParentLocalKey])),N'') IS NULL
+              OR NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.fieldKey'))),N'') IS NULL
+              OR NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.fieldLabel'))),N'') IS NULL
+              OR JSON_VALUE([PayloadJson],N'$.valueType') NOT IN
+                  (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress')
+          );
+
+        INSERT INTO [tb_import].[ClientInfoIssues]
+            ([BatchId],[ImportRecordId],[Severity],[IssueCode],[Message])
+        SELECT field.[BatchId],field.[ImportRecordId],N'Error',
+            N'ORPHAN_RESOURCE_FIELD',
+            N'This custom or standard field does not reference a staged resource.'
+        FROM [tb_import].[ClientInfoRecords] field
+        WHERE field.[BatchId]=@BatchId
+          AND field.[RecordType]=N'ResourceField'
+          AND NOT EXISTS
+          (
+              SELECT 1
+              FROM [tb_import].[ClientInfoRecords] resource
+              WHERE resource.[BatchId]=field.[BatchId]
+                AND resource.[RecordType]=N'Resource'
+                AND resource.[LocalKey]=field.[ParentLocalKey]
+                AND resource.[ReviewStatus]<>N'Rejected'
           );
 
         INSERT INTO [tb_import].[ClientInfoIssues]
@@ -26268,8 +26432,9 @@ BEGIN
               AND [ReviewStatus]<>N'Rejected'
             ORDER BY CASE [RecordType]
                 WHEN N'Location' THEN 1 WHEN N'Person' THEN 2
-                WHEN N'Resource' THEN 3 WHEN N'Credential' THEN 4
-                WHEN N'Fact' THEN 5 WHEN N'Equipment' THEN 6 ELSE 9 END,
+                WHEN N'Resource' THEN 3 WHEN N'ResourceField' THEN 4
+                WHEN N'Credential' THEN 5 WHEN N'Fact' THEN 6
+                WHEN N'Equipment' THEN 7 ELSE 9 END,
                 [ImportRecordId];
         OPEN record_cursor;
         FETCH NEXT FROM record_cursor INTO
@@ -26449,6 +26614,53 @@ BEGIN
                         [UpdatedByWindowsSid]=@ActorSid,
                         [UpdatedAtUtc]=@NowUtc
                     WHERE [ResourceId]=@EntityId;
+            END
+            ELSE IF @RecordType=N'ResourceField'
+            BEGIN
+                SET @ResourceId=NULL;
+                SELECT @ResourceId=[ResourceId]
+                FROM [tb_client].[Resources]
+                WHERE [ClientId]=@ClientId AND [LocalKey]=@ParentLocalKey;
+                IF @ResourceId IS NULL
+                    THROW 52463,N'A staged resource field could not be linked to its resource.',1;
+
+                SELECT @EntityId=[ResourceFieldId]
+                FROM [tb_client].[ResourceFields]
+                WHERE [ResourceId]=@ResourceId
+                  AND [FieldKey]=JSON_VALUE(@PayloadJson,N'$.fieldKey');
+                IF @EntityId IS NULL
+                BEGIN
+                    INSERT INTO [tb_client].[ResourceFields]
+                    (
+                        [ResourceId],[FieldKey],[FieldLabel],[ValueText],
+                        [ValueType],[SortOrder],[UpdatedByWindowsSid],[UpdatedAtUtc]
+                    )
+                    VALUES
+                    (
+                        @ResourceId,
+                        JSON_VALUE(@PayloadJson,N'$.fieldKey'),
+                        JSON_VALUE(@PayloadJson,N'$.fieldLabel'),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.valueText'),N''),
+                        COALESCE(NULLIF(JSON_VALUE(@PayloadJson,N'$.valueType'),N''),N'Text'),
+                        COALESCE(TRY_CONVERT(int,JSON_VALUE(@PayloadJson,N'$.sortOrder')),0),
+                        @ActorSid,@NowUtc
+                    );
+                    SET @EntityId=CONVERT(bigint,SCOPE_IDENTITY());
+                END
+                ELSE
+                    UPDATE [tb_client].[ResourceFields]
+                    SET
+                        [FieldLabel]=JSON_VALUE(@PayloadJson,N'$.fieldLabel'),
+                        [ValueText]=NULLIF(JSON_VALUE(@PayloadJson,N'$.valueText'),N''),
+                        [ValueType]=COALESCE(
+                            NULLIF(JSON_VALUE(@PayloadJson,N'$.valueType'),N''),
+                            N'Text'),
+                        [SortOrder]=COALESCE(
+                            TRY_CONVERT(int,JSON_VALUE(@PayloadJson,N'$.sortOrder')),
+                            0),
+                        [UpdatedByWindowsSid]=@ActorSid,
+                        [UpdatedAtUtc]=@NowUtc
+                    WHERE [ResourceFieldId]=@EntityId;
             END
             ELSE IF @RecordType=N'Credential'
             BEGIN
@@ -27702,6 +27914,10 @@ GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoLocation]
 GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoPerson]
     TO [tb_role_client_info_editor];
 GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoResource]
+    TO [tb_role_client_info_editor];
+GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoResourceField]
+    TO [tb_role_client_info_editor];
+GRANT EXECUTE ON OBJECT::[tb_app].[DeleteClientInfoResourceField]
     TO [tb_role_client_info_editor];
 GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoFact]
     TO [tb_role_client_info_editor];
@@ -33911,6 +34127,8 @@ FROM
         (N'tb_app.SaveClientInfoLocation',N'P'),
         (N'tb_app.SaveClientInfoPerson',N'P'),
         (N'tb_app.SaveClientInfoResource',N'P'),
+        (N'tb_app.SaveClientInfoResourceField',N'P'),
+        (N'tb_app.DeleteClientInfoResourceField',N'P'),
         (N'tb_app.SaveClientInfoFact',N'P'),
         (N'tb_app.SaveClientCredential',N'P'),
         (N'tb_app.SetClientCredentialSecret',N'P'),

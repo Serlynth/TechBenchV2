@@ -88,6 +88,10 @@ GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoPerson]
     TO [tb_role_client_info_editor];
 GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoResource]
     TO [tb_role_client_info_editor];
+GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoResourceField]
+    TO [tb_role_client_info_editor];
+GRANT EXECUTE ON OBJECT::[tb_app].[DeleteClientInfoResourceField]
+    TO [tb_role_client_info_editor];
 GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoFact]
     TO [tb_role_client_info_editor];
 GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientCredential]

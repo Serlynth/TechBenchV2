@@ -105,6 +105,10 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         public const string SaveClientInfoLocation = "[tb_app].[SaveClientInfoLocation]";
         public const string SaveClientInfoPerson = "[tb_app].[SaveClientInfoPerson]";
         public const string SaveClientInfoResource = "[tb_app].[SaveClientInfoResource]";
+        public const string SaveClientInfoResourceField =
+            "[tb_app].[SaveClientInfoResourceField]";
+        public const string DeleteClientInfoResourceField =
+            "[tb_app].[DeleteClientInfoResourceField]";
         public const string SaveClientInfoFact = "[tb_app].[SaveClientInfoFact]";
         public const string SaveClientCredential = "[tb_app].[SaveClientCredential]";
         public const string SetClientCredentialSecret =

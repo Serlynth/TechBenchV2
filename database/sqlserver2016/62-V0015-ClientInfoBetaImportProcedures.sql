@@ -153,7 +153,8 @@ BEGIN
     SET @LocalKey=NULLIF(LTRIM(RTRIM(@LocalKey)),N'');
     SET @ParentLocalKey=NULLIF(LTRIM(RTRIM(@ParentLocalKey)),N'');
     IF @RecordType NOT IN
-        (N'Profile',N'Location',N'Person',N'Resource',N'Credential',N'Fact',N'Equipment')
+        (N'Profile',N'Location',N'Person',N'Resource',N'ResourceField',
+         N'Credential',N'Fact',N'Equipment')
        OR @LocalKey IS NULL OR ISJSON(@PayloadJson)<>1
         THROW 52410,N'The staged Client Info record is invalid.',1;
     IF @ReviewStatus NOT IN
@@ -353,6 +354,39 @@ BEGIN
           (
               NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.sectionName'))),N'') IS NULL
               OR NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.fieldLabel'))),N'') IS NULL
+          );
+
+        INSERT INTO [tb_import].[ClientInfoIssues]
+            ([BatchId],[ImportRecordId],[Severity],[IssueCode],[Message])
+        SELECT [BatchId],[ImportRecordId],N'Error',N'RESOURCE_FIELD_INVALID',
+            N'This resource field requires a parent resource, field key, field label, and valid value type.'
+        FROM [tb_import].[ClientInfoRecords]
+        WHERE [BatchId]=@BatchId AND [RecordType]=N'ResourceField'
+          AND
+          (
+              NULLIF(LTRIM(RTRIM([ParentLocalKey])),N'') IS NULL
+              OR NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.fieldKey'))),N'') IS NULL
+              OR NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.fieldLabel'))),N'') IS NULL
+              OR JSON_VALUE([PayloadJson],N'$.valueType') NOT IN
+                  (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress')
+          );
+
+        INSERT INTO [tb_import].[ClientInfoIssues]
+            ([BatchId],[ImportRecordId],[Severity],[IssueCode],[Message])
+        SELECT field.[BatchId],field.[ImportRecordId],N'Error',
+            N'ORPHAN_RESOURCE_FIELD',
+            N'This custom or standard field does not reference a staged resource.'
+        FROM [tb_import].[ClientInfoRecords] field
+        WHERE field.[BatchId]=@BatchId
+          AND field.[RecordType]=N'ResourceField'
+          AND NOT EXISTS
+          (
+              SELECT 1
+              FROM [tb_import].[ClientInfoRecords] resource
+              WHERE resource.[BatchId]=field.[BatchId]
+                AND resource.[RecordType]=N'Resource'
+                AND resource.[LocalKey]=field.[ParentLocalKey]
+                AND resource.[ReviewStatus]<>N'Rejected'
           );
 
         INSERT INTO [tb_import].[ClientInfoIssues]
@@ -823,8 +857,9 @@ BEGIN
               AND [ReviewStatus]<>N'Rejected'
             ORDER BY CASE [RecordType]
                 WHEN N'Location' THEN 1 WHEN N'Person' THEN 2
-                WHEN N'Resource' THEN 3 WHEN N'Credential' THEN 4
-                WHEN N'Fact' THEN 5 WHEN N'Equipment' THEN 6 ELSE 9 END,
+                WHEN N'Resource' THEN 3 WHEN N'ResourceField' THEN 4
+                WHEN N'Credential' THEN 5 WHEN N'Fact' THEN 6
+                WHEN N'Equipment' THEN 7 ELSE 9 END,
                 [ImportRecordId];
         OPEN record_cursor;
         FETCH NEXT FROM record_cursor INTO
@@ -1004,6 +1039,53 @@ BEGIN
                         [UpdatedByWindowsSid]=@ActorSid,
                         [UpdatedAtUtc]=@NowUtc
                     WHERE [ResourceId]=@EntityId;
+            END
+            ELSE IF @RecordType=N'ResourceField'
+            BEGIN
+                SET @ResourceId=NULL;
+                SELECT @ResourceId=[ResourceId]
+                FROM [tb_client].[Resources]
+                WHERE [ClientId]=@ClientId AND [LocalKey]=@ParentLocalKey;
+                IF @ResourceId IS NULL
+                    THROW 52463,N'A staged resource field could not be linked to its resource.',1;
+
+                SELECT @EntityId=[ResourceFieldId]
+                FROM [tb_client].[ResourceFields]
+                WHERE [ResourceId]=@ResourceId
+                  AND [FieldKey]=JSON_VALUE(@PayloadJson,N'$.fieldKey');
+                IF @EntityId IS NULL
+                BEGIN
+                    INSERT INTO [tb_client].[ResourceFields]
+                    (
+                        [ResourceId],[FieldKey],[FieldLabel],[ValueText],
+                        [ValueType],[SortOrder],[UpdatedByWindowsSid],[UpdatedAtUtc]
+                    )
+                    VALUES
+                    (
+                        @ResourceId,
+                        JSON_VALUE(@PayloadJson,N'$.fieldKey'),
+                        JSON_VALUE(@PayloadJson,N'$.fieldLabel'),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.valueText'),N''),
+                        COALESCE(NULLIF(JSON_VALUE(@PayloadJson,N'$.valueType'),N''),N'Text'),
+                        COALESCE(TRY_CONVERT(int,JSON_VALUE(@PayloadJson,N'$.sortOrder')),0),
+                        @ActorSid,@NowUtc
+                    );
+                    SET @EntityId=CONVERT(bigint,SCOPE_IDENTITY());
+                END
+                ELSE
+                    UPDATE [tb_client].[ResourceFields]
+                    SET
+                        [FieldLabel]=JSON_VALUE(@PayloadJson,N'$.fieldLabel'),
+                        [ValueText]=NULLIF(JSON_VALUE(@PayloadJson,N'$.valueText'),N''),
+                        [ValueType]=COALESCE(
+                            NULLIF(JSON_VALUE(@PayloadJson,N'$.valueType'),N''),
+                            N'Text'),
+                        [SortOrder]=COALESCE(
+                            TRY_CONVERT(int,JSON_VALUE(@PayloadJson,N'$.sortOrder')),
+                            0),
+                        [UpdatedByWindowsSid]=@ActorSid,
+                        [UpdatedAtUtc]=@NowUtc
+                    WHERE [ResourceFieldId]=@EntityId;
             END
             ELSE IF @RecordType=N'Credential'
             BEGIN

@@ -234,6 +234,50 @@ public sealed partial class SqlServerTechBenchRepository
                 "SQL Server did not return the saved Client Info resource.");
     }
 
+    public ClientInfoResourceField SaveClientInfoResourceField(
+        ClientInfoResourceField field)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        return QueryAsync(
+            Procedures.SaveClientInfoResourceField,
+            command =>
+            {
+                AddBigInt(
+                    command,
+                    "@ResourceFieldId",
+                    field.ResourceFieldId > 0 ? field.ResourceFieldId : null);
+                AddBigInt(command, "@ResourceId", field.ResourceId);
+                AddRequiredText(command, "@FieldKey", 120, field.FieldKey);
+                AddRequiredText(command, "@FieldLabel", 200, field.FieldLabel);
+                AddMaxText(command, "@ValueText", field.ValueText);
+                AddRequiredText(command, "@ValueType", 24, field.ValueType);
+                AddInt(command, "@SortOrder", field.SortOrder);
+                AddBinary(command, "@ExpectedRowVersion", 8, field.RowVersion);
+                AddGuid(command, "@RequestId", Guid.NewGuid());
+            },
+            (reader, token) => ReadSingleAsync(
+                reader,
+                token,
+                ReadClientInfoResourceField),
+            CancellationToken.None).GetAwaiter().GetResult()
+            ?? throw new InvalidOperationException(
+                "SQL Server did not return the saved resource field.");
+    }
+
+    public void DeleteClientInfoResourceField(ClientInfoResourceField field)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        ExecuteNonQueryAsync(
+            Procedures.DeleteClientInfoResourceField,
+            command =>
+            {
+                AddBigInt(command, "@ResourceFieldId", field.ResourceFieldId);
+                AddBinary(command, "@ExpectedRowVersion", 8, field.RowVersion);
+                AddGuid(command, "@RequestId", Guid.NewGuid());
+            },
+            CancellationToken.None).GetAwaiter().GetResult();
+    }
+
     public ClientInfoFact SaveClientInfoFact(ClientInfoFact fact)
     {
         ArgumentNullException.ThrowIfNull(fact);
@@ -720,6 +764,20 @@ public sealed partial class SqlServerTechBenchRepository
         RowVersion = GetBytes(reader, "RowVersion")
     };
 
+    private static ClientInfoResourceField ReadClientInfoResourceField(
+        SqlDataReader reader) => new()
+    {
+        ResourceFieldId = GetInt64(reader, "ResourceFieldId"),
+        ResourceId = GetInt64(reader, "ResourceId"),
+        FieldKey = GetString(reader, "FieldKey"),
+        FieldLabel = GetString(reader, "FieldLabel"),
+        ValueText = GetString(reader, "ValueText"),
+        ValueType = GetString(reader, "ValueType", "Text"),
+        SortOrder = GetInt32(reader, "SortOrder"),
+        UpdatedAtUtc = GetNullableDateTime(reader, "UpdatedAtUtc"),
+        RowVersion = GetBytes(reader, "RowVersion")
+    };
+
     private static ClientInfoCredential ReadClientInfoCredential(
         SqlDataReader reader) => new()
     {
@@ -829,18 +887,7 @@ public sealed partial class SqlServerTechBenchRepository
         var resourceFields = await ReadNextResultAsync(
             reader,
             cancellationToken,
-            row => new ClientInfoResourceField
-            {
-                ResourceFieldId = GetInt64(row, "ResourceFieldId"),
-                ResourceId = GetInt64(row, "ResourceId"),
-                FieldKey = GetString(row, "FieldKey"),
-                FieldLabel = GetString(row, "FieldLabel"),
-                ValueText = GetString(row, "ValueText"),
-                ValueType = GetString(row, "ValueType", "Text"),
-                SortOrder = GetInt32(row, "SortOrder"),
-                UpdatedAtUtc = GetNullableDateTime(row, "UpdatedAtUtc"),
-                RowVersion = GetBytes(row, "RowVersion")
-            }).ConfigureAwait(false);
+            ReadClientInfoResourceField).ConfigureAwait(false);
         var credentials = await ReadNextResultAsync(
             reader,
             cancellationToken,

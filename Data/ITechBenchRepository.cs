@@ -150,6 +150,15 @@ public interface ITechBenchRepository
         throw new NotSupportedException(
             "Canonical Client Info requires the shared SQL Server beta extension.");
 
+    ClientInfoResourceField SaveClientInfoResourceField(
+        ClientInfoResourceField field) =>
+        throw new NotSupportedException(
+            "Canonical Client Info requires the shared SQL Server beta extension.");
+
+    void DeleteClientInfoResourceField(ClientInfoResourceField field) =>
+        throw new NotSupportedException(
+            "Canonical Client Info requires the shared SQL Server beta extension.");
+
     ClientInfoFact SaveClientInfoFact(ClientInfoFact fact) =>
         throw new NotSupportedException(
             "Canonical Client Info requires the shared SQL Server beta extension.");

@@ -55,6 +55,18 @@ public sealed class ClientInfoBetaTests
                     "Other Info"
                 ],
                 names);
+            Assert.Contains(
+                "Primary IP",
+                ReadHeaderRow(workbook, "Servers & Infrastructure"));
+            Assert.Contains(
+                "Public / WAN IP",
+                ReadHeaderRow(workbook, "Connection & Internet"));
+            Assert.Contains(
+                "SSID",
+                ReadHeaderRow(workbook, "Wi-Fi"));
+            Assert.Contains(
+                "Tenant / Instance",
+                ReadHeaderRow(workbook, "Applications & Cloud"));
         }
         finally
         {
@@ -92,7 +104,8 @@ public sealed class ClientInfoBetaTests
                 path,
                 "Connection & Internet",
                 "Firewall", "WatchGuard", "WatchGuard", "https://firewall.test",
-                "Main Office", "Active", "Primary firewall", "Verified");
+                "", "", "", "", "Main Office", "Active", "Primary firewall",
+                "Verified");
             AppendRow(
                 path,
                 "Equipment",
@@ -169,7 +182,8 @@ public sealed class ClientInfoBetaTests
             AppendRow(
                 path,
                 "Wi-Fi",
-                "Access Point", "Lobby AP", "Ubiquiti", "", "", "Active",
+                "Access Point", "Lobby AP", "Ubiquiti", "https://controller.test",
+                "10.0.20.10", "Lobby Wi-Fi", "20", "WPA2", "", "Active",
                 "Main wireless access point", "Verified");
 
             var package = service.Read(path);
@@ -181,6 +195,56 @@ public sealed class ClientInfoBetaTests
                 "\"resourceType\":\"Wi-Fi / Access Point\"",
                 resource.PayloadJson,
                 StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void WorkbookStandardAndCustomColumnsStageResourceFields()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "TechBenchClientInfoTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "Custom Fields.xlsx");
+            var service = new ClientInfoWorkbookService();
+            service.CreateTemplate(path, 477, "Acme Legal");
+            AppendHeader(path, "Servers & Infrastructure", "Custom: Rack");
+            AppendRow(
+                path,
+                "Servers & Infrastructure",
+                "Server", "DC01", "Dell", "dc01.example.test", "10.0.0.5",
+                "10.0.0.6", "10.0.0.7; 10.0.0.0/24", "", "Active",
+                "Domain controller", "Verified", "Rack A / U12");
+
+            var package = service.Read(path);
+
+            var resource = Assert.Single(
+                package.Records,
+                record => record.RecordType == "Resource");
+            var fields = package.Records
+                .Where(record => record.RecordType == "ResourceField")
+                .ToArray();
+            Assert.Equal(4, fields.Length);
+            Assert.All(fields, field => Assert.Equal(
+                resource.LocalKey,
+                field.ParentLocalKey));
+            Assert.Contains(
+                fields,
+                field => field.PayloadJson.Contains(
+                    "\"fieldKey\":\"primary_ip\"",
+                    StringComparison.Ordinal));
+            Assert.Contains(
+                fields,
+                field => field.PayloadJson.Contains(
+                    "\"fieldKey\":\"custom.rack\"",
+                    StringComparison.Ordinal));
         }
         finally
         {
@@ -340,6 +404,46 @@ public sealed class ClientInfoBetaTests
             var package = service.Read(path);
 
             Assert.Equal(
+                ClientInfoWorkbookService.ConnectionTemplateVersion,
+                package.TemplateVersion);
+            var resource = Assert.Single(
+                package.Records,
+                record => record.RecordType == "Resource");
+            Assert.Equal(
+                "Wi-Fi",
+                TechBench.Models.ClientInfoResourceCategories.Classify(
+                    System.Text.Json.JsonDocument.Parse(resource.PayloadJson)
+                        .RootElement.GetProperty("resourceType").GetString()));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void PreviousWifiWorkbookVersionRemainsImportable()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "TechBenchClientInfoTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "Previous Wi-Fi.xlsx");
+            var service = new ClientInfoWorkbookService();
+            service.CreateTemplate(path, 477, "Acme Legal");
+            ConvertGeneratedWorkbookToPreviousWifiVersion(path);
+            AppendRow(
+                path,
+                "Wi-Fi",
+                "Wireless Access Point", "Lobby Wi-Fi", "Ubiquiti", "", "",
+                "Active", "Previous beta workbook", "Verified");
+
+            var package = service.Read(path);
+
+            Assert.Equal(
                 ClientInfoWorkbookService.PreviousTemplateVersion,
                 package.TemplateVersion);
             var resource = Assert.Single(
@@ -373,6 +477,10 @@ public sealed class ClientInfoBetaTests
             "database",
             "sqlserver2016",
             "106-V0015-ClientInfoBetaVerify.sql");
+        var grants = Read(
+            "database",
+            "sqlserver2016",
+            "63-V0015-ClientInfoBetaGrants.sql");
 
         Assert.Contains(
             "SqlServer2016.ClientInfoBeta.0015",
@@ -394,6 +502,26 @@ public sealed class ClientInfoBetaTests
         Assert.Contains(
             "CompareClientInfoImportToFireDrill",
             imports,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "N'ResourceField'",
+            imports,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "SaveClientInfoResourceField",
+            procedures,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "DeleteClientInfoResourceField",
+            procedures,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoResourceField]",
+            grants,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "tb_app.SaveClientInfoResourceField",
+            verifier,
             StringComparison.Ordinal);
         Assert.Contains(
             "HASHBYTES(",
@@ -444,6 +572,9 @@ public sealed class ClientInfoBetaTests
             "ClientInfoBetaViewModel.cs");
         var mainWindow = Read("MainWindow.xaml.cs");
         var importWindow = Read("ClientInfoImportWindow.xaml");
+        var resourceGrid = Read(
+            "Controls",
+            "ClientInfoResourceDataGrid.cs");
 
         foreach (var tab in new[]
                  {
@@ -468,6 +599,10 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("SaveClientInfoLocation", viewModel, StringComparison.Ordinal);
         Assert.Contains("SaveClientInfoPerson", viewModel, StringComparison.Ordinal);
         Assert.Contains("SaveClientInfoResource", viewModel, StringComparison.Ordinal);
+        Assert.Contains("SaveClientInfoResourceField", viewModel, StringComparison.Ordinal);
+        Assert.Contains("ManageResourceFieldsCommand", viewModel, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Custom Fields\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("customFields", resourceGrid, StringComparison.Ordinal);
         Assert.Contains("RefreshResourceGroups", viewModel, StringComparison.Ordinal);
         Assert.Contains("Computers, printers", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Computers, servers", xaml, StringComparison.Ordinal);
@@ -649,6 +784,80 @@ public sealed class ClientInfoBetaTests
         part.Worksheet.Save();
     }
 
+    private static void AppendHeader(
+        string path,
+        string sheetName,
+        string header)
+    {
+        using var workbook = SpreadsheetDocument.Open(path, true);
+        var part = GetWorksheetPart(workbook, sheetName);
+        var headerRow = part.Worksheet.GetFirstChild<SheetData>()!
+            .Elements<Row>()
+            .Single(row => row.RowIndex?.Value == 1U);
+        var column = headerRow.Elements<Cell>().Count() + 1;
+        headerRow.Append(new Cell
+        {
+            CellReference = $"{TestColumnName(column)}1",
+            DataType = CellValues.InlineString,
+            InlineString = new InlineString(new Text(header))
+        });
+        part.Worksheet.Save();
+    }
+
+    private static string[] ReadHeaderRow(
+        SpreadsheetDocument workbook,
+        string sheetName) =>
+        GetWorksheetPart(workbook, sheetName)
+            .Worksheet.GetFirstChild<SheetData>()!
+            .Elements<Row>()
+            .Single(row => row.RowIndex?.Value == 1U)
+            .Elements<Cell>()
+            .Select(cell => cell.InlineString?.Text?.Text ?? string.Empty)
+            .ToArray();
+
+    private static WorksheetPart GetWorksheetPart(
+        SpreadsheetDocument workbook,
+        string sheetName)
+    {
+        var sheet = workbook.WorkbookPart!.Workbook.Sheets!
+            .Elements<Sheet>()
+            .Single(item => string.Equals(
+                item.Name?.Value,
+                sheetName,
+                StringComparison.Ordinal));
+        return (WorksheetPart)workbook.WorkbookPart.GetPartById(sheet.Id!);
+    }
+
+    private static void SetLegacyResourceHeaders(
+        WorkbookPart workbookPart,
+        IEnumerable<Sheet> sheets)
+    {
+        foreach (var sheet in sheets)
+        {
+            var part = (WorksheetPart)workbookPart.GetPartById(sheet.Id!);
+            var headerRow = part.Worksheet.GetFirstChild<SheetData>()!
+                .Elements<Row>()
+                .Single(row => row.RowIndex?.Value == 1U);
+            headerRow.RemoveAllChildren<Cell>();
+            var headers = new[]
+            {
+                "Type", "Name", "Provider", "Address/URL", "Location",
+                "Status", "Notes", "Review Status"
+            };
+            for (var index = 0; index < headers.Length; index++)
+            {
+                headerRow.Append(new Cell
+                {
+                    CellReference = $"{TestColumnName(index + 1)}1",
+                    DataType = CellValues.InlineString,
+                    InlineString = new InlineString(new Text(headers[index]))
+                });
+            }
+
+            part.Worksheet.Save();
+        }
+    }
+
     private static void ConvertGeneratedWorkbookToFriendlyVersion(string path)
     {
         using var workbook = SpreadsheetDocument.Open(path, true);
@@ -661,6 +870,9 @@ public sealed class ClientInfoBetaTests
 
         sheets.Single(sheet => sheet.Name?.Value == "Connection & Internet").Name =
             "Systems & Services";
+        SetLegacyResourceHeaders(
+            workbookPart,
+            sheets.Where(sheet => sheet.Name?.Value == "Systems & Services"));
         foreach (var name in new[]
                  {
                      "Servers & Infrastructure",
@@ -690,6 +902,15 @@ public sealed class ClientInfoBetaTests
         sheets.Single(sheet => sheet.Name?.Value == "Connection & Internet").Name =
             "Network & Internet";
         sheets.Single(sheet => sheet.Name?.Value == "Wi-Fi").Remove();
+        SetLegacyResourceHeaders(
+            workbookPart,
+            sheets.Where(sheet => sheet.Name?.Value is
+                "Servers & Infrastructure" or
+                "Network & Internet" or
+                "Applications & Cloud" or
+                "Domains & Email" or
+                "Backup & Security" or
+                "Vendors & Services"));
         workbookPart.Workbook.Save();
     }
 
@@ -702,8 +923,40 @@ public sealed class ClientInfoBetaTests
         SetTemplateVersion(
             workbookPart,
             sheets,
-            ClientInfoWorkbookService.PreviousTemplateVersion);
+            ClientInfoWorkbookService.ConnectionTemplateVersion);
         sheets.Single(sheet => sheet.Name?.Value == "Wi-Fi").Remove();
+        SetLegacyResourceHeaders(
+            workbookPart,
+            sheets.Where(sheet => sheet.Name?.Value is
+                "Servers & Infrastructure" or
+                "Connection & Internet" or
+                "Applications & Cloud" or
+                "Domains & Email" or
+                "Backup & Security" or
+                "Vendors & Services"));
+        workbookPart.Workbook.Save();
+    }
+
+    private static void ConvertGeneratedWorkbookToPreviousWifiVersion(
+        string path)
+    {
+        using var workbook = SpreadsheetDocument.Open(path, true);
+        var workbookPart = workbook.WorkbookPart!;
+        var sheets = workbookPart.Workbook.Sheets!.Elements<Sheet>().ToList();
+        SetTemplateVersion(
+            workbookPart,
+            sheets,
+            ClientInfoWorkbookService.PreviousTemplateVersion);
+        SetLegacyResourceHeaders(
+            workbookPart,
+            sheets.Where(sheet => sheet.Name?.Value is
+                "Servers & Infrastructure" or
+                "Connection & Internet" or
+                "Wi-Fi" or
+                "Applications & Cloud" or
+                "Domains & Email" or
+                "Backup & Security" or
+                "Vendors & Services"));
         workbookPart.Workbook.Save();
     }
 

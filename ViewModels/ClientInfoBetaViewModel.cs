@@ -71,6 +71,9 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         EditResourceCommand = new RelayCommand(
             item => EditResource(item as ClientInfoResource ?? SelectedResource),
             _ => CanEdit && SelectedResource is not null);
+        ManageResourceFieldsCommand = new RelayCommand(
+            _ => ManageResourceFields(),
+            _ => CanEdit && SelectedResource is not null);
         AddCredentialCommand = new RelayCommand(
             _ => EditCredential(null),
             _ => CanEdit);
@@ -242,6 +245,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             if (SetProperty(ref _selectedResource, value))
             {
                 EditResourceCommand.RaiseCanExecuteChanged();
+                ManageResourceFieldsCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -306,6 +310,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     public RelayCommand EditPersonCommand { get; }
     public RelayCommand AddResourceCommand { get; }
     public RelayCommand EditResourceCommand { get; }
+    public RelayCommand ManageResourceFieldsCommand { get; }
     public RelayCommand AddCredentialCommand { get; }
     public RelayCommand EditCredentialCommand { get; }
     public RelayCommand AddFactCommand { get; }
@@ -484,30 +489,58 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         ClientInfoResource? current,
         string? requestedCategory = null)
     {
+        var editingCategory = current?.Category
+            ?? ClientInfoResourceCategories.NormalizeCategory(requestedCategory);
+        var standardFields = ClientInfoResourceFieldDefinitions.ForCategory(
+            editingCategory);
         var locationOptions = new[] { "(None)" }
             .Concat(Locations.Select(item => item.Name))
             .ToArray();
+        var editorFields = new List<ClientInfoEditField>
+        {
+            new(
+                "category",
+                "Category",
+                editingCategory,
+                true,
+                Options: ResourceCategories),
+            new("name", "Name", current?.Name ?? "", true),
+            new("type", "Type", current?.TypeLabel ?? "", true),
+            new(
+                "location",
+                "Location",
+                current?.LocationName ?? "(None)",
+                Options: locationOptions),
+            new("provider", "Provider", current?.Provider ?? ""),
+            new(
+                "address",
+                ClientInfoResourceFieldDefinitions.AddressLabelForCategory(
+                    editingCategory),
+                current?.AddressOrUrl ?? "")
+        };
+        editorFields.AddRange(standardFields.Select(field =>
+            new ClientInfoEditField(
+                StandardFieldEditorKey(field.FieldKey),
+                field.FieldLabel,
+                current?.GetFieldValue(field.FieldKey) ?? "")));
+        editorFields.AddRange(
+        [
+            new("status", "Status", current?.Status ?? ""),
+            new("notes", "Notes", current?.Notes ?? "", IsMultiline: true),
+            new(
+                "active",
+                "Active",
+                YesNo(current?.IsActive ?? true),
+                Options: BooleanOptions),
+            new(
+                "review",
+                "Review status",
+                current?.ReviewStatus ?? "Unverified",
+                Options: ReviewStatuses)
+        ]);
         var values = ShowEditor(
             current is null ? "Add technology or service" : "Edit technology or service",
-            [
-                new("category", "Category",
-                    current?.Category
-                        ?? ClientInfoResourceCategories.NormalizeCategory(requestedCategory),
-                    true,
-                    Options: ResourceCategories),
-                new("name", "Name", current?.Name ?? "", true),
-                new("type", "Type", current?.TypeLabel ?? "", true),
-                new("location", "Location", current?.LocationName ?? "(None)",
-                    Options: locationOptions),
-                new("provider", "Provider", current?.Provider ?? ""),
-                new("address", "Address / URL", current?.AddressOrUrl ?? ""),
-                new("status", "Status", current?.Status ?? ""),
-                new("notes", "Notes", current?.Notes ?? "", IsMultiline: true),
-                new("active", "Active", YesNo(current?.IsActive ?? true),
-                    Options: BooleanOptions),
-                new("review", "Review status", current?.ReviewStatus ?? "Unverified",
-                    Options: ReviewStatuses)
-            ]);
+            editorFields);
         if (values is null)
         {
             return;
@@ -521,7 +554,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             "technology or service",
             () =>
             {
-                _repository.SaveClientInfoResource((current ?? new ClientInfoResource
+                var savedResource = _repository.SaveClientInfoResource(
+                    (current ?? new ClientInfoResource
                 {
                     ClientId = ClientId
                 }) with
@@ -539,8 +573,60 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                     IsActive = IsYes(values["active"]),
                     ReviewStatus = values["review"]
                 });
+                foreach (var definition in standardFields)
+                {
+                    var existing = current?.Fields.FirstOrDefault(field =>
+                        string.Equals(
+                            field.FieldKey,
+                            definition.FieldKey,
+                            StringComparison.OrdinalIgnoreCase));
+                    var value = values[StandardFieldEditorKey(
+                        definition.FieldKey)];
+                    if (string.IsNullOrWhiteSpace(value))
+                    {
+                        if (existing is not null)
+                        {
+                            _repository.DeleteClientInfoResourceField(existing);
+                        }
+
+                        continue;
+                    }
+
+                    _repository.SaveClientInfoResourceField(
+                        (existing ?? new ClientInfoResourceField
+                        {
+                            ResourceId = savedResource.ResourceId,
+                            FieldKey = definition.FieldKey
+                        }) with
+                        {
+                            ResourceId = savedResource.ResourceId,
+                            FieldLabel = definition.FieldLabel,
+                            ValueText = value,
+                            ValueType = definition.ValueType,
+                            SortOrder = definition.SortOrder
+                        });
+                }
                 Refresh();
             });
+    }
+
+    private void ManageResourceFields()
+    {
+        if (SelectedResource is null)
+        {
+            return;
+        }
+
+        var editor = new ClientInfoResourceFieldsWindow(
+            SelectedResource,
+            _repository,
+            _dialogs)
+        {
+            Owner = FindOwner()
+        };
+        editor.ShowDialog();
+        Refresh();
+        StatusMessage = "Custom resource fields refreshed.";
     }
 
     private void RefreshResourceGroups()
@@ -959,7 +1045,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 
     private static bool IsConcurrencyConflict(SqlException exception) =>
         exception.Number is 52324 or 52332 or 52343 or 52354 or 52363
-            or 52375 or 52384 or 52441 or 52453 or 52460;
+            or 52358 or 52359 or 52375 or 52384 or 52441 or 52453 or 52460;
 
     private void ShowError(string title, Exception exception)
     {
@@ -988,6 +1074,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     }
 
     private static string YesNo(bool value) => value ? "Yes" : "No";
+    private static string StandardFieldEditorKey(string fieldKey) =>
+        $"resource_field_{fieldKey}";
     private static bool IsYes(string value) =>
         value.Equals("Yes", StringComparison.OrdinalIgnoreCase);
 

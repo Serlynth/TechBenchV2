@@ -20,7 +20,14 @@ public partial class ClientInfoBetaWindow : Window
         Func<ClientInfoBetaViewModel, RelayCommand> commandSelector)
     {
         if (e.ChangedButton != MouseButton.Left
-            || sender is not DataGrid { DataContext: ClientInfoBetaViewModel viewModel })
+            || sender is not DataGrid dataGrid)
+        {
+            return;
+        }
+
+        var viewModel = dataGrid.DataContext as ClientInfoBetaViewModel
+            ?? Window.GetWindow(dataGrid)?.DataContext as ClientInfoBetaViewModel;
+        if (viewModel is null)
         {
             return;
         }

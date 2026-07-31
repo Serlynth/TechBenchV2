@@ -13,8 +13,9 @@ namespace TechBench.Services;
 
 public sealed class ClientInfoWorkbookService
 {
-    public const string TemplateVersion = "TB-CI-5";
-    public const string PreviousTemplateVersion = "TB-CI-4";
+    public const string TemplateVersion = "TB-CI-6";
+    public const string PreviousTemplateVersion = "TB-CI-5";
+    public const string ConnectionTemplateVersion = "TB-CI-4";
     public const string CategorizedTemplateVersion = "TB-CI-3";
     public const string FriendlyTemplateVersion = "TB-CI-2";
     public const string LegacyTemplateVersion = "TB-CI-1";
@@ -47,7 +48,7 @@ public sealed class ClientInfoWorkbookService
             "Start Here",
             [
                 ["TechBench Client Info Migration Workbook", ""],
-                ["What to do", "Copy cleaned information into the matching category tabs. Switches and network appliances go under Servers & Infrastructure; wireless networks and access points go under Wi-Fi; antivirus and EDR go under Backup & Security."],
+                ["What to do", "Copy cleaned information into the matching category tabs. Use the category-specific IP and network columns. You may add optional columns whose headings begin with 'Custom:' for unusual client-specific details."],
                 ["Review each row", "Choose Verified, Keep as-is, Needs review, or Do not import. A workbook cannot be approved while a populated row is blank or still Needs review."],
                 ["Passwords", "Put passwords and other secrets only on the Passwords tab. They are encrypted when imported and are never written to import logs."],
                 ["Template Version", TemplateVersion],
@@ -87,41 +88,32 @@ public sealed class ClientInfoWorkbookService
             sheets,
             ref sheetId,
             "Servers & Infrastructure",
-            [
-                ["Type", "Name", "Provider", "Address/URL", "Location", "Status",
-                 "Notes", "Review Status"]
-            ],
-            columnWidths: [22, 28, 24, 34, 22, 18, 40, 22]);
+            [ResourceHeaders(ClientInfoResourceCategories.ServersInfrastructure)],
+            columnWidths: ResourceColumnWidths(
+                ClientInfoResourceCategories.ServersInfrastructure));
         AddSheet(
             workbookPart,
             sheets,
             ref sheetId,
             "Connection & Internet",
-            [
-                ["Type", "Name", "Provider", "Address/URL", "Location", "Status",
-                 "Notes", "Review Status"]
-            ],
-            columnWidths: [22, 28, 24, 34, 22, 18, 40, 22]);
+            [ResourceHeaders(ClientInfoResourceCategories.ConnectionInternet)],
+            columnWidths: ResourceColumnWidths(
+                ClientInfoResourceCategories.ConnectionInternet));
         AddSheet(
             workbookPart,
             sheets,
             ref sheetId,
             "Wi-Fi",
-            [
-                ["Type", "Name", "Provider", "Address/URL", "Location", "Status",
-                 "Notes", "Review Status"]
-            ],
-            columnWidths: [22, 28, 24, 34, 22, 18, 40, 22]);
+            [ResourceHeaders(ClientInfoResourceCategories.Wifi)],
+            columnWidths: ResourceColumnWidths(ClientInfoResourceCategories.Wifi));
         AddSheet(
             workbookPart,
             sheets,
             ref sheetId,
             "Applications & Cloud",
-            [
-                ["Type", "Name", "Provider", "Address/URL", "Location", "Status",
-                 "Notes", "Review Status"]
-            ],
-            columnWidths: [22, 28, 24, 34, 22, 18, 40, 22]);
+            [ResourceHeaders(ClientInfoResourceCategories.ApplicationsCloud)],
+            columnWidths: ResourceColumnWidths(
+                ClientInfoResourceCategories.ApplicationsCloud));
         AddSheet(
             workbookPart,
             sheets,
@@ -204,6 +196,10 @@ public sealed class ClientInfoWorkbookService
                 StringComparison.OrdinalIgnoreCase)
             && !string.Equals(
                 version,
+                ConnectionTemplateVersion,
+                StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(
+                version,
                 CategorizedTemplateVersion,
                 StringComparison.OrdinalIgnoreCase)
             && !string.Equals(
@@ -216,7 +212,7 @@ public sealed class ClientInfoWorkbookService
                 StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException(
-                $"Template version '{version}' is not supported. Expected {TemplateVersion}, {PreviousTemplateVersion}, {CategorizedTemplateVersion}, {FriendlyTemplateVersion}, or {LegacyTemplateVersion}.");
+                $"Template version '{version}' is not supported. Expected {TemplateVersion}, {PreviousTemplateVersion}, {ConnectionTemplateVersion}, {CategorizedTemplateVersion}, {FriendlyTemplateVersion}, or {LegacyTemplateVersion}.");
         }
 
         if (!Guid.TryParse(GetRequired(info, "Workbook ID"), out var workbookId))
@@ -260,13 +256,21 @@ public sealed class ClientInfoWorkbookService
                 StringComparison.OrdinalIgnoreCase)
             || string.Equals(
                 version,
+                ConnectionTemplateVersion,
+                StringComparison.OrdinalIgnoreCase)
+            || string.Equals(
+                version,
                 CategorizedTemplateVersion,
                 StringComparison.OrdinalIgnoreCase))
         {
-            var isCurrentTemplate = string.Equals(
-                version,
-                TemplateVersion,
-                StringComparison.OrdinalIgnoreCase);
+            var hasWifiSheet = string.Equals(
+                    version,
+                    TemplateVersion,
+                    StringComparison.OrdinalIgnoreCase)
+                || string.Equals(
+                    version,
+                    PreviousTemplateVersion,
+                    StringComparison.OrdinalIgnoreCase);
             var connectionSheetName = string.Equals(
                 version,
                 CategorizedTemplateVersion,
@@ -298,7 +302,7 @@ public sealed class ClientInfoWorkbookService
                 ClientInfoResourceCategories.ConnectionInternet,
                 connectionSheetName,
                 "network");
-            if (isCurrentTemplate)
+            if (hasWifiSheet)
             {
                 ParseSimpleResources(
                     GetSheet(tables, "Wi-Fi"),
@@ -553,6 +557,10 @@ public sealed class ClientInfoWorkbookService
             AddFriendlyLookup(keys, name, localKey);
             var locationName = Value(row.Values, row.Headers, "Location");
             var type = Value(row.Values, row.Headers, "Type");
+            var reviewStatus = NormalizeReviewStatus(
+                Value(row.Values, row.Headers, "Review Status"));
+            var addressLabel = ClientInfoResourceFieldDefinitions
+                .AddressLabelForCategory(category);
             records.Add(new ClientInfoImportRecord(
                 "Resource",
                 localKey,
@@ -570,7 +578,15 @@ public sealed class ClientInfoWorkbookService
                         : ClientInfoResourceCategories.Encode(category, type),
                     name,
                     provider = Value(row.Values, row.Headers, "Provider"),
-                    addressOrUrl = Value(row.Values, row.Headers, "Address/URL"),
+                    addressOrUrl = ValueAny(
+                        row.Values,
+                        row.Headers,
+                        addressLabel,
+                        "Address/URL",
+                        "Address / URL",
+                        "Hostname / URL",
+                        "Controller / URL",
+                        "URL"),
                     status = Value(row.Values, row.Headers, "Status"),
                     notes = Value(
                         row.Values,
@@ -581,8 +597,122 @@ public sealed class ClientInfoWorkbookService
                 }),
                 sourceSheet,
                 row.RowNumber,
-                NormalizeReviewStatus(Value(row.Values, row.Headers, "Review Status"))));
+                reviewStatus));
+            ParseSimpleResourceFields(
+                row.Values,
+                row.Headers,
+                row.RowNumber,
+                records,
+                category,
+                sourceSheet,
+                keyPrefix,
+                localKey,
+                reviewStatus);
         }
+    }
+
+    private static void ParseSimpleResourceFields(
+        string[] values,
+        string[] headers,
+        int rowNumber,
+        ICollection<ClientInfoImportRecord> records,
+        string? category,
+        string sourceSheet,
+        string keyPrefix,
+        string resourceLocalKey,
+        string reviewStatus)
+    {
+        foreach (var definition in ClientInfoResourceFieldDefinitions
+                     .ForCategory(category))
+        {
+            var value = Value(values, headers, definition.FieldLabel);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                AddResourceFieldRecord(
+                    records,
+                    sourceSheet,
+                    rowNumber,
+                    keyPrefix,
+                    resourceLocalKey,
+                    definition.FieldKey,
+                    definition.FieldLabel,
+                    value,
+                    definition.ValueType,
+                    definition.SortOrder,
+                    reviewStatus);
+            }
+        }
+
+        var customKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < headers.Length && index < values.Length; index++)
+        {
+            var header = headers[index].Trim();
+            if (!header.StartsWith("Custom:", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var label = header["Custom:".Length..].Trim();
+            var value = values[index].Trim();
+            if (string.IsNullOrWhiteSpace(label) || string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            var fieldKey = ClientInfoResourceFieldDefinitions.CustomFieldKey(label);
+            if (!customKeys.Add(fieldKey))
+            {
+                throw new InvalidDataException(
+                    $"{sourceSheet} has duplicate custom field columns named '{label}'.");
+            }
+
+            AddResourceFieldRecord(
+                records,
+                sourceSheet,
+                rowNumber,
+                keyPrefix,
+                resourceLocalKey,
+                fieldKey,
+                label,
+                value,
+                "Text",
+                100 + index,
+                reviewStatus);
+        }
+    }
+
+    private static void AddResourceFieldRecord(
+        ICollection<ClientInfoImportRecord> records,
+        string sourceSheet,
+        int rowNumber,
+        string keyPrefix,
+        string resourceLocalKey,
+        string fieldKey,
+        string fieldLabel,
+        string valueText,
+        string valueType,
+        int sortOrder,
+        string reviewStatus)
+    {
+        var identity = Encoding.UTF8.GetBytes(
+            $"{keyPrefix}|{rowNumber}|{fieldKey}");
+        var suffix = Convert.ToHexString(SHA256.HashData(identity))
+            .ToLowerInvariant()[..12];
+        records.Add(new ClientInfoImportRecord(
+            "ResourceField",
+            $"{keyPrefix}-field-{rowNumber}-{suffix}",
+            resourceLocalKey,
+            JsonSerializer.Serialize(new
+            {
+                fieldKey,
+                fieldLabel,
+                valueText,
+                valueType,
+                sortOrder
+            }),
+            sourceSheet,
+            rowNumber,
+            reviewStatus));
     }
 
     private static void ParseSimpleEquipment(
@@ -1086,6 +1216,24 @@ public sealed class ClientInfoWorkbookService
         return preserveWhitespace ? values[index] : values[index].Trim();
     }
 
+    private static string ValueAny(
+        IReadOnlyList<string> values,
+        IReadOnlyList<string> headers,
+        params string[] candidates)
+    {
+        foreach (var candidate in candidates.Distinct(
+                     StringComparer.OrdinalIgnoreCase))
+        {
+            var value = Value(values, headers, candidate);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
+    }
+
     private static string GetRequired(
         IReadOnlyDictionary<string, string> values,
         string key)
@@ -1160,6 +1308,34 @@ public sealed class ClientInfoWorkbookService
             _ => value.ToString() ?? string.Empty
         };
 
+    private static string[] ResourceHeaders(string category) =>
+        [
+            "Type",
+            "Name",
+            "Provider",
+            ClientInfoResourceFieldDefinitions.AddressLabelForCategory(category),
+            .. ClientInfoResourceFieldDefinitions.ForCategory(category)
+                .Select(field => field.FieldLabel),
+            "Location",
+            "Status",
+            "Notes",
+            "Review Status"
+        ];
+
+    private static double[] ResourceColumnWidths(string category) =>
+        [
+            22,
+            28,
+            24,
+            34,
+            .. ClientInfoResourceFieldDefinitions.ForCategory(category)
+                .Select(field => field.ValueType == "IpAddress" ? 20D : 22D),
+            22,
+            18,
+            40,
+            22
+        ];
+
     private static void AddSheet(
         WorkbookPart workbookPart,
         Sheets sheets,
@@ -1219,7 +1395,7 @@ public sealed class ClientInfoWorkbookService
                     : formatFirstRowAsTitle && rowIndex == 0
                         ? 34D
                         : formatFirstRowAsTitle && rowIndex == 1
-                            ? 38D
+                            ? 58D
                             : formatFirstRowAsTitle && rowIndex == 2
                                 ? 52D
                                 : formatFirstRowAsTitle && rowIndex == 3
