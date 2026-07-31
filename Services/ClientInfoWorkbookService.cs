@@ -52,7 +52,7 @@ public sealed class ClientInfoWorkbookService
                 ["Internal Client ID", clientId.ToString(CultureInfo.InvariantCulture)],
                 ["Client Name", clientName],
                 ["Summary", ""],
-                ["Review Status", "Unverified"],
+                ["Review Status", "Verified"],
                 ["Important", "Do not change the internal client ID or reuse this workbook for another client."]
             ],
             headerRow: 0,

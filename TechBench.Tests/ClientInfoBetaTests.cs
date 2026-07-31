@@ -30,6 +30,7 @@ public sealed class ClientInfoBetaTests
             Assert.Equal(32, package.ContentSha256.Length);
             var profile = Assert.Single(package.Records);
             Assert.Equal("Profile", profile.RecordType);
+            Assert.Equal("Verified", profile.ReviewStatus);
             Assert.Empty(package.Secrets);
 
             using var workbook = SpreadsheetDocument.Open(path, false);
