@@ -15,6 +15,7 @@ public sealed class V2AppUpdateService :
     public const string InventoryBetaReleaseChannel = "inventory-beta";
     public const string ClientInfoBetaReleaseChannel = "client-info-beta";
     public const bool InventoryBetaAvailable = false;
+    public const bool ClientInfoBetaAvailable = true;
 #if TECHBENCH_CLIENT_INFO_BETA
     public const string CompiledReleaseChannel = ClientInfoBetaReleaseChannel;
 #elif TECHBENCH_INVENTORY_BETA
@@ -64,10 +65,15 @@ public sealed class V2AppUpdateService :
         string? releaseChannel,
         string? fallbackChannel = null)
     {
-#if TECHBENCH_CLIENT_INFO_BETA
-        return ClientInfoBetaReleaseChannel;
-#else
         var selected = releaseChannel?.Trim();
+        if (ClientInfoBetaAvailable
+            && selected?.Equals(
+                ClientInfoBetaReleaseChannel,
+                StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return ClientInfoBetaReleaseChannel;
+        }
+
         if (InventoryBetaAvailable
             && selected?.Equals(
                 InventoryBetaReleaseChannel,
@@ -83,13 +89,20 @@ public sealed class V2AppUpdateService :
             return StableReleaseChannel;
         }
 
+        if (ClientInfoBetaAvailable
+            && fallbackChannel?.Equals(
+                ClientInfoBetaReleaseChannel,
+                StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return ClientInfoBetaReleaseChannel;
+        }
+
         return InventoryBetaAvailable
             && fallbackChannel?.Equals(
                 InventoryBetaReleaseChannel,
                 StringComparison.OrdinalIgnoreCase) == true
             ? InventoryBetaReleaseChannel
             : StableReleaseChannel;
-#endif
     }
 
     private static UpdateManager CreateUpdateManager(string releaseChannel) =>

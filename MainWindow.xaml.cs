@@ -532,6 +532,7 @@ public partial class MainWindow : Window
             return;
         }
 
+#if TECHBENCH_CLIENT_INFO_BETA
         ClientInfoBetaViewModel? canonicalViewModel;
         try
         {
@@ -578,6 +579,7 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
+#endif
 
         var profileWindow = new ClientInfoWindow
         {

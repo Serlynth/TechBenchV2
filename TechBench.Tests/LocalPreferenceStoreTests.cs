@@ -109,6 +109,29 @@ public sealed class LocalPreferenceStoreTests
     }
 
     [Fact]
+    public void PreservesClientInfoBetaPreference()
+    {
+        var (directory, path) = CreateTestPath();
+        try
+        {
+            var preferences = LocalPreferenceStore.LoadOrCreate(path);
+            preferences.UpdateChannel =
+                V2AppUpdateService.ClientInfoBetaReleaseChannel;
+
+            LocalPreferenceStore.Save(preferences, path);
+            var loaded = LocalPreferenceStore.LoadOrCreate(path);
+
+            Assert.Equal(
+                V2AppUpdateService.ClientInfoBetaReleaseChannel,
+                loaded.UpdateChannel);
+        }
+        finally
+        {
+            DeleteDirectory(directory);
+        }
+    }
+
+    [Fact]
     public void NormalizesValuesAndPersistsOnlyAllowedPreferenceFields()
     {
         var (directory, path) = CreateTestPath();

@@ -22,6 +22,7 @@ public sealed class V2AppUpdateServiceTests
             "client-info-beta",
             V2AppUpdateService.ClientInfoBetaReleaseChannel);
         Assert.False(V2AppUpdateService.InventoryBetaAvailable);
+        Assert.True(V2AppUpdateService.ClientInfoBetaAvailable);
         Assert.Equal("v2", V2AppUpdateService.CompiledReleaseChannel);
     }
 
@@ -46,6 +47,15 @@ public sealed class V2AppUpdateServiceTests
             V2AppUpdateService.ResolveReleaseChannel(
                 null,
                 V2AppUpdateService.InventoryBetaReleaseChannel));
+        Assert.Equal(
+            V2AppUpdateService.ClientInfoBetaReleaseChannel,
+            V2AppUpdateService.ResolveReleaseChannel(
+                V2AppUpdateService.ClientInfoBetaReleaseChannel));
+        Assert.Equal(
+            V2AppUpdateService.ClientInfoBetaReleaseChannel,
+            V2AppUpdateService.ResolveReleaseChannel(
+                null,
+                V2AppUpdateService.ClientInfoBetaReleaseChannel));
     }
 
     [Fact]
@@ -66,8 +76,9 @@ public sealed class V2AppUpdateServiceTests
             "'TechBenchClientInfoBetaSetup.exe'",
             source,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "'CSRI.TechBenchV2.ClientInfoBeta'",
+        Assert.Contains("$packId = 'CSRI.TechBenchV2'", source, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "CSRI.TechBenchV2.ClientInfoBeta",
             source,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -111,21 +122,32 @@ public sealed class V2AppUpdateServiceTests
             "public const bool InventoryBetaAvailable = false;",
             service,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "public const bool ClientInfoBetaAvailable = true;",
+            service,
+            StringComparison.Ordinal);
     }
 
     [Fact]
-    public void StableWorkspaceDoesNotOfferADeadBetaChannel()
+    public void StableWorkspaceOffersTheClientInfoBetaChannel()
     {
         var mainWindow = File.ReadAllText(RepositoryFile("MainWindow.xaml"));
+        var connectionWindow = File.ReadAllText(
+            RepositoryFile("DatabaseConnectionWindow.xaml"));
+        var mainWindowCode = File.ReadAllText(
+            RepositoryFile("MainWindow.xaml.cs"));
 
-        Assert.DoesNotContain(
-            "Use Inventory Beta update channel",
+        Assert.Contains(
+            "Use Client Info Beta update channel",
             mainWindow,
             StringComparison.Ordinal);
         Assert.Contains(
-            "All completed beta functionality is included in TechBench 0.6.0.",
-            File.ReadAllText(
-                RepositoryFile(@"ViewModels\MainWindowViewModel.cs")),
+            "Check the Client Info Beta channel instead of Stable",
+            connectionWindow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "#if TECHBENCH_CLIENT_INFO_BETA",
+            mainWindowCode,
             StringComparison.Ordinal);
     }
 

@@ -33,7 +33,7 @@ public partial class DatabaseConnectionWindow : Window
                 _localPreferences.UpdateChannel,
                 V2AppUpdateService.CompiledReleaseChannel);
         UpdateChannelCheckBox.IsChecked = selectedChannel.Equals(
-            V2AppUpdateService.InventoryBetaReleaseChannel,
+            V2AppUpdateService.ClientInfoBetaReleaseChannel,
             StringComparison.OrdinalIgnoreCase);
         UpdateChannelCheckBox.IsEnabled =
             _updateService is IAppUpdateChannelService;
@@ -183,7 +183,7 @@ public partial class DatabaseConnectionWindow : Window
         }
 
         var selectedChannel = UpdateChannelCheckBox.IsChecked == true
-            ? V2AppUpdateService.InventoryBetaReleaseChannel
+            ? V2AppUpdateService.ClientInfoBetaReleaseChannel
             : V2AppUpdateService.StableReleaseChannel;
         try
         {
@@ -193,8 +193,8 @@ public partial class DatabaseConnectionWindow : Window
             _availableUpdate = null;
             UpdateButton.Content = "Check for updates";
             StatusTextBlock.Text =
-                selectedChannel == V2AppUpdateService.InventoryBetaReleaseChannel
-                    ? "Inventory Beta selected. Select Check for updates to look for beta builds."
+                selectedChannel == V2AppUpdateService.ClientInfoBetaReleaseChannel
+                    ? "Client Info Beta selected. Select Check for updates to look for beta builds."
                     : "Stable selected. Select Check for updates to return to stable releases.";
             RefreshUpdateChannelDescription();
         }
@@ -205,7 +205,7 @@ public partial class DatabaseConnectionWindow : Window
         {
             UpdateChannelCheckBox.IsChecked =
                 channelService.SelectedReleaseChannel.Equals(
-                    V2AppUpdateService.InventoryBetaReleaseChannel,
+                    V2AppUpdateService.ClientInfoBetaReleaseChannel,
                     StringComparison.OrdinalIgnoreCase);
             StatusTextBlock.Text =
                 $"Could not change the update channel: {ex.Message}";
@@ -359,7 +359,7 @@ public partial class DatabaseConnectionWindow : Window
         UpdateChannelDescriptionTextBlock.Text =
             UpdateChannelCheckBox.IsChecked == true
                 ? "Beta builds include features still being tested. Turn this off at any time to check for Stable."
-                : "Stable releases are selected. Turn this on when you want to install or return to Inventory Beta.";
+                : "Stable releases are selected. Turn this on when you want to install Client Info Beta.";
     }
 
     private static LocalPreferences LoadLocalPreferences()

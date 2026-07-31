@@ -37,16 +37,8 @@ $installerFileName = switch ($releaseChannel) {
     'client-info-beta' { 'TechBenchClientInfoBetaSetup.exe' }
     default { 'TechBenchV2Setup.exe' }
 }
-$packId = if ($releaseChannel -eq 'client-info-beta') {
-    'CSRI.TechBenchV2.ClientInfoBeta'
-} else {
-    'CSRI.TechBenchV2'
-}
-$packTitle = if ($releaseChannel -eq 'client-info-beta') {
-    'TechBench V2 Client Info Beta'
-} else {
-    'TechBench V2'
-}
+$packId = 'CSRI.TechBenchV2'
+$packTitle = 'TechBench V2'
 
 if ([string]::IsNullOrWhiteSpace($ReleaseNotesPath)) {
     $ReleaseNotesPath = Join-Path $repoRoot "release-notes\$Version.md"

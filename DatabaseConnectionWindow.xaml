@@ -172,7 +172,7 @@
                     <StackPanel Grid.Row="2"
                                 Margin="2,16,2,0">
                         <CheckBox x:Name="UpdateChannelCheckBox"
-                                  Content="Check the Inventory Beta channel instead of Stable"
+                                  Content="Check the Client Info Beta channel instead of Stable"
                                   FontWeight="SemiBold" />
                         <TextBlock x:Name="UpdateChannelDescriptionTextBlock"
                                    Margin="24,4,0,0"

@@ -10,22 +10,25 @@ clients, the stable sync service, and Server Manager therefore continue to
 accept the same database. New tables and stored procedures are additive and are
 ignored by stable clients.
 
-The beta client has a separate installer identity and the
-`client-info-beta` Velopack channel. Installing it does not overwrite the stable
-TechBench installation. Both installations read the same saved SQL Server
-connection settings. The existing single-instance protection means close one
-before launching the other.
+Stable and beta use the same TechBench installer identity with separate `v2`
+and `client-info-beta` Velopack channels, matching the earlier Inventory Beta
+workflow. Stable keeps the FireDrill pane; only a build compiled for the beta
+channel opens canonical Client Info. The update-channel selector can move a
+workstation in either direction without a manual reinstall.
 
 ## Initial beta installation
 
 1. Back up the TechBench database and the database master key/certificates.
-2. Download `TechBenchServerSetup.exe` and
-   `TechBenchClientInfoBetaSetup.exe` from the same `0.6.2-beta.1` GitHub
-   prerelease.
+2. Download `TechBenchServerSetup.exe` from the current Client Info Beta GitHub
+   prerelease. Alternatively, a DBA can review and run the matching standalone
+   `TechBenchV2-SQLServer2016-*.sql` bundle; do not apply both deployment paths.
 3. On the TechBench server, run `TechBenchServerSetup.exe` as an administrator.
    It applies the additive SQL bundle and refreshes the server components. The
    required schema remains 15.
-4. On a test workstation, run `TechBenchClientInfoBetaSetup.exe`.
+4. Let the existing stable client update to 0.6.2. Under **Settings**, select
+   **Use Client Info Beta update channel**, then choose **Check for Updates**
+   and install the offered beta. The same selector is available on the database
+   connection window.
 5. Connect to the existing TechBench SQL Server database with the normal
    Windows Integrated Authentication flow.
 6. Confirm stable TechBench 0.6.1 can still connect and its current Client Info
@@ -64,9 +67,9 @@ stable 0.6.1 and FireDrill operational, correct the workbook or individual
 canonical records in the beta, and re-verify. Do not drop the beta tables while
 any beta client is running.
 
-To stop beta testing on a workstation, uninstall **TechBench V2 Client Info
-Beta** and continue using the stable installation. The canonical tables remain
-dormant and stable clients ignore them.
+To stop beta testing on a workstation, clear **Use Client Info Beta update
+channel**, choose **Check for Updates**, and install Stable. The canonical
+tables remain dormant and stable clients ignore them.
 
 ## FireDrill retirement gate
 
