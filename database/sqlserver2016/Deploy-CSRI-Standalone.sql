@@ -33511,7 +33511,7 @@ BEGIN
 END;
 
 IF CHARINDEX(
-    N'@SourceStage NOT IN (N''Assigned'', N''Deployment'')',
+    N'@SourceStage NOT IN (N''Assigned'', N''Deployment'', N''Deployed'')',
     COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminMoveEquipment', N'P')), N''))=0
 BEGIN
     PRINT N'FAIL: equipment priority maintenance does not isolate each technician deployment lane.';
