@@ -158,7 +158,7 @@
                                            FontSize="17"
                                            FontWeight="SemiBold"
                                            Margin="0,3,0,6" />
-                                <TextBlock Text="Copy the useful information into the matching category tabs. Switches belong under Servers &amp; Infrastructure; antivirus and EDR belong under Backup &amp; Security. Leave tabs that do not apply blank, and put passwords only on the Passwords tab. For each copied row, choose Verified, Keep as-is, Needs review, or Do not import."
+                                <TextBlock Text="Copy the useful information into the matching category tabs. Switches and network appliances belong under Servers &amp; Infrastructure; wireless networks and access points belong under Wi-Fi; antivirus and EDR belong under Backup &amp; Security. Leave tabs that do not apply blank, and put passwords only on the Passwords tab. For each copied row, choose Verified, Keep as-is, Needs review, or Do not import."
                                            Foreground="{DynamicResource SecondaryTextBrush}"
                                            TextWrapping="Wrap" />
                             </StackPanel>

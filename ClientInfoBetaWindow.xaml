@@ -530,7 +530,7 @@
                     <StackPanel>
                         <TextBlock Text="Equipment"
                                    Style="{StaticResource SectionHeaderStyle}" />
-                        <TextBlock Text="Computers, printers, network appliances, and other devices assigned to this client. Equipment remains shared with the TechBench Inventory workspace."
+                        <TextBlock Text="Computers, printers, and other end-user devices assigned to this client. Equipment remains shared with the TechBench Inventory workspace."
                                    Foreground="{DynamicResource SecondaryTextBrush}"
                                    TextWrapping="Wrap"
                                    Margin="0,3,0,10" />
@@ -576,6 +576,10 @@
 
             <TabItem Header="Connection &amp; Internet"
                      Content="{Binding ConnectionInternetGroup}"
+                     ContentTemplate="{StaticResource ResourceCategoryContentTemplate}" />
+
+            <TabItem Header="Wi-Fi"
+                     Content="{Binding WifiGroup}"
                      ContentTemplate="{StaticResource ResourceCategoryContentTemplate}" />
 
             <TabItem Header="Applications &amp; Cloud"

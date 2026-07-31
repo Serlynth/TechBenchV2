@@ -4,6 +4,7 @@ public static class ClientInfoResourceCategories
 {
     public const string ServersInfrastructure = "Servers & Infrastructure";
     public const string ConnectionInternet = "Connection & Internet";
+    public const string Wifi = "Wi-Fi";
     public const string LegacyNetworkInternet = "Network & Internet";
     public const string ApplicationsCloud = "Applications & Cloud";
     public const string DomainsEmail = "Domains & Email";
@@ -15,6 +16,7 @@ public static class ClientInfoResourceCategories
     [
         ServersInfrastructure,
         ConnectionInternet,
+        Wifi,
         ApplicationsCloud,
         DomainsEmail,
         BackupSecurity,
@@ -29,9 +31,14 @@ public static class ClientInfoResourceCategories
         if (ContainsAny(
                 normalizedType.ToLowerInvariant(),
                 "switch",
-                "switching"))
+                "switching",
+                "network appliance"))
         {
             normalizedCategory = ServersInfrastructure;
+        }
+        else if (IsWifi(normalizedType.ToLowerInvariant()))
+        {
+            normalizedCategory = Wifi;
         }
         if (normalizedCategory == NeedsSorting)
         {
@@ -52,6 +59,21 @@ public static class ClientInfoResourceCategories
     public static string Classify(string? resourceType)
     {
         var value = resourceType?.Trim() ?? string.Empty;
+        var lower = value.ToLowerInvariant();
+        if (ContainsAny(
+                lower,
+                "switch",
+                "switching",
+                "network appliance"))
+        {
+            return ServersInfrastructure;
+        }
+
+        if (IsWifi(lower))
+        {
+            return Wifi;
+        }
+
         foreach (var category in All.Where(
                      category => category != NeedsSorting))
         {
@@ -69,10 +91,7 @@ public static class ClientInfoResourceCategories
                 legacyNetworkPrefix,
                 StringComparison.OrdinalIgnoreCase))
         {
-            var legacyType = value[legacyNetworkPrefix.Length..];
-            return ContainsAny(legacyType.ToLowerInvariant(), "switch", "switching")
-                ? ServersInfrastructure
-                : ConnectionInternet;
+            return ConnectionInternet;
         }
 
         if (string.Equals(
@@ -81,12 +100,6 @@ public static class ClientInfoResourceCategories
                 StringComparison.OrdinalIgnoreCase))
         {
             return ConnectionInternet;
-        }
-
-        var lower = value.ToLowerInvariant();
-        if (ContainsAny(lower, "switch", "switching"))
-        {
-            return ServersInfrastructure;
         }
 
         if (ContainsAny(
@@ -109,8 +122,7 @@ public static class ClientInfoResourceCategories
 
         if (ContainsAny(
                 lower,
-                "firewall", "router", "wireless", "wi-fi",
-                "wifi", "access point", "internet", "isp", "circuit",
+                "firewall", "router", "internet", "isp", "circuit",
                 "vlan", "vpn", "public ip", "modem", "gateway",
                 "network"))
         {
@@ -181,4 +193,14 @@ public static class ClientInfoResourceCategories
         string value,
         params string[] candidates) =>
         candidates.Any(value.Contains);
+
+    private static bool IsWifi(string value) =>
+        ContainsAny(
+            value,
+            "wi-fi",
+            "wifi",
+            "wireless",
+            "access point",
+            "wlan",
+            "ssid");
 }

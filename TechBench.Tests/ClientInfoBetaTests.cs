@@ -45,6 +45,7 @@ public sealed class ClientInfoBetaTests
                     "People",
                     "Servers & Infrastructure",
                     "Connection & Internet",
+                    "Wi-Fi",
                     "Applications & Cloud",
                     "Domains & Email",
                     "Backup & Security",
@@ -152,14 +153,57 @@ public sealed class ClientInfoBetaTests
         }
     }
 
+    [Fact]
+    public void CurrentWorkbookWifiSheetMapsToTheWifiCategory()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "TechBenchClientInfoTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "Wi-Fi Migration.xlsx");
+            var service = new ClientInfoWorkbookService();
+            service.CreateTemplate(path, 477, "Acme Legal");
+            AppendRow(
+                path,
+                "Wi-Fi",
+                "Access Point", "Lobby AP", "Ubiquiti", "", "", "Active",
+                "Main wireless access point", "Verified");
+
+            var package = service.Read(path);
+
+            var resource = Assert.Single(
+                package.Records,
+                record => record.RecordType == "Resource");
+            Assert.Contains(
+                "\"resourceType\":\"Wi-Fi / Access Point\"",
+                resource.PayloadJson,
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("Antivirus / EDR", "Backup & Security")]
     [InlineData("CrowdStrike", "Backup & Security")]
     [InlineData("Firewall", "Connection & Internet")]
     [InlineData("Switch", "Servers & Infrastructure")]
     [InlineData("Network Switch", "Servers & Infrastructure")]
+    [InlineData("Network Appliance", "Servers & Infrastructure")]
+    [InlineData("Connection & Internet / Network Appliance", "Servers & Infrastructure")]
+    [InlineData("Network & Internet / Network Appliance", "Servers & Infrastructure")]
     [InlineData("Network & Internet / Switch", "Servers & Infrastructure")]
     [InlineData("Network & Internet / Firewall", "Connection & Internet")]
+    [InlineData("Wi-Fi", "Wi-Fi")]
+    [InlineData("Wireless Network", "Wi-Fi")]
+    [InlineData("Access Point", "Wi-Fi")]
+    [InlineData("Connection & Internet / Wi-Fi", "Wi-Fi")]
+    [InlineData("Network & Internet / Access Point", "Wi-Fi")]
     [InlineData("Microsoft 365", "Applications & Cloud")]
     [InlineData("Domain Registrar", "Domains & Email")]
     [InlineData("Hyper-V Host", "Servers & Infrastructure")]
@@ -171,6 +215,27 @@ public sealed class ClientInfoBetaTests
         Assert.Equal(
             expectedCategory,
             TechBench.Models.ClientInfoResourceCategories.Classify(resourceType));
+    }
+
+    [Theory]
+    [InlineData(
+        "Connection & Internet",
+        "Network Appliance",
+        "Servers & Infrastructure / Network Appliance")]
+    [InlineData(
+        "Connection & Internet",
+        "Wireless Access Point",
+        "Wi-Fi / Wireless Access Point")]
+    public void FriendlyWorkbookCategoriesAreCorrectedForInfrastructureAndWifi(
+        string selectedCategory,
+        string type,
+        string expectedResourceType)
+    {
+        Assert.Equal(
+            expectedResourceType,
+            TechBench.Models.ClientInfoResourceCategories.Encode(
+                selectedCategory,
+                type));
     }
 
     [Fact]
@@ -235,13 +300,53 @@ public sealed class ClientInfoBetaTests
             var package = service.Read(path);
 
             Assert.Equal(
-                ClientInfoWorkbookService.PreviousTemplateVersion,
+                ClientInfoWorkbookService.CategorizedTemplateVersion,
                 package.TemplateVersion);
             var resource = Assert.Single(
                 package.Records,
                 record => record.RecordType == "Resource");
             Assert.Equal(
                 "Servers & Infrastructure",
+                TechBench.Models.ClientInfoResourceCategories.Classify(
+                    System.Text.Json.JsonDocument.Parse(resource.PayloadJson)
+                        .RootElement.GetProperty("resourceType").GetString()));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void PreviousConnectionWorkbookVersionMovesWifiIntoItsOwnCategory()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "TechBenchClientInfoTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "Previous Connection.xlsx");
+            var service = new ClientInfoWorkbookService();
+            service.CreateTemplate(path, 477, "Acme Legal");
+            ConvertGeneratedWorkbookToPreviousConnectionVersion(path);
+            AppendRow(
+                path,
+                "Connection & Internet",
+                "Wireless Access Point", "Lobby Wi-Fi", "Ubiquiti", "", "",
+                "Active", "Previous beta workbook", "Verified");
+
+            var package = service.Read(path);
+
+            Assert.Equal(
+                ClientInfoWorkbookService.PreviousTemplateVersion,
+                package.TemplateVersion);
+            var resource = Assert.Single(
+                package.Records,
+                record => record.RecordType == "Resource");
+            Assert.Equal(
+                "Wi-Fi",
                 TechBench.Models.ClientInfoResourceCategories.Classify(
                     System.Text.Json.JsonDocument.Parse(resource.PayloadJson)
                         .RootElement.GetProperty("resourceType").GetString()));
@@ -347,6 +452,7 @@ public sealed class ClientInfoBetaTests
                      "Equipment",
                      "Servers &amp; Infrastructure",
                      "Connection &amp; Internet",
+                     "Wi-Fi",
                      "Applications &amp; Cloud",
                      "Domains &amp; Email",
                      "Backup &amp; Security",
@@ -365,6 +471,10 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("RefreshResourceGroups", viewModel, StringComparison.Ordinal);
         Assert.Contains("Computers, printers", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Computers, servers", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "network appliances",
+            xaml,
+            StringComparison.OrdinalIgnoreCase);
         Assert.Contains("SaveClientInfoCredential", viewModel, StringComparison.Ordinal);
         Assert.Contains("CompareClientInfoImportToFireDrill", viewModel, StringComparison.Ordinal);
         Assert.Contains("Another editor saved first", viewModel, StringComparison.Ordinal);
@@ -554,6 +664,7 @@ public sealed class ClientInfoBetaTests
         foreach (var name in new[]
                  {
                      "Servers & Infrastructure",
+                     "Wi-Fi",
                      "Applications & Cloud",
                      "Domains & Email",
                      "Backup & Security",
@@ -575,9 +686,24 @@ public sealed class ClientInfoBetaTests
         SetTemplateVersion(
             workbookPart,
             sheets,
-            ClientInfoWorkbookService.PreviousTemplateVersion);
+            ClientInfoWorkbookService.CategorizedTemplateVersion);
         sheets.Single(sheet => sheet.Name?.Value == "Connection & Internet").Name =
             "Network & Internet";
+        sheets.Single(sheet => sheet.Name?.Value == "Wi-Fi").Remove();
+        workbookPart.Workbook.Save();
+    }
+
+    private static void ConvertGeneratedWorkbookToPreviousConnectionVersion(
+        string path)
+    {
+        using var workbook = SpreadsheetDocument.Open(path, true);
+        var workbookPart = workbook.WorkbookPart!;
+        var sheets = workbookPart.Workbook.Sheets!.Elements<Sheet>().ToList();
+        SetTemplateVersion(
+            workbookPart,
+            sheets,
+            ClientInfoWorkbookService.PreviousTemplateVersion);
+        sheets.Single(sheet => sheet.Name?.Value == "Wi-Fi").Remove();
         workbookPart.Workbook.Save();
     }
 

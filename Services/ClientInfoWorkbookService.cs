@@ -13,8 +13,9 @@ namespace TechBench.Services;
 
 public sealed class ClientInfoWorkbookService
 {
-    public const string TemplateVersion = "TB-CI-4";
-    public const string PreviousTemplateVersion = "TB-CI-3";
+    public const string TemplateVersion = "TB-CI-5";
+    public const string PreviousTemplateVersion = "TB-CI-4";
+    public const string CategorizedTemplateVersion = "TB-CI-3";
     public const string FriendlyTemplateVersion = "TB-CI-2";
     public const string LegacyTemplateVersion = "TB-CI-1";
 
@@ -46,7 +47,7 @@ public sealed class ClientInfoWorkbookService
             "Start Here",
             [
                 ["TechBench Client Info Migration Workbook", ""],
-                ["What to do", "Copy cleaned information into the matching category tabs. Switches go under Servers & Infrastructure; antivirus and EDR go under Backup & Security."],
+                ["What to do", "Copy cleaned information into the matching category tabs. Switches and network appliances go under Servers & Infrastructure; wireless networks and access points go under Wi-Fi; antivirus and EDR go under Backup & Security."],
                 ["Review each row", "Choose Verified, Keep as-is, Needs review, or Do not import. A workbook cannot be approved while a populated row is blank or still Needs review."],
                 ["Passwords", "Put passwords and other secrets only on the Passwords tab. They are encrypted when imported and are never written to import logs."],
                 ["Template Version", TemplateVersion],
@@ -96,6 +97,16 @@ public sealed class ClientInfoWorkbookService
             sheets,
             ref sheetId,
             "Connection & Internet",
+            [
+                ["Type", "Name", "Provider", "Address/URL", "Location", "Status",
+                 "Notes", "Review Status"]
+            ],
+            columnWidths: [22, 28, 24, 34, 22, 18, 40, 22]);
+        AddSheet(
+            workbookPart,
+            sheets,
+            ref sheetId,
+            "Wi-Fi",
             [
                 ["Type", "Name", "Provider", "Address/URL", "Location", "Status",
                  "Notes", "Review Status"]
@@ -193,6 +204,10 @@ public sealed class ClientInfoWorkbookService
                 StringComparison.OrdinalIgnoreCase)
             && !string.Equals(
                 version,
+                CategorizedTemplateVersion,
+                StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(
+                version,
                 FriendlyTemplateVersion,
                 StringComparison.OrdinalIgnoreCase)
             && !string.Equals(
@@ -201,7 +216,7 @@ public sealed class ClientInfoWorkbookService
                 StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException(
-                $"Template version '{version}' is not supported. Expected {TemplateVersion}, {PreviousTemplateVersion}, {FriendlyTemplateVersion}, or {LegacyTemplateVersion}.");
+                $"Template version '{version}' is not supported. Expected {TemplateVersion}, {PreviousTemplateVersion}, {CategorizedTemplateVersion}, {FriendlyTemplateVersion}, or {LegacyTemplateVersion}.");
         }
 
         if (!Guid.TryParse(GetRequired(info, "Workbook ID"), out var workbookId))
@@ -242,14 +257,22 @@ public sealed class ClientInfoWorkbookService
             || string.Equals(
                 version,
                 PreviousTemplateVersion,
+                StringComparison.OrdinalIgnoreCase)
+            || string.Equals(
+                version,
+                CategorizedTemplateVersion,
                 StringComparison.OrdinalIgnoreCase))
         {
-            var connectionSheetName = string.Equals(
+            var isCurrentTemplate = string.Equals(
                 version,
                 TemplateVersion,
+                StringComparison.OrdinalIgnoreCase);
+            var connectionSheetName = string.Equals(
+                version,
+                CategorizedTemplateVersion,
                 StringComparison.OrdinalIgnoreCase)
-                ? "Connection & Internet"
-                : "Network & Internet";
+                ? "Network & Internet"
+                : "Connection & Internet";
             var locationKeys = ParseSimpleLocations(
                 GetSheet(tables, "Locations"),
                 records);
@@ -275,6 +298,17 @@ public sealed class ClientInfoWorkbookService
                 ClientInfoResourceCategories.ConnectionInternet,
                 connectionSheetName,
                 "network");
+            if (isCurrentTemplate)
+            {
+                ParseSimpleResources(
+                    GetSheet(tables, "Wi-Fi"),
+                    records,
+                    locationKeys,
+                    resourceKeys,
+                    ClientInfoResourceCategories.Wifi,
+                    "Wi-Fi",
+                    "wifi");
+            }
             ParseSimpleResources(
                 GetSheet(tables, "Applications & Cloud"),
                 records,

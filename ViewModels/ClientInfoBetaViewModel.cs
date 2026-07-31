@@ -183,10 +183,13 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     public ObservableCollection<EquipmentItem> Equipment { get; } = [];
     public ClientInfoResourceGroup ServerInfrastructureGroup { get; } = new(
         ClientInfoResourceCategories.ServersInfrastructure,
-        "Servers, virtual machines, hypervisors, storage, directory services, and infrastructure roles.");
+        "Servers, virtual machines, hypervisors, storage, switches, network appliances, directory services, and infrastructure roles.");
     public ClientInfoResourceGroup ConnectionInternetGroup { get; } = new(
         ClientInfoResourceCategories.ConnectionInternet,
-        "Firewalls, Wi-Fi, ISPs, circuits, VLANs, VPNs, and public IP information.");
+        "Firewalls, routers, ISPs, circuits, VLANs, VPNs, and public IP information.");
+    public ClientInfoResourceGroup WifiGroup { get; } = new(
+        ClientInfoResourceCategories.Wifi,
+        "Wireless networks, access points, SSIDs, controllers, and related Wi-Fi information.");
     public ClientInfoResourceGroup ApplicationsCloudGroup { get; } = new(
         ClientInfoResourceCategories.ApplicationsCloud,
         "Microsoft 365, line-of-business applications, SaaS products, cloud services, and licensing.");
@@ -546,6 +549,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                  {
                      ServerInfrastructureGroup,
                      ConnectionInternetGroup,
+                     WifiGroup,
                      ApplicationsCloudGroup,
                      DomainsEmailGroup,
                      BackupSecurityGroup,
