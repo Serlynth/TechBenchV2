@@ -1264,10 +1264,6 @@ function Get-AvailableServiceUpdate {
     $releaseResponse = Invoke-RestMethod -Uri $script:ReleaseApiUrl -Headers $headers `
         -Method Get -TimeoutSec 30
     $releases = @($releaseResponse)
-    $currentVersion = (Get-ServiceDetails).Version
-    $currentParts = ConvertTo-SemanticVersionParts $currentVersion
-    $currentIsStable = $null -ne $currentParts -and
-        [string]::IsNullOrEmpty($currentParts.PreRelease)
     $candidates = @()
     foreach ($release in $releases) {
         if ($release.draft -or [string]::IsNullOrWhiteSpace([string]$release.tag_name)) {
@@ -1277,7 +1273,7 @@ function Get-AvailableServiceUpdate {
         if ($null -eq $versionParts) { continue }
         $versionIsPrerelease = -not [string]::IsNullOrEmpty($versionParts.PreRelease)
         if ([bool]$release.prerelease -ne $versionIsPrerelease) { continue }
-        if ($currentIsStable -and $versionIsPrerelease) { continue }
+        if ($versionIsPrerelease) { continue }
 
         $zipName = "TechBenchSyncService-$($versionParts.Normalized)-win-x64.zip"
         $checksumName = "$zipName.sha256"

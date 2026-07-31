@@ -26,7 +26,7 @@ internal sealed class ReleaseUpdater(AppPaths paths)
             if (!SemanticVersion.TryParse(version, out var parsed)) continue;
             var isPrerelease = release.GetProperty("prerelease").GetBoolean();
             if (isPrerelease != parsed.IsPrerelease) continue;
-            if (SemanticVersion.TryParse(paths.CurrentVersion, out var current) && !current.IsPrerelease && parsed.IsPrerelease) continue;
+            if (isPrerelease) continue;
 
             var zipName = $"TechBenchSyncService-{version}-win-x64.zip";
             var checksumName = zipName + ".sha256";

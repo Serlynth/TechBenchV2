@@ -10,6 +10,10 @@ clients, the stable sync service, and Server Manager therefore continue to
 accept the same database. New tables and stored procedures are additive and are
 ignored by stable clients.
 
+Server Manager, the Sync Service, and SQL deployment stay on one stable release
+line. The current stable server package supports both desktop channels and its
+updater ignores desktop prereleases. There is no beta Server Manager setting.
+
 Stable and beta use the same TechBench installer identity with separate `v2`
 and `client-info-beta` Velopack channels, matching the earlier Inventory Beta
 workflow. Stable keeps the FireDrill pane; only a build compiled for the beta
@@ -19,8 +23,8 @@ workstation in either direction without a manual reinstall.
 ## Initial beta installation
 
 1. Back up the TechBench database and the database master key/certificates.
-2. Download `TechBenchServerSetup.exe` from the current Client Info Beta GitHub
-   prerelease. Alternatively, a DBA can review and run the matching standalone
+2. Download `TechBenchServerSetup.exe` from the current Stable GitHub release.
+   Alternatively, a DBA can review and run the matching standalone
    `TechBenchV2-SQLServer2016-*.sql` bundle; do not apply both deployment paths.
 3. On the TechBench server, run `TechBenchServerSetup.exe` as an administrator.
    It applies the additive SQL bundle and refreshes the server components. The

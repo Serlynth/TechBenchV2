@@ -101,6 +101,11 @@ public sealed class ServerManagerScriptTests
         var uninstaller = ReadScript("Uninstall-TechBenchSyncService.ps1");
 
         Assert.Contains("[int]$RequiredDatabaseSchemaVersion = 15", publisher, StringComparison.Ordinal);
+        Assert.Contains(
+            "[ValidatePattern('^\\d+\\.\\d+\\.\\d+$')]",
+            publisher,
+            StringComparison.Ordinal);
+        Assert.Contains("if ($versionIsPrerelease) { continue }", ReadScript("TechBench-ServerManager.ps1"), StringComparison.Ordinal);
         Assert.Contains("'TechBench-ServerManager.ps1'", publisher, StringComparison.Ordinal);
         Assert.Contains(
             "RequiredDatabaseSchemaVersion = $RequiredDatabaseSchemaVersion",
