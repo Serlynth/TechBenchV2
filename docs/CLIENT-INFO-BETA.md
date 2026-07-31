@@ -23,12 +23,13 @@ workstation in either direction without a manual reinstall.
 ## Initial beta installation
 
 1. Back up the TechBench database and the database master key/certificates.
-2. Download `TechBenchServerSetup.exe` from the current Stable GitHub release.
-   Alternatively, a DBA can review and run the matching standalone
-   `TechBenchV2-SQLServer2016-*.sql` bundle; do not apply both deployment paths.
-3. On the TechBench server, run `TechBenchServerSetup.exe` as an administrator.
-   It applies the additive SQL bundle and refreshes the server components. The
-   required schema remains 15.
+2. Download `TechBenchV2-SQLServer2016-0.6.2.sql` from the current Stable
+   GitHub release. A DBA reviews it and executes it in SSMS with **SQLCMD Mode**
+   enabled. The script is idempotent and keeps the required schema at 15.
+3. In the existing Stable Server Manager, check for and install version 0.6.2.
+   Alternatively, run the Stable `TechBenchServerSetup.exe` as administrator.
+   This refreshes Server Manager and the Sync Service; it does not silently
+   execute the separate DBA-controlled SQL bundle.
 4. Let the existing stable client update to 0.6.2. Under **Settings**, select
    **Use Client Info Beta update channel**, then choose **Check for Updates**
    and install the offered beta. The same selector is available on the database
