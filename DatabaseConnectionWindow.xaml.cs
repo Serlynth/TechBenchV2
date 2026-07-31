@@ -1,6 +1,7 @@
 using System.IO;
 using System.Security.Principal;
 using System.Windows;
+using System.Windows.Media.Imaging;
 using Microsoft.Data.SqlClient;
 using TechBench.Data;
 using TechBench.Models;
@@ -16,14 +17,30 @@ public partial class DatabaseConnectionWindow : Window
     private AppUpdateRelease? _availableUpdate;
     private bool _isCheckingOrInstallingUpdate;
     private bool _schemaVersionMismatch;
+    private readonly bool _forceForeground;
 
     public DatabaseConnectionWindow(
         SqlServerConnectionOptions? initialOptions,
         string? initialStatus = null,
-        IAppUpdateService? updateService = null)
+        IAppUpdateService? updateService = null,
+        bool forceForeground = false)
     {
-        InitializeComponent();
         _localPreferences = LoadLocalPreferences();
+        var savedModule = ModuleBranding.Resolve(
+            _localPreferences.LastBenchModule);
+        ThemeService.Apply(
+            _localPreferences.Theme.Equals(
+                "Light",
+                StringComparison.OrdinalIgnoreCase)
+                ? AppTheme.Light
+                : AppTheme.Dark,
+            savedModule);
+        InitializeComponent();
+        _forceForeground = forceForeground;
+        Title = $"Connect to {savedModule}";
+        WelcomeTitleTextBlock.Text = $"Welcome to {savedModule}";
+        ModuleLogoImage.Source = new BitmapImage(
+            new Uri(ModuleBranding.LogoSource(savedModule), UriKind.Relative));
         _updateService = updateService
             ?? new V2AppUpdateService(_localPreferences.UpdateChannel);
         var selectedChannel =
@@ -72,6 +89,11 @@ public partial class DatabaseConnectionWindow : Window
     private async void DatabaseConnectionWindow_Loaded(object sender, RoutedEventArgs e)
     {
         FitToWorkingArea();
+        if (_forceForeground)
+        {
+            WindowActivationService.BringToForeground(this);
+        }
+
         try
         {
             await _updateService.CleanupDownloadedUpdatesAsync(
