@@ -65,6 +65,10 @@ public sealed class ClientInfoBetaTests
             "database",
             "sqlserver2016",
             "62-V0015-ClientInfoBetaImportProcedures.sql");
+        var verifier = Read(
+            "database",
+            "sqlserver2016",
+            "106-V0015-ClientInfoBetaVerify.sql");
 
         Assert.Contains(
             "SqlServer2016.ClientInfoBeta.0015",
@@ -94,6 +98,14 @@ public sealed class ClientInfoBetaTests
         Assert.DoesNotContain(
             "SELECT secret.[ValueEncrypted]",
             imports,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]', @Capabilities) = 0",
+            verifier,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            "@Capabilities NOT LIKE",
+            verifier,
             StringComparison.OrdinalIgnoreCase);
     }
 

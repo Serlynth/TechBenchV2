@@ -33944,7 +33944,7 @@ IF NOT EXISTS
 DECLARE @Capabilities nvarchar(max)=
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'));
 IF CHARINDEX(N'[ClientInfoBetaAvailable]', @Capabilities) = 0
-   OR @Capabilities NOT LIKE N'%CONVERT(int, 15) AS [SchemaVersion]%'
+   OR CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]', @Capabilities) = 0
     THROW 52505,N'Repository capabilities do not expose the schema-15-compatible Client Info beta.',1;
 
 DECLARE @MergeManual nvarchar(max)=
