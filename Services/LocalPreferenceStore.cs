@@ -156,6 +156,12 @@ public sealed class LocalPreferences
 
     public string WindowState { get; set; } = "Normal";
 
+    public string LastBenchModule { get; set; } = "TechBench";
+
+    public string TechBenchWorkspace { get; set; } = "Today";
+
+    public string AdminBenchWorkspace { get; set; } = "Client Match";
+
     public int RefreshIntervalMinutes { get; set; } = 5;
 
     public DateTime? LastUpdateCheckAtUtc { get; set; }
@@ -185,9 +191,16 @@ public sealed class LocalPreferences
         Theme = Theme.Equals("Light", StringComparison.OrdinalIgnoreCase)
             ? "Light"
             : "Dark";
-        WindowState = WindowState is "Maximized" or "Minimized"
-            ? WindowState
+        WindowState = WindowState.Equals(
+            "Maximized",
+            StringComparison.OrdinalIgnoreCase)
+            ? "Maximized"
             : "Normal";
+        LastBenchModule = NormalizeBenchModule(LastBenchModule);
+        TechBenchWorkspace = NormalizeWorkspace(TechBenchWorkspace, "Today");
+        AdminBenchWorkspace = NormalizeWorkspace(
+            AdminBenchWorkspace,
+            "Client Match");
         RefreshIntervalMinutes = Math.Clamp(RefreshIntervalMinutes, 1, 120);
         SkippedUpdateVersion = string.IsNullOrWhiteSpace(SkippedUpdateVersion)
             ? null
@@ -219,5 +232,25 @@ public sealed class LocalPreferences
         EquipmentTechnicianPriorityLoginName =
             EquipmentTechnicianPriorityLoginName?.Trim() ?? string.Empty;
         return this;
+    }
+
+    private static string NormalizeBenchModule(string? value)
+    {
+        return Enum.TryParse<TechBench.Models.BenchModule>(
+            value,
+            ignoreCase: true,
+            out var module)
+            ? module.ToString()
+            : TechBench.Models.BenchModule.TechBench.ToString();
+    }
+
+    private static string NormalizeWorkspace(string? value, string fallback)
+    {
+        var normalized = value?.Trim();
+        return string.IsNullOrWhiteSpace(normalized)
+            || normalized.Length > 120
+            || normalized.Any(char.IsControl)
+                ? fallback
+                : normalized;
     }
 }
