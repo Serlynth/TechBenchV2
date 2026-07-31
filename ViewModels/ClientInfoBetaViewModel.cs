@@ -126,9 +126,17 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     public string CutoverLabel => Profile.IsLive
         ? $"Canonical SQL is live · {Profile.CutoverState}"
         : $"Migration workspace · {Profile.CutoverState}";
+    public string ClientInfoStatusLabel => Profile.IsLive
+        ? $"Client Information is live - {Profile.CutoverState}"
+        : $"Client Information draft - {Profile.CutoverState}";
     public bool CanEdit => _currentUser.CanWrite;
     public bool CanRevealSecrets => !_currentUser.IsReadOnlyPreview;
     public bool CanManageImports => _currentUser.IsAdmin && _currentUser.CanWrite;
+    public bool HasImportBatches => ImportBatches.Count > 0;
+    public bool HasSelectedImportBatch => SelectedImportBatch is not null;
+    public string ImportPermissionText => CanManageImports
+        ? "You can import, review, approve, and add this client's workbook to Client Information."
+        : "Only a TechBench Admin can import and approve workbooks. You can still create the client template.";
     public IReadOnlyList<string> ReviewStatusOptions => ReviewStatuses;
 
     public ClientInfoProfile Profile
@@ -145,6 +153,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             OnPropertyChanged(nameof(WindowTitle));
             OnPropertyChanged(nameof(InternalClientIdLabel));
             OnPropertyChanged(nameof(CutoverLabel));
+            OnPropertyChanged(nameof(ClientInfoStatusLabel));
         }
     }
 
@@ -258,6 +267,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             CompareImportCommand.RaiseCanExecuteChanged();
             ApproveImportCommand.RaiseCanExecuteChanged();
             PromoteImportCommand.RaiseCanExecuteChanged();
+            OnPropertyChanged(nameof(HasSelectedImportBatch));
         }
     }
 
@@ -300,6 +310,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             Replace(Credentials, snapshot.Credentials);
             Replace(Facts, snapshot.Facts);
             Replace(ImportBatches, snapshot.ImportBatches);
+            OnPropertyChanged(nameof(HasImportBatches));
             SelectedImportBatch = null;
             StatusMessage =
                 $"Loaded {Locations.Count} locations, {People.Count} people, "
@@ -683,9 +694,9 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     {
         var dialog = new SaveFileDialog
         {
-            Title = "Save Client Info migration workbook",
+            Title = "Save this client's migration workbook",
             Filter = "Excel workbook (*.xlsx)|*.xlsx",
-            FileName = SafeFileName($"{ClientName} - Client Info.xlsx"),
+            FileName = SafeFileName($"{ClientName} - Migration Workbook.xlsx"),
             AddExtension = true,
             DefaultExt = ".xlsx"
         };
@@ -698,7 +709,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         {
             _workbooks.CreateTemplate(dialog.FileName, ClientId, ClientName);
             StatusMessage =
-                $"Created a migration workbook for internal client ID {ClientId}.";
+                $"Created the migration workbook for internal client ID {ClientId}. Copy the cleaned client information into it, then return here to import it.";
         }
         catch (Exception exception)
         {
@@ -710,7 +721,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     {
         var dialog = new OpenFileDialog
         {
-            Title = "Review a Client Info migration workbook",
+            Title = "Choose the completed client migration workbook",
             Filter = "Excel workbooks (*.xlsx;*.xls)|*.xlsx;*.xls",
             Multiselect = false
         };
@@ -736,8 +747,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 && !_dialogs.Confirm(
                     "Client name differs",
                     $"The workbook says '{package.ClientName}', while TechBench says "
-                    + $"'{ClientName}'. The internal ID matches. Continue to staging?",
-                    "Stage",
+                    + $"'{ClientName}'. The internal ID matches. Continue with the import?",
+                    "Continue",
                     "Cancel"))
             {
                 return;
@@ -748,8 +759,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             SelectedImportBatch = _repository.GetClientInfoImportBatch(
                 batch.BatchId);
             StatusMessage =
-                $"Staged {batch.RecordCount} records and {batch.SecretCount} secrets. "
-                + "Nothing is canonical until approval and promotion.";
+                $"Imported a review copy containing {batch.RecordCount} records and {batch.SecretCount} passwords or secrets. "
+                + "Client Information has not changed yet.";
         }
         catch (Exception exception)
         {
@@ -804,7 +815,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         if (SelectedImportBatch is null
             || !_dialogs.Confirm(
                 "Approve import",
-                "Approve this reviewed batch? This does not yet change canonical Client Info.",
+                "Approve this reviewed workbook? This does not change Client Information yet.",
                 "Approve",
                 "Cancel"))
         {
@@ -815,7 +826,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         {
             SelectedImportBatch = _repository.ApproveClientInfoImport(
                 SelectedImportBatch);
-            StatusMessage = "Import approved and ready for promotion.";
+            StatusMessage = "Workbook approved and ready to add to Client Information.";
         }
         catch (Exception exception)
         {
@@ -828,10 +839,9 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     {
         if (SelectedImportBatch is null
             || !_dialogs.Confirm(
-                "Promote into canonical Client Info",
-                "Promote this approved batch into SQL? Stable 0.6.1 remains available "
-                + "and continues using FireDrill during the beta.",
-                "Promote",
+                "Add workbook to Client Information",
+                "Add this approved workbook to the client's SQL information? FireDrill remains unchanged during the beta.",
+                "Add to Client Information",
                 "Cancel"))
         {
             return;
@@ -842,7 +852,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             _repository.PromoteClientInfoImport(SelectedImportBatch);
             Refresh();
             StatusMessage =
-                "Import promoted. Canonical SQL now contains this client's reviewed data.";
+                "Complete. Client Information now contains the reviewed workbook data.";
         }
         catch (Exception exception)
         {
@@ -896,6 +906,9 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     private Window? FindOwner() =>
         WpfApplication.Current.Windows
             .OfType<ClientInfoBetaWindow>()
+            .FirstOrDefault(window => ReferenceEquals(window.DataContext, this))
+        ?? WpfApplication.Current.Windows
+            .OfType<ClientInfoImportWindow>()
             .FirstOrDefault(window => ReferenceEquals(window.DataContext, this))
         ?? WpfApplication.Current.MainWindow;
 

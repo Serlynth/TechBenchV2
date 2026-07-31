@@ -233,7 +233,7 @@
                                 BorderThickness="1"
                                 CornerRadius="12"
                                 Padding="11,5">
-                            <TextBlock Text="{Binding CutoverLabel}"
+                            <TextBlock Text="{Binding ClientInfoStatusLabel}"
                                        Foreground="#BDF7DC" />
                         </Border>
                     </StackPanel>
@@ -685,7 +685,7 @@
                 </Grid>
             </TabItem>
 
-            <TabItem Header="Migration">
+            <TabItem Header="Migration" Visibility="Collapsed">
                 <Grid Margin="18">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />

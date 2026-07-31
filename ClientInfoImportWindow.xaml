@@ -1,0 +1,373 @@
+<Window x:Class="TechBench.ClientInfoImportWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:conv="clr-namespace:TechBench.Converters"
+        Title="{Binding ClientName, StringFormat={}{0} - Workbook Import}"
+        Icon="Assets/csri-techbench-icon.ico"
+        Width="1180"
+        Height="820"
+        MinWidth="980"
+        MinHeight="680"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource WindowBackgroundBrush}">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+        <conv:InverseBooleanToVisibilityConverter
+            x:Key="InverseBooleanToVisibilityConverter" />
+        <Style x:Key="ImportStepCardStyle" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource PanelBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="11" />
+            <Setter Property="Padding" Value="18" />
+        </Style>
+        <Style x:Key="ImportLabelStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="Bold" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="140" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="54" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,0,0,1">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#0D2340" Offset="0" />
+                    <GradientStop Color="#173B60" Offset="0.6" />
+                    <GradientStop Color="#0B1728" Offset="1" />
+                </LinearGradientBrush>
+            </Border.Background>
+            <Grid Margin="30,20">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="CLIENT WORKBOOK IMPORT"
+                               Foreground="#8DBEFF"
+                               FontSize="11"
+                               FontWeight="Bold" />
+                    <TextBlock Text="{Binding ClientName}"
+                               Foreground="White"
+                               FontSize="28"
+                               FontWeight="SemiBold"
+                               Margin="0,4,0,7"
+                               TextTrimming="CharacterEllipsis" />
+                    <StackPanel Orientation="Horizontal">
+                        <Border Background="#243B5A"
+                                BorderBrush="#41658F"
+                                BorderThickness="1"
+                                CornerRadius="12"
+                                Padding="11,5"
+                                Margin="0,0,8,0">
+                            <TextBlock Text="{Binding InternalClientIdLabel}"
+                                       Foreground="#EAF3FF" />
+                        </Border>
+                        <Border Background="#112D25"
+                                BorderBrush="{DynamicResource SuccessBrush}"
+                                BorderThickness="1"
+                                CornerRadius="12"
+                                Padding="11,5">
+                            <TextBlock Text="{Binding CutoverLabel}"
+                                       Foreground="#BDF7DC" />
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <Button Content="Refresh"
+                            Command="{Binding RefreshCommand}"
+                            MinWidth="96"
+                            Margin="0,0,8,0" />
+                    <Button Content="Close"
+                            MinWidth="96"
+                            Click="Close_Click" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <ScrollViewer Grid.Row="1"
+                      VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="24,20,24,24">
+                <TextBlock Text="Move one client workbook into TechBench"
+                           Foreground="{DynamicResource PrimaryTextBrush}"
+                           FontSize="21"
+                           FontWeight="SemiBold" />
+                <TextBlock Text="The workbook is tied to this internal client ID. Importing creates a review copy first; Client Information changes only after the final approval step."
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           TextWrapping="Wrap"
+                           Margin="0,4,0,14" />
+
+                <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="9"
+                        Padding="12,9"
+                        Margin="0,0,0,14">
+                    <TextBlock Text="{Binding ImportPermissionText}"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               TextWrapping="Wrap" />
+                </Border>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="0.9*" />
+                        <ColumnDefinition Width="16" />
+                        <ColumnDefinition Width="1.35*" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0">
+                        <Border Style="{StaticResource ImportStepCardStyle}"
+                                Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="STEP 1"
+                                           Style="{StaticResource ImportLabelStyle}" />
+                                <TextBlock Text="Create this client's workbook"
+                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                           FontSize="17"
+                                           FontWeight="SemiBold"
+                                           Margin="0,3,0,6" />
+                                <TextBlock Text="TechBench fills in the client name and internal ID. Save a fresh copy for this migration."
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,12" />
+                                <Button Content="Create Migration Workbook"
+                                        Command="{Binding CreateTemplateCommand}"
+                                        Style="{StaticResource PrimaryButtonStyle}"
+                                        HorizontalAlignment="Left"
+                                        Padding="16,8" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource ImportStepCardStyle}"
+                                Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="STEP 2"
+                                           Style="{StaticResource ImportLabelStyle}" />
+                                <TextBlock Text="Copy and clean the current information"
+                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                           FontSize="17"
+                                           FontWeight="SemiBold"
+                                           Margin="0,3,0,6" />
+                                <TextBlock Text="Copy the useful information from the client's current workbook. Leave tabs that do not apply blank. Put passwords only on the Passwords tab. For each copied row, choose Verified, Keep as-is, Needs review, or Do not import."
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource ImportStepCardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="STEP 3"
+                                           Style="{StaticResource ImportLabelStyle}" />
+                                <TextBlock Text="Import the completed workbook"
+                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                           FontSize="17"
+                                           FontWeight="SemiBold"
+                                           Margin="0,3,0,6" />
+                                <TextBlock Text="TechBench checks the client ID, required information, duplicate rows, and password comparisons before anything is added to Client Information."
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,12" />
+                                <Button Content="Import Completed Workbook"
+                                        Command="{Binding ImportWorkbookCommand}"
+                                        Style="{StaticResource PrimaryButtonStyle}"
+                                        HorizontalAlignment="Left"
+                                        Padding="16,8" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <Border Grid.Column="2"
+                            Style="{StaticResource ImportStepCardStyle}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="210" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <StackPanel Grid.Row="0" Margin="0,0,0,10">
+                                <TextBlock Text="Review imported workbooks"
+                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                           FontSize="18"
+                                           FontWeight="SemiBold" />
+                                <TextBlock Text="Select an import below to see its checks and finish it."
+                                           Foreground="{DynamicResource MutedTextBrush}"
+                                           Margin="0,3,0,0" />
+                            </StackPanel>
+
+                            <Grid Grid.Row="1">
+                                <TextBlock Text="No workbooks have been imported for this client yet."
+                                           Foreground="{DynamicResource MutedTextBrush}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           Visibility="{Binding HasImportBatches, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                                <ListBox ItemsSource="{Binding ImportBatches}"
+                                         SelectedItem="{Binding SelectedImportBatch}"
+                                         Style="{StaticResource ListBoxChromeLessStyle}"
+                                         ItemContainerStyle="{StaticResource ListBoxItemCardStyle}"
+                                         Visibility="{Binding HasImportBatches, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                    BorderBrush="{DynamicResource BorderBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="8"
+                                                    Padding="11,9"
+                                                    Margin="0,0,0,7">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding State}"
+                                                                   Foreground="{DynamicResource PrimaryTextBrush}"
+                                                                   FontWeight="SemiBold" />
+                                                        <TextBlock Foreground="{DynamicResource MutedTextBrush}"
+                                                                   FontSize="11"
+                                                                   Margin="0,2,0,0">
+                                                            <Run Text="{Binding RecordCount}" />
+                                                            <Run Text=" records, " />
+                                                            <Run Text="{Binding SecretCount}" />
+                                                            <Run Text=" passwords / secrets" />
+                                                        </TextBlock>
+                                                    </StackPanel>
+                                                    <TextBlock Grid.Column="1"
+                                                               Text="{Binding CreatedAtUtc, StringFormat={}{0:g}}"
+                                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                                               VerticalAlignment="Center"
+                                                               Margin="12,0,0,0" />
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Grid>
+
+                            <Grid Grid.Row="2"
+                                  Margin="0,12,0,0"
+                                  Visibility="{Binding HasSelectedImportBatch, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid Grid.Row="0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="FIREDRILL MATCHES"
+                                                   Style="{StaticResource ImportLabelStyle}" />
+                                        <TextBlock Text="{Binding SelectedImportBatch.SecretMatchCount}"
+                                                   Foreground="{DynamicResource SuccessBrush}"
+                                                   FontSize="18"
+                                                   FontWeight="SemiBold" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="MISMATCHES"
+                                                   Style="{StaticResource ImportLabelStyle}" />
+                                        <TextBlock Text="{Binding SelectedImportBatch.SecretMismatchCount}"
+                                                   Foreground="{DynamicResource WarningBrush}"
+                                                   FontSize="18"
+                                                   FontWeight="SemiBold" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="BLOCKING ERRORS"
+                                                   Style="{StaticResource ImportLabelStyle}" />
+                                        <TextBlock Text="{Binding SelectedImportBatch.BlockingIssueCount}"
+                                                   Foreground="{DynamicResource DangerBrush}"
+                                                   FontSize="18"
+                                                   FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <TextBlock Grid.Row="1"
+                                           Text="{Binding SelectedImportBatch.Message}"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,10,0,8" />
+
+                                <ScrollViewer Grid.Row="2"
+                                              MaxHeight="150"
+                                              VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{Binding ImportIssues}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border BorderBrush="{DynamicResource BorderBrush}"
+                                                        BorderThickness="0,0,0,1"
+                                                        Padding="0,7">
+                                                    <StackPanel>
+                                                        <TextBlock Foreground="{DynamicResource WarningBrush}"
+                                                                   FontWeight="SemiBold">
+                                                            <Run Text="{Binding Severity}" />
+                                                            <Run Text=" - " />
+                                                            <Run Text="{Binding IssueCode}" />
+                                                        </TextBlock>
+                                                        <TextBlock Text="{Binding Message}"
+                                                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                                                   TextWrapping="Wrap"
+                                                                   Margin="0,2,0,0" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+
+                                <WrapPanel Grid.Row="3"
+                                           HorizontalAlignment="Right"
+                                           Margin="0,12,0,0">
+                                    <Button Content="Refresh Checks"
+                                            Command="{Binding ReloadImportCommand}"
+                                            Margin="0,0,8,8" />
+                                    <Button Content="Check Against FireDrill"
+                                            Command="{Binding CompareImportCommand}"
+                                            Margin="0,0,8,8" />
+                                    <Button Content="Approve Reviewed Workbook"
+                                            Command="{Binding ApproveImportCommand}"
+                                            Margin="0,0,8,8" />
+                                    <Button Content="Add to Client Information"
+                                            Command="{Binding PromoteImportCommand}"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Margin="0,0,0,8" />
+                                </WrapPanel>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="2"
+                Background="{DynamicResource HeaderBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,1,0,0">
+            <Grid Margin="24,0">
+                <StackPanel Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <Ellipse Width="8"
+                             Height="8"
+                             Fill="{DynamicResource SuccessBrush}"
+                             Margin="0,0,10,0" />
+                    <TextBlock Text="{Binding StatusMessage}"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

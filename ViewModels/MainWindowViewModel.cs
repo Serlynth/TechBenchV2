@@ -1094,6 +1094,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Common Links" => "Showing commonly used websites",
             "Client Info" => "Showing all synchronized FireDrill client information",
             ClientInfoWorkspaceSection => "Showing canonical SQL client information",
+            ClientInfoImportWorkspaceSection => "Preparing client workbook imports",
             "Inventory" => "Showing equipment currently available in Stock Room",
             "Equipment Board" => "Showing stock, technician assignments, and deployment order",
             "Admin Center" => "Showing server synchronization and active TechBench clients",
@@ -1136,6 +1137,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 RefreshClientUsers();
                 break;
             case ClientInfoWorkspaceSection:
+            case ClientInfoImportWorkspaceSection:
                 RefreshClientInfoClients();
                 break;
             case "Ticket List":
@@ -1168,8 +1170,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         RefreshHistory();
         RefreshPostingQueue();
         RefreshPostingLogs();
-        if (CurrentSection.Equals(
-                ClientInfoWorkspaceSection,
+        if (CurrentSection.Equals(ClientInfoWorkspaceSection, StringComparison.Ordinal)
+            || CurrentSection.Equals(
+                ClientInfoImportWorkspaceSection,
                 StringComparison.Ordinal))
         {
             RefreshClientInfoClients();

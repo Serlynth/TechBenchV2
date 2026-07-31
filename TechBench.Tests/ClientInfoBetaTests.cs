@@ -1,4 +1,5 @@
 using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Spreadsheet;
 using TechBench.Data;
 using TechBench.Services;
 
@@ -38,14 +39,99 @@ public sealed class ClientInfoBetaTests
                 .ToArray();
             Assert.Equal(
                 [
-                    "Client Info",
-                    "People & Locations",
+                    "Start Here",
+                    "Locations",
+                    "People",
                     "Systems & Services",
                     "Equipment",
-                    "Credentials",
-                    "Other Info & Notes"
+                    "Passwords",
+                    "Other Info"
                 ],
                 names);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void FriendlyWorkbookRowsMapToCanonicalRecordsWithoutTechnicalKeys()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "TechBenchClientInfoTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "Friendly Migration.xlsx");
+            var service = new ClientInfoWorkbookService();
+            service.CreateTemplate(path, 477, "Acme Legal");
+
+            AppendRow(
+                path,
+                "Locations",
+                "Main Office", "Office", "100 Main Street", "", "Malvern",
+                "PA", "19355", "610-555-0100", "Eastern Standard Time",
+                "Yes", "Verified");
+            AppendRow(
+                path,
+                "People",
+                "Jamie Rivera", "Office Manager", "jamie@example.test",
+                "610-555-0101", "", "Main Office", "Primary", "Yes",
+                "Verified");
+            AppendRow(
+                path,
+                "Systems & Services",
+                "Firewall", "WatchGuard", "WatchGuard", "https://firewall.test",
+                "Main Office", "Active", "Primary firewall", "Verified");
+            AppendRow(
+                path,
+                "Equipment",
+                "Desktop", "Reception PC", "Dell", "OptiPlex", "SN-100", "",
+                "TB-100", "10.0.0.10", "Main Office", "Front desk", "Verified");
+            AppendRow(
+                path,
+                "Passwords",
+                "Firewall Admin", "Firewall", "admin", "P@ss word",
+                "https://firewall.test", "WatchGuard", "Emergency admin",
+                "Password", "Admin password", "Verified");
+            AppendRow(
+                path,
+                "Other Info",
+                "Operations", "After-hours procedure", "Call the office manager",
+                "Keep as-is");
+
+            var package = service.Read(path);
+
+            Assert.Equal(7, package.Records.Count);
+            Assert.Contains(package.Records, record => record.RecordType == "Profile");
+            var location = Assert.Single(
+                package.Records,
+                record => record.RecordType == "Location");
+            var person = Assert.Single(
+                package.Records,
+                record => record.RecordType == "Person");
+            var resource = Assert.Single(
+                package.Records,
+                record => record.RecordType == "Resource");
+            var credential = Assert.Single(
+                package.Records,
+                record => record.RecordType == "Credential");
+            Assert.Single(
+                package.Records,
+                record => record.RecordType == "Equipment");
+            var fact = Assert.Single(
+                package.Records,
+                record => record.RecordType == "Fact");
+            Assert.Equal("AcceptedUnverified", fact.ReviewStatus);
+            Assert.Equal(location.LocalKey, person.ParentLocalKey);
+            Assert.Contains(location.LocalKey, resource.PayloadJson, StringComparison.Ordinal);
+            Assert.Contains(resource.LocalKey, credential.PayloadJson, StringComparison.Ordinal);
+            var secret = Assert.Single(package.Secrets);
+            Assert.Equal(credential.LocalKey, secret.CredentialLocalKey);
+            Assert.Equal("P@ss word", secret.SecretValue);
         }
         finally
         {
@@ -139,6 +225,7 @@ public sealed class ClientInfoBetaTests
             "ViewModels",
             "ClientInfoBetaViewModel.cs");
         var mainWindow = Read("MainWindow.xaml.cs");
+        var importWindow = Read("ClientInfoImportWindow.xaml");
 
         foreach (var tab in new[]
                  {
@@ -146,8 +233,7 @@ public sealed class ClientInfoBetaTests
                      "People &amp; Locations",
                      "Systems &amp; Services",
                      "Credentials",
-                     "Other Info &amp; Notes",
-                     "Migration"
+                     "Other Info &amp; Notes"
                  })
         {
             Assert.Contains($"Header=\"{tab}\"", xaml, StringComparison.Ordinal);
@@ -160,7 +246,24 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("CompareClientInfoImportToFireDrill", viewModel, StringComparison.Ordinal);
         Assert.Contains("Another editor saved first", viewModel, StringComparison.Ordinal);
         Assert.Contains("new ClientInfoBetaWindow", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("new ClientInfoImportWindow", mainWindow, StringComparison.Ordinal);
         Assert.Contains("new ClientInfoWindow", mainWindow, StringComparison.Ordinal);
+        Assert.Contains(
+            "Header=\"Migration\" Visibility=\"Collapsed\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Content=\"Create Migration Workbook\"",
+            importWindow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Content=\"Import Completed Workbook\"",
+            importWindow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Content=\"Add to Client Information\"",
+            importWindow,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -175,11 +278,19 @@ public sealed class ClientInfoBetaTests
 
         Assert.Contains("Header=\"CLIENTS\"", navigation, StringComparison.Ordinal);
         Assert.Contains(
-            "Content=\"Client Info (Beta)\"",
+            "Content=\"Client Information\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Content=\"Workbook Imports\"",
             navigation,
             StringComparison.Ordinal);
         Assert.Contains(
             "CommandParameter=\"Client Database\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CommandParameter=\"Workbook Imports\"",
             navigation,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -195,7 +306,7 @@ public sealed class ClientInfoBetaTests
             mainWindowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Content=\"Open Client Info\"",
+            "Content=\"View / Edit\"",
             mainWindowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -270,5 +381,51 @@ public sealed class ClientInfoBetaTests
 
         Assert.NotNull(directory);
         return directory!.FullName;
+    }
+
+    private static void AppendRow(
+        string path,
+        string sheetName,
+        params string[] values)
+    {
+        using var workbook = SpreadsheetDocument.Open(path, true);
+        var sheet = workbook.WorkbookPart!.Workbook.Sheets!
+            .Elements<Sheet>()
+            .Single(item => string.Equals(
+                item.Name?.Value,
+                sheetName,
+                StringComparison.Ordinal));
+        var part = (WorksheetPart)workbook.WorkbookPart.GetPartById(sheet.Id!);
+        var sheetData = part.Worksheet.GetFirstChild<SheetData>()!;
+        var rowIndex = (uint)(sheetData.Elements<Row>()
+            .Select(row => row.RowIndex?.Value ?? 0U)
+            .DefaultIfEmpty(0U)
+            .Max() + 1U);
+        var row = new Row { RowIndex = rowIndex };
+        for (var index = 0; index < values.Length; index++)
+        {
+            row.Append(new Cell
+            {
+                CellReference = $"{TestColumnName(index + 1)}{rowIndex}",
+                DataType = CellValues.InlineString,
+                InlineString = new InlineString(new Text(values[index]))
+            });
+        }
+
+        sheetData.Append(row);
+        part.Worksheet.Save();
+    }
+
+    private static string TestColumnName(int column)
+    {
+        var result = string.Empty;
+        while (column > 0)
+        {
+            column--;
+            result = (char)('A' + column % 26) + result;
+            column /= 26;
+        }
+
+        return result;
     }
 }

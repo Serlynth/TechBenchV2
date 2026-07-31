@@ -6,6 +6,7 @@ namespace TechBench.ViewModels;
 public sealed partial class MainWindowViewModel
 {
     public const string ClientInfoWorkspaceSection = "Client Database";
+    public const string ClientInfoImportWorkspaceSection = "Workbook Imports";
 
     private string _clientInfoSearchText = string.Empty;
     private ClientInfoClientSummary? _selectedClientInfoClient;
@@ -30,8 +31,12 @@ public sealed partial class MainWindowViewModel
         ClientInfoWorkspaceAvailable && !HasClientInfoClients;
 
     public string ClientInfoWorkspaceDescription =>
-        "Search canonical SQL client records by name or internal client ID. "
-        + "Open a client to review, import, edit, and manage its cutover independently of FireDrill.";
+        "Search client information stored in TechBench SQL. Open a client to view "
+        + "or edit its contacts, locations, systems, credentials, and other information.";
+
+    public string ClientInfoImportWorkspaceDescription =>
+        "Choose a client, create its prefilled migration workbook, copy in the "
+        + "cleaned information, then import and review it before it becomes Client Information.";
 
     public string ClientInfoEmptyText => ClientInfoWorkspaceAvailable
         ? "No clients match this search."
@@ -95,8 +100,11 @@ public sealed partial class MainWindowViewModel
             OnPropertyChanged(nameof(HasClientInfoClients));
             OnPropertyChanged(nameof(IsClientInfoResultsEmpty));
             OnPropertyChanged(nameof(ClientInfoEmptyText));
-            StatusMessage =
-                $"Showing {ClientInfoClients.Count} canonical SQL client record(s).";
+            StatusMessage = CurrentSection.Equals(
+                ClientInfoImportWorkspaceSection,
+                StringComparison.Ordinal)
+                ? $"Showing {ClientInfoClients.Count} client(s) available for workbook import."
+                : $"Showing {ClientInfoClients.Count} Client Information record(s).";
         }
         catch (Exception exception)
         {

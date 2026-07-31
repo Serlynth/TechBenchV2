@@ -13,7 +13,8 @@ namespace TechBench.Services;
 
 public sealed class ClientInfoWorkbookService
 {
-    public const string TemplateVersion = "TB-CI-1";
+    public const string TemplateVersion = "TB-CI-2";
+    public const string LegacyTemplateVersion = "TB-CI-1";
 
     private static readonly string[] ReviewStatuses =
     [
@@ -40,69 +41,85 @@ public sealed class ClientInfoWorkbookService
             workbookPart,
             sheets,
             ref sheetId,
-            "Client Info",
+            "Start Here",
             [
                 ["TechBench Client Info Migration Workbook", ""],
+                ["What to do", "Copy the useful, cleaned information from the client's current workbook into the matching tabs. Leave tabs that do not apply blank."],
+                ["Review each row", "Choose Verified, Keep as-is, Needs review, or Do not import. A workbook cannot be approved while a populated row is blank or still Needs review."],
+                ["Passwords", "Put passwords and other secrets only on the Passwords tab. They are encrypted when imported and are never written to import logs."],
                 ["Template Version", TemplateVersion],
                 ["Workbook ID", Guid.NewGuid().ToString("D")],
                 ["Internal Client ID", clientId.ToString(CultureInfo.InvariantCulture)],
                 ["Client Name", clientName],
                 ["Summary", ""],
                 ["Review Status", "Unverified"],
-                ["Instructions", "Keep the internal client ID unchanged. Use one row per record on the remaining tabs. Passwords belong only in the Credentials tab."]
+                ["Important", "Do not change the internal client ID or reuse this workbook for another client."]
             ],
-            headerRow: 0);
+            headerRow: 0,
+            columnWidths: [28, 78],
+            formatFirstRowAsTitle: true);
         AddSheet(
             workbookPart,
             sheets,
             ref sheetId,
-            "People & Locations",
+            "Locations",
             [
-                ["Record Type", "Local Key", "Name", "Location Type", "Address 1",
-                 "Address 2", "City", "State/Province", "Postal Code", "Main Phone",
-                 "Time Zone ID", "Location Local Key", "Role/Department", "Email",
-                 "Phone", "Mobile Phone", "Contact Type", "Is Primary", "Is Active",
-                 "Review Status"]
-            ]);
+                ["Name", "Location Type", "Address 1", "Address 2", "City",
+                 "State/Province", "Postal Code", "Main Phone", "Time Zone ID",
+                 "Is Primary", "Review Status"]
+            ],
+            columnWidths: [26, 18, 28, 22, 18, 16, 16, 18, 18, 12, 22]);
+        AddSheet(
+            workbookPart,
+            sheets,
+            ref sheetId,
+            "People",
+            [
+                ["Name", "Role/Department", "Email", "Phone", "Mobile Phone",
+                 "Location", "Contact Type", "Is Primary", "Review Status"]
+            ],
+            columnWidths: [26, 24, 32, 18, 18, 22, 20, 12, 22]);
         AddSheet(
             workbookPart,
             sheets,
             ref sheetId,
             "Systems & Services",
             [
-                ["Local Key", "Parent Local Key", "Location Local Key", "Type", "Name",
-                 "Provider", "Address/URL", "Status", "Notes", "Is Active",
-                 "Review Status"]
-            ]);
+                ["Type", "Name", "Provider", "Address/URL", "Location", "Status",
+                 "Notes", "Review Status"]
+            ],
+            columnWidths: [22, 28, 24, 34, 22, 18, 40, 22]);
         AddSheet(
             workbookPart,
             sheets,
             ref sheetId,
             "Equipment",
             [
-                ["Local Key", "Location Local Key", "Device Type", "Name", "Manufacturer",
-                 "Model", "Serial Number", "Part Number", "Asset Tag", "IP Address",
-                 "Location Name", "Notes", "Review Status"]
-            ]);
+                ["Device Type", "Name", "Manufacturer", "Model", "Serial Number",
+                 "Part Number", "Asset Tag", "IP Address", "Location", "Notes",
+                 "Review Status"]
+            ],
+            columnWidths: [20, 28, 22, 22, 22, 22, 18, 18, 22, 40, 22]);
         AddSheet(
             workbookPart,
             sheets,
             ref sheetId,
-            "Credentials",
+            "Passwords",
             [
-                ["Local Key", "Resource Local Key", "Person Local Key", "Name", "Category",
-                 "Username", "Login URL", "Notes", "Secret Type", "Secret Label",
-                 "Password / Secret", "Review Status"]
-            ]);
+                ["Name", "Category", "Username", "Password / Secret", "Login URL",
+                 "Related System", "Notes", "Secret Type", "Secret Label",
+                 "Review Status"]
+            ],
+            columnWidths: [26, 20, 26, 30, 34, 26, 40, 18, 20, 22]);
         AddSheet(
             workbookPart,
             sheets,
             ref sheetId,
-            "Other Info & Notes",
+            "Other Info",
             [
-                ["Local Key", "Section", "Field Label", "Value", "Value Type",
-                 "Sort Order", "Is Active", "Review Status"]
-            ]);
+                ["Section", "Item", "Value / Notes", "Review Status"]
+            ],
+            columnWidths: [22, 28, 55, 22]);
         workbookPart.Workbook.Save();
     }
 
@@ -112,12 +129,19 @@ public sealed class ClientInfoWorkbookService
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
         var tables = ReadTables(path);
-        var info = ReadKeyValues(RequireSheet(tables, "Client Info"));
+        var metadataSheet = tables.ContainsKey("Start Here")
+            ? "Start Here"
+            : "Client Info";
+        var info = ReadKeyValues(RequireSheet(tables, metadataSheet));
         var version = GetRequired(info, "Template Version");
-        if (!string.Equals(version, TemplateVersion, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(version, TemplateVersion, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(
+                version,
+                LegacyTemplateVersion,
+                StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException(
-                $"Template version '{version}' is not supported. Expected {TemplateVersion}.");
+                $"Template version '{version}' is not supported. Expected {TemplateVersion} or {LegacyTemplateVersion}.");
         }
 
         if (!Guid.TryParse(GetRequired(info, "Workbook ID"), out var workbookId))
@@ -145,15 +169,44 @@ public sealed class ClientInfoWorkbookService
             "profile",
             null,
             JsonSerializer.Serialize(new { summary }),
-            "Client Info",
-            6,
+            metadataSheet,
+            metadataSheet.Equals("Start Here", StringComparison.OrdinalIgnoreCase)
+                ? 9
+                : 6,
             NormalizeReviewStatus(Get(info, "Review Status"))));
 
-        ParsePeopleAndLocations(GetSheet(tables, "People & Locations"), records);
-        ParseResources(GetSheet(tables, "Systems & Services"), records);
-        ParseEquipment(GetSheet(tables, "Equipment"), records);
-        ParseCredentials(GetSheet(tables, "Credentials"), records, secrets);
-        ParseFacts(GetSheet(tables, "Other Info & Notes"), records);
+        if (string.Equals(
+                version,
+                TemplateVersion,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            var locationKeys = ParseSimpleLocations(
+                GetSheet(tables, "Locations"),
+                records);
+            ParseSimplePeople(
+                GetSheet(tables, "People"),
+                records,
+                locationKeys);
+            var resourceKeys = ParseSimpleResources(
+                GetSheet(tables, "Systems & Services"),
+                records,
+                locationKeys);
+            ParseSimpleEquipment(GetSheet(tables, "Equipment"), records);
+            ParseSimpleCredentials(
+                GetSheet(tables, "Passwords"),
+                records,
+                secrets,
+                resourceKeys);
+            ParseSimpleFacts(GetSheet(tables, "Other Info"), records);
+        }
+        else
+        {
+            ParsePeopleAndLocations(GetSheet(tables, "People & Locations"), records);
+            ParseResources(GetSheet(tables, "Systems & Services"), records);
+            ParseEquipment(GetSheet(tables, "Equipment"), records);
+            ParseCredentials(GetSheet(tables, "Credentials"), records, secrets);
+            ParseFacts(GetSheet(tables, "Other Info & Notes"), records);
+        }
 
         using var hashStream = new FileStream(
             path,
@@ -203,6 +256,310 @@ public sealed class ClientInfoWorkbookService
         }
         while (reader.NextResult());
         return result;
+    }
+
+    private static IReadOnlyDictionary<string, string?> ParseSimpleLocations(
+        IReadOnlyList<string[]> rows,
+        ICollection<ClientInfoImportRecord> records)
+    {
+        var keys = new Dictionary<string, string?>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var row in DataRows(rows))
+        {
+            var name = Value(row.Values, row.Headers, "Name");
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            var localKey = LocalKey(string.Empty, "location", row.RowNumber);
+            AddFriendlyLookup(keys, name, localKey);
+            records.Add(new ClientInfoImportRecord(
+                "Location",
+                localKey,
+                null,
+                JsonSerializer.Serialize(new
+                {
+                    name,
+                    locationType = Value(row.Values, row.Headers, "Location Type"),
+                    address1 = Value(row.Values, row.Headers, "Address 1"),
+                    address2 = Value(row.Values, row.Headers, "Address 2"),
+                    city = Value(row.Values, row.Headers, "City"),
+                    stateProvince = Value(row.Values, row.Headers, "State/Province"),
+                    postalCode = Value(row.Values, row.Headers, "Postal Code"),
+                    mainPhone = Value(row.Values, row.Headers, "Main Phone"),
+                    timeZoneId = Value(row.Values, row.Headers, "Time Zone ID"),
+                    isPrimary = ParseBoolean(Value(row.Values, row.Headers, "Is Primary")),
+                    isActive = true
+                }),
+                "Locations",
+                row.RowNumber,
+                NormalizeReviewStatus(Value(row.Values, row.Headers, "Review Status"))));
+        }
+
+        return keys;
+    }
+
+    private static void ParseSimplePeople(
+        IReadOnlyList<string[]> rows,
+        ICollection<ClientInfoImportRecord> records,
+        IReadOnlyDictionary<string, string?> locationKeys)
+    {
+        foreach (var row in DataRows(rows))
+        {
+            var name = Value(row.Values, row.Headers, "Name");
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            var locationName = Value(row.Values, row.Headers, "Location");
+            records.Add(new ClientInfoImportRecord(
+                "Person",
+                LocalKey(string.Empty, "person", row.RowNumber),
+                ResolveFriendlyLookup(
+                    locationKeys,
+                    locationName,
+                    "location",
+                    "People",
+                    row.RowNumber),
+                JsonSerializer.Serialize(new
+                {
+                    displayName = name,
+                    roleDepartment = Value(row.Values, row.Headers, "Role/Department"),
+                    email = Value(row.Values, row.Headers, "Email"),
+                    phone = Value(row.Values, row.Headers, "Phone"),
+                    mobilePhone = Value(row.Values, row.Headers, "Mobile Phone"),
+                    contactType = Value(row.Values, row.Headers, "Contact Type"),
+                    isPrimary = ParseBoolean(Value(row.Values, row.Headers, "Is Primary")),
+                    isActive = true
+                }),
+                "People",
+                row.RowNumber,
+                NormalizeReviewStatus(Value(row.Values, row.Headers, "Review Status"))));
+        }
+    }
+
+    private static IReadOnlyDictionary<string, string?> ParseSimpleResources(
+        IReadOnlyList<string[]> rows,
+        ICollection<ClientInfoImportRecord> records,
+        IReadOnlyDictionary<string, string?> locationKeys)
+    {
+        var keys = new Dictionary<string, string?>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var row in DataRows(rows))
+        {
+            var name = Value(row.Values, row.Headers, "Name");
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            var localKey = LocalKey(string.Empty, "resource", row.RowNumber);
+            AddFriendlyLookup(keys, name, localKey);
+            var locationName = Value(row.Values, row.Headers, "Location");
+            records.Add(new ClientInfoImportRecord(
+                "Resource",
+                localKey,
+                null,
+                JsonSerializer.Serialize(new
+                {
+                    locationKey = ResolveFriendlyLookup(
+                        locationKeys,
+                        locationName,
+                        "location",
+                        "Systems & Services",
+                        row.RowNumber),
+                    resourceType = Value(row.Values, row.Headers, "Type"),
+                    name,
+                    provider = Value(row.Values, row.Headers, "Provider"),
+                    addressOrUrl = Value(row.Values, row.Headers, "Address/URL"),
+                    status = Value(row.Values, row.Headers, "Status"),
+                    notes = Value(
+                        row.Values,
+                        row.Headers,
+                        "Notes",
+                        preserveWhitespace: true),
+                    isActive = true
+                }),
+                "Systems & Services",
+                row.RowNumber,
+                NormalizeReviewStatus(Value(row.Values, row.Headers, "Review Status"))));
+        }
+
+        return keys;
+    }
+
+    private static void ParseSimpleEquipment(
+        IReadOnlyList<string[]> rows,
+        ICollection<ClientInfoImportRecord> records)
+    {
+        foreach (var row in DataRows(rows))
+        {
+            var name = Value(row.Values, row.Headers, "Name");
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            records.Add(new ClientInfoImportRecord(
+                "Equipment",
+                LocalKey(string.Empty, "equipment", row.RowNumber),
+                null,
+                JsonSerializer.Serialize(new
+                {
+                    deviceType = Value(row.Values, row.Headers, "Device Type"),
+                    name,
+                    manufacturer = Value(row.Values, row.Headers, "Manufacturer"),
+                    model = Value(row.Values, row.Headers, "Model"),
+                    serialNumber = Value(row.Values, row.Headers, "Serial Number"),
+                    partNumber = Value(row.Values, row.Headers, "Part Number"),
+                    assetTag = Value(row.Values, row.Headers, "Asset Tag"),
+                    ipAddress = Value(row.Values, row.Headers, "IP Address"),
+                    locationName = Value(row.Values, row.Headers, "Location"),
+                    notes = Value(
+                        row.Values,
+                        row.Headers,
+                        "Notes",
+                        preserveWhitespace: true)
+                }),
+                "Equipment",
+                row.RowNumber,
+                NormalizeReviewStatus(Value(row.Values, row.Headers, "Review Status"))));
+        }
+    }
+
+    private static void ParseSimpleCredentials(
+        IReadOnlyList<string[]> rows,
+        ICollection<ClientInfoImportRecord> records,
+        ICollection<ClientInfoImportSecret> secrets,
+        IReadOnlyDictionary<string, string?> resourceKeys)
+    {
+        foreach (var row in DataRows(rows))
+        {
+            var name = Value(row.Values, row.Headers, "Name");
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            var localKey = LocalKey(string.Empty, "credential", row.RowNumber);
+            var relatedSystem = Value(row.Values, row.Headers, "Related System");
+            records.Add(new ClientInfoImportRecord(
+                "Credential",
+                localKey,
+                null,
+                JsonSerializer.Serialize(new
+                {
+                    resourceKey = ResolveFriendlyLookup(
+                        resourceKeys,
+                        relatedSystem,
+                        "system or service",
+                        "Passwords",
+                        row.RowNumber),
+                    personKey = string.Empty,
+                    name,
+                    category = Value(row.Values, row.Headers, "Category"),
+                    username = Value(row.Values, row.Headers, "Username"),
+                    loginUrl = Value(row.Values, row.Headers, "Login URL"),
+                    notes = Value(
+                        row.Values,
+                        row.Headers,
+                        "Notes",
+                        preserveWhitespace: true)
+                }),
+                "Passwords",
+                row.RowNumber,
+                NormalizeReviewStatus(Value(row.Values, row.Headers, "Review Status"))));
+
+            var secretValue = Value(
+                row.Values,
+                row.Headers,
+                "Password / Secret",
+                preserveWhitespace: true);
+            if (!string.IsNullOrEmpty(secretValue))
+            {
+                secrets.Add(new ClientInfoImportSecret(
+                    localKey,
+                    Default(Value(row.Values, row.Headers, "Secret Type"), "Password"),
+                    Default(Value(row.Values, row.Headers, "Secret Label"), "Password"),
+                    secretValue));
+            }
+        }
+    }
+
+    private static void ParseSimpleFacts(
+        IReadOnlyList<string[]> rows,
+        ICollection<ClientInfoImportRecord> records)
+    {
+        foreach (var row in DataRows(rows))
+        {
+            var item = Value(row.Values, row.Headers, "Item");
+            if (string.IsNullOrWhiteSpace(item))
+            {
+                continue;
+            }
+
+            records.Add(new ClientInfoImportRecord(
+                "Fact",
+                LocalKey(string.Empty, "fact", row.RowNumber),
+                null,
+                JsonSerializer.Serialize(new
+                {
+                    sectionName = Default(
+                        Value(row.Values, row.Headers, "Section"),
+                        "Other"),
+                    fieldLabel = item,
+                    valueText = Value(
+                        row.Values,
+                        row.Headers,
+                        "Value / Notes",
+                        preserveWhitespace: true),
+                    valueType = "Text",
+                    sortOrder = row.RowNumber,
+                    isActive = true
+                }),
+                "Other Info",
+                row.RowNumber,
+                NormalizeReviewStatus(Value(row.Values, row.Headers, "Review Status"))));
+        }
+    }
+
+    private static void AddFriendlyLookup(
+        IDictionary<string, string?> lookup,
+        string displayName,
+        string localKey)
+    {
+        var key = displayName.Trim();
+        if (lookup.ContainsKey(key))
+        {
+            lookup[key] = null;
+            return;
+        }
+
+        lookup[key] = localKey;
+    }
+
+    private static string? ResolveFriendlyLookup(
+        IReadOnlyDictionary<string, string?> lookup,
+        string displayName,
+        string recordType,
+        string sheetName,
+        int rowNumber)
+    {
+        if (string.IsNullOrWhiteSpace(displayName))
+        {
+            return null;
+        }
+
+        if (!lookup.TryGetValue(displayName.Trim(), out var localKey))
+        {
+            throw new InvalidDataException(
+                $"{sheetName} row {rowNumber} refers to {recordType} '{displayName}', but no matching row was found in the workbook.");
+        }
+
+        return localKey ?? throw new InvalidDataException(
+            $"{sheetName} row {rowNumber} refers to {recordType} '{displayName}', but that name appears more than once in the workbook. Make the names unique before importing.");
     }
 
     private static void ParsePeopleAndLocations(
@@ -550,12 +907,24 @@ public sealed class ClientInfoWorkbookService
         string key) =>
         values.TryGetValue(key, out var value) ? value.Trim() : string.Empty;
 
-    private static string NormalizeReviewStatus(string value) =>
-        ReviewStatuses.FirstOrDefault(status => string.Equals(
+    private static string NormalizeReviewStatus(string value)
+    {
+        var trimmed = value.Trim();
+        var friendlyValue = trimmed.ToUpperInvariant() switch
+        {
+            "KEEP AS-IS" or "KEEP AS IS" => "AcceptedUnverified",
+            "NEEDS REVIEW" => "NeedsReview",
+            "DO NOT IMPORT" => "Rejected",
+            "NOT REVIEWED" => "Unverified",
+            _ => trimmed
+        };
+
+        return ReviewStatuses.FirstOrDefault(status => string.Equals(
             status,
-            value.Trim(),
+            friendlyValue,
             StringComparison.OrdinalIgnoreCase))
-        ?? "Unverified";
+            ?? "Unverified";
+    }
 
     private static string LocalKey(string value, string prefix, int rowNumber) =>
         string.IsNullOrWhiteSpace(value)
@@ -602,50 +971,84 @@ public sealed class ClientInfoWorkbookService
         ref uint sheetId,
         string name,
         IReadOnlyList<string[]> rows,
-        int headerRow = 1)
+        int headerRow = 1,
+        IReadOnlyList<double>? columnWidths = null,
+        bool formatFirstRowAsTitle = false)
     {
         var part = workbookPart.AddNewPart<WorksheetPart>();
         var sheetData = new SheetData();
         var worksheet = new Worksheet();
+        var view = new SheetView
+        {
+            WorkbookViewId = 0U,
+            ShowGridLines = false
+        };
         if (headerRow > 0)
         {
-            worksheet.Append(new SheetViews(
-                new SheetView(
-                    new Pane
-                    {
-                        VerticalSplit = headerRow,
-                        TopLeftCell = $"A{headerRow + 1}",
-                        ActivePane = PaneValues.BottomLeft,
-                        State = PaneStateValues.Frozen
-                    })
-                {
-                    WorkbookViewId = 0U
-                }));
-        }
-
-        worksheet.Append(new Columns(
-            new Column
+            view.Append(new Pane
             {
-                Min = 1,
-                Max = 30,
-                Width = 22,
+                VerticalSplit = headerRow,
+                TopLeftCell = $"A{headerRow + 1}",
+                ActivePane = PaneValues.BottomLeft,
+                State = PaneStateValues.Frozen
+            });
+        }
+        worksheet.Append(new SheetViews(view));
+
+        var columns = new Columns();
+        var widestRow = rows.Count == 0
+            ? 1
+            : rows.Max(row => row.Length);
+        for (var index = 0; index < widestRow; index++)
+        {
+            columns.Append(new Column
+            {
+                Min = (uint)(index + 1),
+                Max = (uint)(index + 1),
+                Width = columnWidths is not null && index < columnWidths.Count
+                    ? columnWidths[index]
+                    : 22,
                 CustomWidth = true
-            }));
+            });
+        }
+        worksheet.Append(columns);
         worksheet.Append(sheetData);
 
         for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
         {
-            var row = new Row { RowIndex = (uint)(rowIndex + 1) };
+            var row = new Row
+            {
+                RowIndex = (uint)(rowIndex + 1),
+                Height = rowIndex + 1 == headerRow
+                    ? 28D
+                    : formatFirstRowAsTitle && rowIndex == 0
+                        ? 34D
+                        : formatFirstRowAsTitle && rowIndex == 1
+                            ? 38D
+                            : formatFirstRowAsTitle && rowIndex == 2
+                                ? 52D
+                                : formatFirstRowAsTitle && rowIndex == 3
+                                    ? 42D
+                        : 24D,
+                CustomHeight = true
+            };
             for (var columnIndex = 0;
                  columnIndex < rows[rowIndex].Length;
                  columnIndex++)
             {
+                var styleIndex = rowIndex + 1 == headerRow
+                    ? 1U
+                    : formatFirstRowAsTitle && rowIndex == 0
+                        ? 2U
+                        : headerRow == 0 && columnIndex == 0
+                            ? 3U
+                            : 0U;
                 row.Append(new Cell
                 {
                     CellReference =
                         $"{ColumnName(columnIndex + 1)}{rowIndex + 1}",
                     DataType = CellValues.InlineString,
-                    StyleIndex = rowIndex + 1 == headerRow ? 1U : 0U,
+                    StyleIndex = styleIndex,
                     InlineString = new InlineString(
                         new Text(rows[rowIndex][columnIndex])
                         {
@@ -657,6 +1060,15 @@ public sealed class ClientInfoWorkbookService
             sheetData.Append(row);
         }
 
+        if (formatFirstRowAsTitle && widestRow > 1)
+        {
+            worksheet.Append(new MergeCells(
+                new MergeCell
+                {
+                    Reference = $"A1:{ColumnName(widestRow)}1"
+                }));
+        }
+
         if (headerRow > 0 && rows.Count > 0)
         {
             worksheet.Append(new AutoFilter
@@ -664,6 +1076,16 @@ public sealed class ClientInfoWorkbookService
                 Reference =
                     $"A{headerRow}:{ColumnName(rows[0].Length)}{headerRow}"
             });
+            AppendListValidation(
+                worksheet,
+                rows[0],
+                "Review Status",
+                "Verified,Keep as-is,Needs review,Do not import");
+            AppendListValidation(
+                worksheet,
+                rows[0],
+                "Is Primary",
+                "Yes,No");
         }
 
         part.Worksheet = worksheet;
@@ -676,14 +1098,82 @@ public sealed class ClientInfoWorkbookService
         });
     }
 
+    private static void AppendListValidation(
+        Worksheet worksheet,
+        IReadOnlyList<string> headers,
+        string header,
+        string values)
+    {
+        var index = -1;
+        for (var position = 0; position < headers.Count; position++)
+        {
+            if (string.Equals(
+                    headers[position],
+                    header,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                index = position;
+                break;
+            }
+        }
+
+        if (index < 0)
+        {
+            return;
+        }
+
+        var validations = worksheet.Elements<DataValidations>().FirstOrDefault();
+        if (validations is null)
+        {
+            validations = new DataValidations();
+            worksheet.Append(validations);
+        }
+
+        var column = ColumnName(index + 1);
+        validations.Append(new DataValidation
+        {
+            Type = DataValidationValues.List,
+            AllowBlank = true,
+            ShowErrorMessage = true,
+            ErrorTitle = "Choose a listed value",
+            Error = $"Use one of: {values}",
+            SequenceOfReferences = new ListValue<StringValue>
+            {
+                InnerText = $"{column}2:{column}500"
+            },
+            Formula1 = new Formula1($"\"{values}\"")
+        });
+        validations.Count = (uint)validations.ChildElements.Count;
+    }
+
     private static Stylesheet CreateStylesheet() => new(
         new Fonts(
-            new DocumentFormat.OpenXml.Spreadsheet.Font(),
+            new DocumentFormat.OpenXml.Spreadsheet.Font(
+                new FontName { Val = "Aptos" },
+                new FontSize { Val = 11D }),
             new DocumentFormat.OpenXml.Spreadsheet.Font(
                 new Bold(),
+                new FontName { Val = "Aptos" },
+                new FontSize { Val = 11D },
                 new DocumentFormat.OpenXml.Spreadsheet.Color
                 {
                     Rgb = "FFFFFFFF"
+                }),
+            new DocumentFormat.OpenXml.Spreadsheet.Font(
+                new Bold(),
+                new FontName { Val = "Aptos Display" },
+                new FontSize { Val = 18D },
+                new DocumentFormat.OpenXml.Spreadsheet.Color
+                {
+                    Rgb = "FFFFFFFF"
+                }),
+            new DocumentFormat.OpenXml.Spreadsheet.Font(
+                new Bold(),
+                new FontName { Val = "Aptos" },
+                new FontSize { Val = 11D },
+                new DocumentFormat.OpenXml.Spreadsheet.Color
+                {
+                    Rgb = "FF17324D"
                 })),
         new Fills(
             new Fill(new PatternFill
@@ -698,16 +1188,78 @@ public sealed class ClientInfoWorkbookService
                 new ForegroundColor { Rgb = "FF1F4E78" })
             {
                 PatternType = PatternValues.Solid
+            }),
+            new Fill(new PatternFill(
+                new ForegroundColor { Rgb = "FFDCE6F1" })
+            {
+                PatternType = PatternValues.Solid
             })),
-        new Borders(new Border()),
+        new Borders(
+            new Border(),
+            new Border(
+                new BottomBorder
+                {
+                    Style = BorderStyleValues.Thin,
+                    Color = new DocumentFormat.OpenXml.Spreadsheet.Color
+                    {
+                        Rgb = "FFB8C8D8"
+                    }
+                })),
         new CellFormats(
-            new CellFormat(),
+            new CellFormat
+            {
+                Alignment = new Alignment
+                {
+                    Horizontal = HorizontalAlignmentValues.Left,
+                    Vertical = VerticalAlignmentValues.Top,
+                    WrapText = true
+                },
+                ApplyAlignment = true
+            },
             new CellFormat
             {
                 FontId = 1,
                 FillId = 2,
+                BorderId = 1,
                 ApplyFont = true,
-                ApplyFill = true
+                ApplyFill = true,
+                ApplyBorder = true,
+                Alignment = new Alignment
+                {
+                    Horizontal = HorizontalAlignmentValues.Left,
+                    Vertical = VerticalAlignmentValues.Center,
+                    WrapText = true
+                },
+                ApplyAlignment = true
+            },
+            new CellFormat
+            {
+                FontId = 2,
+                FillId = 2,
+                ApplyFont = true,
+                ApplyFill = true,
+                Alignment = new Alignment
+                {
+                    Horizontal = HorizontalAlignmentValues.Left,
+                    Vertical = VerticalAlignmentValues.Center
+                },
+                ApplyAlignment = true
+            },
+            new CellFormat
+            {
+                FontId = 3,
+                FillId = 3,
+                BorderId = 1,
+                ApplyFont = true,
+                ApplyFill = true,
+                ApplyBorder = true,
+                Alignment = new Alignment
+                {
+                    Horizontal = HorizontalAlignmentValues.Left,
+                    Vertical = VerticalAlignmentValues.Top,
+                    WrapText = true
+                },
+                ApplyAlignment = true
             }));
 
     private static string ColumnName(int column)

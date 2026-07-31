@@ -283,10 +283,15 @@
                                   Style="{StaticResource WorkspaceGroupStyle}"
                                   Visibility="{Binding IsClientInfoBetaBuild, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <StackPanel>
-                                <Button Content="Client Info (Beta)"
+                                <Button Content="Client Information"
                                         Command="{Binding NavigateCommand}"
                                         CommandParameter="Client Database"
                                         Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Client Database}"
+                                        Style="{StaticResource WorkspaceNavItemStyle}" />
+                                <Button Content="Workbook Imports"
+                                        Command="{Binding NavigateCommand}"
+                                        CommandParameter="Workbook Imports"
+                                        Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Workbook Imports}"
                                         Style="{StaticResource WorkspaceNavItemStyle}" />
                             </StackPanel>
                         </Expander>
