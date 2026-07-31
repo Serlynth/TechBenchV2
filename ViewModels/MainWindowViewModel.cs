@@ -187,6 +187,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         InitializeV1DatabaseImport();
         InitializeCommonLinks();
         InitializeFireDrillCredentials();
+        InitializeClientInfoBeta();
         InitializeClientUsers();
         InitializeEquipmentBoard();
 
@@ -1092,6 +1093,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Ticket List" => "Showing my assigned and group non-closed tickets",
             "Common Links" => "Showing commonly used websites",
             "Client Info" => "Showing all synchronized FireDrill client information",
+            ClientInfoWorkspaceSection => "Showing canonical SQL client information",
             "Inventory" => "Showing equipment currently available in Stock Room",
             "Equipment Board" => "Showing stock, technician assignments, and deployment order",
             "Admin Center" => "Showing server synchronization and active TechBench clients",
@@ -1133,6 +1135,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             case "Client Users":
                 RefreshClientUsers();
                 break;
+            case ClientInfoWorkspaceSection:
+                RefreshClientInfoClients();
+                break;
             case "Ticket List":
                 RefreshTicketList();
                 break;
@@ -1163,6 +1168,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         RefreshHistory();
         RefreshPostingQueue();
         RefreshPostingLogs();
+        if (CurrentSection.Equals(
+                ClientInfoWorkspaceSection,
+                StringComparison.Ordinal))
+        {
+            RefreshClientInfoClients();
+        }
         UpdateTotals();
     }
 

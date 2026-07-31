@@ -532,8 +532,58 @@ public partial class MainWindow : Window
             return;
         }
 
-#if TECHBENCH_CLIENT_INFO_BETA
-        ClientInfoBetaViewModel? canonicalViewModel;
+        var profileWindow = new ClientInfoWindow
+        {
+            Owner = this,
+            DataContext = viewModel.CreateClientInfoProfile(summary)
+        };
+        profileWindow.Show();
+        profileWindow.Activate();
+        e.Handled = true;
+    }
+
+    private void ClientInfoClientListBox_MouseDoubleClick(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.ListBox listBox
+            || e.OriginalSource is not DependencyObject source
+            || ItemsControl.ContainerFromElement(listBox, source)
+                is not System.Windows.Controls.ListBoxItem
+                {
+                    DataContext: ClientInfoClientSummary summary
+                })
+        {
+            return;
+        }
+
+        OpenClientInfoBetaWindow(summary);
+        e.Handled = true;
+    }
+
+    private void OpenClientInfoBeta_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement
+            {
+                DataContext: ClientInfoClientSummary summary
+            })
+        {
+            OpenClientInfoBetaWindow(summary);
+            e.Handled = true;
+        }
+    }
+
+    private void OpenClientInfoBetaWindow(
+        ClientInfoClientSummary summary)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        ClientInfoBetaViewModel canonicalViewModel;
         try
         {
             canonicalViewModel =
@@ -545,50 +595,36 @@ public partial class MainWindow : Window
                 "Client Info could not be opened",
                 exception.Message,
                 this);
-            e.Handled = true;
             return;
         }
 
-        if (canonicalViewModel is not null)
+        if (_clientInfoBetaWindows.TryGetValue(
+                canonicalViewModel.ClientId,
+                out var existing))
         {
-            if (_clientInfoBetaWindows.TryGetValue(
-                    canonicalViewModel.ClientId,
-                    out var existing))
+            if (existing.WindowState == WindowState.Minimized)
             {
-                if (existing.WindowState == WindowState.Minimized)
-                {
-                    existing.WindowState = WindowState.Normal;
-                }
-
-                existing.Activate();
-                e.Handled = true;
-                return;
+                existing.WindowState = WindowState.Normal;
             }
 
-            var canonicalWindow = new ClientInfoBetaWindow
-            {
-                Owner = this,
-                DataContext = canonicalViewModel
-            };
-            _clientInfoBetaWindows[canonicalViewModel.ClientId] =
-                canonicalWindow;
-            canonicalWindow.Closed += (_, _) =>
-                _clientInfoBetaWindows.Remove(canonicalViewModel.ClientId);
-            canonicalWindow.Show();
-            canonicalWindow.Activate();
-            e.Handled = true;
+            existing.Activate();
             return;
         }
-#endif
 
-        var profileWindow = new ClientInfoWindow
+        var canonicalWindow = new ClientInfoBetaWindow
         {
             Owner = this,
-            DataContext = viewModel.CreateClientInfoProfile(summary)
+            DataContext = canonicalViewModel
         };
-        profileWindow.Show();
-        profileWindow.Activate();
-        e.Handled = true;
+        _clientInfoBetaWindows[canonicalViewModel.ClientId] =
+            canonicalWindow;
+        canonicalWindow.Closed += (_, _) =>
+        {
+            _clientInfoBetaWindows.Remove(canonicalViewModel.ClientId);
+            viewModel.RefreshClientInfoWorkspace();
+        };
+        canonicalWindow.Show();
+        canonicalWindow.Activate();
     }
 
     private async void OpenEquipmentFromInventory_Click(

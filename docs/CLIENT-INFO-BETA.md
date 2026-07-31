@@ -16,9 +16,10 @@ updater ignores desktop prereleases. There is no beta Server Manager setting.
 
 Stable and beta use the same TechBench installer identity with separate `v2`
 and `client-info-beta` Velopack channels, matching the earlier Inventory Beta
-workflow. Stable keeps the FireDrill pane; only a build compiled for the beta
-channel opens canonical Client Info. The update-channel selector can move a
-workstation in either direction without a manual reinstall.
+workflow. Stable and beta both keep the existing FireDrill pane and profile
+behavior. Only a build compiled for the beta adds the separate **CLIENTS >
+Client Info (Beta)** workspace for canonical SQL records. The update-channel
+selector can move a workstation in either direction without a manual reinstall.
 
 ## Initial beta installation
 
@@ -41,7 +42,9 @@ workstation in either direction without a manual reinstall.
 
 ## Migrating one client
 
-1. In the beta, open **Client Info** and double-click the client.
+1. In the beta, open **CLIENTS > Client Info (Beta)**. Search by client name or
+   internal client ID, then select **Open Client Info** (or double-click the
+   client row).
 2. Confirm the internal client ID in the header.
 3. On **Migration**, choose **Create workbook**.
 4. Prune and normalize the client's source workbook into the generated tabs.

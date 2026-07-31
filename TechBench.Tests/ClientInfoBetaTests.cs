@@ -163,6 +163,63 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("new ClientInfoWindow", mainWindow, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void CanonicalClientInfoHasItsOwnWorkspaceAndDoesNotReplaceFireDrill()
+    {
+        var navigation = Read("Controls", "WorkspaceNavigation.xaml");
+        var mainWindowXaml = Read("MainWindow.xaml");
+        var mainWindowCode = Read("MainWindow.xaml.cs");
+        var workspaceViewModel = Read(
+            "ViewModels",
+            "MainWindowViewModel.ClientInfoBeta.cs");
+
+        Assert.Contains("Header=\"CLIENTS\"", navigation, StringComparison.Ordinal);
+        Assert.Contains(
+            "Content=\"Client Info (Beta)\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CommandParameter=\"Client Database\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Visibility=\"{Binding IsClientInfoBetaBuild",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ConverterParameter=Client Database",
+            mainWindowXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ItemsSource=\"{Binding ClientInfoClients}\"",
+            mainWindowXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Content=\"Open Client Info\"",
+            mainWindowXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "MouseDoubleClick=\"ClientInfoClientListBox_MouseDoubleClick\"",
+            mainWindowXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "DataContext = viewModel.CreateClientInfoProfile(summary)",
+            mainWindowCode,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "#if TECHBENCH_CLIENT_INFO_BETA",
+            mainWindowCode,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CreateCanonicalClientInfoProfile(\n        ClientInfoClientSummary summary)",
+            workspaceViewModel.Replace("\r\n", "\n"),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "FireDrillCredentialSummary",
+            workspaceViewModel,
+            StringComparison.Ordinal);
+    }
+
     private static string Read(params string[] parts) =>
         File.ReadAllText(Path.Combine(
             new[] { RepositoryRoot() }.Concat(parts).ToArray()));

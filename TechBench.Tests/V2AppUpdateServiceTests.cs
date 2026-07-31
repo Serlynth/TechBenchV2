@@ -134,8 +134,8 @@ public sealed class V2AppUpdateServiceTests
         var mainWindow = File.ReadAllText(RepositoryFile("MainWindow.xaml"));
         var connectionWindow = File.ReadAllText(
             RepositoryFile("DatabaseConnectionWindow.xaml"));
-        var mainWindowCode = File.ReadAllText(
-            RepositoryFile("MainWindow.xaml.cs"));
+        var clientInfoWorkspace = File.ReadAllText(
+            RepositoryFile(@"ViewModels\MainWindowViewModel.ClientInfoBeta.cs"));
 
         Assert.Contains(
             "Use Client Info Beta update channel",
@@ -147,7 +147,11 @@ public sealed class V2AppUpdateServiceTests
             StringComparison.Ordinal);
         Assert.Contains(
             "#if TECHBENCH_CLIENT_INFO_BETA",
-            mainWindowCode,
+            clientInfoWorkspace,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "public bool IsClientInfoBetaBuild => false;",
+            clientInfoWorkspace,
             StringComparison.Ordinal);
     }
 

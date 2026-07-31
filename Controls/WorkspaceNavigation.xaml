@@ -279,6 +279,18 @@
                         </StackPanel>
                         </Expander>
 
+                        <Expander Header="CLIENTS"
+                                  Style="{StaticResource WorkspaceGroupStyle}"
+                                  Visibility="{Binding IsClientInfoBetaBuild, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <StackPanel>
+                                <Button Content="Client Info (Beta)"
+                                        Command="{Binding NavigateCommand}"
+                                        CommandParameter="Client Database"
+                                        Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Client Database}"
+                                        Style="{StaticResource WorkspaceNavItemStyle}" />
+                            </StackPanel>
+                        </Expander>
+
                         <Expander Header="FIREDRILL"
                               Style="{StaticResource WorkspaceGroupStyle}">
                         <StackPanel>
