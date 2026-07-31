@@ -1956,6 +1956,12 @@ BEGIN
             [UpdatedAtUtc] = SYSUTCDATETIME()
         WHERE [ClientId] = @SageClientId;
 
+        IF OBJECT_ID(N'tb_client.ReparentClientGraph', N'P') IS NOT NULL
+            EXEC [tb_client].[ReparentClientGraph]
+                @SourceClientId = @SageClientId,
+                @TargetClientId = @WhdClientId,
+                @ActorWindowsSid = @UserSid;
+
         DELETE FROM [tb_data].[Clients]
         WHERE [Id] = @SageClientId
           AND [RowVersion] = @ExpectedSageRowVersion;

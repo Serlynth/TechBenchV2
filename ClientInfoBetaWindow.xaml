@@ -1,0 +1,662 @@
+<Window x:Class="TechBench.ClientInfoBetaWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:conv="clr-namespace:TechBench.Converters"
+        Title="{Binding WindowTitle}"
+        Icon="Assets/csri-techbench-icon.ico"
+        Width="1260"
+        Height="820"
+        MinWidth="980"
+        MinHeight="650"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource WindowBackgroundBrush}">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+        <conv:InverseBooleanToVisibilityConverter
+            x:Key="InverseBooleanToVisibilityConverter" />
+        <Style x:Key="SectionHeaderStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+        </Style>
+        <Style x:Key="SubtleLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+        </Style>
+        <Style x:Key="DataGridTextStyle" TargetType="TextBlock">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="Margin" Value="3,0" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="150" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="54" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,0,0,1">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#0D2340" Offset="0" />
+                    <GradientStop Color="#173B60" Offset="0.6" />
+                    <GradientStop Color="#0B1728" Offset="1" />
+                </LinearGradientBrush>
+            </Border.Background>
+            <Grid Margin="30,22">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="CANONICAL CLIENT INFO · BETA"
+                               Foreground="#8DBEFF"
+                               FontSize="11"
+                               FontWeight="Bold" />
+                    <TextBlock Text="{Binding ClientName}"
+                               Foreground="White"
+                               FontSize="30"
+                               FontWeight="SemiBold"
+                               Margin="0,5,0,8"
+                               TextTrimming="CharacterEllipsis" />
+                    <StackPanel Orientation="Horizontal">
+                        <Border Background="#243B5A"
+                                BorderBrush="#41658F"
+                                BorderThickness="1"
+                                CornerRadius="12"
+                                Padding="11,5"
+                                Margin="0,0,8,0">
+                            <TextBlock Text="{Binding InternalClientIdLabel}"
+                                       Foreground="#EAF3FF" />
+                        </Border>
+                        <Border Background="#112D25"
+                                BorderBrush="{DynamicResource SuccessBrush}"
+                                BorderThickness="1"
+                                CornerRadius="12"
+                                Padding="11,5">
+                            <TextBlock Text="{Binding CutoverLabel}"
+                                       Foreground="#BDF7DC" />
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <Button Content="Refresh"
+                            Command="{Binding RefreshCommand}"
+                            MinWidth="96"
+                            Margin="0,0,8,0" />
+                    <Button Content="Close"
+                            MinWidth="96"
+                            Click="Close_Click" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <TabControl Grid.Row="1"
+                    Margin="22,18,22,12"
+                    Background="{DynamicResource PanelBackgroundBrush}">
+            <TabItem Header="Overview">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="22">
+                        <TextBlock Text="Overview"
+                                   Style="{StaticResource SectionHeaderStyle}" />
+                        <TextBlock Text="Contact details are synchronized from the existing client record. The summary and review state belong to canonical Client Info."
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,4,0,18" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="10"
+                                    Padding="18"
+                                    Margin="0,0,8,0">
+                                <StackPanel>
+                                    <TextBlock Text="MAIN CONTACT"
+                                               Style="{StaticResource SubtleLabelStyle}" />
+                                    <TextBlock Text="{Binding Profile.WhdContactName}"
+                                               FontSize="16"
+                                               Margin="0,4,0,12" />
+                                    <TextBlock Text="EMAIL"
+                                               Style="{StaticResource SubtleLabelStyle}" />
+                                    <TextBlock Text="{Binding Profile.WhdContactEmail}"
+                                               Margin="0,4,0,12" />
+                                    <TextBlock Text="PHONE"
+                                               Style="{StaticResource SubtleLabelStyle}" />
+                                    <TextBlock Text="{Binding Profile.WhdPhone}"
+                                               Margin="0,4,0,12" />
+                                    <TextBlock Text="ADDRESS"
+                                               Style="{StaticResource SubtleLabelStyle}" />
+                                    <TextBlock Text="{Binding Profile.WhdAddress}"
+                                               Margin="0,4,0,0"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="1"
+                                    Background="{DynamicResource PanelAltBackgroundBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="10"
+                                    Padding="18"
+                                    Margin="8,0,0,0">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="CANONICAL SUMMARY"
+                                               Style="{StaticResource SubtleLabelStyle}" />
+                                    <TextBox Grid.Row="1"
+                                             Text="{Binding Summary, UpdateSourceTrigger=PropertyChanged}"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto"
+                                             MinHeight="155"
+                                             Margin="0,6,0,12"
+                                             Padding="10" />
+                                    <ComboBox Grid.Row="2"
+                                              ItemsSource="{Binding ReviewStatusOptions}"
+                                              SelectedItem="{Binding ReviewStatus}"
+                                              MinWidth="190"
+                                              HorizontalAlignment="Left"
+                                              Margin="0,0,0,12"
+                                              IsEnabled="{Binding CanEdit}" />
+                                    <Button Grid.Row="3"
+                                            Content="Save overview"
+                                            Command="{Binding SaveProfileCommand}"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            HorizontalAlignment="Right"
+                                            MinWidth="130" />
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="People &amp; Locations">
+                <Grid Margin="18">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.05*" />
+                        <ColumnDefinition Width="1.25*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid Margin="0,0,9,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Locations"
+                                       Style="{StaticResource SectionHeaderStyle}" />
+                            <Button Grid.Column="1"
+                                    Content="Add"
+                                    Command="{Binding AddLocationCommand}"
+                                    Margin="0,0,8,8"
+                                    MinWidth="70" />
+                            <Button Grid.Column="2"
+                                    Content="Edit"
+                                    Command="{Binding EditLocationCommand}"
+                                    Margin="0,0,0,8"
+                                    MinWidth="70" />
+                        </Grid>
+                        <DataGrid Grid.Row="1"
+                                  ItemsSource="{Binding Locations}"
+                                  SelectedItem="{Binding SelectedLocation}"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  CanUserAddRows="False"
+                                  MouseDoubleClick="Locations_DoubleClick">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Name"
+                                                    Binding="{Binding Name}"
+                                                    Width="1.1*" />
+                                <DataGridTextColumn Header="Type"
+                                                    Binding="{Binding LocationType}"
+                                                    Width="0.7*" />
+                                <DataGridTextColumn Header="Address"
+                                                    Binding="{Binding AddressLabel}"
+                                                    Width="1.5*" />
+                                <DataGridTextColumn Header="Review"
+                                                    Binding="{Binding ReviewStatus}"
+                                                    Width="0.8*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                    <Grid Grid.Column="1" Margin="9,0,0,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="People"
+                                       Style="{StaticResource SectionHeaderStyle}" />
+                            <Button Grid.Column="1"
+                                    Content="Add"
+                                    Command="{Binding AddPersonCommand}"
+                                    Margin="0,0,8,8"
+                                    MinWidth="70" />
+                            <Button Grid.Column="2"
+                                    Content="Edit"
+                                    Command="{Binding EditPersonCommand}"
+                                    Margin="0,0,0,8"
+                                    MinWidth="70" />
+                        </Grid>
+                        <DataGrid Grid.Row="1"
+                                  ItemsSource="{Binding People}"
+                                  SelectedItem="{Binding SelectedPerson}"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  CanUserAddRows="False"
+                                  MouseDoubleClick="People_DoubleClick">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Name"
+                                                    Binding="{Binding DisplayName}"
+                                                    Width="1.1*" />
+                                <DataGridTextColumn Header="Role"
+                                                    Binding="{Binding RoleDepartment}"
+                                                    Width="1*" />
+                                <DataGridTextColumn Header="Email"
+                                                    Binding="{Binding Email}"
+                                                    Width="1.2*" />
+                                <DataGridTextColumn Header="Location"
+                                                    Binding="{Binding LocationName}"
+                                                    Width="0.8*" />
+                                <DataGridTextColumn Header="Review"
+                                                    Binding="{Binding ReviewStatus}"
+                                                    Width="0.8*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Systems &amp; Services">
+                <Grid Margin="18">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Systems &amp; Services"
+                                       Style="{StaticResource SectionHeaderStyle}" />
+                            <TextBlock Text="Servers, networks, SaaS, vendors, domains, backups, and other client resources."
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                       Margin="0,3,0,10" />
+                        </StackPanel>
+                        <Button Grid.Column="1"
+                                Content="Add"
+                                Command="{Binding AddResourceCommand}"
+                                MinWidth="76"
+                                Margin="0,0,8,8" />
+                        <Button Grid.Column="2"
+                                Content="Edit"
+                                Command="{Binding EditResourceCommand}"
+                                MinWidth="76"
+                                Margin="0,0,0,8" />
+                    </Grid>
+                    <DataGrid Grid.Row="1"
+                              ItemsSource="{Binding Resources}"
+                              SelectedItem="{Binding SelectedResource}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False"
+                              MouseDoubleClick="Resources_DoubleClick">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Name"
+                                                Binding="{Binding Name}"
+                                                Width="1.2*" />
+                            <DataGridTextColumn Header="Type"
+                                                Binding="{Binding ResourceType}"
+                                                Width="0.8*" />
+                            <DataGridTextColumn Header="Provider"
+                                                Binding="{Binding Provider}"
+                                                Width="0.9*" />
+                            <DataGridTextColumn Header="Address / URL"
+                                                Binding="{Binding AddressOrUrl}"
+                                                Width="1.5*" />
+                            <DataGridTextColumn Header="Location"
+                                                Binding="{Binding LocationName}"
+                                                Width="0.9*" />
+                            <DataGridTextColumn Header="Status"
+                                                Binding="{Binding Status}"
+                                                Width="0.7*" />
+                            <DataGridTextColumn Header="Review"
+                                                Binding="{Binding ReviewStatus}"
+                                                Width="0.8*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Credentials">
+                <Grid Margin="18">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.45*" />
+                        <ColumnDefinition Width="0.8*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid Margin="0,0,10,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Credentials"
+                                       Style="{StaticResource SectionHeaderStyle}" />
+                            <Button Grid.Column="1"
+                                    Content="Add"
+                                    Command="{Binding AddCredentialCommand}"
+                                    MinWidth="76"
+                                    Margin="0,0,8,8" />
+                            <Button Grid.Column="2"
+                                    Content="Edit"
+                                    Command="{Binding EditCredentialCommand}"
+                                    MinWidth="76"
+                                    Margin="0,0,0,8" />
+                        </Grid>
+                        <DataGrid Grid.Row="1"
+                                  ItemsSource="{Binding Credentials}"
+                                  SelectedItem="{Binding SelectedCredential}"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  CanUserAddRows="False"
+                                  MouseDoubleClick="Credentials_DoubleClick">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Name"
+                                                    Binding="{Binding Name}"
+                                                    Width="1.1*" />
+                                <DataGridTextColumn Header="Category"
+                                                    Binding="{Binding Category}"
+                                                    Width="0.8*" />
+                                <DataGridTextColumn Header="Username"
+                                                    Binding="{Binding Username}"
+                                                    Width="1.2*" />
+                                <DataGridTextColumn Header="Login URL"
+                                                    Binding="{Binding LoginUrl}"
+                                                    Width="1.3*" />
+                                <DataGridTextColumn Header="Secrets"
+                                                    Binding="{Binding SecretCount}"
+                                                    Width="0.5*" />
+                                <DataGridTextColumn Header="Review"
+                                                    Binding="{Binding ReviewStatus}"
+                                                    Width="0.8*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                    <Border Grid.Column="1"
+                            Background="{DynamicResource PanelAltBackgroundBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="10"
+                            Padding="16"
+                            Margin="10,0,0,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="{Binding SelectedCredential.Name, TargetNullValue=Select a credential}"
+                                       Style="{StaticResource SectionHeaderStyle}"
+                                       TextTrimming="CharacterEllipsis" />
+                            <Button Grid.Row="1"
+                                    Content="Add password / secret"
+                                    Command="{Binding AddSecretCommand}"
+                                    HorizontalAlignment="Left"
+                                    Margin="0,10,0,12" />
+                            <ScrollViewer Grid.Row="2"
+                                          VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding SelectedCredential.Secrets}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border BorderBrush="{DynamicResource BorderBrush}"
+                                                    BorderThickness="0,0,0,1"
+                                                    Padding="0,10">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding SecretLabel}"
+                                                               FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding SecretType}"
+                                                               Foreground="{DynamicResource MutedTextBrush}"
+                                                               FontSize="11"
+                                                               Margin="0,2,0,7" />
+                                                    <WrapPanel>
+                                                        <Button Content="Reveal"
+                                                                Command="{Binding DataContext.RevealSecretCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}"
+                                                                Margin="0,0,6,0"
+                                                                Padding="9,4" />
+                                                        <Button Content="Copy"
+                                                                Command="{Binding DataContext.CopySecretCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}"
+                                                                Margin="0,0,6,0"
+                                                                Padding="9,4" />
+                                                        <Button Content="Replace"
+                                                                Command="{Binding DataContext.ReplaceSecretCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}"
+                                                                Padding="9,4" />
+                                                    </WrapPanel>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Other Info &amp; Notes">
+                <Grid Margin="18">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Other Info &amp; Notes"
+                                   Style="{StaticResource SectionHeaderStyle}" />
+                        <Button Grid.Column="1"
+                                Content="Add"
+                                Command="{Binding AddFactCommand}"
+                                MinWidth="76"
+                                Margin="0,0,8,8" />
+                        <Button Grid.Column="2"
+                                Content="Edit"
+                                Command="{Binding EditFactCommand}"
+                                MinWidth="76"
+                                Margin="0,0,0,8" />
+                    </Grid>
+                    <DataGrid Grid.Row="1"
+                              ItemsSource="{Binding Facts}"
+                              SelectedItem="{Binding SelectedFact}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False"
+                              MouseDoubleClick="Facts_DoubleClick">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Section"
+                                                Binding="{Binding SectionName}"
+                                                Width="0.9*" />
+                            <DataGridTextColumn Header="Field"
+                                                Binding="{Binding FieldLabel}"
+                                                Width="1.2*" />
+                            <DataGridTextColumn Header="Value"
+                                                Binding="{Binding ValueText}"
+                                                Width="2.4*" />
+                            <DataGridTextColumn Header="Type"
+                                                Binding="{Binding ValueType}"
+                                                Width="0.7*" />
+                            <DataGridTextColumn Header="Review"
+                                                Binding="{Binding ReviewStatus}"
+                                                Width="0.8*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Migration">
+                <Grid Margin="18">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="1.15*" />
+                        <RowDefinition Height="0.85*" />
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Per-client migration"
+                                       Style="{StaticResource SectionHeaderStyle}" />
+                            <TextBlock Text="Stage → validate → review → approve → promote. Staging never changes canonical records."
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                       Margin="0,3,0,12" />
+                        </StackPanel>
+                        <Button Grid.Column="1"
+                                Content="Create workbook"
+                                Command="{Binding CreateTemplateCommand}"
+                                MinWidth="125"
+                                Margin="0,0,8,12" />
+                        <Button Grid.Column="2"
+                                Content="Stage workbook"
+                                Command="{Binding ImportWorkbookCommand}"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                MinWidth="125"
+                                Margin="0,0,0,12" />
+                    </Grid>
+                    <DataGrid Grid.Row="1"
+                              ItemsSource="{Binding ImportBatches}"
+                              SelectedItem="{Binding SelectedImportBatch}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Created"
+                                                Binding="{Binding CreatedAtUtc, StringFormat={}{0:g}}"
+                                                Width="1*" />
+                            <DataGridTextColumn Header="State"
+                                                Binding="{Binding State}"
+                                                Width="0.8*" />
+                            <DataGridTextColumn Header="Records"
+                                                Binding="{Binding RecordCount}"
+                                                Width="0.55*" />
+                            <DataGridTextColumn Header="Secrets"
+                                                Binding="{Binding SecretCount}"
+                                                Width="0.55*" />
+                            <DataGridTextColumn Header="FD matches"
+                                                Binding="{Binding SecretMatchCount}"
+                                                Width="0.65*" />
+                            <DataGridTextColumn Header="FD mismatches"
+                                                Binding="{Binding SecretMismatchCount}"
+                                                Width="0.75*" />
+                            <DataGridTextColumn Header="Errors"
+                                                Binding="{Binding BlockingIssueCount}"
+                                                Width="0.55*" />
+                            <DataGridTextColumn Header="Warnings"
+                                                Binding="{Binding WarningCount}"
+                                                Width="0.6*" />
+                            <DataGridTextColumn Header="Message"
+                                                Binding="{Binding Message}"
+                                                Width="2.2*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <Grid Grid.Row="2" Margin="0,14,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <DataGrid ItemsSource="{Binding ImportIssues}"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  CanUserAddRows="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Severity"
+                                                    Binding="{Binding Severity}"
+                                                    Width="0.7*" />
+                                <DataGridTextColumn Header="Code"
+                                                    Binding="{Binding IssueCode}"
+                                                    Width="1*" />
+                                <DataGridTextColumn Header="Issue"
+                                                    Binding="{Binding Message}"
+                                                    Width="3*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <StackPanel Grid.Column="1"
+                                    Margin="14,0,0,0"
+                                    Width="145">
+                            <Button Content="Refresh review"
+                                    Command="{Binding ReloadImportCommand}"
+                                    Margin="0,0,0,8" />
+                            <Button Content="Compare FireDrill"
+                                    Command="{Binding CompareImportCommand}"
+                                    Margin="0,0,0,8" />
+                            <Button Content="Approve"
+                                    Command="{Binding ApproveImportCommand}"
+                                    Margin="0,0,0,8" />
+                            <Button Content="Promote to SQL"
+                                    Command="{Binding PromoteImportCommand}"
+                                    Style="{StaticResource PrimaryButtonStyle}" />
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </TabItem>
+        </TabControl>
+
+        <Border Grid.Row="2"
+                Background="{DynamicResource HeaderBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,1,0,0">
+            <Grid Margin="24,0">
+                <StackPanel Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <Ellipse Width="8"
+                             Height="8"
+                             Fill="{DynamicResource SuccessBrush}"
+                             Margin="0,0,10,0" />
+                    <TextBlock Text="{Binding StatusMessage}"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

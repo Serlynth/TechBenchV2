@@ -31,6 +31,7 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         new(StringComparer.OrdinalIgnoreCase);
     private bool _fullTextSearchAvailable;
     private bool _equipmentBoardAvailable;
+    private bool _clientInfoBetaAvailable;
 
     public SqlServerTechBenchRepository(
         SqlServerConnectionFactory connectionFactory,
@@ -49,6 +50,7 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
 
     public bool FullTextSearchAvailable => _fullTextSearchAvailable;
     public bool EquipmentBoardAvailable => _equipmentBoardAvailable;
+    public bool ClientInfoBetaAvailable => _clientInfoBetaAvailable;
 
     public static class Procedures
     {
@@ -97,6 +99,31 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         public const string GetCommonLinks = "[tb_app].[GetCommonLinks]";
         public const string SearchFireDrillCredentials = "[tb_app].[SearchFireDrillCredentials]";
         public const string RevealFireDrillCredential = "[tb_app].[RevealFireDrillCredential]";
+        public const string SearchClientInfoClients = "[tb_app].[SearchClientInfoClients]";
+        public const string GetClientInfoSnapshot = "[tb_app].[GetClientInfoSnapshot]";
+        public const string SaveClientInfoProfile = "[tb_app].[SaveClientInfoProfile]";
+        public const string SaveClientInfoLocation = "[tb_app].[SaveClientInfoLocation]";
+        public const string SaveClientInfoPerson = "[tb_app].[SaveClientInfoPerson]";
+        public const string SaveClientInfoResource = "[tb_app].[SaveClientInfoResource]";
+        public const string SaveClientInfoFact = "[tb_app].[SaveClientInfoFact]";
+        public const string SaveClientCredential = "[tb_app].[SaveClientCredential]";
+        public const string SetClientCredentialSecret =
+            "[tb_app].[SetClientCredentialSecret]";
+        public const string RevealClientCredentialSecret =
+            "[tb_app].[RevealClientCredentialSecret]";
+        public const string BeginClientInfoImport = "[tb_app].[BeginClientInfoImport]";
+        public const string StageClientInfoRecord = "[tb_app].[StageClientInfoRecord]";
+        public const string StageClientInfoSecret = "[tb_app].[StageClientInfoSecret]";
+        public const string ValidateClientInfoImport =
+            "[tb_app].[ValidateClientInfoImport]";
+        public const string CompareClientInfoImportToFireDrill =
+            "[tb_app].[CompareClientInfoImportToFireDrill]";
+        public const string GetClientInfoImportBatch =
+            "[tb_app].[GetClientInfoImportBatch]";
+        public const string ApproveClientInfoImport =
+            "[tb_app].[ApproveClientInfoImport]";
+        public const string PromoteClientInfoImport =
+            "[tb_app].[PromoteClientInfoImport]";
         public const string SearchClientUsers = "[tb_app].[SearchClientUsers]";
         public const string RevealClientUser = "[tb_app].[RevealClientUser]";
         public const string GetCredentialsSyncStatus = "[tb_app].[GetFireDrillSyncStatus]";
@@ -201,23 +228,29 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
                     {
                         if (!await reader.ReadAsync(token).ConfigureAwait(false))
                         {
-                            return (FullText: false, Equipment: false);
+                            return (
+                                FullText: false,
+                                Equipment: false,
+                                ClientInfo: false);
                         }
 
                         return (
                             FullText: GetBoolean(reader, "FullTextSearchAvailable"),
-                            Equipment: GetBoolean(reader, "EquipmentBoardAvailable"));
+                            Equipment: GetBoolean(reader, "EquipmentBoardAvailable"),
+                            ClientInfo: GetBoolean(reader, "ClientInfoBetaAvailable"));
                     },
                     cancellationToken)
                 .ConfigureAwait(false);
             _fullTextSearchAvailable = capabilities.FullText;
             _equipmentBoardAvailable = capabilities.Equipment;
+            _clientInfoBetaAvailable = capabilities.ClientInfo;
         }
         catch (SqlException ex) when (ex.Number == 2812)
         {
             // Older deployment packages do not expose the capability procedure.
             _fullTextSearchAvailable = false;
             _equipmentBoardAvailable = false;
+            _clientInfoBetaAvailable = false;
         }
     }
 

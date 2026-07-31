@@ -23,10 +23,12 @@
     <IntermediateOutputPath Condition="'$(TechBenchTestBuild)' != 'true'">obj\$(Configuration)\ClientBuild\</IntermediateOutputPath>
     <TechBenchReleaseChannel Condition="'$(TechBenchReleaseChannel)' == ''">v2</TechBenchReleaseChannel>
     <DefineConstants Condition="'$(TechBenchReleaseChannel)' == 'inventory-beta'">$(DefineConstants);TECHBENCH_INVENTORY_BETA</DefineConstants>
+    <DefineConstants Condition="'$(TechBenchReleaseChannel)' == 'client-info-beta'">$(DefineConstants);TECHBENCH_CLIENT_INFO_BETA</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="ExcelDataReader" Version="3.9.0" />
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.3.0" />
     <PackageReference Include="Markdig" Version="1.3.2" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />

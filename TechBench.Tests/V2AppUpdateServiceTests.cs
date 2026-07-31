@@ -18,6 +18,9 @@ public sealed class V2AppUpdateServiceTests
         Assert.Equal(
             "inventory-beta",
             V2AppUpdateService.InventoryBetaReleaseChannel);
+        Assert.Equal(
+            "client-info-beta",
+            V2AppUpdateService.ClientInfoBetaReleaseChannel);
         Assert.False(V2AppUpdateService.InventoryBetaAvailable);
         Assert.Equal("v2", V2AppUpdateService.CompiledReleaseChannel);
     }
@@ -52,11 +55,19 @@ public sealed class V2AppUpdateServiceTests
             RepositoryFile(@"scripts\Publish-TechBenchRelease.ps1"));
 
         Assert.Contains(
-            "[ValidateSet('v2', 'inventory-beta')]",
+            "[ValidateSet('v2', 'inventory-beta', 'client-info-beta')]",
             source,
             StringComparison.Ordinal);
         Assert.Contains(
             "'TechBenchInventoryBetaSetup.exe'",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "'TechBenchClientInfoBetaSetup.exe'",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "'CSRI.TechBenchV2.ClientInfoBeta'",
             source,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -79,6 +90,14 @@ public sealed class V2AppUpdateServiceTests
         Assert.Contains(
             "TECHBENCH_INVENTORY_BETA",
             project,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "TECHBENCH_CLIENT_INFO_BETA",
+            project,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "public const string CompiledReleaseChannel = ClientInfoBetaReleaseChannel;",
+            service,
             StringComparison.Ordinal);
         Assert.Contains(
             "public const string CompiledReleaseChannel = InventoryBetaReleaseChannel;",

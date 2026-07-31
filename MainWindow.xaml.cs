@@ -32,6 +32,8 @@ public partial class MainWindow : Window
     private bool _equipmentLaneDragStarted;
     private GridLength _expandedEquipmentDeploymentHeight =
         new(230, GridUnitType.Pixel);
+    private readonly Dictionary<int, ClientInfoBetaWindow>
+        _clientInfoBetaWindows = [];
 
     private void HideEquipmentLane_Click(
         object sender,
@@ -527,6 +529,53 @@ public partial class MainWindow : Window
             } ||
             DataContext is not MainWindowViewModel viewModel)
         {
+            return;
+        }
+
+        ClientInfoBetaViewModel? canonicalViewModel;
+        try
+        {
+            canonicalViewModel =
+                viewModel.CreateCanonicalClientInfoProfile(summary);
+        }
+        catch (Exception exception)
+        {
+            AppDialogWindow.Error(
+                "Client Info could not be opened",
+                exception.Message,
+                this);
+            e.Handled = true;
+            return;
+        }
+
+        if (canonicalViewModel is not null)
+        {
+            if (_clientInfoBetaWindows.TryGetValue(
+                    canonicalViewModel.ClientId,
+                    out var existing))
+            {
+                if (existing.WindowState == WindowState.Minimized)
+                {
+                    existing.WindowState = WindowState.Normal;
+                }
+
+                existing.Activate();
+                e.Handled = true;
+                return;
+            }
+
+            var canonicalWindow = new ClientInfoBetaWindow
+            {
+                Owner = this,
+                DataContext = canonicalViewModel
+            };
+            _clientInfoBetaWindows[canonicalViewModel.ClientId] =
+                canonicalWindow;
+            canonicalWindow.Closed += (_, _) =>
+                _clientInfoBetaWindows.Remove(canonicalViewModel.ClientId);
+            canonicalWindow.Show();
+            canonicalWindow.Activate();
+            e.Handled = true;
             return;
         }
 

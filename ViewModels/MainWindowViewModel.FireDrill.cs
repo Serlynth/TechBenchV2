@@ -196,6 +196,49 @@ public sealed partial class MainWindowViewModel
             _repository.RevealClientUser);
     }
 
+    internal ClientInfoBetaViewModel? CreateCanonicalClientInfoProfile(
+        FireDrillCredentialSummary summary)
+    {
+        if (!_repository.ClientInfoBetaAvailable)
+        {
+            return null;
+        }
+
+        var clients = _repository.GetClients();
+        var matchedClient = ClientProfileWhdMatcher.FindConfidentMatch(
+            summary.ClientName,
+            clients);
+        if (matchedClient is null)
+        {
+            var exactMatches = _repository.SearchClientInfoClients(
+                    summary.ClientName)
+                .Where(client => string.Equals(
+                    client.ClientName.Trim(),
+                    summary.ClientName.Trim(),
+                    StringComparison.OrdinalIgnoreCase))
+                .Take(2)
+                .ToArray();
+            if (exactMatches.Length == 1)
+            {
+                matchedClient = _repository.GetClient(
+                    exactMatches[0].ClientId);
+            }
+        }
+
+        if (matchedClient is null)
+        {
+            throw new InvalidOperationException(
+                $"'{summary.ClientName}' is not confidently linked to one TechBench "
+                + "internal client ID. Resolve the client match before migrating it.");
+        }
+
+        return new ClientInfoBetaViewModel(
+            matchedClient.Id,
+            _repository,
+            _currentUser,
+            _dialogService);
+    }
+
     private void RefreshFireDrillCredentials()
     {
         if (!CanAccessFireDrill) return;

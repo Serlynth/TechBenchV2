@@ -15,6 +15,8 @@ public interface ITechBenchRepository
 
     bool EquipmentBoardAvailable => false;
 
+    bool ClientInfoBetaAvailable => false;
+
     void Initialize();
 
     IReadOnlyList<Client> GetClients(bool includeInactive = false, string? searchTerm = null);
@@ -125,6 +127,72 @@ public interface ITechBenchRepository
     IReadOnlyList<FireDrillCredentialSummary> SearchFireDrillCredentials(string? searchTerm = null) => [];
 
     FireDrillCredential? RevealFireDrillCredential(long credentialId) => null;
+
+    IReadOnlyList<ClientInfoClientSummary> SearchClientInfoClients(
+        string? searchTerm = null,
+        bool includeInactive = false) => [];
+
+    ClientInfoSnapshot? GetClientInfoSnapshot(int clientId) => null;
+
+    ClientInfoProfile SaveClientInfoProfile(ClientInfoProfile profile) =>
+        throw new NotSupportedException(
+            "Canonical Client Info requires the shared SQL Server beta extension.");
+
+    ClientInfoLocation SaveClientInfoLocation(ClientInfoLocation location) =>
+        throw new NotSupportedException(
+            "Canonical Client Info requires the shared SQL Server beta extension.");
+
+    ClientInfoPerson SaveClientInfoPerson(ClientInfoPerson person) =>
+        throw new NotSupportedException(
+            "Canonical Client Info requires the shared SQL Server beta extension.");
+
+    ClientInfoResource SaveClientInfoResource(ClientInfoResource resource) =>
+        throw new NotSupportedException(
+            "Canonical Client Info requires the shared SQL Server beta extension.");
+
+    ClientInfoFact SaveClientInfoFact(ClientInfoFact fact) =>
+        throw new NotSupportedException(
+            "Canonical Client Info requires the shared SQL Server beta extension.");
+
+    ClientInfoCredential SaveClientInfoCredential(ClientInfoCredential credential) =>
+        throw new NotSupportedException(
+            "Canonical Client Info requires the shared SQL Server beta extension.");
+
+    ClientInfoSecretSummary SetClientInfoSecret(
+        ClientInfoSecretSummary secret,
+        string secretValue,
+        bool verified) =>
+        throw new NotSupportedException(
+            "Canonical Client Info requires the shared SQL Server beta extension.");
+
+    RevealedClientInfoSecret? RevealClientInfoSecret(
+        long secretId,
+        bool forClipboard = false) => null;
+
+    ClientInfoImportBatch ImportClientInfoWorkbook(
+        ClientInfoWorkbookPackage package) =>
+        throw new NotSupportedException(
+            "Canonical Client Info import requires the shared SQL Server beta extension.");
+
+    ClientInfoImportBatch GetClientInfoImportBatch(Guid batchId) =>
+        throw new NotSupportedException(
+            "Canonical Client Info import requires the shared SQL Server beta extension.");
+
+    ClientInfoImportBatch ValidateClientInfoImport(Guid batchId) =>
+        throw new NotSupportedException(
+            "Canonical Client Info import requires the shared SQL Server beta extension.");
+
+    ClientInfoImportBatch CompareClientInfoImportToFireDrill(Guid batchId) =>
+        throw new NotSupportedException(
+            "Canonical Client Info comparison requires the shared SQL Server beta extension.");
+
+    ClientInfoImportBatch ApproveClientInfoImport(ClientInfoImportBatch batch) =>
+        throw new NotSupportedException(
+            "Canonical Client Info import requires the shared SQL Server beta extension.");
+
+    void PromoteClientInfoImport(ClientInfoImportBatch batch) =>
+        throw new NotSupportedException(
+            "Canonical Client Info import requires the shared SQL Server beta extension.");
 
     IReadOnlyList<ClientUserSummary> SearchClientUsers(
         int? clientId = null,

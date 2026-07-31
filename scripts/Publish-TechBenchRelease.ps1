@@ -10,7 +10,7 @@ param(
 
     [string]$RepositoryUrl = 'https://github.com/Serlynth/TechBenchV2-Releases',
 
-    [ValidateSet('v2', 'inventory-beta')]
+    [ValidateSet('v2', 'inventory-beta', 'client-info-beta')]
     [string]$Channel = 'v2',
 
     [switch]$Publish,
@@ -31,10 +31,21 @@ $splashPath = Join-Path $repoRoot 'Assets\csri-techbench-logo.png'
 $numericVersion = ($Version -split '-', 2)[0]
 $isPrerelease = $Version.Contains('-')
 $releaseChannel = $Channel
-$installerFileName = if ($releaseChannel -eq 'inventory-beta') {
-    'TechBenchInventoryBetaSetup.exe'
+$isBetaChannel = $releaseChannel -in @('inventory-beta', 'client-info-beta')
+$installerFileName = switch ($releaseChannel) {
+    'inventory-beta' { 'TechBenchInventoryBetaSetup.exe' }
+    'client-info-beta' { 'TechBenchClientInfoBetaSetup.exe' }
+    default { 'TechBenchV2Setup.exe' }
+}
+$packId = if ($releaseChannel -eq 'client-info-beta') {
+    'CSRI.TechBenchV2.ClientInfoBeta'
 } else {
-    'TechBenchV2Setup.exe'
+    'CSRI.TechBenchV2'
+}
+$packTitle = if ($releaseChannel -eq 'client-info-beta') {
+    'TechBench V2 Client Info Beta'
+} else {
+    'TechBench V2'
 }
 
 if ([string]::IsNullOrWhiteSpace($ReleaseNotesPath)) {
@@ -214,7 +225,9 @@ try {
     }
 
     $hasExistingChannelRelease = @($existingReleases | Where-Object {
-        if ($releaseChannel -eq 'inventory-beta') {
+        if ($releaseChannel -eq 'client-info-beta') {
+            $false
+        } elseif ($isBetaChannel) {
             $_.tagName -match '^v\d+\.\d+\.\d+-beta\.'
         } else {
             $_.tagName -match '^v0\.' -and $_.tagName -notmatch '-beta\.'
@@ -231,7 +244,7 @@ try {
             '--outputDir', $releaseDirectory,
             '--channel', $releaseChannel,
             '--repoUrl', $RepositoryUrl,
-            '--pre', ($releaseChannel -eq 'inventory-beta').ToString().ToLowerInvariant()
+            '--pre', $isBetaChannel.ToString().ToLowerInvariant()
         )
     }
 
@@ -259,11 +272,11 @@ try {
         '--outputDir', $releaseDirectory,
         '--channel', $releaseChannel,
         '--runtime', 'win-x86',
-        '--packId', 'CSRI.TechBenchV2',
+        '--packId', $packId,
         '--packVersion', $Version,
         '--packDir', $publishDirectory,
         '--packAuthors', 'CSRI',
-        '--packTitle', 'TechBench V2',
+        '--packTitle', $packTitle,
         '--releaseNotes', $ReleaseNotesPath,
         '--icon', $iconPath,
         '--mainExe', 'TechBenchV2.exe',
