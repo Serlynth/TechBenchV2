@@ -21,6 +21,9 @@ public sealed class LocalPreferenceStoreTests
             created.WindowWidth = 1440;
             created.WindowHeight = 900;
             created.WindowState = "Maximized";
+            created.LastBenchModule = "AdminBench";
+            created.TechBenchWorkspace = "Inventory";
+            created.AdminBenchWorkspace = "Admin Center";
             created.RefreshIntervalMinutes = 15;
             created.MicrosoftAdminOpenInChromeIncognito = true;
             created.LastUpdateCheckAtUtc = new DateTime(
@@ -57,6 +60,9 @@ public sealed class LocalPreferenceStoreTests
             Assert.Equal(1440, loaded.WindowWidth);
             Assert.Equal(900, loaded.WindowHeight);
             Assert.Equal("Maximized", loaded.WindowState);
+            Assert.Equal("AdminBench", loaded.LastBenchModule);
+            Assert.Equal("Inventory", loaded.TechBenchWorkspace);
+            Assert.Equal("Admin Center", loaded.AdminBenchWorkspace);
             Assert.Equal(15, loaded.RefreshIntervalMinutes);
             Assert.True(loaded.MicrosoftAdminOpenInChromeIncognito);
             Assert.Equal(created.LastUpdateCheckAtUtc, loaded.LastUpdateCheckAtUtc);
@@ -140,7 +146,10 @@ public sealed class LocalPreferenceStoreTests
             LocalPreferenceStore.Save(new LocalPreferences
             {
                 Theme = "unexpected",
-                WindowState = "Fullscreen",
+                WindowState = "Minimized",
+                LastBenchModule = "unexpected",
+                TechBenchWorkspace = "   ",
+                AdminBenchWorkspace = new string('x', 121),
                 RefreshIntervalMinutes = -10,
                 SkippedUpdateVersion = "   ",
                 UpdateChannel = "unexpected",
@@ -164,6 +173,9 @@ public sealed class LocalPreferenceStoreTests
             var loaded = LocalPreferenceStore.LoadOrCreate(path);
             Assert.Equal("Dark", loaded.Theme);
             Assert.Equal("Normal", loaded.WindowState);
+            Assert.Equal("TechBench", loaded.LastBenchModule);
+            Assert.Equal("Today", loaded.TechBenchWorkspace);
+            Assert.Equal("Client Match", loaded.AdminBenchWorkspace);
             Assert.Equal(1, loaded.RefreshIntervalMinutes);
             Assert.Null(loaded.SkippedUpdateVersion);
             Assert.Equal(string.Empty, loaded.UpdateChannel);

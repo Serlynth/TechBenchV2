@@ -761,7 +761,11 @@ public partial class MainWindow : Window
             currentUser,
             _localPreferences,
             new V2AppUpdateService(_localPreferences.UpdateChannel),
-            () => System.Windows.Application.Current.Shutdown());
+            () =>
+            {
+                SaveWindowPreferences();
+                System.Windows.Application.Current.Shutdown();
+            });
 
         viewModel.ActiveClientSessionSelectionRestoreRequested +=
             ViewModel_ActiveClientSessionSelectionRestoreRequested;
@@ -912,20 +916,23 @@ public partial class MainWindow : Window
 
     private void ApplyWindowPreferences()
     {
-        if (_localPreferences.WindowWidth is >= 640)
+        if (_localPreferences.WindowWidth is >= 640 and var savedWidth
+            && double.IsFinite(savedWidth))
         {
-            Width = _localPreferences.WindowWidth.Value;
+            Width = savedWidth;
         }
 
-        if (_localPreferences.WindowHeight is >= 480)
+        if (_localPreferences.WindowHeight is >= 480 and var savedHeight
+            && double.IsFinite(savedHeight))
         {
-            Height = _localPreferences.WindowHeight.Value;
+            Height = savedHeight;
         }
 
         if (_localPreferences.WindowLeft is double left
             && _localPreferences.WindowTop is double top
             && double.IsFinite(left)
-            && double.IsFinite(top))
+            && double.IsFinite(top)
+            && IsSavedWindowVisible(left, top, Width, Height))
         {
             Left = left;
             Top = top;
@@ -937,6 +944,22 @@ public partial class MainWindow : Window
             StringComparison.OrdinalIgnoreCase)
             ? WindowState.Maximized
             : WindowState.Normal;
+    }
+
+    private static bool IsSavedWindowVisible(
+        double left,
+        double top,
+        double width,
+        double height)
+    {
+        var savedBounds = new Rect(left, top, width, height);
+        var virtualScreen = new Rect(
+            SystemParameters.VirtualScreenLeft,
+            SystemParameters.VirtualScreenTop,
+            SystemParameters.VirtualScreenWidth,
+            SystemParameters.VirtualScreenHeight);
+        savedBounds.Intersect(virtualScreen);
+        return savedBounds.Width >= 80 && savedBounds.Height >= 80;
     }
 
     private void SaveWindowPreferences()

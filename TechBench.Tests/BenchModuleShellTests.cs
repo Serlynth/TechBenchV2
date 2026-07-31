@@ -11,6 +11,8 @@ public sealed class BenchModuleShellTests
             Path.Combine("Controls", "WorkspaceNavigation.xaml"));
         var viewModel = ReadRepositoryFile(
             Path.Combine("ViewModels", "MainWindowViewModel.cs"));
+        var moduleBranding = ReadRepositoryFile(
+            Path.Combine("Services", "ModuleBranding.cs"));
         var project = ReadRepositoryFile("TechBench.csproj");
 
         Assert.Contains(
@@ -44,9 +46,13 @@ public sealed class BenchModuleShellTests
                      "csri-adminbench-logo.png"
                  })
         {
-            Assert.Contains(asset, viewModel, StringComparison.Ordinal);
+            Assert.Contains(asset, moduleBranding, StringComparison.Ordinal);
             Assert.Contains(asset, project, StringComparison.Ordinal);
         }
+        Assert.Contains(
+            "ModuleBranding.LogoSource(ActiveBenchModule)",
+            viewModel,
+            StringComparison.Ordinal);
         Assert.Contains(
             "Visibility=\"{Binding CanAccessBenchModules",
             navigation,

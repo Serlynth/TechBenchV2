@@ -38,6 +38,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private string _currentSection = "Today";
     private string _techBenchSection = "Today";
     private string _adminBenchSection = "Client Match";
+    private bool _isRestoringWorkspacePreferences;
     private string _statusMessage = "Ready";
     private DateTime _selectedDate = DateTime.Today;
     private WorkEntry? _selectedEntry;
@@ -235,6 +236,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         LoadSettings();
         RefreshAll();
+        RestoreWorkspacePreferences();
         PrimeKnownWhdTicketKeys();
         ConfigureSharedDataRefreshTimer();
         RunSearch();
@@ -403,14 +405,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     public string ModuleBrandName => ActiveBenchModule.ToString();
-    public string ModuleLogoSource => ActiveBenchModule switch
-    {
-        BenchModule.SalesBench =>
-            "/TechBenchV2;component/Assets/csri-salesbench-logo.png",
-        BenchModule.AdminBench =>
-            "/TechBenchV2;component/Assets/csri-adminbench-logo.png",
-        _ => "/TechBenchV2;component/Assets/csri-techbench-logo.png"
-    };
+    public string ModuleLogoSource => ModuleBranding.LogoSource(ActiveBenchModule);
     public double ModuleLogoDisplayWidth => 252;
     public bool IsTechBenchModule => ActiveBenchModule == BenchModule.TechBench;
     public bool IsSalesBenchModule => ActiveBenchModule == BenchModule.SalesBench;
@@ -470,6 +465,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 ArchiveEquipmentCommand?.RaiseCanExecuteChanged();
                 OnPropertyChanged(nameof(CanMarkSelectedEquipmentDeployed));
                 MarkEquipmentDeployedCommand?.RaiseCanExecuteChanged();
+                PersistWorkspacePreferences();
             }
         }
     }
@@ -1039,6 +1035,86 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             StatusMessage =
                 $"{ModuleBrandName} private beta shell. Navigation is intentionally empty for now.";
+        }
+
+        PersistWorkspacePreferences();
+    }
+
+    private void RestoreWorkspacePreferences()
+    {
+        _isRestoringWorkspacePreferences = true;
+        try
+        {
+            _techBenchSection = ResolveTechBenchWorkspace(
+                _localPreferences.TechBenchWorkspace);
+            _adminBenchSection = ResolveAdminBenchWorkspace(
+                _localPreferences.AdminBenchWorkspace);
+            ActiveBenchModule = BenchModuleAccess.ResolveRequestedModule(
+                ModuleBranding.Resolve(_localPreferences.LastBenchModule),
+                _currentUser);
+            CurrentSection = ActiveBenchModule switch
+            {
+                BenchModule.AdminBench => _adminBenchSection,
+                BenchModule.TechBench => _techBenchSection,
+                _ => CurrentSection
+            };
+            ThemeService.Apply(
+                IsLightTheme ? AppTheme.Light : AppTheme.Dark,
+                ActiveBenchModule);
+            if (HasModuleWorkspace)
+            {
+                RefreshCurrentSectionData();
+            }
+        }
+        finally
+        {
+            _isRestoringWorkspacePreferences = false;
+        }
+
+        PersistWorkspacePreferences();
+    }
+
+    private string ResolveTechBenchWorkspace(string? savedWorkspace)
+    {
+        var fixedWorkspaces = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Today", "This Week", "History", "Search", "Ticket List",
+            "Posting Queue", "Posting History", "Client Info", "Client Users",
+            "Common Links", "Inventory", "Equipment Board", "Settings"
+        };
+        return savedWorkspace is not null
+            && (fixedWorkspaces.Contains(savedWorkspace)
+                || FireDrillWorkspaceSections.Any(section =>
+                    section.SectionKey.Equals(savedWorkspace, StringComparison.Ordinal)))
+            ? savedWorkspace
+            : "Today";
+    }
+
+    private string ResolveAdminBenchWorkspace(string? savedWorkspace) =>
+        savedWorkspace is "Client Match" or "Admin Center"
+            ? savedWorkspace
+            : "Client Match";
+
+    private void PersistWorkspacePreferences()
+    {
+        if (_isRestoringWorkspacePreferences)
+        {
+            return;
+        }
+
+        _localPreferences.LastBenchModule = ActiveBenchModule.ToString();
+        _localPreferences.TechBenchWorkspace = _techBenchSection;
+        _localPreferences.AdminBenchWorkspace = _adminBenchSection;
+        try
+        {
+            LocalPreferenceStore.Save(_localPreferences);
+        }
+        catch (Exception ex) when (
+            ex is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException)
+        {
+            // Navigation must remain usable if a workstation preference cannot be saved.
         }
     }
 
