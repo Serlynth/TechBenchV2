@@ -68,17 +68,18 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
 
-                        <Image Grid.Column="0"
+                        <Image x:Name="ModuleLogoImage"
+                               Grid.Column="0"
                                Width="190"
                                Height="82"
                                HorizontalAlignment="Left"
-                               Stretch="Uniform"
-                               Source="Assets/csri-techbench-logo.png" />
+                               Stretch="Uniform" />
 
                         <StackPanel Grid.Column="1"
                                     Margin="24,0,0,0"
                                     VerticalAlignment="Center">
-                            <TextBlock Text="Welcome to TechBench"
+                            <TextBlock x:Name="WelcomeTitleTextBlock"
+                                       Text="Welcome to TechBench"
                                        FontSize="25"
                                        FontWeight="SemiBold" />
                             <TextBlock Margin="0,6,0,0"
