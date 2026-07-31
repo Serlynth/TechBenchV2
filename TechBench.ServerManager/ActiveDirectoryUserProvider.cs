@@ -38,7 +38,15 @@ internal sealed class ActiveDirectoryUserProvider
                 user.IsAdmin,
                 saved.TryGetValue(user.LoginName, out var mapping)
                     ? mapping.TechnicianExternalId
-                    : string.Empty))
+                    : string.Empty,
+                saved.TryGetValue(user.LoginName, out mapping)
+                    ? mapping.AuthPointLogin
+                    : string.Empty,
+                saved.TryGetValue(user.LoginName, out mapping)
+                    && mapping.AuthPointEnabled,
+                saved.TryGetValue(user.LoginName, out mapping)
+                    ? mapping.AuthPointRowVersion
+                    : null))
             .OrderBy(static mapping => mapping.DisplayName, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(static mapping => mapping.LoginName, StringComparer.OrdinalIgnoreCase)
             .ToList();

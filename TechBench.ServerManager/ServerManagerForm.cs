@@ -13,6 +13,7 @@ internal sealed class ServerManagerForm : Form
     private readonly ProtectedSecretStore _whdSecret;
     private readonly ProtectedSecretStore _sageSecret;
     private readonly ProtectedSecretStore _fireDrillSecret;
+    private readonly ProtectedSecretStore _authPointSecret;
     private SynchronizationConfiguration? _configuration;
     private ReleasePackage? _availableUpdate;
     private bool _allowExit;
@@ -81,6 +82,35 @@ internal sealed class ServerManagerForm : Form
     };
     private readonly Label _fireDrillSyncStatus = StatusLabel();
 
+    private readonly CheckBox _authPointEnabled = new()
+    {
+        Text = "Require AuthPoint for Client Info beta secret reveal and copy",
+        AutoSize = true
+    };
+    private readonly TextBox _authPointBaseUrl = Field();
+    private readonly TextBox _authPointAccountId = Field();
+    private readonly TextBox _authPointResourceId = Field();
+    private readonly TextBox _authPointAccessId = Field();
+    private readonly TextBox _authPointAccessPassword = PasswordField();
+    private readonly TextBox _authPointApiKey = PasswordField();
+    private readonly Label _authPointSecretStatus = ValueLabel();
+    private readonly Label _authPointStatus = StatusLabel();
+    private readonly DataGridView _authPointMappingGrid = new()
+    {
+        AllowUserToAddRows = false,
+        AllowUserToDeleteRows = false,
+        AllowUserToResizeRows = false,
+        AutoGenerateColumns = false,
+        AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+        BackgroundColor = Color.White,
+        Dock = DockStyle.Fill,
+        EditMode = DataGridViewEditMode.EditOnEnter,
+        MinimumSize = new Size(0, 300),
+        MultiSelect = false,
+        RowHeadersVisible = false,
+        SelectionMode = DataGridViewSelectionMode.FullRowSelect
+    };
+
     private readonly NotifyIcon _trayIcon;
     private readonly ToolStripMenuItem _trayStart = new("Start service");
     private readonly ToolStripMenuItem _trayStop = new("Stop service");
@@ -94,6 +124,7 @@ internal sealed class ServerManagerForm : Form
         _whdSecret = ProtectedSecretStore.Whd(paths);
         _sageSecret = ProtectedSecretStore.Sage(paths);
         _fireDrillSecret = ProtectedSecretStore.FireDrill(paths);
+        _authPointSecret = ProtectedSecretStore.AuthPoint(paths);
 
         Text = "TechBench Server Manager";
         StartPosition = FormStartPosition.CenterScreen;
@@ -181,6 +212,7 @@ internal sealed class ServerManagerForm : Form
         tabs.TabPages.Add(BuildWhdTab());
         tabs.TabPages.Add(BuildSageTab());
         tabs.TabPages.Add(BuildFireDrillTab());
+        tabs.TabPages.Add(BuildAuthPointTab());
         tabs.TabPages.Add(BuildUpdatesTab());
         return tabs;
     }
@@ -424,6 +456,94 @@ internal sealed class ServerManagerForm : Form
         return BuildStackedTab("Credentials", credential, settings);
     }
 
+    private TabPage BuildAuthPointTab()
+    {
+        var page = new TabPage("AuthPoint (Beta)") { Padding = new Padding(8) };
+        var sections = new TabControl { Dock = DockStyle.Fill };
+
+        var configurationPage = new TabPage("Server Configuration")
+        {
+            Padding = new Padding(16),
+            AutoScroll = true
+        };
+        var configurationGroup = Group("WatchGuard Cloud Authentication API", 535);
+        var layout = Grid(3, 12);
+        _authPointBaseUrl.PlaceholderText = "https://api.usa.cloud.watchguard.com";
+        layout.Controls.Add(_authPointEnabled, 1, 0);
+        layout.SetColumnSpan(_authPointEnabled, 2);
+        layout.Controls.Add(Label("Regional API base URL"), 0, 1);
+        layout.Controls.Add(_authPointBaseUrl, 1, 1);
+        layout.SetColumnSpan(_authPointBaseUrl, 2);
+        layout.Controls.Add(Label("AuthPoint account ID"), 0, 2);
+        layout.Controls.Add(_authPointAccountId, 1, 2);
+        layout.Controls.Add(Label("REST resource ID"), 0, 3);
+        layout.Controls.Add(_authPointResourceId, 1, 3);
+        layout.Controls.Add(Label("WatchGuard API access ID"), 0, 4);
+        layout.Controls.Add(_authPointAccessId, 1, 4);
+        layout.Controls.Add(Label("API access password"), 0, 5);
+        layout.Controls.Add(_authPointAccessPassword, 1, 5);
+        layout.Controls.Add(Label("WatchGuard API key"), 0, 6);
+        layout.Controls.Add(_authPointApiKey, 1, 6);
+        layout.Controls.Add(_authPointSecretStatus, 2, 5);
+        var showSecrets = new CheckBox { Text = "Show protected API values", AutoSize = true };
+        showSecrets.CheckedChanged += (_, _) =>
+        {
+            _authPointAccessPassword.UseSystemPasswordChar = !showSecrets.Checked;
+            _authPointApiKey.UseSystemPasswordChar = !showSecrets.Checked;
+        };
+        layout.Controls.Add(showSecrets, 1, 7);
+        var save = Button("Save AuthPoint configuration");
+        save.Click += async (_, _) => await SaveAuthPointAsync();
+        var refresh = Button("Refresh");
+        refresh.Click += async (_, _) => await RefreshConfigurationAsync(true);
+        layout.Controls.Add(ButtonRow(save, refresh), 1, 8);
+        layout.Controls.Add(_authPointStatus, 0, 9);
+        layout.SetColumnSpan(_authPointStatus, 3);
+        var note = new Label
+        {
+            Text = "This protects only the Client Info beta. Windows Integrated Authentication remains the first factor. "
+                   + "Create a WatchGuard AuthPoint RESTful API Client resource with a push-only policy (no AuthPoint password). "
+                   + "The API password and API key are DPAPI-protected on this server and are never stored in SQL or desktop clients.",
+            AutoSize = true,
+            MaximumSize = new Size(900, 0),
+            ForeColor = Color.DimGray,
+            Margin = new Padding(3, 16, 3, 3)
+        };
+        layout.Controls.Add(note, 0, 10);
+        layout.SetColumnSpan(note, 3);
+        configurationGroup.Controls.Add(layout);
+        configurationPage.Controls.Add(configurationGroup);
+
+        var mappingsPage = new TabPage("User Mappings") { Padding = new Padding(16) };
+        var mappingsLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3
+        };
+        mappingsLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        mappingsLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        mappingsLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        mappingsLayout.Controls.Add(new Label
+        {
+            Text = "Map each TechBench Windows account to its WatchGuard AuthPoint username or email.",
+            AutoSize = true,
+            ForeColor = Color.DimGray,
+            Margin = new Padding(3, 8, 3, 12)
+        }, 0, 0);
+        ConfigureAuthPointMappingGrid();
+        mappingsLayout.Controls.Add(_authPointMappingGrid, 0, 1);
+        var saveMappings = Button("Save AuthPoint mappings");
+        saveMappings.Click += async (_, _) => await SaveAuthPointMappingsAsync();
+        mappingsLayout.Controls.Add(ButtonRow(saveMappings), 0, 2);
+        mappingsPage.Controls.Add(mappingsLayout);
+
+        sections.TabPages.Add(configurationPage);
+        sections.TabPages.Add(mappingsPage);
+        page.Controls.Add(sections);
+        return page;
+    }
+
     private void AddSecretRow(TableLayoutPanel layout, int row, string label, TextBox box, Label status, ProtectedSecretStore store, string name)
     {
         layout.Controls.Add(Label(label), 0, row); layout.Controls.Add(box, 1, row);
@@ -457,6 +577,7 @@ internal sealed class ServerManagerForm : Form
     private void WireEvents()
     {
         _mappingGrid.DataError += (_, args) => args.ThrowException = false;
+        _authPointMappingGrid.DataError += (_, args) => args.ThrowException = false;
     }
 
     private async Task RefreshEverythingAsync(bool showErrors)
@@ -513,6 +634,7 @@ internal sealed class ServerManagerForm : Form
         _whdSecretStatus.Text = _whdSecret.Exists ? "Configured" : "Not configured";
         _sageSecretStatus.Text = _sageSecret.Exists ? "Configured" : "Not configured";
         _fireDrillSecretStatus.Text = _fireDrillSecret.Exists ? "Configured" : "Not configured";
+        _authPointSecretStatus.Text = _authPointSecret.Exists ? "Protected API credentials configured" : "Protected API credentials not configured";
     }
 
     private async Task RefreshConfigurationAsync(bool showErrors)
@@ -567,6 +689,7 @@ internal sealed class ServerManagerForm : Form
             _whdSyncStatus.Text = "Configuration unavailable: " + FriendlySqlError(ex);
             _sageSyncStatus.Text = _whdSyncStatus.Text;
             _fireDrillSyncStatus.Text = _whdSyncStatus.Text;
+            _authPointStatus.Text = _whdSyncStatus.Text;
             AddLog("ERROR: " + FriendlySqlError(ex));
             if (showErrors) ShowError(FriendlySqlError(ex));
         }
@@ -586,6 +709,16 @@ internal sealed class ServerManagerForm : Form
         _fireDrillDaily.Checked = !bool.TryParse(Setting("FireDrill.DailySyncEnabled", "True"), out var fireDrillEnabled) || fireDrillEnabled;
         if (TimeSpan.TryParse(Setting("FireDrill.DailySyncTime", "04:00"), out var dailyTime))
             _fireDrillTime.Value = DateTime.Today.Add(dailyTime);
+        _authPointEnabled.Checked = bool.TryParse(
+            Setting("AuthPoint.Enabled", "False"),
+            out var authPointEnabled) && authPointEnabled;
+        _authPointBaseUrl.Text = Setting("AuthPoint.BaseApiUrl");
+        _authPointAccountId.Text = Setting("AuthPoint.AccountId");
+        _authPointResourceId.Text = Setting("AuthPoint.ResourceId");
+        _authPointAccessId.Text = Setting("AuthPoint.AccessId");
+        _authPointStatus.Text = _authPointEnabled.Checked
+            ? "Enabled for Client Info beta reveal and copy."
+            : "Disabled; existing stable and FireDrill behavior is unchanged.";
         _whdSyncStatus.Text = FormatStatus(configuration.WhdStatus, false);
         _sageSyncStatus.Text = FormatStatus(configuration.SageStatus, true);
         _fireDrillSyncStatus.Text = FormatStatus(configuration.FireDrillStatus, true);
@@ -593,6 +726,154 @@ internal sealed class ServerManagerForm : Form
             $"{Math.Max(0, configuration.Technicians.Count - 1)} active WHD technician(s) available for mapping.";
         _confirmSageButton.Visible = configuration.SageStatus.RequiresLargeRemovalConfirmation;
         PopulateMappingGrid(configuration);
+        PopulateAuthPointMappingGrid(configuration);
+    }
+
+    private async Task SaveAuthPointAsync()
+    {
+        await RunAsync("Saving WatchGuard AuthPoint configuration...", async () =>
+        {
+            var baseUri = ValidateAuthPointApiUrl(_authPointBaseUrl.Text);
+            if (string.IsNullOrWhiteSpace(_authPointAccountId.Text)
+                || string.IsNullOrWhiteSpace(_authPointResourceId.Text)
+                || !_authPointResourceId.Text.Trim().All(char.IsDigit)
+                || string.IsNullOrWhiteSpace(_authPointAccessId.Text))
+            {
+                throw new InvalidOperationException(
+                    "Enter the WatchGuard account ID, numeric REST resource ID, and API access ID.");
+            }
+
+            var hasNewCredentials = !string.IsNullOrWhiteSpace(_authPointAccessPassword.Text)
+                || !string.IsNullOrWhiteSpace(_authPointApiKey.Text);
+            if (hasNewCredentials)
+            {
+                if (string.IsNullOrWhiteSpace(_authPointAccessPassword.Text)
+                    || string.IsNullOrWhiteSpace(_authPointApiKey.Text))
+                {
+                    throw new InvalidOperationException(
+                        "Enter both the WatchGuard API access password and API key when rotating credentials.");
+                }
+
+                var protectedJson = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    accessPassword = _authPointAccessPassword.Text,
+                    apiKey = _authPointApiKey.Text
+                });
+                await Task.Run(() => _authPointSecret.Write(protectedJson));
+                _authPointAccessPassword.Clear();
+                _authPointApiKey.Clear();
+            }
+
+            if (_authPointEnabled.Checked && !_authPointSecret.Exists)
+            {
+                throw new InvalidOperationException(
+                    "Save the protected WatchGuard API password and API key before enabling AuthPoint.");
+            }
+
+            var settings = new Dictionary<string, string>
+            {
+                ["AuthPoint.Enabled"] = _authPointEnabled.Checked.ToString(),
+                ["AuthPoint.BaseApiUrl"] = baseUri.GetLeftPart(UriPartial.Authority),
+                ["AuthPoint.AccountId"] = _authPointAccountId.Text.Trim(),
+                ["AuthPoint.ResourceId"] = _authPointResourceId.Text.Trim(),
+                ["AuthPoint.AccessId"] = _authPointAccessId.Text.Trim()
+            };
+            await Task.Run(() => _repository.SaveSettings(
+                settings,
+                _configuration?.RowVersions ?? new Dictionary<string, byte[]>()));
+            AddLog("WatchGuard AuthPoint beta configuration saved; no secret values were written to SQL.");
+            RefreshSecretStatus();
+            await RefreshConfigurationAsync(false);
+        });
+    }
+
+    private async Task SaveAuthPointMappingsAsync()
+    {
+        await RunAsync("Saving AuthPoint user mappings...", async () =>
+        {
+            var mappings = _authPointMappingGrid.Rows
+                .Cast<DataGridViewRow>()
+                .Select(row => new AuthPointMappingAssignment(
+                    Convert.ToString(row.Cells["WindowsLogin"].Value) ?? string.Empty,
+                    Convert.ToString(row.Cells["AuthPointLogin"].Value) ?? string.Empty,
+                    Convert.ToBoolean(row.Cells["AuthPointEnabled"].Value ?? false),
+                    row.Tag as byte[]))
+                .ToArray();
+            await Task.Run(() => _repository.SaveAuthPointMappings(mappings));
+            AddLog($"Saved {mappings.Count(static item => !string.IsNullOrWhiteSpace(item.AuthPointLogin))} AuthPoint mapping(s).");
+            await RefreshConfigurationAsync(false);
+        });
+    }
+
+    private void ConfigureAuthPointMappingGrid()
+    {
+        if (_authPointMappingGrid.Columns.Count > 0)
+        {
+            return;
+        }
+
+        _authPointMappingGrid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "DisplayName",
+            HeaderText = "TechBench user",
+            ReadOnly = true,
+            FillWeight = 34
+        });
+        _authPointMappingGrid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "WindowsLogin",
+            HeaderText = "Windows login",
+            ReadOnly = true,
+            FillWeight = 30
+        });
+        _authPointMappingGrid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "AuthPointLogin",
+            HeaderText = "AuthPoint username / email",
+            FillWeight = 30
+        });
+        _authPointMappingGrid.Columns.Add(new DataGridViewCheckBoxColumn
+        {
+            Name = "AuthPointEnabled",
+            HeaderText = "Enabled",
+            FillWeight = 12
+        });
+    }
+
+    private void PopulateAuthPointMappingGrid(SynchronizationConfiguration configuration)
+    {
+        _authPointMappingGrid.Rows.Clear();
+        foreach (var mapping in configuration.UserMappings)
+        {
+            var row = _authPointMappingGrid.Rows[_authPointMappingGrid.Rows.Add(
+                mapping.DisplayName,
+                mapping.LoginName,
+                mapping.AuthPointLogin,
+                mapping.AuthPointEnabled)];
+            row.Tag = mapping.AuthPointRowVersion;
+        }
+    }
+
+    private static Uri ValidateAuthPointApiUrl(string value)
+    {
+        if (!Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri)
+            || uri.Scheme != Uri.UriSchemeHttps
+            || !uri.IsDefaultPort
+            || !string.IsNullOrEmpty(uri.UserInfo)
+            || !string.IsNullOrEmpty(uri.Query)
+            || !string.IsNullOrEmpty(uri.Fragment)
+            || (uri.AbsolutePath != "/" && !string.IsNullOrEmpty(uri.AbsolutePath))
+            || !System.Text.RegularExpressions.Regex.IsMatch(
+                uri.IdnHost,
+                @"^api\.[a-z0-9-]+\.cloud\.watchguard\.com$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                | System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+        {
+            throw new InvalidOperationException(
+                "Enter the HTTPS regional WatchGuard API base URL shown on Managed Access, such as https://api.usa.cloud.watchguard.com.");
+        }
+
+        return uri;
     }
 
     private async Task SaveWhdAsync(bool requestSync)
@@ -1002,6 +1283,7 @@ internal sealed class ServerManagerForm : Form
     private void ClearSecretFields()
     {
         _servicePassword.Clear(); _whdSecretBox.Clear(); _sageSecretBox.Clear(); _fireDrillSecretBox.Clear();
+        _authPointAccessPassword.Clear(); _authPointApiKey.Clear();
     }
     private void AddLog(string message)
     {

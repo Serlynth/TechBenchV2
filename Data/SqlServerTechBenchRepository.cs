@@ -115,6 +115,12 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
             "[tb_app].[SetClientCredentialSecret]";
         public const string RevealClientCredentialSecret =
             "[tb_app].[RevealClientCredentialSecret]";
+        public const string BeginClientSecretMfaChallenge =
+            "[tb_app].[BeginClientSecretMfaChallenge]";
+        public const string GetClientSecretMfaChallenge =
+            "[tb_app].[GetClientSecretMfaChallenge]";
+        public const string CancelClientSecretMfaChallenge =
+            "[tb_app].[CancelClientSecretMfaChallenge]";
         public const string BeginClientInfoImport = "[tb_app].[BeginClientInfoImport]";
         public const string StageClientInfoRecord = "[tb_app].[StageClientInfoRecord]";
         public const string StageClientInfoSecret = "[tb_app].[StageClientInfoSecret]";

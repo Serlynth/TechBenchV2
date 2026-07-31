@@ -33,6 +33,7 @@ $orderedScripts = @(
     '34-V0015-EquipmentAnyDeskSchema.sql'
     '35-V0015-EquipmentDeploymentLifecycle.sql'
     '36-V0015-ClientInfoBetaSchema.sql'
+    '37-V0015-AuthPointMfaSchema.sql'
     '30-Security.sql'
     '40-StoredProcedures.sql'
     '41-V0002-WorkProcedures.sql'
@@ -51,6 +52,7 @@ $orderedScripts = @(
     '54-V0014-EquipmentBoardProcedures.sql'
     '61-V0015-ClientInfoBetaProcedures.sql'
     '62-V0015-ClientInfoBetaImportProcedures.sql'
+    '64-V0015-AuthPointMfaProcedures.sql'
     '50-Grants.sql'
     '51-V0002-OperationalGrants.sql'
     '52-V0004-AdminSharedGrants.sql'
@@ -63,6 +65,7 @@ $orderedScripts = @(
     '59-V0012-FlexibleCredentialFieldsGrants.sql'
     '60-V0014-EquipmentBoardGrants.sql'
     '63-V0015-ClientInfoBetaGrants.sql'
+    '65-V0015-AuthPointMfaGrants.sql'
     '90-Verify.sql'
     '91-V0002-OperationalVerify.sql'
     '92-V0003-SharedReferenceVerify.sql'
@@ -80,6 +83,7 @@ $orderedScripts = @(
     '104-V0015-EquipmentAnyDeskVerify.sql'
     '105-V0015-EquipmentDeploymentLifecycleVerify.sql'
     '106-V0015-ClientInfoBetaVerify.sql'
+    '107-V0015-AuthPointMfaVerify.sql'
 )
 
 $sections = [System.Collections.Generic.List[string]]::new()

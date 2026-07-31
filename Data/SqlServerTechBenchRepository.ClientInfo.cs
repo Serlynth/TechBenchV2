@@ -421,7 +421,8 @@ public sealed partial class SqlServerTechBenchRepository
 
     public RevealedClientInfoSecret? RevealClientInfoSecret(
         long secretId,
-        bool forClipboard = false)
+        bool forClipboard = false,
+        byte[]? authorizationToken = null)
     {
         if (secretId <= 0)
         {
@@ -438,6 +439,11 @@ public sealed partial class SqlServerTechBenchRepository
                     "@AccessAction",
                     12,
                     forClipboard ? "Copy" : "Reveal");
+                AddBinary(
+                    command,
+                    "@AuthorizationToken",
+                    32,
+                    authorizationToken);
                 AddGuid(command, "@RequestId", Guid.NewGuid());
             },
             (reader, token) => ReadSingleAsync(
@@ -454,6 +460,97 @@ public sealed partial class SqlServerTechBenchRepository
                     SecretValue = GetString(row, "SecretValue"),
                     RowVersion = GetBytes(row, "RowVersion")
                 }),
+            CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    public ClientSecretMfaChallenge BeginClientSecretMfaChallenge(
+        long secretId,
+        bool forClipboard)
+    {
+        if (secretId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(secretId));
+        }
+
+        return QueryAsync(
+            Procedures.BeginClientSecretMfaChallenge,
+            command =>
+            {
+                AddBigInt(command, "@SecretId", secretId);
+                AddRequiredText(
+                    command,
+                    "@ActionScope",
+                    16,
+                    forClipboard ? "Copy" : "Reveal");
+                AddText(command, "@ClientMachine", 128, Environment.MachineName);
+                AddGuid(command, "@RequestId", Guid.NewGuid());
+            },
+            (reader, token) => ReadSingleAsync(
+                reader,
+                token,
+                row => new ClientSecretMfaChallenge
+                {
+                    ChallengeId = GetNullableGuid(row, "ChallengeId") ?? Guid.Empty,
+                    ChallengeNonce = GetBytes(row, "ChallengeNonce") ?? [],
+                    Status = GetString(row, "Status"),
+                    ExpiresAtUtc = GetNullableDateTime(row, "ExpiresAtUtc"),
+                    ProviderLogin = GetString(row, "ProviderLogin")
+                }),
+            CancellationToken.None).GetAwaiter().GetResult()
+            ?? throw new InvalidOperationException(
+                "SQL Server did not return an AuthPoint challenge.");
+    }
+
+    public ClientSecretMfaStatus GetClientSecretMfaChallenge(
+        Guid challengeId,
+        byte[] challengeNonce)
+    {
+        if (challengeId == Guid.Empty || challengeNonce.Length != 32)
+        {
+            throw new ArgumentException("The AuthPoint challenge proof is invalid.");
+        }
+
+        return QueryAsync(
+            Procedures.GetClientSecretMfaChallenge,
+            command =>
+            {
+                AddGuid(command, "@ChallengeId", challengeId);
+                AddBinary(command, "@ChallengeNonce", 32, challengeNonce);
+            },
+            (reader, token) => ReadSingleAsync(
+                reader,
+                token,
+                row => new ClientSecretMfaStatus
+                {
+                    ChallengeId = GetNullableGuid(row, "ChallengeId") ?? Guid.Empty,
+                    Status = GetString(row, "Status"),
+                    OutcomeCode = GetString(row, "OutcomeCode"),
+                    OutcomeMessage = GetString(row, "OutcomeMessage"),
+                    ExpiresAtUtc = GetNullableDateTime(row, "ExpiresAtUtc"),
+                    AuthorizationToken = GetBytes(row, "AuthorizationToken")
+                }),
+            CancellationToken.None).GetAwaiter().GetResult()
+            ?? throw new InvalidOperationException(
+                "SQL Server did not return the AuthPoint challenge status.");
+    }
+
+    public void CancelClientSecretMfaChallenge(
+        Guid challengeId,
+        byte[] challengeNonce)
+    {
+        if (challengeId == Guid.Empty || challengeNonce.Length != 32)
+        {
+            return;
+        }
+
+        ExecuteNonQueryAsync(
+            Procedures.CancelClientSecretMfaChallenge,
+            command =>
+            {
+                AddGuid(command, "@ChallengeId", challengeId);
+                AddBinary(command, "@ChallengeNonce", 32, challengeNonce);
+                AddGuid(command, "@RequestId", Guid.NewGuid());
+            },
             CancellationToken.None).GetAwaiter().GetResult();
     }
 

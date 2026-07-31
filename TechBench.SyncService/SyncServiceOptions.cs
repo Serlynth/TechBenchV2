@@ -15,9 +15,11 @@ public sealed class SyncServiceOptions
     public string? SecretPath { get; set; }
     public string? SageSecretPath { get; set; }
     public string? FireDrillSecretPath { get; set; }
+    public string? AuthPointSecretPath { get; set; }
     public string? SageOdbcWorkerPath { get; set; }
     public int SageOdbcTimeoutSeconds { get; set; } = 120;
     public int FinalizationTimeoutSeconds { get; set; } = 15;
+    public int MfaPollMilliseconds { get; set; } = 750;
 
     public TimeSpan PollInterval => TimeSpan.FromSeconds(Math.Clamp(PollSeconds, 5, 300));
     public int EffectiveLeaseSeconds => Math.Clamp(LeaseSeconds, 120, 3600);
@@ -26,6 +28,8 @@ public sealed class SyncServiceOptions
     public TimeSpan WhdRequestTimeout => TimeSpan.FromSeconds(Math.Clamp(WhdRequestTimeoutSeconds, 300, 600));
     public TimeSpan SageOdbcTimeout => TimeSpan.FromSeconds(Math.Clamp(SageOdbcTimeoutSeconds, 30, 900));
     public TimeSpan FinalizationTimeout => TimeSpan.FromSeconds(Math.Clamp(FinalizationTimeoutSeconds, 5, 30));
+    public TimeSpan MfaPollInterval => TimeSpan.FromMilliseconds(
+        Math.Clamp(MfaPollMilliseconds, 250, 5000));
 
     public string ResolveSecretPath()
     {
@@ -67,6 +71,20 @@ public sealed class SyncServiceOptions
             "CSRI",
             "TechBench Sync Service",
             "firedrill.secret");
+    }
+
+    public string ResolveAuthPointSecretPath()
+    {
+        if (!string.IsNullOrWhiteSpace(AuthPointSecretPath))
+        {
+            return Path.GetFullPath(Environment.ExpandEnvironmentVariables(AuthPointSecretPath));
+        }
+
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "CSRI",
+            "TechBench Sync Service",
+            "authpoint.secret");
     }
 
     public string ResolveSageOdbcWorkerPath()

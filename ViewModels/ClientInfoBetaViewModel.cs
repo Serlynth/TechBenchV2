@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Security.Cryptography;
 using System.Windows;
 using Microsoft.Data.SqlClient;
 using Microsoft.Win32;
@@ -798,9 +799,27 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             return;
         }
 
+        byte[]? authorizationToken = null;
         try
         {
-            var revealed = _repository.RevealClientInfoSecret(secret.SecretId)
+#if TECHBENCH_CLIENT_INFO_BETA
+            var authPoint = new ClientSecretAuthPointWindow(
+                _repository,
+                secret.SecretId,
+                secret.SecretLabel,
+                forClipboard: false)
+            {
+                Owner = FindOwner()
+            };
+            if (authPoint.ShowDialog() != true)
+            {
+                return;
+            }
+            authorizationToken = authPoint.AuthorizationToken;
+#endif
+            var revealed = _repository.RevealClientInfoSecret(
+                secret.SecretId,
+                authorizationToken: authorizationToken)
                 ?? throw new InvalidOperationException(
                     "The secret is no longer available.");
             var window = new ClientInfoSecretRevealWindow(revealed)
@@ -814,6 +833,13 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         {
             ShowError("Secret could not be revealed", exception);
         }
+        finally
+        {
+            if (authorizationToken is not null)
+            {
+                CryptographicOperations.ZeroMemory(authorizationToken);
+            }
+        }
     }
 
     private void CopySecret(ClientInfoSecretSummary? secret)
@@ -823,11 +849,28 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             return;
         }
 
+        byte[]? authorizationToken = null;
         try
         {
+#if TECHBENCH_CLIENT_INFO_BETA
+            var authPoint = new ClientSecretAuthPointWindow(
+                _repository,
+                secret.SecretId,
+                secret.SecretLabel,
+                forClipboard: true)
+            {
+                Owner = FindOwner()
+            };
+            if (authPoint.ShowDialog() != true)
+            {
+                return;
+            }
+            authorizationToken = authPoint.AuthorizationToken;
+#endif
             var revealed = _repository.RevealClientInfoSecret(
                 secret.SecretId,
-                forClipboard: true)
+                forClipboard: true,
+                authorizationToken: authorizationToken)
                 ?? throw new InvalidOperationException(
                     "The secret is no longer available.");
             WpfClipboard.SetText(revealed.SecretValue);
@@ -837,6 +880,13 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         catch (Exception exception)
         {
             ShowError("Secret could not be copied", exception);
+        }
+        finally
+        {
+            if (authorizationToken is not null)
+            {
+                CryptographicOperations.ZeroMemory(authorizationToken);
+            }
         }
     }
 

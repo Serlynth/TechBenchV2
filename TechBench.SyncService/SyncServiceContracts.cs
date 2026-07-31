@@ -129,3 +129,12 @@ public sealed record FireDrillSyncExecutionResult(
     FireDrillSyncCounts Counts,
     DateTimeOffset SourceModifiedAtUtc,
     string Message);
+
+public sealed record AuthPointMfaWork(
+    Guid ChallengeId,
+    Guid LeaseId,
+    string ProviderLogin,
+    string ClientMachine,
+    string ActionScope,
+    long SecretId,
+    DateTimeOffset ExpiresAtUtc);

@@ -178,6 +178,26 @@ public sealed record RevealedClientInfoSecret
     public byte[]? RowVersion { get; init; }
 }
 
+public sealed record ClientSecretMfaChallenge
+{
+    public Guid ChallengeId { get; init; }
+    public byte[] ChallengeNonce { get; init; } = [];
+    public string Status { get; init; } = "Queued";
+    public DateTime? ExpiresAtUtc { get; init; }
+    public string ProviderLogin { get; init; } = string.Empty;
+    public bool IsRequired => ChallengeId != Guid.Empty;
+}
+
+public sealed record ClientSecretMfaStatus
+{
+    public Guid ChallengeId { get; init; }
+    public string Status { get; init; } = string.Empty;
+    public string OutcomeCode { get; init; } = string.Empty;
+    public string OutcomeMessage { get; init; } = string.Empty;
+    public DateTime? ExpiresAtUtc { get; init; }
+    public byte[]? AuthorizationToken { get; init; }
+}
+
 public sealed record ClientInfoFact
 {
     public long FactId { get; init; }

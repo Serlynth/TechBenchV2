@@ -176,7 +176,26 @@ public interface ITechBenchRepository
 
     RevealedClientInfoSecret? RevealClientInfoSecret(
         long secretId,
-        bool forClipboard = false) => null;
+        bool forClipboard = false,
+        byte[]? authorizationToken = null) => null;
+
+    ClientSecretMfaChallenge BeginClientSecretMfaChallenge(
+        long secretId,
+        bool forClipboard) =>
+        throw new NotSupportedException(
+            "AuthPoint MFA requires the shared SQL Server beta extension.");
+
+    ClientSecretMfaStatus GetClientSecretMfaChallenge(
+        Guid challengeId,
+        byte[] challengeNonce) =>
+        throw new NotSupportedException(
+            "AuthPoint MFA requires the shared SQL Server beta extension.");
+
+    void CancelClientSecretMfaChallenge(
+        Guid challengeId,
+        byte[] challengeNonce)
+    {
+    }
 
     ClientInfoImportBatch ImportClientInfoWorkbook(
         ClientInfoWorkbookPackage package) =>
