@@ -8,8 +8,10 @@ a database per client and does not replace the stable database.
 The extension deliberately records schema version 15. Stable TechBench 0.6.1
 clients, the stable sync service, and Server Manager therefore continue to
 accept the same database. New tables and stored procedures are additive and are
-ignored by stable clients. The workbook-import improvements in beta.5 are
-client-only and do not require another SQL update.
+ignored by stable clients. The custom resource-field editor and `TB-CI-6`
+promotion support in beta.10 require reapplying the updated standalone SQL
+deployment to refresh stored procedures and grants; the schema version remains
+15.
 
 Server Manager, the Sync Service, and SQL deployment stay on one stable release
 line. The current stable server package supports both desktop channels and its
@@ -26,9 +28,11 @@ either direction without a manual reinstall.
 ## Initial beta installation
 
 1. Back up the TechBench database and the database master key/certificates.
-2. Download `TechBenchV2-SQLServer2016-0.6.4.sql` from the current Stable
-   GitHub release. A DBA reviews it and executes it in SSMS with **SQLCMD Mode**
-   enabled. The script is idempotent and keeps the required schema at 15.
+2. Download the updated beta
+   `database/sqlserver2016/Deploy-CSRI-Standalone.sql` from the
+   `codex/client-info-beta` branch. A DBA reviews it and executes it in SSMS
+   with **SQLCMD Mode** enabled. The script is idempotent and keeps the required
+   schema at 15.
 3. In the existing Stable Server Manager, check for and install version 0.6.4.
    Alternatively, run the Stable `TechBenchServerSetup.exe` as administrator.
    This refreshes Server Manager and the Sync Service; it does not silently
