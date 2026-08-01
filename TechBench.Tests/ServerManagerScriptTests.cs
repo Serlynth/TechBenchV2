@@ -108,6 +108,9 @@ public sealed class ServerManagerScriptTests
         Assert.Contains("if ($versionIsPrerelease) { continue }", ReadScript("TechBench-ServerManager.ps1"), StringComparison.Ordinal);
         Assert.Contains("^server-v", ReadScript("TechBench-ServerManager.ps1"), StringComparison.Ordinal);
         Assert.Contains("$serverReleaseTag = \"server-v$Version\"", publisher, StringComparison.Ordinal);
+        Assert.Contains("New-AnnotatedServerReleaseTag", publisher, StringComparison.Ordinal);
+        Assert.Contains("git/tags", publisher, StringComparison.Ordinal);
+        Assert.Contains("--verify-tag", publisher, StringComparison.Ordinal);
         Assert.Contains("'release', 'create', $serverReleaseTag", publisher, StringComparison.Ordinal);
         Assert.Contains("'TechBench-ServerManager.ps1'", publisher, StringComparison.Ordinal);
         Assert.Contains(

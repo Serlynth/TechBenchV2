@@ -36,16 +36,16 @@ The database remains schema version 15. The deployment is additive and idempoten
 
 ## 3. Install the current shared server package
 
-Run `TechBenchServerSetup.exe` from the TechBench Server 0.6.7 release on the TechBench server. This updates the one shared Server Manager and Sync Service; there is no beta Server Manager.
+Run `TechBenchServerSetup.exe` from the TechBench Server 0.6.8 release on the TechBench server. This updates the one shared Server Manager and Sync Service; there is no beta Server Manager.
 
 After setup:
 
 1. Open **TechBench Server Manager**.
 2. Confirm the Sync Service is running under the existing Windows service identity.
-3. Confirm Server Manager reports version 0.6.7.
+3. Confirm Server Manager reports version 0.6.8.
 4. Leave AuthPoint disabled while configuring it.
 
-The first AuthPoint-capable server package is a manual bootstrap update. Subsequent server updates use independent `server-v...` releases so server updates no longer consume or depend on Stable/Beta client version tags.
+The first AuthPoint-capable server package is a manual bootstrap update. Server 0.6.8 also corrects release discovery when the repository contains more than 100 older client releases. Subsequent server updates use independent `server-v...` releases so server updates no longer consume or depend on Stable/Beta client version tags.
 
 ## 4. Configure AuthPoint in Server Manager
 

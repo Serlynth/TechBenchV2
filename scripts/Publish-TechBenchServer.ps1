@@ -91,6 +91,45 @@ function Resolve-GitHubRepositorySlug {
     return $slug
 }
 
+function New-AnnotatedServerReleaseTag {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositorySlug,
+        [Parameter(Mandatory = $true)][string]$Tag,
+        [Parameter(Mandatory = $true)][string]$ReleaseVersion
+    )
+
+    $commitSha = & gh api "repos/$RepositorySlug/git/ref/heads/main" --jq '.object.sha'
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($commitSha)) {
+        throw "Could not resolve the release repository main branch for $Tag."
+    }
+
+    $tagPayload = [ordered]@{
+        tag = $Tag
+        message = "TechBench Server $ReleaseVersion"
+        object = $commitSha.Trim()
+        type = 'commit'
+        tagger = [ordered]@{
+            name = 'TechBench Release Publisher'
+            email = 'noreply@csri-qt.com'
+            date = [DateTime]::UtcNow.ToString('o')
+        }
+    } | ConvertTo-Json -Depth 4 -Compress
+    $tagObjectSha = $tagPayload |
+        & gh api --method POST "repos/$RepositorySlug/git/tags" --input - --jq '.sha'
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tagObjectSha)) {
+        throw "Could not create the annotated Git tag object for $Tag."
+    }
+
+    $refPayload = [ordered]@{
+        ref = "refs/tags/$Tag"
+        sha = $tagObjectSha.Trim()
+    } | ConvertTo-Json -Depth 3 -Compress
+    $refPayload | & gh api --method POST "repos/$RepositorySlug/git/refs" --input - | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not publish the annotated Git tag for $Tag."
+    }
+}
+
 function Reset-RepositoryDirectory {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -424,11 +463,16 @@ try {
             --repo $repositorySlug `
             --json tagName,isDraft,assets
         if ($LASTEXITCODE -ne 0) {
+            New-AnnotatedServerReleaseTag `
+                -RepositorySlug $repositorySlug `
+                -Tag $serverReleaseTag `
+                -ReleaseVersion $Version
             Invoke-Checked 'gh' @(
                 'release', 'create', $serverReleaseTag,
                 '--repo', $repositorySlug,
                 '--title', "TechBench Server $Version",
                 '--notes-file', $releaseNotesPath,
+                '--verify-tag',
                 '--latest=false'
             )
             $releaseJson = & gh release view $serverReleaseTag `

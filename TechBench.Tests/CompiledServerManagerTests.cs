@@ -69,7 +69,9 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("windowsSid = user.WindowsSidHex", sql, StringComparison.Ordinal);
         Assert.Contains("ToSqlSidHex(user.Sid)", directory, StringComparison.Ordinal);
         Assert.Contains("MinimumSupportedSchemaVersion = 13", sql, StringComparison.Ordinal);
-        Assert.Contains("if (isPrerelease) continue;", updater, StringComparison.Ordinal);
+        Assert.Contains("isPrerelease != parsed.IsPrerelease || isPrerelease", updater, StringComparison.Ordinal);
+        Assert.Contains("MaximumReleasePages", updater, StringComparison.Ordinal);
+        Assert.Contains("page={page}", updater, StringComparison.Ordinal);
         Assert.Contains("NormalizeServerReleaseTag", updater, StringComparison.Ordinal);
         Assert.Contains("server-v", updater, StringComparison.Ordinal);
         Assert.DoesNotContain("!current.IsPrerelease", updater, StringComparison.Ordinal);
@@ -101,6 +103,55 @@ public sealed class CompiledServerManagerTests
     public void ServerReleaseTagsAreIndependentFromClientChannels(string tag, string? expected)
     {
         Assert.Equal(expected, ReleaseUpdater.NormalizeServerReleaseTag(tag));
+    }
+
+    [Fact]
+    public async Task ServerUpdaterPaginatesPastOlderClientReleases()
+    {
+        var firstPage = Enumerable.Range(0, 100)
+            .Select(index => new
+            {
+                draft = true,
+                tag_name = $"v0.5.{index}",
+                prerelease = false,
+                assets = Array.Empty<object>()
+            })
+            .ToArray();
+        var secondPage = new object[]
+        {
+            new
+            {
+                draft = false,
+                tag_name = "server-v0.6.8",
+                prerelease = false,
+                assets = new[]
+                {
+                    new
+                    {
+                        name = "TechBenchSyncService-0.6.8-win-x64.zip",
+                        browser_download_url = "https://github.com/Serlynth/TechBenchV2-Releases/releases/download/server-v0.6.8/TechBenchSyncService-0.6.8-win-x64.zip",
+                        size = 140_000_000L
+                    },
+                    new
+                    {
+                        name = "TechBenchSyncService-0.6.8-win-x64.zip.sha256",
+                        browser_download_url = "https://github.com/Serlynth/TechBenchV2-Releases/releases/download/server-v0.6.8/TechBenchSyncService-0.6.8-win-x64.zip.sha256",
+                        size = 106L
+                    }
+                }
+            }
+        };
+        using var http = new HttpClient(new PagedReleaseHandler(
+            System.Text.Json.JsonSerializer.Serialize(firstPage),
+            System.Text.Json.JsonSerializer.Serialize(secondPage)));
+        var updater = new ReleaseUpdater(
+            TestPaths(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"))),
+            http);
+
+        var package = await updater.FindUpdateAsync(CancellationToken.None);
+
+        Assert.NotNull(package);
+        Assert.Equal("0.6.8", package.Version);
     }
 
     [Fact]
@@ -437,5 +488,24 @@ public sealed class CompiledServerManagerTests
         for (var index = 0; (index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0; index += value.Length)
             count++;
         return count;
+    }
+
+    private sealed class PagedReleaseHandler(string firstPage, string secondPage)
+        : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var page = request.RequestUri?.Query.Contains(
+                "page=2",
+                StringComparison.Ordinal) == true
+                ? secondPage
+                : firstPage;
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(page, Encoding.UTF8, "application/json")
+            });
+        }
     }
 }
