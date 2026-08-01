@@ -28,7 +28,7 @@ Use the WatchGuard Cloud tenant that already owns CSRI's AuthPoint licenses.
 ## 2. Back up and install the additive SQL package
 
 1. Take the normal TechBench database backup and confirm the existing TechBench encryption certificate/key backup is current.
-2. Open the release's `TechBenchV2-SQLServer2016-0.6.9.sql` in SSMS on `CSRI-SQL`.
+2. Open the current release's `TechBenchV2-SQLServer2016-0.6.10.sql` in SSMS on `CSRI-SQL`.
 3. Enable **Query > SQLCMD Mode**.
 4. Run the entire script as a SQL sysadmin and verify the final success message.
 
@@ -36,13 +36,13 @@ The database remains schema version 15. The deployment is additive and idempoten
 
 ## 3. Install the current shared server package
 
-Run `TechBenchServerSetup.exe` from the TechBench Server 0.6.9 release on the TechBench server. This updates the one shared Server Manager and Sync Service; there is no beta Server Manager.
+Run `TechBenchServerSetup.exe` from the TechBench Server 0.6.10 release on the TechBench server. This updates the one shared Server Manager and Sync Service; there is no beta Server Manager.
 
 After setup:
 
 1. Open **TechBench Server Manager**.
 2. Confirm the Sync Service is running under the existing Windows service identity.
-3. Confirm Server Manager reports version 0.6.9.
+3. Confirm Server Manager reports version 0.6.10.
 4. Leave AuthPoint disabled while configuring it.
 
 The first AuthPoint-capable server package was a manual bootstrap update. Current server releases use independent `server-v...` releases, so server updates no longer consume or depend on Stable/Beta client version tags.

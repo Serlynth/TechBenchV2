@@ -283,6 +283,7 @@ public sealed class AuthPointMfaTests
         Assert.Contains("RequireAtLogin", form, StringComparison.Ordinal);
         Assert.Contains("Save per-user requirements", form, StringComparison.Ordinal);
         Assert.Contains("\"AuthPoint.RequireAllUsers\"", repository, StringComparison.Ordinal);
+        Assert.DoesNotContain("reader.GetBoolean(requireOrdinal)", repository, StringComparison.Ordinal);
         Assert.Contains("AdminSaveAuthPointLoginPolicy", procedures, StringComparison.OrdinalIgnoreCase);
     }
 

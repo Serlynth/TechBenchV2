@@ -486,7 +486,7 @@ internal sealed class SqlAdminRepository(AppPaths paths)
                     TryOrdinal(reader, "RequireAtLogin") is var requireOrdinal
                         && requireOrdinal >= 0
                         && !reader.IsDBNull(requireOrdinal)
-                            ? reader.GetBoolean(requireOrdinal)
+                            ? Convert.ToBoolean(reader.GetValue(requireOrdinal))
                             : true,
                     version);
             }
