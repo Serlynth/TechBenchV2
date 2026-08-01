@@ -438,6 +438,22 @@ public sealed class AuthPointApiClient
                     transactionId);
             }
 
+            if (response.StatusCode == HttpStatusCode.Accepted)
+            {
+                var pendingRemaining = deadlineUtc - DateTimeOffset.UtcNow;
+                if (pendingRemaining > TimeSpan.Zero)
+                {
+                    await Task.Delay(
+                            pendingRemaining < _pushPollInterval
+                                ? pendingRemaining
+                                : _pushPollInterval,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
+                continue;
+            }
+
             if (!response.IsSuccessStatusCode)
             {
                 throw ProviderStatus(
@@ -452,9 +468,7 @@ public sealed class AuthPointApiClient
                     stream,
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
-            if (document.RootElement.TryGetProperty(
-                    "authenticationResult",
-                    out var element)
+            if (document.RootElement.TryGetProperty("pushResult", out var element)
                 && string.Equals(
                     element.GetString(),
                     "AUTHORIZED",
@@ -467,16 +481,11 @@ public sealed class AuthPointApiClient
                     transactionId);
             }
 
-            var remaining = deadlineUtc - DateTimeOffset.UtcNow;
-            if (remaining > TimeSpan.Zero)
-            {
-                await Task.Delay(
-                        remaining < _pushPollInterval
-                            ? remaining
-                            : _pushPollInterval,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-            }
+            throw new AuthPointApiException(
+                AuthPointMfaResultKind.Error,
+                "PUSH_RESPONSE_INVALID",
+                "WatchGuard returned an invalid completed push response.",
+                transactionId);
         }
 
         return new AuthPointMfaResult(

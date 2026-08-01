@@ -24,7 +24,7 @@ public sealed class AuthPointMfaTests
             Json(HttpStatusCode.OK, """{"access_token":"bearer-secret","expires_in":3600}"""),
             Json(HttpStatusCode.OK, Policy(push: true, password: false)),
             Json(HttpStatusCode.OK, """{"transactionId":"03b68c49-3770-4f71-9f90-c0da1fc9584e"}"""),
-            Json(HttpStatusCode.OK, """{"authenticationResult":"AUTHORIZED"}"""));
+            Json(HttpStatusCode.OK, """{"pushResult":"AUTHORIZED"}"""));
         using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
         var client = new AuthPointApiClient(httpClient);
 
@@ -57,8 +57,8 @@ public sealed class AuthPointMfaTests
             Json(HttpStatusCode.OK, """{"access_token":"bearer-secret","expires_in":3600}"""),
             Json(HttpStatusCode.OK, Policy(push: true, password: false)),
             Json(HttpStatusCode.OK, """{"transactionId":"03b68c49-3770-4f71-9f90-c0da1fc9584e"}"""),
-            Json(HttpStatusCode.OK, """{"authenticationResult":"PENDING"}"""),
-            Json(HttpStatusCode.OK, """{"authenticationResult":"AUTHORIZED"}"""));
+            Json(HttpStatusCode.Accepted, """{"detail":"Waiting for push response"}"""),
+            Json(HttpStatusCode.OK, """{"pushResult":"AUTHORIZED"}"""));
         using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
         var client = new AuthPointApiClient(
             httpClient,
