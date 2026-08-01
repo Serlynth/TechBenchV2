@@ -106,6 +106,9 @@ public sealed class ServerManagerScriptTests
             publisher,
             StringComparison.Ordinal);
         Assert.Contains("if ($versionIsPrerelease) { continue }", ReadScript("TechBench-ServerManager.ps1"), StringComparison.Ordinal);
+        Assert.Contains("^server-v", ReadScript("TechBench-ServerManager.ps1"), StringComparison.Ordinal);
+        Assert.Contains("$serverReleaseTag = \"server-v$Version\"", publisher, StringComparison.Ordinal);
+        Assert.Contains("'release', 'create', $serverReleaseTag", publisher, StringComparison.Ordinal);
         Assert.Contains("'TechBench-ServerManager.ps1'", publisher, StringComparison.Ordinal);
         Assert.Contains(
             "RequiredDatabaseSchemaVersion = $RequiredDatabaseSchemaVersion",

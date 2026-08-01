@@ -22,7 +22,8 @@ internal sealed class ReleaseUpdater(AppPaths paths)
         {
             if (release.GetProperty("draft").GetBoolean()) continue;
             var tag = release.GetProperty("tag_name").GetString() ?? string.Empty;
-            var version = tag.StartsWith('v') ? tag[1..] : tag;
+            var version = NormalizeServerReleaseTag(tag);
+            if (version is null) continue;
             if (!SemanticVersion.TryParse(version, out var parsed)) continue;
             var isPrerelease = release.GetProperty("prerelease").GetBoolean();
             if (isPrerelease != parsed.IsPrerelease) continue;
@@ -45,6 +46,15 @@ internal sealed class ReleaseUpdater(AppPaths paths)
             if (best is null || SemanticVersion.CompareForUpdate(candidate.Version, best.Version) > 0) best = candidate;
         }
         return best;
+    }
+
+    internal static string? NormalizeServerReleaseTag(string tag)
+    {
+        if (tag.StartsWith("server-v", StringComparison.OrdinalIgnoreCase))
+            return tag[8..];
+        if (tag.StartsWith('v'))
+            return tag[1..];
+        return null;
     }
 
     public async Task<string> DownloadAndPrepareAsync(ReleasePackage package, IProgress<string> progress, CancellationToken cancellationToken)

@@ -174,26 +174,8 @@ BEGIN
     IF @ProviderLogin IS NULL
         THROW 52412, N'Your Windows account is not mapped to an enabled AuthPoint user.', 1;
 
-    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME();
-    IF (SELECT COUNT_BIG(*) FROM [tb_security].[MfaChallenges]
-        WHERE [ActorWindowsSid]=@ActorSid
-          AND [CreatedAtUtc]>=DATEADD(minute,-2,@NowUtc))>=3
-        THROW 52413, N'Too many AuthPoint requests were started. Wait two minutes and try again.', 1;
-    IF (SELECT COUNT_BIG(*) FROM [tb_security].[MfaChallenges]
-        WHERE [ActorWindowsSid]=@ActorSid
-          AND [CreatedAtUtc]>=DATEADD(minute,-15,@NowUtc))>=10
-        THROW 52413, N'Too many AuthPoint requests were started. Wait before trying again.', 1;
-    IF EXISTS
-    (
-        SELECT 1 FROM [tb_security].[MfaChallenges]
-        WHERE [ActorWindowsSid]=@ActorSid AND [SecretId]=@SecretId
-          AND [ActionScope]=@ActionScope
-          AND [Status] IN (N'Queued',N'Processing')
-          AND [ExpiresAtUtc]>@NowUtc
-    )
-        THROW 52414, N'An AuthPoint request for this action is already in progress.', 1;
-
-    DECLARE @ChallengeId uniqueidentifier=NEWID(),
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(),
+            @ChallengeId uniqueidentifier=NEWID(),
             @ChallengeNonce varbinary(32)=CRYPT_GEN_RANDOM(32),
             @EffectiveRequestId uniqueidentifier=COALESCE(@RequestId,NEWID()),
             @ActorLogin nvarchar(256)=CONVERT(nvarchar(256),ORIGINAL_LOGIN());
@@ -201,6 +183,28 @@ BEGIN
 
     BEGIN TRY
         BEGIN TRANSACTION;
+        /* Key-range locks serialize requests for this SID so simultaneous
+           workstations cannot race past the rate and duplicate guards. */
+        IF (SELECT COUNT_BIG(*) FROM [tb_security].[MfaChallenges]
+            WITH (UPDLOCK,HOLDLOCK)
+            WHERE [ActorWindowsSid]=@ActorSid
+              AND [CreatedAtUtc]>=DATEADD(minute,-2,@NowUtc))>=3
+            THROW 52413, N'Too many AuthPoint requests were started. Wait two minutes and try again.', 1;
+        IF (SELECT COUNT_BIG(*) FROM [tb_security].[MfaChallenges]
+            WITH (UPDLOCK,HOLDLOCK)
+            WHERE [ActorWindowsSid]=@ActorSid
+              AND [CreatedAtUtc]>=DATEADD(minute,-15,@NowUtc))>=10
+            THROW 52413, N'Too many AuthPoint requests were started. Wait before trying again.', 1;
+        IF EXISTS
+        (
+            SELECT 1 FROM [tb_security].[MfaChallenges] WITH (UPDLOCK,HOLDLOCK)
+            WHERE [ActorWindowsSid]=@ActorSid AND [SecretId]=@SecretId
+              AND [ActionScope]=@ActionScope
+              AND [Status] IN (N'Queued',N'Processing')
+              AND [ExpiresAtUtc]>@NowUtc
+        )
+            THROW 52414, N'An AuthPoint request for this action is already in progress.', 1;
+
         UPDATE [tb_security].[MfaChallenges]
         SET [Status]=N'Expired',[CompletedAtUtc]=@NowUtc,
             [OutcomeCode]=N'CLIENT_EXPIRED',
@@ -253,11 +257,11 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit,
-            @IsSyncOperator bit;
-    EXEC [tb_security].[GetCurrentAccess]
-        @UserSid=@ActorSid OUTPUT,@IsManager=@IsManager OUTPUT,
-        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
+    /* EXECUTE AS OWNER is required for key access. ORIGINAL_LOGIN preserves
+       the authenticated Windows identity across that execution context. */
+    DECLARE @ActorSid varbinary(85)=SUSER_SID(ORIGINAL_LOGIN());
+    IF @ActorSid IS NULL OR DATALENGTH(@ActorSid) NOT BETWEEN 8 AND 85
+        THROW 51000,N'SQL Server did not provide a valid authenticated Windows identity.',1;
     IF @ChallengeNonce IS NULL OR DATALENGTH(@ChallengeNonce)<>32
         THROW 52415, N'The AuthPoint challenge proof is invalid.', 1;
 
@@ -377,8 +381,8 @@ WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;
-    IF IS_ROLEMEMBER(N'tb_role_sync_service')<>1
-        THROW 52420,N'The Sync Service role is required.',1;
+    /* Direct execution is granted only to tb_role_sync_service. EXECUTE AS
+       OWNER supplies table access without granting that role direct reads. */
     SELECT
         COALESCE(TRY_CONVERT(bit,(SELECT [SettingValue]
             FROM [tb_data].[OrganizationSettings]
@@ -406,8 +410,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
-    IF IS_ROLEMEMBER(N'tb_role_sync_service')<>1
-        THROW 52420,N'The Sync Service role is required.',1;
+    /* Direct execution is granted only to tb_role_sync_service. */
     IF @WorkerId IS NULL THROW 52421,N'WorkerId is required.',1;
     SET @LeaseSeconds=CASE WHEN @LeaseSeconds<90 THEN 90
         WHEN @LeaseSeconds>240 THEN 240 ELSE @LeaseSeconds END;
@@ -478,8 +481,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
-    IF IS_ROLEMEMBER(N'tb_role_sync_service')<>1
-        THROW 52420,N'The Sync Service role is required.',1;
+    /* Direct execution is granted only to tb_role_sync_service. */
     IF @Result NOT IN (N'Approved',N'Denied',N'Error')
         THROW 52422,N'The AuthPoint result is invalid.',1;
 
@@ -653,11 +655,11 @@ BEGIN
     IF @AccessAction NOT IN (N'Reveal',N'Copy')
         THROW 52392,N'The secret access action is invalid.',1;
 
-    DECLARE @ActorSid varbinary(85),@IsManager bit,@IsAdmin bit,
-            @IsSyncOperator bit;
-    EXEC [tb_security].[GetCurrentAccess]
-        @UserSid=@ActorSid OUTPUT,@IsManager=@IsManager OUTPUT,
-        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
+    /* Keep the real Windows SID while running as owner for certificate/key
+       access. Execute permission remains limited to the secret-reader role. */
+    DECLARE @ActorSid varbinary(85)=SUSER_SID(ORIGINAL_LOGIN());
+    IF @ActorSid IS NULL OR DATALENGTH(@ActorSid) NOT BETWEEN 8 AND 85
+        THROW 51000,N'SQL Server did not provide a valid authenticated Windows identity.',1;
     DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(),@Authorized bit=0,
             @UsedBreakGlass bit=0,
             @MfaEnabled bit=COALESCE(TRY_CONVERT(bit,

@@ -278,7 +278,7 @@ public sealed class AuthPointApiClient
     private static AuthPointMfaResult? ValidatePolicy(AuthPointPolicyResponse policy)
     {
         if (!policy.HasPolicy || !policy.IsAllowedToAuthenticate
-            || policy.IsInQuarantine || policy.IsBlocked || policy.IsOverallocated)
+            || policy.IsInQuarantine || policy.IsBlocked || policy.IsInOverallocated)
         {
             return new AuthPointMfaResult(
                 AuthPointMfaResultKind.Denied,
@@ -489,7 +489,7 @@ public sealed class AuthPointApiClient
         bool IsAllowedToAuthenticate,
         bool IsInForgotToken,
         bool IsBlocked,
-        bool IsOverallocated);
+        bool IsInOverallocated);
 
     private sealed record AuthPointPolicyMethods(bool Password, bool Push);
 

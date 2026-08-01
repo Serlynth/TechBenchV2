@@ -91,6 +91,29 @@ public sealed class AuthPointMfaTests
     }
 
     [Fact]
+    public async Task RefusesAnOverallocatedAuthPointUser()
+    {
+        var handler = new QueueHandler(
+            Json(HttpStatusCode.OK, """{"access_token":"bearer-secret"}"""),
+            Json(HttpStatusCode.OK, Policy(
+                push: true,
+                password: false,
+                isInOverallocated: true)));
+        using var httpClient = new HttpClient(handler);
+
+        var result = await new AuthPointApiClient(httpClient).AuthenticatePushAsync(
+            Configuration,
+            Credentials,
+            "user@example.com",
+            "TECH-01",
+            CancellationToken.None);
+
+        Assert.Equal(AuthPointMfaResultKind.Denied, result.Kind);
+        Assert.Equal("POLICY_NOT_ALLOWED", result.Code);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
     public async Task DeniedPushFailsClosed()
     {
         var handler = new QueueHandler(
@@ -132,6 +155,7 @@ public sealed class AuthPointMfaTests
     public void SqlAuthorizationIsSidBoundShortLivedAndSingleUse()
     {
         var source = ReadSql("64-V0015-AuthPointMfaProcedures.sql");
+        Assert.Contains("SUSER_SID(ORIGINAL_LOGIN())", source, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("[ActorWindowsSid]=@ActorSid", source, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("[ActionScope]=@AccessAction", source, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("[SecretId]=@SecretId", source, StringComparison.OrdinalIgnoreCase);
@@ -143,6 +167,27 @@ public sealed class AuthPointMfaTests
     }
 
     [Fact]
+    public void ExecuteAsOwnerProceduresPreserveCallerIdentityAndRelyOnExplicitGrants()
+    {
+        var procedures = ReadSql("64-V0015-AuthPointMfaProcedures.sql");
+        var grants = ReadSql("65-V0015-AuthPointMfaGrants.sql");
+
+        Assert.Contains("SUSER_SID(ORIGINAL_LOGIN())", procedures, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            "IF IS_ROLEMEMBER(N'tb_role_sync_service')<>1",
+            procedures,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "GRANT EXECUTE ON OBJECT::[tb_service].[ClaimAuthPointMfaChallenge]",
+            grants,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "DENY SELECT, INSERT, UPDATE, DELETE ON OBJECT::[tb_security].[MfaChallenges]",
+            grants,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void SqlChallengesPreventReplayAndCrossUserPolling()
     {
         var source = ReadSql("64-V0015-AuthPointMfaProcedures.sql");
@@ -151,6 +196,7 @@ public sealed class AuthPointMfaTests
         Assert.Contains("[AttemptCount]<3", source, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("DATEADD(minute,-2,@NowUtc)", source, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("DATEADD(minute,-15,@NowUtc)", source, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WITH (UPDLOCK,HOLDLOCK)", source, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -213,7 +259,10 @@ public sealed class AuthPointMfaTests
         Content = new StringContent(json, Encoding.UTF8, "application/json")
     };
 
-    private static string Policy(bool push, bool password) => $$"""
+    private static string Policy(
+        bool push,
+        bool password,
+        bool isInOverallocated = false) => $$"""
         {
           "hasPolicy": true,
           "policyResponse": { "password": {{password.ToString().ToLowerInvariant()}}, "push": {{push.ToString().ToLowerInvariant()}} },
@@ -221,7 +270,7 @@ public sealed class AuthPointMfaTests
           "isAllowedToAuthenticate": true,
           "isInForgotToken": false,
           "isBlocked": false,
-          "isOverallocated": false
+          "isInOverallocated": {{isInOverallocated.ToString().ToLowerInvariant()}}
         }
         """;
 

@@ -44,6 +44,8 @@ $sqlChecksumPath = "$sqlAssetPath.sha256"
 $setupPath = Join-Path $distDirectory 'TechBenchServerSetup.exe'
 $setupChecksumPath = "$setupPath.sha256"
 $numericVersion = ($Version -split '-', 2)[0]
+$serverReleaseTag = "server-v$Version"
+$releaseNotesPath = Join-Path $repoRoot "release-notes\$Version.md"
 
 $userDotNet = Join-Path $env:USERPROFILE '.dotnet\dotnet.exe'
 $dotnet = if (Test-Path -LiteralPath $userDotNet) {
@@ -128,6 +130,7 @@ function Assert-SafeServicePayload {
         'sage-odbc-worker\TechBench.SageOdbcWorker.runtimeconfig.json',
         'sage-odbc-worker\TechBench.SageOdbcWorker.deps.json',
         'README-WHD-SYNC-SERVICE.md',
+        'README-AUTHPOINT-MFA.md',
         'database\Deploy-CSRI-Standalone.sql',
         'database\README-Deploy.md'
     )) {
@@ -331,7 +334,9 @@ try {
 
     Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\WHD-SYNC-SERVICE.md') `
         -Destination (Join-Path $publishDirectory 'README-WHD-SYNC-SERVICE.md') -Force
-    Copy-Item -LiteralPath (Join-Path $repoRoot "release-notes\$Version.md") `
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\AUTHPOINT-MFA-BETA.md') `
+        -Destination (Join-Path $publishDirectory 'README-AUTHPOINT-MFA.md') -Force
+    Copy-Item -LiteralPath $releaseNotesPath `
         -Destination (Join-Path $publishDirectory 'RELEASE-NOTES.md') -Force
 
     $databaseDirectory = Join-Path $publishDirectory 'database'
@@ -415,21 +420,33 @@ try {
         Set-Content -LiteralPath $setupChecksumPath -Encoding ASCII
 
     if ($Publish) {
-        $releaseJson = & gh release view "v$Version" `
+        $releaseJson = & gh release view $serverReleaseTag `
             --repo $repositorySlug `
             --json tagName,isDraft,assets
         if ($LASTEXITCODE -ne 0) {
-            throw "GitHub release v$Version could not be read from $RepositoryUrl. Confirm gh authentication and publish the matching client release first with Publish-TechBenchRelease.ps1 -Publish."
+            Invoke-Checked 'gh' @(
+                'release', 'create', $serverReleaseTag,
+                '--repo', $repositorySlug,
+                '--title', "TechBench Server $Version",
+                '--notes-file', $releaseNotesPath,
+                '--latest=false'
+            )
+            $releaseJson = & gh release view $serverReleaseTag `
+                --repo $repositorySlug `
+                --json tagName,isDraft,assets
+            if ($LASTEXITCODE -ne 0) {
+                throw "GitHub server release $serverReleaseTag was created but could not be read back from $RepositoryUrl."
+            }
         }
 
         try {
             $release = (($releaseJson -join '') | ConvertFrom-Json)
         } catch {
-            throw "GitHub returned an invalid response for release v${Version}: $($_.Exception.Message)"
+            throw "GitHub returned an invalid response for release ${serverReleaseTag}: $($_.Exception.Message)"
         }
 
-        if ($release.tagName -ne "v$Version" -or $release.isDraft) {
-            throw "GitHub release v$Version must be the already-published, non-draft client release before server assets can be attached."
+        if ($release.tagName -ne $serverReleaseTag -or $release.isDraft) {
+            throw "GitHub server release $serverReleaseTag must be non-draft before server assets can be attached."
         }
 
         $assetPaths = @(
@@ -444,15 +461,15 @@ try {
         $existingNames = @($release.assets | ForEach-Object { $_.name })
         $conflicts = @($assetNames | Where-Object { $existingNames -contains $_ })
         if ($conflicts.Count -gt 0) {
-            throw "Release v$Version already contains immutable server asset(s): $($conflicts -join ', '). Choose a new version instead of overwriting a published asset."
+            throw "Release $serverReleaseTag already contains immutable server asset(s): $($conflicts -join ', '). Choose a new version instead of overwriting a published asset."
         }
 
         Invoke-Checked 'gh' (@(
-            'release', 'upload', "v$Version"
+            'release', 'upload', $serverReleaseTag
         ) + $assetPaths + @(
             '--repo', $repositorySlug
         ))
-        Write-Host "Published server and SQL assets to $RepositoryUrl/releases/tag/v$Version"
+        Write-Host "Published server and SQL assets to $RepositoryUrl/releases/tag/$serverReleaseTag"
     }
 
     Write-Host "Created service package: $packagePath"

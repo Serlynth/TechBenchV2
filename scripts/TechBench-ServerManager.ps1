@@ -1269,7 +1269,13 @@ function Get-AvailableServiceUpdate {
         if ($release.draft -or [string]::IsNullOrWhiteSpace([string]$release.tag_name)) {
             continue
         }
-        $versionParts = ConvertTo-SemanticVersionParts ([string]$release.tag_name)
+        $releaseTag = [string]$release.tag_name
+        $versionTag = if ($releaseTag -match '^server-v(?<ServerVersion>\d+\.\d+\.\d+)$') {
+            $Matches.ServerVersion
+        } else {
+            $releaseTag
+        }
+        $versionParts = ConvertTo-SemanticVersionParts $versionTag
         if ($null -eq $versionParts) { continue }
         $versionIsPrerelease = -not [string]::IsNullOrEmpty($versionParts.PreRelease)
         if ([bool]$release.prerelease -ne $versionIsPrerelease) { continue }

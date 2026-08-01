@@ -65,6 +65,8 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("ToSqlSidHex(user.Sid)", directory, StringComparison.Ordinal);
         Assert.Contains("MinimumSupportedSchemaVersion = 13", sql, StringComparison.Ordinal);
         Assert.Contains("if (isPrerelease) continue;", updater, StringComparison.Ordinal);
+        Assert.Contains("NormalizeServerReleaseTag", updater, StringComparison.Ordinal);
+        Assert.Contains("server-v", updater, StringComparison.Ordinal);
         Assert.DoesNotContain("!current.IsPrerelease", updater, StringComparison.Ordinal);
         Assert.Contains("MaximumSupportedSchemaVersion = 15", sql, StringComparison.Ordinal);
         Assert.Contains("supports database schemas", sql, StringComparison.Ordinal);
@@ -85,6 +87,15 @@ public sealed class CompiledServerManagerTests
         Assert.DoesNotContain("powershell", form, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("powershell", updater, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("powershell", installer, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("server-v0.6.6", "0.6.6")]
+    [InlineData("v0.6.5", "0.6.5")]
+    [InlineData("0.6.5", null)]
+    public void ServerReleaseTagsAreIndependentFromClientChannels(string tag, string? expected)
+    {
+        Assert.Equal(expected, ReleaseUpdater.NormalizeServerReleaseTag(tag));
     }
 
     [Fact]
