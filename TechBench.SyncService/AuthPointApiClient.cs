@@ -41,10 +41,35 @@ public sealed class AuthPointApiClient
         @"^[A-Za-z0-9-]{16,120}$",
         RegexOptions.CultureInvariant);
     private readonly HttpClient _httpClient;
+    private readonly TimeSpan _pushPollInterval;
+    private readonly TimeSpan _pushApprovalTimeout;
 
     public AuthPointApiClient(HttpClient httpClient)
+        : this(
+            httpClient,
+            TimeSpan.FromMilliseconds(750),
+            TimeSpan.FromSeconds(90))
+    {
+    }
+
+    internal AuthPointApiClient(
+        HttpClient httpClient,
+        TimeSpan pushPollInterval,
+        TimeSpan pushApprovalTimeout)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        if (pushPollInterval < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(pushPollInterval));
+        }
+
+        if (pushApprovalTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(pushApprovalTimeout));
+        }
+
+        _pushPollInterval = pushPollInterval;
+        _pushApprovalTimeout = pushApprovalTimeout;
     }
 
     public async Task<AuthPointMfaResult> AuthenticatePushAsync(
@@ -389,50 +414,75 @@ public sealed class AuthPointApiClient
         string transactionId,
         CancellationToken cancellationToken)
     {
-        var relative = BuildResourcePath(
-            configuration,
-            "transactions/" + Uri.EscapeDataString(transactionId));
-        using var request = CreateApiRequest(
-            HttpMethod.Get,
-            new Uri(baseUri, relative),
-            apiKey,
-            accessToken);
-        using var response = await _httpClient.SendAsync(request, cancellationToken)
-            .ConfigureAwait(false);
-        if (response.StatusCode == HttpStatusCode.Forbidden)
+        var validationUri = new Uri(
+            baseUri,
+            BuildResourcePath(
+                configuration,
+                "transactions/" + Uri.EscapeDataString(transactionId)));
+        var deadlineUtc = DateTimeOffset.UtcNow + _pushApprovalTimeout;
+        while (DateTimeOffset.UtcNow < deadlineUtc)
         {
-            return new AuthPointMfaResult(
-                AuthPointMfaResultKind.Denied,
-                "PUSH_DENIED",
-                "The AuthPoint push was denied, timed out, or could not be completed.",
-                transactionId);
-        }
+            using var request = CreateApiRequest(
+                HttpMethod.Get,
+                validationUri,
+                apiKey,
+                accessToken);
+            using var response = await _httpClient.SendAsync(request, cancellationToken)
+                .ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.Forbidden)
+            {
+                return new AuthPointMfaResult(
+                    AuthPointMfaResultKind.Denied,
+                    "PUSH_DENIED",
+                    "The AuthPoint push was denied, timed out, or could not be completed.",
+                    transactionId);
+            }
 
-        if (!response.IsSuccessStatusCode)
-        {
-            throw ProviderStatus("PUSH_VALIDATE_FAILED", response.StatusCode, transactionId: transactionId);
-        }
+            if (!response.IsSuccessStatusCode)
+            {
+                throw ProviderStatus(
+                    "PUSH_VALIDATE_FAILED",
+                    response.StatusCode,
+                    transactionId: transactionId);
+            }
 
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken)
-            .ConfigureAwait(false);
-        using var document = await JsonDocument.ParseAsync(
-                stream,
-                cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
-        if (document.RootElement.TryGetProperty("authenticationResult", out var element)
-            && string.Equals(element.GetString(), "AUTHORIZED", StringComparison.Ordinal))
-        {
-            return new AuthPointMfaResult(
-                AuthPointMfaResultKind.Approved,
-                "AUTHORIZED",
-                "AuthPoint approved the request.",
-                transactionId);
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken)
+                .ConfigureAwait(false);
+            using var document = await JsonDocument.ParseAsync(
+                    stream,
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            if (document.RootElement.TryGetProperty(
+                    "authenticationResult",
+                    out var element)
+                && string.Equals(
+                    element.GetString(),
+                    "AUTHORIZED",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return new AuthPointMfaResult(
+                    AuthPointMfaResultKind.Approved,
+                    "AUTHORIZED",
+                    "AuthPoint approved the request.",
+                    transactionId);
+            }
+
+            var remaining = deadlineUtc - DateTimeOffset.UtcNow;
+            if (remaining > TimeSpan.Zero)
+            {
+                await Task.Delay(
+                        remaining < _pushPollInterval
+                            ? remaining
+                            : _pushPollInterval,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
 
         return new AuthPointMfaResult(
-            AuthPointMfaResultKind.Error,
-            "PUSH_RESPONSE_INVALID",
-            "WatchGuard returned an unexpected push-validation response.",
+            AuthPointMfaResultKind.Denied,
+            "PUSH_TIMEOUT",
+            "The AuthPoint push was not approved before it expired.",
             transactionId);
     }
 

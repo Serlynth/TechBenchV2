@@ -50,6 +50,34 @@ public sealed class AuthPointMfaTests
         Assert.Contains("\"machineName\":\"TECH-01\"", handler.Requests[2].Body, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task PendingPushIsPolledUntilWatchGuardReportsApproval()
+    {
+        var handler = new QueueHandler(
+            Json(HttpStatusCode.OK, """{"access_token":"bearer-secret","expires_in":3600}"""),
+            Json(HttpStatusCode.OK, Policy(push: true, password: false)),
+            Json(HttpStatusCode.OK, """{"transactionId":"03b68c49-3770-4f71-9f90-c0da1fc9584e"}"""),
+            Json(HttpStatusCode.OK, """{"authenticationResult":"PENDING"}"""),
+            Json(HttpStatusCode.OK, """{"authenticationResult":"AUTHORIZED"}"""));
+        using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
+        var client = new AuthPointApiClient(
+            httpClient,
+            TimeSpan.Zero,
+            TimeSpan.FromSeconds(2));
+
+        var result = await client.AuthenticatePushAsync(
+            Configuration,
+            Credentials,
+            "user@example.com",
+            "TECH-01",
+            CancellationToken.None);
+
+        Assert.Equal(AuthPointMfaResultKind.Approved, result.Kind);
+        Assert.Equal("AUTHORIZED", result.Code);
+        Assert.Equal(5, handler.Requests.Count);
+        Assert.Equal(handler.Requests[3].Uri, handler.Requests[4].Uri);
+    }
+
     [Theory]
     [InlineData("http://api.usa.cloud.watchguard.com")]
     [InlineData("https://watchguard.example.com")]
