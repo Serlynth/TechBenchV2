@@ -110,6 +110,9 @@ public sealed class ServerManagerScriptTests
         Assert.Contains("$serverReleaseTag = \"server-v$Version\"", publisher, StringComparison.Ordinal);
         Assert.Contains("New-AnnotatedServerReleaseTag", publisher, StringComparison.Ordinal);
         Assert.Contains("git/tags", publisher, StringComparison.Ordinal);
+        Assert.Contains("--raw-field \"tag=$Tag\"", publisher, StringComparison.Ordinal);
+        Assert.Contains("--raw-field \"ref=refs/tags/$Tag\"", publisher, StringComparison.Ordinal);
+        Assert.DoesNotContain("--input -", publisher, StringComparison.Ordinal);
         Assert.Contains("--verify-tag", publisher, StringComparison.Ordinal);
         Assert.Contains("'release', 'create', $serverReleaseTag", publisher, StringComparison.Ordinal);
         Assert.Contains("'TechBench-ServerManager.ps1'", publisher, StringComparison.Ordinal);

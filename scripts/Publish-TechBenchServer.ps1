@@ -103,28 +103,26 @@ function New-AnnotatedServerReleaseTag {
         throw "Could not resolve the release repository main branch for $Tag."
     }
 
-    $tagPayload = [ordered]@{
-        tag = $Tag
-        message = "TechBench Server $ReleaseVersion"
-        object = $commitSha.Trim()
-        type = 'commit'
-        tagger = [ordered]@{
-            name = 'TechBench Release Publisher'
-            email = 'noreply@csri-qt.com'
-            date = [DateTime]::UtcNow.ToString('o')
-        }
-    } | ConvertTo-Json -Depth 4 -Compress
-    $tagObjectSha = $tagPayload |
-        & gh api --method POST "repos/$RepositorySlug/git/tags" --input - --jq '.sha'
+    # Use gh's field arguments instead of piping JSON through Windows PowerShell.
+    # The latter can add an encoding marker that GitHub rejects as malformed JSON.
+    $tagDate = [DateTime]::UtcNow.ToString('o')
+    $tagObjectSha = & gh api --method POST "repos/$RepositorySlug/git/tags" `
+        --raw-field "tag=$Tag" `
+        --raw-field "message=TechBench Server $ReleaseVersion" `
+        --raw-field "object=$($commitSha.Trim())" `
+        --raw-field 'type=commit' `
+        --raw-field 'tagger[name]=TechBench Release Publisher' `
+        --raw-field 'tagger[email]=noreply@csri-qt.com' `
+        --raw-field "tagger[date]=$tagDate" `
+        --jq '.sha'
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tagObjectSha)) {
         throw "Could not create the annotated Git tag object for $Tag."
     }
 
-    $refPayload = [ordered]@{
-        ref = "refs/tags/$Tag"
-        sha = $tagObjectSha.Trim()
-    } | ConvertTo-Json -Depth 3 -Compress
-    $refPayload | & gh api --method POST "repos/$RepositorySlug/git/refs" --input - | Out-Null
+    & gh api --method POST "repos/$RepositorySlug/git/refs" `
+        --raw-field "ref=refs/tags/$Tag" `
+        --raw-field "sha=$($tagObjectSha.Trim())" `
+        --silent
     if ($LASTEXITCODE -ne 0) {
         throw "Could not publish the annotated Git tag for $Tag."
     }
