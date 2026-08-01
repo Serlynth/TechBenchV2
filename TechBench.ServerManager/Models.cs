@@ -45,7 +45,8 @@ internal sealed record UserMapping(
     string TechnicianExternalId,
     string AuthPointLogin = "",
     bool AuthPointEnabled = false,
-    byte[]? AuthPointRowVersion = null)
+    byte[]? AuthPointRowVersion = null,
+    bool AuthPointRequireAtLogin = true)
 {
     public string Label => string.IsNullOrWhiteSpace(DisplayName)
         ? LoginName
@@ -65,6 +66,11 @@ internal sealed record AuthPointMappingAssignment(
     string AuthPointLogin,
     bool IsEnabled,
     byte[]? ExpectedRowVersion);
+
+internal sealed record AuthPointLoginPolicyAssignment(
+    string LoginName,
+    bool RequireAtLogin,
+    byte[] ExpectedRowVersion);
 
 internal sealed record Technician(string ExternalId, string Label, string Username = "")
 {

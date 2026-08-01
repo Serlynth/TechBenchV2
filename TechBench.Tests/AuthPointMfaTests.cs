@@ -167,6 +167,25 @@ public sealed class AuthPointMfaTests
     }
 
     [Fact]
+    public void LoginMfaSessionIsSidClientAndTokenBound()
+    {
+        var schema = ReadSql("37-V0015-AuthPointMfaSchema.sql");
+        var procedures = ReadSql("64-V0015-AuthPointMfaProcedures.sql");
+        var grants = ReadSql("65-V0015-AuthPointMfaGrants.sql");
+
+        Assert.Contains("[tb_security].[MfaLoginSessions]", schema, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[ClientInstanceId] uniqueidentifier", schema, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[SessionTokenHash] binary(64)", schema, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[RequireAtLogin] bit", schema, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUSER_SID(ORIGINAL_LOGIN())", procedures, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[ClientInstanceId]=@ClientInstanceId", procedures, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[SessionTokenHash]=HASHBYTES(N'SHA2_512',@MfaSessionToken)", procedures, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("DATEADD(hour,12", procedures, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("AuthPoint.RequireAllUsers", procedures, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("DENY SELECT, INSERT, UPDATE, DELETE ON OBJECT::[tb_security].[MfaLoginSessions]", grants, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ExecuteAsOwnerProceduresPreserveCallerIdentityAndRelyOnExplicitGrants()
     {
         var procedures = ReadSql("64-V0015-AuthPointMfaProcedures.sql");
@@ -220,6 +239,10 @@ public sealed class AuthPointMfaTests
             "(N'SqlServer2016.AuthPointMfa.0015', 15, N'0.6.6-beta.1'",
             ReadSql("37-V0015-AuthPointMfaSchema.sql"),
             StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "(N'SqlServer2016.AuthPointLoginMfa.0015', 15, N'0.6.6-beta.2'",
+            ReadSql("37-V0015-AuthPointMfaSchema.sql"),
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -229,9 +252,38 @@ public sealed class AuthPointMfaTests
         Assert.DoesNotContain("MfaChallenge", fireDrill, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("BeginClientSecretMfaChallenge", fireDrill, StringComparison.OrdinalIgnoreCase);
 
-        var viewModel = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "ViewModels", "ClientInfoBetaViewModel.cs"));
-        Assert.Contains("#if TECHBENCH_CLIENT_INFO_BETA", viewModel, StringComparison.Ordinal);
-        Assert.Contains("ClientSecretAuthPointWindow", viewModel, StringComparison.Ordinal);
+        var connectionWindow = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "DatabaseConnectionWindow.xaml.cs"));
+        var viewModel = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "ViewModels",
+            "ClientInfoBetaViewModel.cs"));
+        Assert.Contains("#if TECHBENCH_CLIENT_INFO_BETA", connectionWindow, StringComparison.Ordinal);
+        Assert.Contains("AuthPointLoginWindow", connectionWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("ClientSecretAuthPointWindow", viewModel, StringComparison.Ordinal);
+        Assert.Contains("RevealClientInfoSecret", viewModel, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ServerManagerSupportsGlobalAndPerUserLoginRequirements()
+    {
+        var form = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "TechBench.ServerManager",
+            "ServerManagerForm.cs"));
+        var repository = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "TechBench.ServerManager",
+            "SqlAdminRepository.cs"));
+        var procedures = ReadSql("64-V0015-AuthPointMfaProcedures.sql");
+
+        Assert.Contains("_authPointEnabled", form, StringComparison.Ordinal);
+        Assert.Contains("_authPointRequireAllUsers", form, StringComparison.Ordinal);
+        Assert.Contains("RequireAtLogin", form, StringComparison.Ordinal);
+        Assert.Contains("Save per-user requirements", form, StringComparison.Ordinal);
+        Assert.Contains("\"AuthPoint.RequireAllUsers\"", repository, StringComparison.Ordinal);
+        Assert.Contains("AdminSaveAuthPointLoginPolicy", procedures, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -27,6 +27,8 @@ BEGIN TRY
             [AuthPointLogin] nvarchar(256) NOT NULL,
             [IsEnabled] bit NOT NULL
                 CONSTRAINT [DF_AuthPointUserMappings_IsEnabled] DEFAULT (1),
+            [RequireAtLogin] bit NOT NULL
+                CONSTRAINT [DF_AuthPointUserMappings_RequireAtLogin] DEFAULT (1),
             [UpdatedByWindowsSid] varbinary(85) NOT NULL,
             [UpdatedAtUtc] datetime2(3) NOT NULL
                 CONSTRAINT [DF_AuthPointUserMappings_UpdatedAtUtc]
@@ -48,6 +50,11 @@ BEGIN TRY
             ON [tb_security].[AuthPointUserMappings]([AuthPointLogin]);
     END;
 
+    IF COL_LENGTH(N'tb_security.AuthPointUserMappings', N'RequireAtLogin') IS NULL
+        ALTER TABLE [tb_security].[AuthPointUserMappings]
+            ADD [RequireAtLogin] bit NOT NULL
+                CONSTRAINT [DF_AuthPointUserMappings_RequireAtLogin] DEFAULT (1);
+
     IF OBJECT_ID(N'tb_security.MfaChallenges', N'U') IS NULL
     BEGIN
         CREATE TABLE [tb_security].[MfaChallenges]
@@ -58,7 +65,8 @@ BEGIN TRY
             [ActorLoginName] nvarchar(256) NOT NULL,
             [ProviderLogin] nvarchar(256) NOT NULL,
             [ActionScope] nvarchar(16) NOT NULL,
-            [SecretId] bigint NOT NULL,
+            [SecretId] bigint NULL,
+            [ClientInstanceId] uniqueidentifier NULL,
             [ClientMachine] nvarchar(128) NULL,
             [ChallengeNonceHash] binary(32) NOT NULL,
             [Status] nvarchar(24) NOT NULL,
@@ -90,7 +98,7 @@ BEGIN TRY
                 FOREIGN KEY ([SecretId])
                 REFERENCES [tb_client].[CredentialSecrets]([SecretId]),
             CONSTRAINT [CK_MfaChallenges_Action]
-                CHECK ([ActionScope] IN (N'Reveal', N'Copy')),
+                CHECK ([ActionScope] IN (N'Login', N'Reveal', N'Copy')),
             CONSTRAINT [CK_MfaChallenges_Status]
                 CHECK ([Status] IN
                     (N'Queued', N'Processing', N'Approved', N'Denied',
@@ -112,6 +120,60 @@ BEGIN TRY
         CREATE INDEX [IX_MfaChallenges_Secret]
             ON [tb_security].[MfaChallenges]
                 ([SecretId], [CreatedAtUtc] DESC);
+    END;
+
+    IF COL_LENGTH(N'tb_security.MfaChallenges', N'ClientInstanceId') IS NULL
+        ALTER TABLE [tb_security].[MfaChallenges]
+            ADD [ClientInstanceId] uniqueidentifier NULL;
+
+    IF EXISTS
+    (
+        SELECT 1 FROM sys.columns
+        WHERE [object_id]=OBJECT_ID(N'tb_security.MfaChallenges')
+          AND [name]=N'SecretId' AND [is_nullable]=0
+    )
+        ALTER TABLE [tb_security].[MfaChallenges]
+            ALTER COLUMN [SecretId] bigint NULL;
+
+    IF OBJECT_ID(N'tb_security.CK_MfaChallenges_Action', N'C') IS NOT NULL
+        ALTER TABLE [tb_security].[MfaChallenges]
+            DROP CONSTRAINT [CK_MfaChallenges_Action];
+    ALTER TABLE [tb_security].[MfaChallenges] WITH CHECK
+        ADD CONSTRAINT [CK_MfaChallenges_Action]
+        CHECK ([ActionScope] IN (N'Login', N'Reveal', N'Copy'));
+    ALTER TABLE [tb_security].[MfaChallenges]
+        CHECK CONSTRAINT [CK_MfaChallenges_Action];
+
+    IF OBJECT_ID(N'tb_security.MfaLoginSessions', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_security].[MfaLoginSessions]
+        (
+            [SessionId] uniqueidentifier NOT NULL,
+            [ClientInstanceId] uniqueidentifier NOT NULL,
+            [ActorWindowsSid] varbinary(85) NOT NULL,
+            [ActorLoginName] nvarchar(256) NOT NULL,
+            [ClientMachine] nvarchar(128) NULL,
+            [SessionTokenHash] binary(64) NOT NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_MfaLoginSessions_CreatedAtUtc]
+                DEFAULT (SYSUTCDATETIME()),
+            [ExpiresAtUtc] datetime2(3) NOT NULL,
+            [LastUsedAtUtc] datetime2(3) NULL,
+            [EndedAtUtc] datetime2(3) NULL,
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_MfaLoginSessions]
+                PRIMARY KEY CLUSTERED ([SessionId]),
+            CONSTRAINT [UX_MfaLoginSessions_Client]
+                UNIQUE ([ActorWindowsSid], [ClientInstanceId]),
+            CONSTRAINT [FK_MfaLoginSessions_User]
+                FOREIGN KEY ([ActorWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid])
+        );
+
+        CREATE INDEX [IX_MfaLoginSessions_Active]
+            ON [tb_security].[MfaLoginSessions]
+                ([ActorWindowsSid], [ExpiresAtUtc])
+            INCLUDE ([EndedAtUtc], [LastUsedAtUtc]);
     END;
 
     IF OBJECT_ID(N'tb_security.MfaBreakGlassGrants', N'U') IS NULL
@@ -175,6 +237,17 @@ BEGIN TRY
             ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
         VALUES
             (N'SqlServer2016.AuthPointMfa.0015', 15, N'0.6.6-beta.1', NULL);
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_deploy].[SchemaMigrations]
+        WHERE [MigrationId] = N'SqlServer2016.AuthPointLoginMfa.0015'
+    )
+        INSERT INTO [tb_deploy].[SchemaMigrations]
+            ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+        VALUES
+            (N'SqlServer2016.AuthPointLoginMfa.0015', 15, N'0.6.6-beta.2', NULL);
 
     COMMIT TRANSACTION;
 END TRY

@@ -12,11 +12,12 @@ using TextBlock = System.Windows.Controls.TextBlock;
 
 namespace TechBench;
 
-public sealed class ClientSecretAuthPointWindow : Window
+public sealed class AuthPointLoginWindow : Window
 {
-    private readonly ITechBenchRepository _repository;
-    private readonly long _secretId;
-    private readonly bool _forClipboard;
+    private readonly SqlServerConnectionFactory _connectionFactory;
+    private readonly AuthPointLoginRequirement _requirement;
+    private readonly Guid _clientInstanceId = Guid.NewGuid();
+    private readonly CancellationTokenSource _cancellation = new();
     private readonly TextBlock _status;
     private readonly ProgressBar _progress;
     private readonly Button _cancel;
@@ -24,19 +25,16 @@ public sealed class ClientSecretAuthPointWindow : Window
     private bool _approved;
     private bool _closing;
 
-    public ClientSecretAuthPointWindow(
-        ITechBenchRepository repository,
-        long secretId,
-        string secretLabel,
-        bool forClipboard)
+    public AuthPointLoginWindow(
+        SqlServerConnectionFactory connectionFactory,
+        AuthPointLoginRequirement requirement)
     {
-        _repository = repository;
-        _secretId = secretId;
-        _forClipboard = forClipboard;
-        Title = "WatchGuard AuthPoint verification";
-        Width = 540;
-        Height = 270;
-        MinWidth = 460;
+        _connectionFactory = connectionFactory;
+        _requirement = requirement;
+        Title = "Sign in with WatchGuard AuthPoint";
+        Width = 560;
+        Height = 300;
+        MinWidth = 480;
         ResizeMode = ResizeMode.NoResize;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Background = (System.Windows.Media.Brush)FindResource("WindowBackgroundBrush");
@@ -47,19 +45,20 @@ public sealed class ClientSecretAuthPointWindow : Window
         var content = new StackPanel();
         content.Children.Add(new TextBlock
         {
-            Text = forClipboard ? "Approve copying this secret" : "Approve revealing this secret",
-            FontSize = 18,
+            Text = "Complete TechBench sign-in",
+            FontSize = 20,
             FontWeight = FontWeights.SemiBold,
             Margin = new Thickness(0, 0, 0, 8)
         });
         content.Children.Add(new TextBlock
         {
-            Text = secretLabel,
+            Text = "Windows verified your identity. Approve one AuthPoint push to open the Client Info beta.",
+            TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 14)
         });
         _status = new TextBlock
         {
-            Text = "Starting AuthPoint verification...",
+            Text = "Starting AuthPoint sign-in...",
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 14)
         };
@@ -74,8 +73,8 @@ public sealed class ClientSecretAuthPointWindow : Window
 
         _cancel = new Button
         {
-            Content = "Cancel",
-            MinWidth = 96,
+            Content = "Cancel sign-in",
+            MinWidth = 112,
             IsCancel = true,
             HorizontalAlignment = System.Windows.HorizontalAlignment.Right,
             Margin = new Thickness(0, 20, 0, 0)
@@ -88,14 +87,14 @@ public sealed class ClientSecretAuthPointWindow : Window
         Closed += (_, _) => CancelOutstandingChallenge();
     }
 
-    public byte[]? AuthorizationToken { get; private set; }
-
     private async Task RunAsync()
     {
+        byte[]? authorizationToken = null;
         try
         {
-            _challenge = await Task.Run(() =>
-                _repository.BeginClientSecretMfaChallenge(_secretId, _forClipboard));
+            _challenge = await _connectionFactory.BeginAuthPointLoginAsync(
+                _clientInstanceId,
+                _cancellation.Token);
             if (!_challenge.IsRequired)
             {
                 _approved = true;
@@ -103,36 +102,49 @@ public sealed class ClientSecretAuthPointWindow : Window
                 return;
             }
 
-            _status.Text = $"A push was sent to {_challenge.ProviderLogin}. Approve it in WatchGuard AuthPoint.";
+            var providerLogin = string.IsNullOrWhiteSpace(_challenge.ProviderLogin)
+                ? _requirement.ProviderLogin
+                : _challenge.ProviderLogin;
+            _status.Text = $"A push was sent to {providerLogin}. Approve it in WatchGuard AuthPoint.";
             while (!_closing)
             {
-                await Task.Delay(650);
-                var current = await Task.Run(() =>
-                    _repository.GetClientSecretMfaChallenge(
-                        _challenge.ChallengeId,
-                        _challenge.ChallengeNonce));
+                await Task.Delay(650, _cancellation.Token);
+                var current = await _connectionFactory.GetAuthPointLoginStatusAsync(
+                    _challenge.ChallengeId,
+                    _challenge.ChallengeNonce,
+                    _cancellation.Token);
                 switch (current.Status)
                 {
                     case "Queued":
                         _status.Text = "Waiting for the TechBench server to send the AuthPoint push...";
                         continue;
                     case "Processing":
-                        _status.Text = "Approve the push in WatchGuard AuthPoint...";
+                        _status.Text = "Approve the sign-in push in WatchGuard AuthPoint...";
                         continue;
                     case "Approved" when current.AuthorizationToken is { Length: 32 }:
-                        AuthorizationToken = current.AuthorizationToken;
+                        authorizationToken = current.AuthorizationToken;
+                        await _connectionFactory.ActivateAuthPointLoginSessionAsync(
+                            _challenge.ChallengeId,
+                            _challenge.ChallengeNonce,
+                            authorizationToken,
+                            _clientInstanceId,
+                            _cancellation.Token);
                         _approved = true;
                         DialogResult = true;
                         return;
                     default:
                         _progress.IsIndeterminate = false;
                         _status.Text = string.IsNullOrWhiteSpace(current.OutcomeMessage)
-                            ? "AuthPoint did not approve this request."
+                            ? "AuthPoint did not approve this TechBench sign-in."
                             : current.OutcomeMessage;
                         _cancel.Content = "Close";
                         return;
                 }
             }
+        }
+        catch (OperationCanceledException) when (_closing)
+        {
+            // The user closed the sign-in window.
         }
         catch (Exception exception)
         {
@@ -140,13 +152,22 @@ public sealed class ClientSecretAuthPointWindow : Window
             _status.Text = exception.Message;
             _cancel.Content = "Close";
         }
+        finally
+        {
+            if (authorizationToken is not null)
+            {
+                CryptographicOperations.ZeroMemory(authorizationToken);
+            }
+        }
     }
 
     private void CancelOutstandingChallenge()
     {
         _closing = true;
+        _cancellation.Cancel();
         if (_challenge is not { IsRequired: true } challenge)
         {
+            _cancellation.Dispose();
             return;
         }
 
@@ -155,16 +176,19 @@ public sealed class ClientSecretAuthPointWindow : Window
         if (_approved)
         {
             CryptographicOperations.ZeroMemory(nonce);
+            _cancellation.Dispose();
             return;
         }
 
-        _ = Task.Run(() =>
+        _ = Task.Run(async () =>
         {
             try
             {
-                _repository.CancelClientSecretMfaChallenge(
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                await _connectionFactory.CancelAuthPointLoginAsync(
                     challenge.ChallengeId,
-                    nonce);
+                    nonce,
+                    timeout.Token);
             }
             catch
             {
@@ -173,6 +197,7 @@ public sealed class ClientSecretAuthPointWindow : Window
             finally
             {
                 CryptographicOperations.ZeroMemory(nonce);
+                _cancellation.Dispose();
             }
         });
     }

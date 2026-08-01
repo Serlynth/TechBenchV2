@@ -217,6 +217,51 @@ internal sealed class SqlAdminRepository(AppPaths paths)
         }
     }
 
+    public void SaveAuthPointLoginPolicies(
+        IReadOnlyCollection<AuthPointLoginPolicyAssignment> policies)
+    {
+        using var connection = OpenAdminConnection();
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            foreach (var policy in policies.OrderBy(
+                         static item => item.LoginName,
+                         StringComparer.OrdinalIgnoreCase))
+            {
+                using var command = StoredProcedure(
+                    connection,
+                    "tb_app.AdminSaveAuthPointLoginPolicy",
+                    transaction);
+                command.Parameters.Add("@LoginName", SqlDbType.NVarChar, 256).Value =
+                    policy.LoginName;
+                command.Parameters.Add("@RequireAtLogin", SqlDbType.Bit).Value =
+                    policy.RequireAtLogin;
+                command.Parameters.Add("@ExpectedRowVersion", SqlDbType.Binary, 8).Value =
+                    policy.ExpectedRowVersion;
+                command.Parameters.Add("@RequestId", SqlDbType.UniqueIdentifier).Value =
+                    Guid.NewGuid();
+                command.ExecuteNonQuery();
+            }
+
+            transaction.Commit();
+        }
+        catch
+        {
+            try
+            {
+                if (transaction.Connection is not null)
+                {
+                    transaction.Rollback();
+                }
+            }
+            catch
+            {
+            }
+
+            throw;
+        }
+    }
+
     public int ReconcileAuthorizedUsers(IReadOnlyCollection<DirectoryUser> users)
     {
         ArgumentNullException.ThrowIfNull(users);
@@ -336,7 +381,7 @@ internal sealed class SqlAdminRepository(AppPaths paths)
             "Whd.BaseUrl", "Whd.AuthenticationMode", "Whd.ServiceUsername", "Whd.AutoSyncEnabled",
             "Whd.AutoSyncMinutes", "Sage.SyncDsn", "Sage.SyncUsername",
             "FireDrill.SourcePath", "FireDrill.DailySyncEnabled", "FireDrill.DailySyncTime",
-            "AuthPoint.Enabled", "AuthPoint.BaseApiUrl", "AuthPoint.AccountId",
+            "AuthPoint.Enabled", "AuthPoint.RequireAllUsers", "AuthPoint.BaseApiUrl", "AuthPoint.AccountId",
             "AuthPoint.ResourceId", "AuthPoint.AccessId"
         };
         using var command = StoredProcedure(connection, "tb_app.GetSettings");
@@ -422,7 +467,11 @@ internal sealed class SqlAdminRepository(AppPaths paths)
                 connection,
                 "tb_app.AdminGetAuthPointUserMappings");
             using var reader = command.ExecuteReader();
-            var values = new Dictionary<string, (string Login, bool Enabled, byte[]? Version)>(
+            var values = new Dictionary<string, (
+                string Login,
+                bool Enabled,
+                bool RequireAtLogin,
+                byte[]? Version)>(
                 StringComparer.OrdinalIgnoreCase);
             while (reader.Read())
             {
@@ -434,6 +483,11 @@ internal sealed class SqlAdminRepository(AppPaths paths)
                 values[loginName] = (
                     ReadString(reader, "AuthPointLogin"),
                     ReadBool(reader, "IsEnabled"),
+                    TryOrdinal(reader, "RequireAtLogin") is var requireOrdinal
+                        && requireOrdinal >= 0
+                        && !reader.IsDBNull(requireOrdinal)
+                            ? reader.GetBoolean(requireOrdinal)
+                            : true,
                     version);
             }
 
@@ -446,6 +500,7 @@ internal sealed class SqlAdminRepository(AppPaths paths)
                     {
                         AuthPointLogin = authPoint.Login,
                         AuthPointEnabled = authPoint.Enabled,
+                        AuthPointRequireAtLogin = authPoint.RequireAtLogin,
                         AuthPointRowVersion = authPoint.Version
                     };
                 }

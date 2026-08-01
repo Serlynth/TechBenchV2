@@ -1,16 +1,16 @@
 # WatchGuard AuthPoint MFA for the Client Info beta
 
-This release adds server-enforced AuthPoint step-up authentication to canonical Client Info credential **Reveal** and **Copy**. Windows Integrated Authentication remains the first factor. The Stable 0.6.5 client, FireDrill, WHD sync, and Sage sync continue to use the same TechBench database without an AuthPoint prompt.
+This release adds server-enforced AuthPoint authentication at **Client Info beta login**. Windows Integrated Authentication remains the first factor. One approved push creates a SID- and client-instance-bound session for that running beta client, so credential **Reveal** and **Copy** do not prompt again. The Stable client, FireDrill, WHD sync, and Sage sync continue to use the same TechBench database without an AuthPoint prompt.
 
 AuthPoint starts disabled. Do not enable it until the SQL package, current server package, WatchGuard resource, policy, protected API credentials, and user mappings are all in place.
 
 ## Components and trust boundary
 
-- The beta desktop requests a short-lived challenge but never receives WatchGuard API credentials.
-- SQL Server binds each challenge and authorization to the caller's Windows SID, action, and exact secret.
+- The beta desktop requests a short-lived login challenge but never receives WatchGuard API credentials.
+- SQL Server binds each challenge and login session to the caller's Windows SID, a cryptographically random client-instance ID, and a 256-bit session token held only in process memory.
 - The TechBench Sync Service is the only component that contacts WatchGuard Cloud.
 - The WatchGuard API access password and API key are protected with LocalMachine DPAPI in the server data directory. They are not stored in SQL or `appsettings.json`.
-- A successful authorization expires after 60 seconds and is consumed by one Reveal or Copy operation. Reuse, the wrong Windows SID, the wrong action, or the wrong secret fails closed.
+- The one-time challenge proof expires after 60 seconds. Activating it creates a session with a maximum 12-hour server lifetime; closing TechBench revokes it early and erases the in-memory token. The wrong SID, client instance, session ID, or token fails closed.
 - Provider denials, timeouts, configuration errors, and outages fail closed after AuthPoint is enabled.
 
 ## 1. Prepare WatchGuard Cloud
@@ -28,7 +28,7 @@ Use the WatchGuard Cloud tenant that already owns CSRI's AuthPoint licenses.
 ## 2. Back up and install the additive SQL package
 
 1. Take the normal TechBench database backup and confirm the existing TechBench encryption certificate/key backup is current.
-2. Open the release's `TechBenchV2-SQLServer2016-0.6.6.sql` in SSMS on `CSRI-SQL`.
+2. Open the release's `TechBenchV2-SQLServer2016-0.6.9.sql` in SSMS on `CSRI-SQL`.
 3. Enable **Query > SQLCMD Mode**.
 4. Run the entire script as a SQL sysadmin and verify the final success message.
 
@@ -36,42 +36,45 @@ The database remains schema version 15. The deployment is additive and idempoten
 
 ## 3. Install the current shared server package
 
-Run `TechBenchServerSetup.exe` from the TechBench Server 0.6.8 release on the TechBench server. This updates the one shared Server Manager and Sync Service; there is no beta Server Manager.
+Run `TechBenchServerSetup.exe` from the TechBench Server 0.6.9 release on the TechBench server. This updates the one shared Server Manager and Sync Service; there is no beta Server Manager.
 
 After setup:
 
 1. Open **TechBench Server Manager**.
 2. Confirm the Sync Service is running under the existing Windows service identity.
-3. Confirm Server Manager reports version 0.6.8.
+3. Confirm Server Manager reports version 0.6.9.
 4. Leave AuthPoint disabled while configuring it.
 
-The first AuthPoint-capable server package is a manual bootstrap update. Server 0.6.8 also corrects release discovery when the repository contains more than 100 older client releases. Subsequent server updates use independent `server-v...` releases so server updates no longer consume or depend on Stable/Beta client version tags.
+The first AuthPoint-capable server package was a manual bootstrap update. Current server releases use independent `server-v...` releases, so server updates no longer consume or depend on Stable/Beta client version tags.
 
 ## 4. Configure AuthPoint in Server Manager
 
 1. Open **AuthPoint (Beta) > Server Configuration**.
 2. Enter the regional API base URL, AuthPoint account ID, numeric REST resource ID, and WatchGuard API access ID.
 3. Enter both the API access password and API key. Save them together. The values are DPAPI-protected on this server.
-4. Keep **Require AuthPoint for Client Info beta secret reveal and copy** unchecked and save.
+4. Keep **Enable AuthPoint at Client Info beta login** unchecked and save.
 5. Open **AuthPoint (Beta) > Directory Identities** and select **Refresh from Active Directory**.
 6. Confirm each authorized TechBench user shows **Ready**. TechBench uses the AD `mail` attribute automatically and falls back to the AD user principal name only when `mail` is blank; there is no routine manual mapping step.
 7. Correct missing or incorrect identities in Active Directory, refresh again, and confirm the displayed identity matches the user's AuthPoint identity.
-8. Return to Server Configuration, enable the requirement, and save.
-9. Restart the Sync Service if Server Manager indicates it is not running the current package.
+8. Choose the rollout policy:
+   - For everyone, enable **Require AuthPoint login for every authorized user**.
+   - For a pilot, leave the all-users switch off and use **Directory Identities > Require at login** for selected users. Use **Select all**, **Clear all**, and **Save per-user requirements** for bulk changes.
+9. Return to Server Configuration, enable **Enable AuthPoint at Client Info beta login**, and save.
+10. Restart the Sync Service if Server Manager indicates it is not running the current package.
 
 ## 5. Test with the beta client
 
-1. Install `TechBenchClientInfoBetaSetup.exe` from client-info beta 0.6.6-beta.1.
-2. Confirm Settings shows version 0.6.6-beta.1 and the Client Info Beta update channel.
-3. Open a client's separate canonical Client Info window.
-4. Select a test credential and choose Reveal. Approve the AuthPoint push; the secret should appear only after approval.
-5. Repeat with Copy and confirm a second one-time authorization is required.
-6. Deny one request and let another expire. Both operations must remain blocked.
+1. Install `TechBenchClientInfoBetaSetup.exe` from client-info beta 0.6.6-beta.2.
+2. Confirm Settings shows version 0.6.6-beta.2 and the Client Info Beta update channel.
+3. Connect to the shared SQL workspace. After Windows identity verification, approve the AuthPoint login push; the workspace must not open before approval.
+4. Open a client's separate canonical Client Info window.
+5. Reveal and Copy several credentials. The active login session is checked by SQL, but no additional push appears.
+6. Deny one login request and let another expire. The workspace must remain closed in both cases.
 7. Confirm the Stable 0.6.5 client still opens and operates normally against the same database, and confirm FireDrill still works unchanged.
 
 ## Disable or roll back
 
-For an AuthPoint outage or beta rollback, clear the AuthPoint requirement in Server Manager and save. This immediately stops requiring new AuthPoint authorizations while preserving mappings and audit history. Do not drop the additive tables or encryption objects. Stable clients and FireDrill do not need to be rolled back.
+For an AuthPoint outage or beta rollback, clear **Enable AuthPoint at Client Info beta login** in Server Manager and save. This immediately stops requiring new login authorizations while preserving mappings, per-user policy, sessions, and audit history. Do not drop the additive tables or encryption objects. Stable clients and FireDrill do not need to be rolled back.
 
 If the server package itself must be rolled back, use the Server Manager's verified package rollback/update path and leave `AuthPoint.Enabled` false until the current AuthPoint-capable Sync Service is restored.
 

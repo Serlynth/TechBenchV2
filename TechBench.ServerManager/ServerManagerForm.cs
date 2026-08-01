@@ -84,7 +84,12 @@ internal sealed class ServerManagerForm : Form
 
     private readonly CheckBox _authPointEnabled = new()
     {
-        Text = "Require AuthPoint for Client Info beta secret reveal and copy",
+        Text = "Enable AuthPoint at Client Info beta login",
+        AutoSize = true
+    };
+    private readonly CheckBox _authPointRequireAllUsers = new()
+    {
+        Text = "Require AuthPoint login for every authorized user (overrides per-user switches)",
         AutoSize = true
     };
     private readonly TextBox _authPointBaseUrl = Field();
@@ -468,41 +473,44 @@ internal sealed class ServerManagerForm : Form
         };
         var configurationGroup = Group("WatchGuard Cloud Authentication API", 535);
         configurationGroup.Dock = DockStyle.Top;
-        var layout = Grid(3, 12);
+        var layout = Grid(3, 13);
         _authPointBaseUrl.PlaceholderText = "https://api.usa.cloud.watchguard.com";
         layout.Controls.Add(_authPointEnabled, 1, 0);
         layout.SetColumnSpan(_authPointEnabled, 2);
-        layout.Controls.Add(Label("Regional API base URL"), 0, 1);
-        layout.Controls.Add(_authPointBaseUrl, 1, 1);
+        layout.Controls.Add(_authPointRequireAllUsers, 1, 1);
+        layout.SetColumnSpan(_authPointRequireAllUsers, 2);
+        layout.Controls.Add(Label("Regional API base URL"), 0, 2);
+        layout.Controls.Add(_authPointBaseUrl, 1, 2);
         layout.SetColumnSpan(_authPointBaseUrl, 2);
-        layout.Controls.Add(Label("AuthPoint account ID"), 0, 2);
-        layout.Controls.Add(_authPointAccountId, 1, 2);
-        layout.Controls.Add(Label("REST resource ID"), 0, 3);
-        layout.Controls.Add(_authPointResourceId, 1, 3);
-        layout.Controls.Add(Label("WatchGuard API access ID"), 0, 4);
-        layout.Controls.Add(_authPointAccessId, 1, 4);
-        layout.Controls.Add(Label("API access password"), 0, 5);
-        layout.Controls.Add(_authPointAccessPassword, 1, 5);
-        layout.Controls.Add(Label("WatchGuard API key"), 0, 6);
-        layout.Controls.Add(_authPointApiKey, 1, 6);
-        layout.Controls.Add(_authPointSecretStatus, 2, 5);
+        layout.Controls.Add(Label("AuthPoint account ID"), 0, 3);
+        layout.Controls.Add(_authPointAccountId, 1, 3);
+        layout.Controls.Add(Label("REST resource ID"), 0, 4);
+        layout.Controls.Add(_authPointResourceId, 1, 4);
+        layout.Controls.Add(Label("WatchGuard API access ID"), 0, 5);
+        layout.Controls.Add(_authPointAccessId, 1, 5);
+        layout.Controls.Add(Label("API access password"), 0, 6);
+        layout.Controls.Add(_authPointAccessPassword, 1, 6);
+        layout.Controls.Add(Label("WatchGuard API key"), 0, 7);
+        layout.Controls.Add(_authPointApiKey, 1, 7);
+        layout.Controls.Add(_authPointSecretStatus, 2, 6);
         var showSecrets = new CheckBox { Text = "Show protected API values", AutoSize = true };
         showSecrets.CheckedChanged += (_, _) =>
         {
             _authPointAccessPassword.UseSystemPasswordChar = !showSecrets.Checked;
             _authPointApiKey.UseSystemPasswordChar = !showSecrets.Checked;
         };
-        layout.Controls.Add(showSecrets, 1, 7);
+        layout.Controls.Add(showSecrets, 1, 8);
         var save = Button("Save AuthPoint configuration");
         save.Click += async (_, _) => await SaveAuthPointAsync();
         var refresh = Button("Refresh");
         refresh.Click += async (_, _) => await RefreshConfigurationAsync(true);
-        layout.Controls.Add(ButtonRow(save, refresh), 1, 8);
-        layout.Controls.Add(_authPointStatus, 0, 9);
+        layout.Controls.Add(ButtonRow(save, refresh), 1, 9);
+        layout.Controls.Add(_authPointStatus, 0, 10);
         layout.SetColumnSpan(_authPointStatus, 3);
         var note = new Label
         {
-            Text = "This protects only the Client Info beta. Windows Integrated Authentication remains the first factor. "
+            Text = "This protects only Client Info beta login. Windows Integrated Authentication remains the first factor. "
+                   + "One successful push authorizes that running beta client; Reveal and Copy do not prompt again. "
                    + "Create a WatchGuard AuthPoint RESTful API Client resource with a push-only policy (no AuthPoint password). "
                    + "The API password and API key are DPAPI-protected on this server and are never stored in SQL or desktop clients.",
             AutoSize = true,
@@ -510,7 +518,7 @@ internal sealed class ServerManagerForm : Form
             ForeColor = Color.DimGray,
             Margin = new Padding(3, 16, 3, 3)
         };
-        layout.Controls.Add(note, 0, 10);
+        layout.Controls.Add(note, 0, 11);
         layout.SetColumnSpan(note, 3);
         configurationGroup.Controls.Add(layout);
         configurationPage.Controls.Add(configurationGroup);
@@ -528,7 +536,8 @@ internal sealed class ServerManagerForm : Form
         mappingsLayout.Controls.Add(new Label
         {
             Text = "AuthPoint identities are synchronized automatically from each authorized user's Active Directory mail attribute. "
-                   + "The AD user principal name is used only when mail is blank.",
+                   + "The AD user principal name is used only when mail is blank. Use Require at login for a pilot group; "
+                   + "the global all-users switch overrides these individual choices.",
             AutoSize = true,
             ForeColor = Color.DimGray,
             Margin = new Padding(3, 8, 3, 12)
@@ -537,7 +546,16 @@ internal sealed class ServerManagerForm : Form
         mappingsLayout.Controls.Add(_authPointMappingGrid, 0, 1);
         var refreshMappings = Button("Refresh from Active Directory");
         refreshMappings.Click += async (_, _) => await RefreshConfigurationAsync(true);
-        mappingsLayout.Controls.Add(ButtonRow(refreshMappings), 0, 2);
+        var requireAllMappings = Button("Select all");
+        requireAllMappings.Click += (_, _) => SetAllAuthPointLoginPolicies(true);
+        var clearAllMappings = Button("Clear all");
+        clearAllMappings.Click += (_, _) => SetAllAuthPointLoginPolicies(false);
+        var saveMappings = Button("Save per-user requirements");
+        saveMappings.Click += async (_, _) => await SaveAuthPointLoginPoliciesAsync();
+        mappingsLayout.Controls.Add(
+            ButtonRow(saveMappings, requireAllMappings, clearAllMappings, refreshMappings),
+            0,
+            2);
         mappingsPage.Controls.Add(mappingsLayout);
 
         sections.TabPages.Add(configurationPage);
@@ -731,12 +749,17 @@ internal sealed class ServerManagerForm : Form
         _authPointEnabled.Checked = bool.TryParse(
             Setting("AuthPoint.Enabled", "False"),
             out var authPointEnabled) && authPointEnabled;
+        _authPointRequireAllUsers.Checked = !bool.TryParse(
+            Setting("AuthPoint.RequireAllUsers", "True"),
+            out var authPointRequireAllUsers) || authPointRequireAllUsers;
         _authPointBaseUrl.Text = Setting("AuthPoint.BaseApiUrl");
         _authPointAccountId.Text = Setting("AuthPoint.AccountId");
         _authPointResourceId.Text = Setting("AuthPoint.ResourceId");
         _authPointAccessId.Text = Setting("AuthPoint.AccessId");
         _authPointStatus.Text = _authPointEnabled.Checked
-            ? "Enabled for Client Info beta reveal and copy."
+            ? (_authPointRequireAllUsers.Checked
+                ? "Enabled at Client Info beta login for every authorized user."
+                : "Enabled at Client Info beta login for selected users.")
             : "Disabled; existing stable and FireDrill behavior is unchanged.";
         _whdSyncStatus.Text = FormatStatus(configuration.WhdStatus, false);
         _sageSyncStatus.Text = FormatStatus(configuration.SageStatus, true);
@@ -792,6 +815,8 @@ internal sealed class ServerManagerForm : Form
             var settings = new Dictionary<string, string>
             {
                 ["AuthPoint.Enabled"] = _authPointEnabled.Checked.ToString(),
+                ["AuthPoint.RequireAllUsers"] =
+                    _authPointRequireAllUsers.Checked.ToString(),
                 ["AuthPoint.BaseApiUrl"] = baseUri.GetLeftPart(UriPartial.Authority),
                 ["AuthPoint.AccountId"] = _authPointAccountId.Text.Trim(),
                 ["AuthPoint.ResourceId"] = _authPointResourceId.Text.Trim(),
@@ -818,28 +843,35 @@ internal sealed class ServerManagerForm : Form
             Name = "DisplayName",
             HeaderText = "TechBench user",
             ReadOnly = true,
-            FillWeight = 30
+            FillWeight = 26
         });
         _authPointMappingGrid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "WindowsLogin",
             HeaderText = "Windows login",
             ReadOnly = true,
-            FillWeight = 25
+            FillWeight = 20
         });
         _authPointMappingGrid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "AuthPointLogin",
             HeaderText = "AD email / AuthPoint identity",
             ReadOnly = true,
-            FillWeight = 32
+            FillWeight = 30
+        });
+        _authPointMappingGrid.Columns.Add(new DataGridViewCheckBoxColumn
+        {
+            Name = "RequireAtLogin",
+            HeaderText = "Require at login",
+            ReadOnly = false,
+            FillWeight = 12
         });
         _authPointMappingGrid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "AuthPointStatus",
             HeaderText = "Status",
             ReadOnly = true,
-            FillWeight = 13
+            FillWeight = 12
         });
     }
 
@@ -852,9 +884,52 @@ internal sealed class ServerManagerForm : Form
                 mapping.DisplayName,
                 mapping.LoginName,
                 mapping.AuthPointLogin,
+                mapping.AuthPointRequireAtLogin,
                 mapping.AuthPointEnabled ? "Ready" : "Missing AD email / UPN")];
-            row.Tag = mapping.AuthPointRowVersion;
+            row.Tag = mapping;
+            row.Cells["RequireAtLogin"].ReadOnly =
+                !mapping.AuthPointEnabled || mapping.AuthPointRowVersion is null;
         }
+    }
+
+    private void SetAllAuthPointLoginPolicies(bool required)
+    {
+        _authPointMappingGrid.EndEdit();
+        foreach (DataGridViewRow row in _authPointMappingGrid.Rows)
+        {
+            var cell = row.Cells["RequireAtLogin"];
+            if (!cell.ReadOnly)
+            {
+                cell.Value = required;
+            }
+        }
+    }
+
+    private async Task SaveAuthPointLoginPoliciesAsync()
+    {
+        await RunAsync("Saving per-user AuthPoint login requirements...", async () =>
+        {
+            _authPointMappingGrid.EndEdit();
+            var policies = _authPointMappingGrid.Rows
+                .Cast<DataGridViewRow>()
+                .Where(static row => row.Tag is UserMapping
+                    {
+                        AuthPointEnabled: true,
+                        AuthPointRowVersion: not null
+                    })
+                .Select(row =>
+                {
+                    var mapping = (UserMapping)row.Tag!;
+                    return new AuthPointLoginPolicyAssignment(
+                        mapping.LoginName,
+                        Convert.ToBoolean(row.Cells["RequireAtLogin"].Value),
+                        mapping.AuthPointRowVersion!);
+                })
+                .ToList();
+            await Task.Run(() => _repository.SaveAuthPointLoginPolicies(policies));
+            AddLog($"Saved AuthPoint login requirements for {policies.Count} user(s).");
+            await RefreshConfigurationAsync(false);
+        });
     }
 
     private static Uri ValidateAuthPointApiUrl(string value)

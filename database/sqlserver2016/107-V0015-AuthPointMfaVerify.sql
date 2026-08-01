@@ -14,9 +14,22 @@ IF NOT EXISTS
 )
     THROW 52490,N'The AuthPoint MFA schema-15 extension is not installed.',1;
 
+IF NOT EXISTS
+(
+    SELECT 1 FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId]=N'SqlServer2016.AuthPointLoginMfa.0015'
+      AND [SchemaVersion]=15
+)
+    THROW 52490,N'The AuthPoint login MFA schema-15 extension is not installed.',1;
+
 IF OBJECT_ID(N'tb_security.AuthPointUserMappings',N'U') IS NULL
    OR OBJECT_ID(N'tb_security.MfaChallenges',N'U') IS NULL
+   OR OBJECT_ID(N'tb_security.MfaLoginSessions',N'U') IS NULL
    OR OBJECT_ID(N'tb_security.MfaBreakGlassGrants',N'U') IS NULL
+   OR OBJECT_ID(N'tb_app.GetAuthPointLoginRequirement',N'P') IS NULL
+   OR OBJECT_ID(N'tb_app.BeginAuthPointLoginMfaChallenge',N'P') IS NULL
+   OR OBJECT_ID(N'tb_app.ActivateAuthPointLoginSession',N'P') IS NULL
+   OR OBJECT_ID(N'tb_app.EndAuthPointLoginSession',N'P') IS NULL
    OR OBJECT_ID(N'tb_app.BeginClientSecretMfaChallenge',N'P') IS NULL
    OR OBJECT_ID(N'tb_app.GetClientSecretMfaChallenge',N'P') IS NULL
    OR OBJECT_ID(N'tb_app.CancelClientSecretMfaChallenge',N'P') IS NULL
@@ -29,6 +42,8 @@ IF COL_LENGTH(N'tb_security.MfaChallenges',N'AuthorizationTokenHash') IS NULL
    OR COL_LENGTH(N'tb_security.MfaChallenges',N'AuthorizationTokenEncrypted') IS NULL
    OR COL_LENGTH(N'tb_security.MfaChallenges',N'ChallengeNonceHash') IS NULL
    OR COL_LENGTH(N'tb_security.MfaChallenges',N'ActorWindowsSid') IS NULL
+   OR COL_LENGTH(N'tb_security.MfaChallenges',N'ClientInstanceId') IS NULL
+   OR COL_LENGTH(N'tb_security.AuthPointUserMappings',N'RequireAtLogin') IS NULL
     THROW 52492,N'The AuthPoint challenge binding columns are incomplete.',1;
 
 IF OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientCredentialSecret'))
@@ -36,7 +51,9 @@ IF OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientCredentialSecret'))
    OR OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientCredentialSecret'))
         NOT LIKE N'%ActorWindowsSid%'
    OR OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientCredentialSecret'))
-        NOT LIKE N'%Status%Consumed%'
+        NOT LIKE N'%MfaLoginSessions%'
+   OR OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientCredentialSecret'))
+        NOT LIKE N'%MfaSessionToken%'
     THROW 52493,N'The canonical secret reveal procedure is not MFA enforcing.',1;
 
 IF OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealFireDrillCredential'))
@@ -57,6 +74,10 @@ IF EXISTS
 IF HAS_PERMS_BY_NAME(N'tb_security.MfaChallenges',N'OBJECT',N'SELECT')=1
    AND IS_ROLEMEMBER(N'tb_role_user')=1
     THROW 52496,N'Desktop users must not directly read MFA challenge storage.',1;
+
+IF HAS_PERMS_BY_NAME(N'tb_security.MfaLoginSessions',N'OBJECT',N'SELECT')=1
+   AND IS_ROLEMEMBER(N'tb_role_user')=1
+    THROW 52497,N'Desktop users must not directly read MFA login-session storage.',1;
 
 PRINT N'WatchGuard AuthPoint MFA verification passed; schema version remains 15.';
 GO

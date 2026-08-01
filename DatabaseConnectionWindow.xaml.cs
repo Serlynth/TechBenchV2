@@ -150,6 +150,28 @@ public partial class DatabaseConnectionWindow : Window
             var connectionFactory = new SqlServerConnectionFactory(options);
             var authenticatedUser = await connectionFactory.GetCurrentUserContextAsync();
 
+#if TECHBENCH_CLIENT_INFO_BETA
+            var authPointRequirement =
+                await connectionFactory.GetAuthPointLoginRequirementAsync();
+            if (authPointRequirement.IsRequired)
+            {
+                StatusTextBlock.Text =
+                    $"Windows identity verified for {authenticatedUser.DisplayName}. Waiting for AuthPoint...";
+                var authPointLogin = new AuthPointLoginWindow(
+                    connectionFactory,
+                    authPointRequirement)
+                {
+                    Owner = this
+                };
+                if (authPointLogin.ShowDialog() != true)
+                {
+                    StatusTextBlock.Text =
+                        "TechBench sign-in was cancelled before AuthPoint approval.";
+                    return;
+                }
+            }
+#endif
+
             SqlServerConnectionConfig.Save(options);
 
             ConnectionFactory = connectionFactory;

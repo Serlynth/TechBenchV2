@@ -4562,6 +4562,8 @@ BEGIN TRY
             [AuthPointLogin] nvarchar(256) NOT NULL,
             [IsEnabled] bit NOT NULL
                 CONSTRAINT [DF_AuthPointUserMappings_IsEnabled] DEFAULT (1),
+            [RequireAtLogin] bit NOT NULL
+                CONSTRAINT [DF_AuthPointUserMappings_RequireAtLogin] DEFAULT (1),
             [UpdatedByWindowsSid] varbinary(85) NOT NULL,
             [UpdatedAtUtc] datetime2(3) NOT NULL
                 CONSTRAINT [DF_AuthPointUserMappings_UpdatedAtUtc]
@@ -4583,6 +4585,11 @@ BEGIN TRY
             ON [tb_security].[AuthPointUserMappings]([AuthPointLogin]);
     END;
 
+    IF COL_LENGTH(N'tb_security.AuthPointUserMappings', N'RequireAtLogin') IS NULL
+        ALTER TABLE [tb_security].[AuthPointUserMappings]
+            ADD [RequireAtLogin] bit NOT NULL
+                CONSTRAINT [DF_AuthPointUserMappings_RequireAtLogin] DEFAULT (1);
+
     IF OBJECT_ID(N'tb_security.MfaChallenges', N'U') IS NULL
     BEGIN
         CREATE TABLE [tb_security].[MfaChallenges]
@@ -4593,7 +4600,8 @@ BEGIN TRY
             [ActorLoginName] nvarchar(256) NOT NULL,
             [ProviderLogin] nvarchar(256) NOT NULL,
             [ActionScope] nvarchar(16) NOT NULL,
-            [SecretId] bigint NOT NULL,
+            [SecretId] bigint NULL,
+            [ClientInstanceId] uniqueidentifier NULL,
             [ClientMachine] nvarchar(128) NULL,
             [ChallengeNonceHash] binary(32) NOT NULL,
             [Status] nvarchar(24) NOT NULL,
@@ -4625,7 +4633,7 @@ BEGIN TRY
                 FOREIGN KEY ([SecretId])
                 REFERENCES [tb_client].[CredentialSecrets]([SecretId]),
             CONSTRAINT [CK_MfaChallenges_Action]
-                CHECK ([ActionScope] IN (N'Reveal', N'Copy')),
+                CHECK ([ActionScope] IN (N'Login', N'Reveal', N'Copy')),
             CONSTRAINT [CK_MfaChallenges_Status]
                 CHECK ([Status] IN
                     (N'Queued', N'Processing', N'Approved', N'Denied',
@@ -4647,6 +4655,60 @@ BEGIN TRY
         CREATE INDEX [IX_MfaChallenges_Secret]
             ON [tb_security].[MfaChallenges]
                 ([SecretId], [CreatedAtUtc] DESC);
+    END;
+
+    IF COL_LENGTH(N'tb_security.MfaChallenges', N'ClientInstanceId') IS NULL
+        ALTER TABLE [tb_security].[MfaChallenges]
+            ADD [ClientInstanceId] uniqueidentifier NULL;
+
+    IF EXISTS
+    (
+        SELECT 1 FROM sys.columns
+        WHERE [object_id]=OBJECT_ID(N'tb_security.MfaChallenges')
+          AND [name]=N'SecretId' AND [is_nullable]=0
+    )
+        ALTER TABLE [tb_security].[MfaChallenges]
+            ALTER COLUMN [SecretId] bigint NULL;
+
+    IF OBJECT_ID(N'tb_security.CK_MfaChallenges_Action', N'C') IS NOT NULL
+        ALTER TABLE [tb_security].[MfaChallenges]
+            DROP CONSTRAINT [CK_MfaChallenges_Action];
+    ALTER TABLE [tb_security].[MfaChallenges] WITH CHECK
+        ADD CONSTRAINT [CK_MfaChallenges_Action]
+        CHECK ([ActionScope] IN (N'Login', N'Reveal', N'Copy'));
+    ALTER TABLE [tb_security].[MfaChallenges]
+        CHECK CONSTRAINT [CK_MfaChallenges_Action];
+
+    IF OBJECT_ID(N'tb_security.MfaLoginSessions', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_security].[MfaLoginSessions]
+        (
+            [SessionId] uniqueidentifier NOT NULL,
+            [ClientInstanceId] uniqueidentifier NOT NULL,
+            [ActorWindowsSid] varbinary(85) NOT NULL,
+            [ActorLoginName] nvarchar(256) NOT NULL,
+            [ClientMachine] nvarchar(128) NULL,
+            [SessionTokenHash] binary(64) NOT NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_MfaLoginSessions_CreatedAtUtc]
+                DEFAULT (SYSUTCDATETIME()),
+            [ExpiresAtUtc] datetime2(3) NOT NULL,
+            [LastUsedAtUtc] datetime2(3) NULL,
+            [EndedAtUtc] datetime2(3) NULL,
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_MfaLoginSessions]
+                PRIMARY KEY CLUSTERED ([SessionId]),
+            CONSTRAINT [UX_MfaLoginSessions_Client]
+                UNIQUE ([ActorWindowsSid], [ClientInstanceId]),
+            CONSTRAINT [FK_MfaLoginSessions_User]
+                FOREIGN KEY ([ActorWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid])
+        );
+
+        CREATE INDEX [IX_MfaLoginSessions_Active]
+            ON [tb_security].[MfaLoginSessions]
+                ([ActorWindowsSid], [ExpiresAtUtc])
+            INCLUDE ([EndedAtUtc], [LastUsedAtUtc]);
     END;
 
     IF OBJECT_ID(N'tb_security.MfaBreakGlassGrants', N'U') IS NULL
@@ -4710,6 +4772,17 @@ BEGIN TRY
             ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
         VALUES
             (N'SqlServer2016.AuthPointMfa.0015', 15, N'0.6.6-beta.1', NULL);
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_deploy].[SchemaMigrations]
+        WHERE [MigrationId] = N'SqlServer2016.AuthPointLoginMfa.0015'
+    )
+        INSERT INTO [tb_deploy].[SchemaMigrations]
+            ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+        VALUES
+            (N'SqlServer2016.AuthPointLoginMfa.0015', 15, N'0.6.6-beta.2', NULL);
 
     COMMIT TRANSACTION;
 END TRY
@@ -27199,6 +27272,7 @@ BEGIN
     SELECT
         users.[LoginName], users.[DisplayName], users.[WindowsSid],
         mapping.[AuthPointLogin], COALESCE(mapping.[IsEnabled], 0) AS [IsEnabled],
+        COALESCE(mapping.[RequireAtLogin], 1) AS [RequireAtLogin],
         mapping.[UpdatedAtUtc], mapping.[RowVersion]
     FROM [tb_security].[Users] AS users
     LEFT JOIN [tb_security].[AuthPointUserMappings] AS mapping
@@ -27216,6 +27290,7 @@ CREATE PROCEDURE [tb_app].[AdminSaveAuthPointUserMapping]
     @LoginName nvarchar(256),
     @AuthPointLogin nvarchar(256),
     @IsEnabled bit = 1,
+    @RequireAtLogin bit = NULL,
     @ExpectedRowVersion binary(8) = NULL,
     @RequestId uniqueidentifier = NULL
 AS
@@ -27255,6 +27330,7 @@ BEGIN
                 THROW 52403, N'The mapping changed after it was loaded. Refresh and try again.', 1;
             UPDATE [tb_security].[AuthPointUserMappings]
             SET [AuthPointLogin]=@AuthPointLogin, [IsEnabled]=@IsEnabled,
+                [RequireAtLogin]=COALESCE(@RequireAtLogin,[RequireAtLogin]),
                 [UpdatedByWindowsSid]=@ActorSid,
                 [UpdatedAtUtc]=SYSUTCDATETIME()
             WHERE [WindowsSid]=@TargetSid
@@ -27265,9 +27341,11 @@ BEGIN
         ELSE
         BEGIN
             INSERT INTO [tb_security].[AuthPointUserMappings]
-                ([WindowsSid],[AuthPointLogin],[IsEnabled],[UpdatedByWindowsSid])
+                ([WindowsSid],[AuthPointLogin],[IsEnabled],[RequireAtLogin],
+                 [UpdatedByWindowsSid])
             VALUES
-                (@TargetSid,@AuthPointLogin,@IsEnabled,@ActorSid);
+                (@TargetSid,@AuthPointLogin,@IsEnabled,
+                 COALESCE(@RequireAtLogin,1),@ActorSid);
         END;
 
         EXEC [tb_security].[WriteAuditEvent]
@@ -27283,12 +27361,224 @@ BEGIN
 
     SELECT
         users.[LoginName], users.[DisplayName], users.[WindowsSid],
-        mapping.[AuthPointLogin], mapping.[IsEnabled], mapping.[UpdatedAtUtc],
+        mapping.[AuthPointLogin], mapping.[IsEnabled],
+        mapping.[RequireAtLogin], mapping.[UpdatedAtUtc],
         mapping.[RowVersion]
     FROM [tb_security].[AuthPointUserMappings] AS mapping
     INNER JOIN [tb_security].[Users] AS users
         ON users.[WindowsSid]=mapping.[WindowsSid]
     WHERE mapping.[WindowsSid]=@TargetSid;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminSaveAuthPointLoginPolicy', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminSaveAuthPointLoginPolicy];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminSaveAuthPointLoginPolicy]
+    @LoginName nvarchar(256),
+    @RequireAtLogin bit,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit,
+            @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin <> 1
+        THROW 52400, N'Only a TechBench Admin may manage AuthPoint login policy.', 1;
+
+    SET @LoginName=NULLIF(LTRIM(RTRIM(@LoginName)),N'');
+    IF @LoginName IS NULL OR @ExpectedRowVersion IS NULL
+        THROW 52403, N'The AuthPoint user policy changed after it was loaded. Refresh and try again.', 1;
+
+    DECLARE @TargetSid varbinary(85)=
+        (SELECT [WindowsSid] FROM [tb_security].[Users]
+         WHERE [LoginName]=@LoginName);
+    IF @TargetSid IS NULL
+        THROW 52402, N'The selected TechBench user no longer exists.', 1;
+
+    UPDATE [tb_security].[AuthPointUserMappings]
+    SET [RequireAtLogin]=@RequireAtLogin,
+        [UpdatedByWindowsSid]=@ActorSid,
+        [UpdatedAtUtc]=SYSUTCDATETIME()
+    WHERE [WindowsSid]=@TargetSid
+      AND [RowVersion]=@ExpectedRowVersion;
+    IF @@ROWCOUNT<>1
+        THROW 52403, N'The AuthPoint user policy changed after it was loaded. Refresh and try again.', 1;
+
+    DECLARE @AuditAction nvarchar(80)=CASE WHEN @RequireAtLogin=1
+        THEN N'AuthPointLoginRequiredForUser'
+        ELSE N'AuthPointLoginExemptedForUser' END;
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action=@AuditAction,
+        @EntityType=N'AuthPointUserMapping',
+        @EntityId=@LoginName,@RequestId=@RequestId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.GetAuthPointLoginRequirement', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[GetAuthPointLoginRequirement];
+GO
+
+CREATE PROCEDURE [tb_app].[GetAuthPointLoginRequirement]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit,
+            @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    DECLARE @Enabled bit=COALESCE(TRY_CONVERT(bit,
+            (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+             WHERE [SettingKey]=N'AuthPoint.Enabled')),0),
+            @RequireAll bit=COALESCE(TRY_CONVERT(bit,
+            (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+             WHERE [SettingKey]=N'AuthPoint.RequireAllUsers')),1),
+            @ProviderLogin nvarchar(256),@MappingEnabled bit=0,
+            @RequireAtLogin bit=0,@IsRequired bit=0;
+
+    SELECT @ProviderLogin=[AuthPointLogin],@MappingEnabled=[IsEnabled],
+           @RequireAtLogin=[RequireAtLogin]
+    FROM [tb_security].[AuthPointUserMappings]
+    WHERE [WindowsSid]=@ActorSid;
+
+    SET @IsRequired=CASE WHEN @Enabled=1
+        AND (@RequireAll=1 OR @RequireAtLogin=1) THEN 1 ELSE 0 END;
+    IF @IsRequired=1 AND
+       (@MappingEnabled<>1 OR NULLIF(LTRIM(RTRIM(@ProviderLogin)),N'') IS NULL)
+        THROW 52412, N'Your Windows account has no ready AuthPoint identity. Ask a TechBench Admin to refresh Directory Identities or change the per-user login requirement.', 1;
+
+    SELECT @IsRequired AS [IsRequired],
+           COALESCE(@ProviderLogin,N'') AS [ProviderLogin],
+           CONVERT(int,12) AS [SessionHours];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.BeginAuthPointLoginMfaChallenge', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[BeginAuthPointLoginMfaChallenge];
+GO
+
+CREATE PROCEDURE [tb_app].[BeginAuthPointLoginMfaChallenge]
+    @ClientInstanceId uniqueidentifier,
+    @ClientMachine nvarchar(128) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    IF @ClientInstanceId IS NULL
+        THROW 52410,N'The TechBench client instance is invalid.',1;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit,
+            @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    DECLARE @Enabled bit=COALESCE(TRY_CONVERT(bit,
+            (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+             WHERE [SettingKey]=N'AuthPoint.Enabled')),0),
+            @RequireAll bit=COALESCE(TRY_CONVERT(bit,
+            (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+             WHERE [SettingKey]=N'AuthPoint.RequireAllUsers')),1),
+            @ProviderLogin nvarchar(256),@MappingEnabled bit=0,
+            @RequireAtLogin bit=0;
+    SELECT @ProviderLogin=[AuthPointLogin],@MappingEnabled=[IsEnabled],
+           @RequireAtLogin=[RequireAtLogin]
+    FROM [tb_security].[AuthPointUserMappings]
+    WHERE [WindowsSid]=@ActorSid;
+
+    IF @Enabled<>1 OR (@RequireAll<>1 AND @RequireAtLogin<>1)
+    BEGIN
+        SELECT CONVERT(uniqueidentifier,NULL) AS [ChallengeId],
+               CONVERT(varbinary(32),NULL) AS [ChallengeNonce],
+               CONVERT(nvarchar(24),N'NotRequired') AS [Status],
+               SYSUTCDATETIME() AS [ExpiresAtUtc],
+               COALESCE(@ProviderLogin,N'') AS [ProviderLogin];
+        RETURN;
+    END;
+    IF @MappingEnabled<>1 OR NULLIF(LTRIM(RTRIM(@ProviderLogin)),N'') IS NULL
+        THROW 52412, N'Your Windows account is not mapped to a ready AuthPoint identity.', 1;
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(),
+            @ChallengeId uniqueidentifier=NEWID(),
+            @ChallengeNonce varbinary(32)=CRYPT_GEN_RANDOM(32),
+            @EffectiveRequestId uniqueidentifier=COALESCE(@RequestId,NEWID()),
+            @ActorLogin nvarchar(256)=CONVERT(nvarchar(256),ORIGINAL_LOGIN());
+    SET @ClientMachine=LEFT(NULLIF(LTRIM(RTRIM(@ClientMachine)),N''),128);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        IF (SELECT COUNT_BIG(*) FROM [tb_security].[MfaChallenges]
+            WITH (UPDLOCK,HOLDLOCK)
+            WHERE [ActorWindowsSid]=@ActorSid
+              AND [CreatedAtUtc]>=DATEADD(minute,-2,@NowUtc))>=3
+            THROW 52413, N'Too many AuthPoint sign-in requests were started. Wait two minutes and try again.', 1;
+        IF (SELECT COUNT_BIG(*) FROM [tb_security].[MfaChallenges]
+            WITH (UPDLOCK,HOLDLOCK)
+            WHERE [ActorWindowsSid]=@ActorSid
+              AND [CreatedAtUtc]>=DATEADD(minute,-15,@NowUtc))>=10
+            THROW 52413, N'Too many AuthPoint sign-in requests were started. Wait before trying again.', 1;
+        IF EXISTS
+        (
+            SELECT 1 FROM [tb_security].[MfaChallenges] WITH (UPDLOCK,HOLDLOCK)
+            WHERE [ActorWindowsSid]=@ActorSid AND [ActionScope]=N'Login'
+              AND [Status] IN (N'Queued',N'Processing')
+              AND [ExpiresAtUtc]>@NowUtc
+        )
+            THROW 52414, N'An AuthPoint sign-in request is already in progress.', 1;
+
+        UPDATE [tb_security].[MfaChallenges]
+        SET [Status]=N'Expired',[CompletedAtUtc]=@NowUtc,
+            [OutcomeCode]=N'CLIENT_EXPIRED',
+            [OutcomeMessage]=N'The AuthPoint request expired.'
+        WHERE [Status] IN (N'Queued',N'Processing',N'Approved')
+          AND [ExpiresAtUtc]<=@NowUtc;
+
+        INSERT INTO [tb_security].[MfaChallenges]
+        (
+            [ChallengeId],[RequestId],[ActorWindowsSid],[ActorLoginName],
+            [ProviderLogin],[ActionScope],[SecretId],[ClientInstanceId],
+            [ClientMachine],[ChallengeNonceHash],[Status],[ExpiresAtUtc]
+        )
+        VALUES
+        (
+            @ChallengeId,@EffectiveRequestId,@ActorSid,@ActorLogin,
+            @ProviderLogin,N'Login',NULL,@ClientInstanceId,@ClientMachine,
+            HASHBYTES(N'SHA2_256',@ChallengeNonce),N'Queued',
+            DATEADD(minute,2,@NowUtc)
+        );
+
+        DECLARE @ChallengeEntityId nvarchar(120)=
+            CONVERT(nvarchar(36),@ChallengeId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'TechBenchLoginMfaRequested',@EntityType=N'MfaChallenge',
+            @EntityId=@ChallengeEntityId,
+            @RequestId=@EffectiveRequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT @ChallengeId AS [ChallengeId],@ChallengeNonce AS [ChallengeNonce],
+           CONVERT(nvarchar(24),N'Queued') AS [Status],
+           DATEADD(minute,2,@NowUtc) AS [ExpiresAtUtc],
+           @ProviderLogin AS [ProviderLogin];
 END;
 GO
 
@@ -27318,6 +27608,20 @@ BEGIN
     IF COALESCE(TRY_CONVERT(bit,
         (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
          WHERE [SettingKey]=N'AuthPoint.Enabled')),0)<>1
+    BEGIN
+        SELECT CONVERT(uniqueidentifier,NULL) AS [ChallengeId],
+               CONVERT(varbinary(32),NULL) AS [ChallengeNonce],
+               CONVERT(nvarchar(24),N'NotRequired') AS [Status],
+               SYSUTCDATETIME() AS [ExpiresAtUtc],
+               CONVERT(nvarchar(256),N'') AS [ProviderLogin];
+        RETURN;
+    END;
+    IF COALESCE(TRY_CONVERT(bit,
+        (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+         WHERE [SettingKey]=N'AuthPoint.RequireAllUsers')),1)<>1
+       AND COALESCE((SELECT [RequireAtLogin]
+            FROM [tb_security].[AuthPointUserMappings]
+            WHERE [WindowsSid]=@ActorSid),0)<>1
     BEGIN
         SELECT CONVERT(uniqueidentifier,NULL) AS [ChallengeId],
                CONVERT(varbinary(32),NULL) AS [ChallengeNonce],
@@ -27542,6 +27846,120 @@ BEGIN
 END;
 GO
 
+IF OBJECT_ID(N'tb_app.ActivateAuthPointLoginSession', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[ActivateAuthPointLoginSession];
+GO
+
+CREATE PROCEDURE [tb_app].[ActivateAuthPointLoginSession]
+    @ChallengeId uniqueidentifier,
+    @ChallengeNonce varbinary(32),
+    @AuthorizationToken varbinary(32),
+    @ClientInstanceId uniqueidentifier,
+    @RequestId uniqueidentifier = NULL
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85)=SUSER_SID(ORIGINAL_LOGIN()),
+            @ActorLogin nvarchar(256)=CONVERT(nvarchar(256),ORIGINAL_LOGIN());
+    IF @ActorSid IS NULL OR DATALENGTH(@ActorSid) NOT BETWEEN 8 AND 85
+        THROW 51000,N'SQL Server did not provide a valid authenticated Windows identity.',1;
+    IF @ChallengeNonce IS NULL OR DATALENGTH(@ChallengeNonce)<>32
+       OR @AuthorizationToken IS NULL OR DATALENGTH(@AuthorizationToken)<>32
+       OR @ClientInstanceId IS NULL
+        THROW 52430,N'The AuthPoint login proof is invalid.',1;
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(),
+            @SessionId uniqueidentifier=NEWID(),
+            @ExpiresAtUtc datetime2(3)=DATEADD(hour,12,SYSUTCDATETIME()),
+            @ClientMachine nvarchar(128);
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        SELECT @ClientMachine=[ClientMachine]
+        FROM [tb_security].[MfaChallenges] WITH (UPDLOCK,HOLDLOCK)
+        WHERE [ChallengeId]=@ChallengeId
+          AND [ActorWindowsSid]=@ActorSid
+          AND [ActionScope]=N'Login'
+          AND [ClientInstanceId]=@ClientInstanceId
+          AND [ChallengeNonceHash]=HASHBYTES(N'SHA2_256',@ChallengeNonce)
+          AND [AuthorizationTokenHash]=HASHBYTES(N'SHA2_512',@AuthorizationToken)
+          AND [Status]=N'Approved' AND [ConsumedAtUtc] IS NULL
+          AND [AuthorizationExpiresAtUtc]>@NowUtc;
+        IF @@ROWCOUNT<>1
+            THROW 52431,N'The AuthPoint login approval is unavailable, expired, or belongs to another Windows session.',1;
+
+        INSERT INTO [tb_security].[MfaLoginSessions]
+        (
+            [SessionId],[ClientInstanceId],[ActorWindowsSid],[ActorLoginName],
+            [ClientMachine],[SessionTokenHash],[CreatedAtUtc],[ExpiresAtUtc]
+        )
+        VALUES
+        (
+            @SessionId,@ClientInstanceId,@ActorSid,@ActorLogin,@ClientMachine,
+            HASHBYTES(N'SHA2_512',@AuthorizationToken),@NowUtc,@ExpiresAtUtc
+        );
+
+        UPDATE [tb_security].[MfaChallenges]
+        SET [Status]=N'Consumed',[ConsumedAtUtc]=@NowUtc,
+            [AuthorizationTokenHash]=NULL,
+            [AuthorizationTokenEncrypted]=NULL,
+            [AuthorizationExpiresAtUtc]=NULL
+        WHERE [ChallengeId]=@ChallengeId;
+
+        DECLARE @SessionEntityId nvarchar(120)=CONVERT(nvarchar(36),@SessionId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'TechBenchLoginMfaSessionStarted',
+            @EntityType=N'MfaLoginSession',
+            @EntityId=@SessionEntityId,
+            @RequestId=@RequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT @SessionId AS [SessionId],@ExpiresAtUtc AS [ExpiresAtUtc];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.EndAuthPointLoginSession', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[EndAuthPointLoginSession];
+GO
+
+CREATE PROCEDURE [tb_app].[EndAuthPointLoginSession]
+    @SessionId uniqueidentifier,
+    @SessionToken varbinary(32),
+    @RequestId uniqueidentifier = NULL
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85)=SUSER_SID(ORIGINAL_LOGIN()),
+            @NowUtc datetime2(3)=SYSUTCDATETIME();
+    IF @ActorSid IS NULL OR @SessionToken IS NULL
+       OR DATALENGTH(@SessionToken)<>32
+        RETURN;
+
+    UPDATE [tb_security].[MfaLoginSessions]
+    SET [EndedAtUtc]=@NowUtc
+    WHERE [SessionId]=@SessionId AND [ActorWindowsSid]=@ActorSid
+      AND [SessionTokenHash]=HASHBYTES(N'SHA2_512',@SessionToken)
+      AND [EndedAtUtc] IS NULL;
+    IF @@ROWCOUNT=1
+    BEGIN
+        DECLARE @SessionEntityId nvarchar(120)=CONVERT(nvarchar(36),@SessionId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'TechBenchLoginMfaSessionEnded',
+            @EntityType=N'MfaLoginSession',
+            @EntityId=@SessionEntityId,
+            @RequestId=@RequestId;
+    END;
+END;
+GO
+
 IF OBJECT_ID(N'tb_service.GetAuthPointMfaConfiguration', N'P') IS NOT NULL
     DROP PROCEDURE [tb_service].[GetAuthPointMfaConfiguration];
 GO
@@ -27659,6 +28077,7 @@ BEGIN
             @AuthorizationToken varbinary(32),
             @TokenHash binary(64),@TokenEncrypted varbinary(8000),
             @ActorSid varbinary(85),@ActorLogin nvarchar(256),
+            @ActionScope nvarchar(16),
             @Authenticator varbinary(32)=HASHBYTES(N'SHA2_256',
                 CONVERT(varbinary(max),N'MfaAuthorization|'
                     +CONVERT(nvarchar(36),@ChallengeId)));
@@ -27676,7 +28095,8 @@ BEGIN
 
     BEGIN TRY
         BEGIN TRANSACTION;
-        SELECT @ActorSid=[ActorWindowsSid],@ActorLogin=[ActorLoginName]
+        SELECT @ActorSid=[ActorWindowsSid],@ActorLogin=[ActorLoginName],
+               @ActionScope=[ActionScope]
         FROM [tb_security].[MfaChallenges] WITH (UPDLOCK,HOLDLOCK)
         WHERE [ChallengeId]=@ChallengeId AND [Status]=N'Processing'
           AND [WorkerId]=@WorkerId AND [LeaseId]=@LeaseId
@@ -27702,8 +28122,14 @@ BEGIN
             [EntityId],[RequestId],[DataJson],[OccurredAtUtc]
         )
         SELECT [ActorWindowsSid],[ActorLoginName],
-               CASE @Result WHEN N'Approved' THEN N'ClientSecretMfaApproved'
-                    WHEN N'Denied' THEN N'ClientSecretMfaDenied'
+               CASE WHEN @ActionScope=N'Login' AND @Result=N'Approved'
+                        THEN N'TechBenchLoginMfaApproved'
+                    WHEN @ActionScope=N'Login' AND @Result=N'Denied'
+                        THEN N'TechBenchLoginMfaDenied'
+                    WHEN @ActionScope=N'Login'
+                        THEN N'TechBenchLoginMfaError'
+                    WHEN @Result=N'Approved' THEN N'ClientSecretMfaApproved'
+                    WHEN @Result=N'Denied' THEN N'ClientSecretMfaDenied'
                     ELSE N'ClientSecretMfaError' END,
                N'MfaChallenge',CONVERT(nvarchar(36),[ChallengeId]),
                [RequestId],NULL,@NowUtc
@@ -27816,6 +28242,8 @@ CREATE PROCEDURE [tb_app].[RevealClientCredentialSecret]
     @SecretId bigint,
     @AccessAction nvarchar(12) = N'Reveal',
     @AuthorizationToken varbinary(32) = NULL,
+    @MfaSessionId uniqueidentifier = NULL,
+    @MfaSessionToken varbinary(32) = NULL,
     @RequestId uniqueidentifier = NULL
 WITH EXECUTE AS OWNER
 AS
@@ -27834,7 +28262,17 @@ BEGIN
             @UsedBreakGlass bit=0,
             @MfaEnabled bit=COALESCE(TRY_CONVERT(bit,
                 (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
-                 WHERE [SettingKey]=N'AuthPoint.Enabled')),0);
+                 WHERE [SettingKey]=N'AuthPoint.Enabled')),0),
+            @RequireAll bit=COALESCE(TRY_CONVERT(bit,
+                (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+                 WHERE [SettingKey]=N'AuthPoint.RequireAllUsers')),1),
+            @RequireAtLogin bit=COALESCE((
+                SELECT [RequireAtLogin]
+                FROM [tb_security].[AuthPointUserMappings]
+                WHERE [WindowsSid]=@ActorSid),0),
+            @UserRequiresMfa bit;
+    SET @UserRequiresMfa=CASE WHEN @MfaEnabled=1
+        AND (@RequireAll=1 OR @RequireAtLogin=1) THEN 1 ELSE 0 END;
 
     DECLARE @Authenticator varbinary(32)=HASHBYTES(N'SHA2_256',
         CONVERT(varbinary(max),N'ClientSecret|'+CONVERT(nvarchar(30),@SecretId)));
@@ -27844,8 +28282,20 @@ BEGIN
 
     BEGIN TRY
         BEGIN TRANSACTION;
-        IF @MfaEnabled=0
+        IF @UserRequiresMfa=0
             SET @Authorized=1;
+        ELSE IF @MfaSessionId IS NOT NULL
+             AND @MfaSessionToken IS NOT NULL
+             AND DATALENGTH(@MfaSessionToken)=32
+        BEGIN
+            UPDATE [tb_security].[MfaLoginSessions]
+            SET [LastUsedAtUtc]=@NowUtc
+            WHERE [SessionId]=@MfaSessionId
+              AND [ActorWindowsSid]=@ActorSid
+              AND [SessionTokenHash]=HASHBYTES(N'SHA2_512',@MfaSessionToken)
+              AND [EndedAtUtc] IS NULL AND [ExpiresAtUtc]>@NowUtc;
+            IF @@ROWCOUNT=1 SET @Authorized=1;
+        END
         ELSE IF @AuthorizationToken IS NOT NULL
              AND DATALENGTH(@AuthorizationToken)=32
         BEGIN
@@ -27861,7 +28311,7 @@ BEGIN
             IF @@ROWCOUNT=1 SET @Authorized=1;
         END;
 
-        IF @Authorized=0 AND @MfaEnabled=1
+        IF @Authorized=0 AND @UserRequiresMfa=1
         BEGIN
             DECLARE @GrantId uniqueidentifier;
             SELECT TOP (1) @GrantId=[GrantId]
@@ -27885,7 +28335,7 @@ BEGIN
         END;
 
         IF @Authorized<>1
-            THROW 52440,N'AuthPoint approval is required. Start a new request from the Client Info beta.',1;
+            THROW 52440,N'Your AuthPoint TechBench login is missing or expired. Close and reopen the Client Info beta to sign in again.',1;
 
         OPEN SYMMETRIC KEY [tb_ClientSecretKey]
             DECRYPTION BY CERTIFICATE [tb_ClientSecretCertificate];
@@ -28966,10 +29416,24 @@ GRANT EXECUTE ON OBJECT::[tb_app].[CancelClientSecretMfaChallenge]
     TO [tb_role_client_secret_reader];
 GRANT EXECUTE ON OBJECT::[tb_app].[RevealClientCredentialSecret]
     TO [tb_role_client_secret_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetAuthPointLoginRequirement]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[BeginAuthPointLoginMfaChallenge]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetClientSecretMfaChallenge]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[CancelClientSecretMfaChallenge]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[ActivateAuthPointLoginSession]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[EndAuthPointLoginSession]
+    TO [tb_role_user];
 
 GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetAuthPointUserMappings]
     TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[AdminSaveAuthPointUserMapping]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminSaveAuthPointLoginPolicy]
     TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[AdminIssueMfaBreakGlassGrant]
     TO [tb_role_mfa_break_glass];
@@ -28987,11 +29451,15 @@ DENY SELECT, INSERT, UPDATE, DELETE ON OBJECT::[tb_security].[AuthPointUserMappi
     TO [tb_role_user];
 DENY SELECT, INSERT, UPDATE, DELETE ON OBJECT::[tb_security].[MfaChallenges]
     TO [tb_role_user];
+DENY SELECT, INSERT, UPDATE, DELETE ON OBJECT::[tb_security].[MfaLoginSessions]
+    TO [tb_role_user];
 DENY SELECT, INSERT, UPDATE, DELETE ON OBJECT::[tb_security].[MfaBreakGlassGrants]
     TO [tb_role_user];
 DENY SELECT, INSERT, UPDATE, DELETE ON OBJECT::[tb_security].[AuthPointUserMappings]
     TO [tb_role_sync_service];
 DENY SELECT, INSERT, UPDATE, DELETE ON OBJECT::[tb_security].[MfaChallenges]
+    TO [tb_role_sync_service];
+DENY SELECT, INSERT, UPDATE, DELETE ON OBJECT::[tb_security].[MfaLoginSessions]
     TO [tb_role_sync_service];
 DENY SELECT, INSERT, UPDATE, DELETE ON OBJECT::[tb_security].[MfaBreakGlassGrants]
     TO [tb_role_sync_service];
@@ -29003,6 +29471,14 @@ REVOKE EXECUTE ON OBJECT::[tb_app].[GetClientSecretMfaChallenge]
 REVOKE EXECUTE ON OBJECT::[tb_app].[CancelClientSecretMfaChallenge]
     FROM [tb_preview_reader];
 REVOKE EXECUTE ON OBJECT::[tb_app].[RevealClientCredentialSecret]
+    FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[GetAuthPointLoginRequirement]
+    FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[BeginAuthPointLoginMfaChallenge]
+    FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[ActivateAuthPointLoginSession]
+    FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[EndAuthPointLoginSession]
     FROM [tb_preview_reader];
 GO
 
@@ -35270,9 +35746,22 @@ IF NOT EXISTS
 )
     THROW 52490,N'The AuthPoint MFA schema-15 extension is not installed.',1;
 
+IF NOT EXISTS
+(
+    SELECT 1 FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId]=N'SqlServer2016.AuthPointLoginMfa.0015'
+      AND [SchemaVersion]=15
+)
+    THROW 52490,N'The AuthPoint login MFA schema-15 extension is not installed.',1;
+
 IF OBJECT_ID(N'tb_security.AuthPointUserMappings',N'U') IS NULL
    OR OBJECT_ID(N'tb_security.MfaChallenges',N'U') IS NULL
+   OR OBJECT_ID(N'tb_security.MfaLoginSessions',N'U') IS NULL
    OR OBJECT_ID(N'tb_security.MfaBreakGlassGrants',N'U') IS NULL
+   OR OBJECT_ID(N'tb_app.GetAuthPointLoginRequirement',N'P') IS NULL
+   OR OBJECT_ID(N'tb_app.BeginAuthPointLoginMfaChallenge',N'P') IS NULL
+   OR OBJECT_ID(N'tb_app.ActivateAuthPointLoginSession',N'P') IS NULL
+   OR OBJECT_ID(N'tb_app.EndAuthPointLoginSession',N'P') IS NULL
    OR OBJECT_ID(N'tb_app.BeginClientSecretMfaChallenge',N'P') IS NULL
    OR OBJECT_ID(N'tb_app.GetClientSecretMfaChallenge',N'P') IS NULL
    OR OBJECT_ID(N'tb_app.CancelClientSecretMfaChallenge',N'P') IS NULL
@@ -35285,6 +35774,8 @@ IF COL_LENGTH(N'tb_security.MfaChallenges',N'AuthorizationTokenHash') IS NULL
    OR COL_LENGTH(N'tb_security.MfaChallenges',N'AuthorizationTokenEncrypted') IS NULL
    OR COL_LENGTH(N'tb_security.MfaChallenges',N'ChallengeNonceHash') IS NULL
    OR COL_LENGTH(N'tb_security.MfaChallenges',N'ActorWindowsSid') IS NULL
+   OR COL_LENGTH(N'tb_security.MfaChallenges',N'ClientInstanceId') IS NULL
+   OR COL_LENGTH(N'tb_security.AuthPointUserMappings',N'RequireAtLogin') IS NULL
     THROW 52492,N'The AuthPoint challenge binding columns are incomplete.',1;
 
 IF OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientCredentialSecret'))
@@ -35292,7 +35783,9 @@ IF OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientCredentialSecret'))
    OR OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientCredentialSecret'))
         NOT LIKE N'%ActorWindowsSid%'
    OR OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientCredentialSecret'))
-        NOT LIKE N'%Status%Consumed%'
+        NOT LIKE N'%MfaLoginSessions%'
+   OR OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientCredentialSecret'))
+        NOT LIKE N'%MfaSessionToken%'
     THROW 52493,N'The canonical secret reveal procedure is not MFA enforcing.',1;
 
 IF OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealFireDrillCredential'))
@@ -35313,6 +35806,10 @@ IF EXISTS
 IF HAS_PERMS_BY_NAME(N'tb_security.MfaChallenges',N'OBJECT',N'SELECT')=1
    AND IS_ROLEMEMBER(N'tb_role_user')=1
     THROW 52496,N'Desktop users must not directly read MFA challenge storage.',1;
+
+IF HAS_PERMS_BY_NAME(N'tb_security.MfaLoginSessions',N'OBJECT',N'SELECT')=1
+   AND IS_ROLEMEMBER(N'tb_role_user')=1
+    THROW 52497,N'Desktop users must not directly read MFA login-session storage.',1;
 
 PRINT N'WatchGuard AuthPoint MFA verification passed; schema version remains 15.';
 GO

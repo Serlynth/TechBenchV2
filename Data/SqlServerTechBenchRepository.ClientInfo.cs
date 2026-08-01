@@ -429,38 +429,59 @@ public sealed partial class SqlServerTechBenchRepository
             return null;
         }
 
-        return QueryAsync(
-            Procedures.RevealClientCredentialSecret,
-            command =>
-            {
-                AddBigInt(command, "@SecretId", secretId);
-                AddRequiredText(
-                    command,
-                    "@AccessAction",
-                    12,
-                    forClipboard ? "Copy" : "Reveal");
-                AddBinary(
-                    command,
-                    "@AuthorizationToken",
-                    32,
-                    authorizationToken);
-                AddGuid(command, "@RequestId", Guid.NewGuid());
-            },
-            (reader, token) => ReadSingleAsync(
-                reader,
-                token,
-                row => new RevealedClientInfoSecret
+        var loginSession = _connectionFactory.AuthPointLoginSession;
+        try
+        {
+            return QueryAsync(
+                Procedures.RevealClientCredentialSecret,
+                command =>
                 {
-                    SecretId = GetInt64(row, "SecretId"),
-                    CredentialId = GetInt64(row, "CredentialId"),
-                    ClientId = GetInt32(row, "ClientId"),
-                    CredentialName = GetString(row, "CredentialName"),
-                    SecretType = GetString(row, "SecretType"),
-                    SecretLabel = GetString(row, "SecretLabel"),
-                    SecretValue = GetString(row, "SecretValue"),
-                    RowVersion = GetBytes(row, "RowVersion")
-                }),
-            CancellationToken.None).GetAwaiter().GetResult();
+                    AddBigInt(command, "@SecretId", secretId);
+                    AddRequiredText(
+                        command,
+                        "@AccessAction",
+                        12,
+                        forClipboard ? "Copy" : "Reveal");
+                    AddBinary(
+                        command,
+                        "@AuthorizationToken",
+                        32,
+                        authorizationToken);
+                    if (loginSession is not null)
+                    {
+                        AddGuid(command, "@MfaSessionId", loginSession.SessionId);
+                        AddBinary(
+                            command,
+                            "@MfaSessionToken",
+                            32,
+                            loginSession.SessionToken);
+                    }
+                    AddGuid(command, "@RequestId", Guid.NewGuid());
+                },
+                (reader, token) => ReadSingleAsync(
+                    reader,
+                    token,
+                    row => new RevealedClientInfoSecret
+                    {
+                        SecretId = GetInt64(row, "SecretId"),
+                        CredentialId = GetInt64(row, "CredentialId"),
+                        ClientId = GetInt32(row, "ClientId"),
+                        CredentialName = GetString(row, "CredentialName"),
+                        SecretType = GetString(row, "SecretType"),
+                        SecretLabel = GetString(row, "SecretLabel"),
+                        SecretValue = GetString(row, "SecretValue"),
+                        RowVersion = GetBytes(row, "RowVersion")
+                    }),
+                CancellationToken.None).GetAwaiter().GetResult();
+        }
+        catch (Microsoft.Data.SqlClient.SqlException exception)
+            when (exception.Number == 52440 && loginSession is not null)
+        {
+            _connectionFactory.ClearAuthPointLoginSession();
+            throw new InvalidOperationException(
+                "Your AuthPoint TechBench login has expired. Close and reopen TechBench to sign in again.",
+                exception);
+        }
     }
 
     public ClientSecretMfaChallenge BeginClientSecretMfaChallenge(

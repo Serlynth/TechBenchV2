@@ -171,6 +171,25 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        if (_connectionFactory?.AuthPointLoginSession is not null)
+        {
+            try
+            {
+                using var authPointTimeout = new CancellationTokenSource(
+                    TimeSpan.FromSeconds(5));
+                _connectionFactory.EndAuthPointLoginSessionAsync(
+                        authPointTimeout.Token)
+                    .GetAwaiter()
+                    .GetResult();
+            }
+            catch
+            {
+                // Login sessions expire server-side. Application shutdown must
+                // continue if best-effort early revocation is unavailable.
+                _connectionFactory.ClearAuthPointLoginSession();
+            }
+        }
+
         if (_connectionFactory?.IsReadOnlyPreview == true)
         {
             try

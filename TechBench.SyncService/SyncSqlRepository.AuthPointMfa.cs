@@ -50,7 +50,9 @@ public sealed partial class SyncSqlRepository
             GetString(reader, "ProviderLogin"),
             GetString(reader, "ClientMachine"),
             GetString(reader, "ActionScope"),
-            GetInt64(reader, "SecretId"),
+            reader.IsDBNull(reader.GetOrdinal("SecretId"))
+                ? null
+                : reader.GetInt64(reader.GetOrdinal("SecretId")),
             GetDateTimeOffset(reader, "ExpiresAtUtc"));
     }
 

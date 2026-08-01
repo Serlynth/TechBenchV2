@@ -43,7 +43,10 @@ internal sealed class ActiveDirectoryUserProvider
                 !string.IsNullOrWhiteSpace(user.AuthPointLogin),
                 saved.TryGetValue(user.LoginName, out mapping)
                     ? mapping.AuthPointRowVersion
-                    : null))
+                    : null,
+                saved.TryGetValue(user.LoginName, out mapping)
+                    ? mapping.AuthPointRequireAtLogin
+                    : true))
             .OrderBy(static mapping => mapping.DisplayName, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(static mapping => mapping.LoginName, StringComparer.OrdinalIgnoreCase)
             .ToList();

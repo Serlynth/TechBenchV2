@@ -198,6 +198,21 @@ public sealed record ClientSecretMfaStatus
     public byte[]? AuthorizationToken { get; init; }
 }
 
+public sealed record AuthPointLoginRequirement
+{
+    public bool IsRequired { get; init; }
+    public string ProviderLogin { get; init; } = string.Empty;
+    public int SessionHours { get; init; } = 12;
+}
+
+public sealed record AuthPointLoginSession
+{
+    public Guid SessionId { get; init; }
+    public Guid ClientInstanceId { get; init; }
+    public byte[] SessionToken { get; init; } = [];
+    public DateTime ExpiresAtUtc { get; init; }
+}
+
 public sealed record ClientInfoFact
 {
     public long FactId { get; init; }

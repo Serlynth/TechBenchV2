@@ -136,5 +136,5 @@ public sealed record AuthPointMfaWork(
     string ProviderLogin,
     string ClientMachine,
     string ActionScope,
-    long SecretId,
+    long? SecretId,
     DateTimeOffset ExpiresAtUtc);
