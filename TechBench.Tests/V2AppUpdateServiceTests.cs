@@ -86,6 +86,8 @@ public sealed class V2AppUpdateServiceTests
             source,
             StringComparison.Ordinal);
         Assert.Contains("'download', 'github'", source, StringComparison.Ordinal);
+        Assert.Contains("[switch]$SkipTests", source, StringComparison.Ordinal);
+        Assert.Contains("if (-not $SkipTests)", source, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "if ($releaseChannel -eq 'client-info-beta')",
             source,
