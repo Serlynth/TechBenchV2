@@ -35,7 +35,8 @@ internal sealed record DirectoryUser(
     string LoginName,
     string DisplayName,
     bool IsAdmin,
-    string WindowsSidHex = "");
+    string WindowsSidHex = "",
+    string AuthPointLogin = "");
 
 internal sealed record UserMapping(
     string LoginName,

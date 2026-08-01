@@ -22,7 +22,7 @@ Use the WatchGuard Cloud tenant that already owns CSRI's AuthPoint licenses.
 3. Record the AuthPoint account ID and numeric REST resource ID.
 4. Create an authentication policy that applies to this resource and the intended technician group.
 5. Allow push authentication. Do not require the AuthPoint password, and do not permit a Forgot Token bypass for this resource.
-6. Confirm each test technician is enrolled and can receive AuthPoint pushes.
+6. Confirm each test technician is enrolled with the same email address stored in Active Directory and can receive AuthPoint pushes.
 7. Identify the tenant's regional API URL, such as `https://api.usa.cloud.watchguard.com`. TechBench accepts only HTTPS `api.<region>.cloud.watchguard.com` hosts with no custom port or URL path.
 
 ## 2. Back up and install the additive SQL package
@@ -36,13 +36,13 @@ The database remains schema version 15. The deployment is additive and idempoten
 
 ## 3. Install the current shared server package
 
-Run `TechBenchServerSetup.exe` from the TechBench Server 0.6.6 release on the TechBench server. This updates the one shared Server Manager and Sync Service; there is no beta Server Manager.
+Run `TechBenchServerSetup.exe` from the TechBench Server 0.6.7 release on the TechBench server. This updates the one shared Server Manager and Sync Service; there is no beta Server Manager.
 
 After setup:
 
 1. Open **TechBench Server Manager**.
 2. Confirm the Sync Service is running under the existing Windows service identity.
-3. Confirm Server Manager reports version 0.6.6.
+3. Confirm Server Manager reports version 0.6.7.
 4. Leave AuthPoint disabled while configuring it.
 
 The first AuthPoint-capable server package is a manual bootstrap update. Subsequent server updates use independent `server-v...` releases so server updates no longer consume or depend on Stable/Beta client version tags.
@@ -53,10 +53,11 @@ The first AuthPoint-capable server package is a manual bootstrap update. Subsequ
 2. Enter the regional API base URL, AuthPoint account ID, numeric REST resource ID, and WatchGuard API access ID.
 3. Enter both the API access password and API key. Save them together. The values are DPAPI-protected on this server.
 4. Keep **Require AuthPoint for Client Info beta secret reveal and copy** unchecked and save.
-5. Open **AuthPoint (Beta) > User Mappings**.
-6. Map each TechBench Windows account to its AuthPoint username or email, check Enabled for the test users, and save mappings.
-7. Return to Server Configuration, enable the requirement, and save.
-8. Restart the Sync Service if Server Manager indicates it is not running the current package.
+5. Open **AuthPoint (Beta) > Directory Identities** and select **Refresh from Active Directory**.
+6. Confirm each authorized TechBench user shows **Ready**. TechBench uses the AD `mail` attribute automatically and falls back to the AD user principal name only when `mail` is blank; there is no routine manual mapping step.
+7. Correct missing or incorrect identities in Active Directory, refresh again, and confirm the displayed identity matches the user's AuthPoint identity.
+8. Return to Server Configuration, enable the requirement, and save.
+9. Restart the Sync Service if Server Manager indicates it is not running the current package.
 
 ## 5. Test with the beta client
 

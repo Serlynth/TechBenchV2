@@ -467,6 +467,7 @@ internal sealed class ServerManagerForm : Form
             AutoScroll = true
         };
         var configurationGroup = Group("WatchGuard Cloud Authentication API", 535);
+        configurationGroup.Dock = DockStyle.Top;
         var layout = Grid(3, 12);
         _authPointBaseUrl.PlaceholderText = "https://api.usa.cloud.watchguard.com";
         layout.Controls.Add(_authPointEnabled, 1, 0);
@@ -514,7 +515,7 @@ internal sealed class ServerManagerForm : Form
         configurationGroup.Controls.Add(layout);
         configurationPage.Controls.Add(configurationGroup);
 
-        var mappingsPage = new TabPage("User Mappings") { Padding = new Padding(16) };
+        var mappingsPage = new TabPage("Directory Identities") { Padding = new Padding(16) };
         var mappingsLayout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -526,16 +527,17 @@ internal sealed class ServerManagerForm : Form
         mappingsLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         mappingsLayout.Controls.Add(new Label
         {
-            Text = "Map each TechBench Windows account to its WatchGuard AuthPoint username or email.",
+            Text = "AuthPoint identities are synchronized automatically from each authorized user's Active Directory mail attribute. "
+                   + "The AD user principal name is used only when mail is blank.",
             AutoSize = true,
             ForeColor = Color.DimGray,
             Margin = new Padding(3, 8, 3, 12)
         }, 0, 0);
         ConfigureAuthPointMappingGrid();
         mappingsLayout.Controls.Add(_authPointMappingGrid, 0, 1);
-        var saveMappings = Button("Save AuthPoint mappings");
-        saveMappings.Click += async (_, _) => await SaveAuthPointMappingsAsync();
-        mappingsLayout.Controls.Add(ButtonRow(saveMappings), 0, 2);
+        var refreshMappings = Button("Refresh from Active Directory");
+        refreshMappings.Click += async (_, _) => await RefreshConfigurationAsync(true);
+        mappingsLayout.Controls.Add(ButtonRow(refreshMappings), 0, 2);
         mappingsPage.Controls.Add(mappingsLayout);
 
         sections.TabPages.Add(configurationPage);
@@ -646,6 +648,10 @@ internal sealed class ServerManagerForm : Form
             try
             {
                 var directoryUsers = await Task.Run(_directoryUsers.LoadAuthorizedUsers);
+                var authPointAssignments =
+                    ActiveDirectoryUserProvider.BuildAuthPointSyncAssignments(
+                        directoryUsers,
+                        _configuration.UserMappings);
                 var mergedMappings = ActiveDirectoryUserProvider.MergeMappings(
                     directoryUsers,
                     _configuration.UserMappings);
@@ -653,6 +659,19 @@ internal sealed class ServerManagerForm : Form
                 _configuration.UserMappings.AddRange(mergedMappings);
                 var retiredCount = await Task.Run(
                     () => _repository.ReconcileAuthorizedUsers(directoryUsers));
+                var authPointSqlAvailable = await Task.Run(
+                    () => _repository.TrySyncAuthPointDirectoryMappings(
+                        authPointAssignments));
+                if (!authPointSqlAvailable)
+                {
+                    AddLog(
+                        "AuthPoint directory identity synchronization is waiting for the additive AuthPoint SQL package.");
+                }
+                else if (authPointAssignments.Count > 0)
+                {
+                    AddLog(
+                        $"Synchronized {authPointAssignments.Count} AuthPoint identity change(s) from Active Directory.");
+                }
                 if (retiredCount > 0)
                 {
                     AddLog(
@@ -787,24 +806,6 @@ internal sealed class ServerManagerForm : Form
         });
     }
 
-    private async Task SaveAuthPointMappingsAsync()
-    {
-        await RunAsync("Saving AuthPoint user mappings...", async () =>
-        {
-            var mappings = _authPointMappingGrid.Rows
-                .Cast<DataGridViewRow>()
-                .Select(row => new AuthPointMappingAssignment(
-                    Convert.ToString(row.Cells["WindowsLogin"].Value) ?? string.Empty,
-                    Convert.ToString(row.Cells["AuthPointLogin"].Value) ?? string.Empty,
-                    Convert.ToBoolean(row.Cells["AuthPointEnabled"].Value ?? false),
-                    row.Tag as byte[]))
-                .ToArray();
-            await Task.Run(() => _repository.SaveAuthPointMappings(mappings));
-            AddLog($"Saved {mappings.Count(static item => !string.IsNullOrWhiteSpace(item.AuthPointLogin))} AuthPoint mapping(s).");
-            await RefreshConfigurationAsync(false);
-        });
-    }
-
     private void ConfigureAuthPointMappingGrid()
     {
         if (_authPointMappingGrid.Columns.Count > 0)
@@ -817,26 +818,28 @@ internal sealed class ServerManagerForm : Form
             Name = "DisplayName",
             HeaderText = "TechBench user",
             ReadOnly = true,
-            FillWeight = 34
+            FillWeight = 30
         });
         _authPointMappingGrid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "WindowsLogin",
             HeaderText = "Windows login",
             ReadOnly = true,
-            FillWeight = 30
+            FillWeight = 25
         });
         _authPointMappingGrid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "AuthPointLogin",
-            HeaderText = "AuthPoint username / email",
-            FillWeight = 30
+            HeaderText = "AD email / AuthPoint identity",
+            ReadOnly = true,
+            FillWeight = 32
         });
-        _authPointMappingGrid.Columns.Add(new DataGridViewCheckBoxColumn
+        _authPointMappingGrid.Columns.Add(new DataGridViewTextBoxColumn
         {
-            Name = "AuthPointEnabled",
-            HeaderText = "Enabled",
-            FillWeight = 12
+            Name = "AuthPointStatus",
+            HeaderText = "Status",
+            ReadOnly = true,
+            FillWeight = 13
         });
     }
 
@@ -849,7 +852,7 @@ internal sealed class ServerManagerForm : Form
                 mapping.DisplayName,
                 mapping.LoginName,
                 mapping.AuthPointLogin,
-                mapping.AuthPointEnabled)];
+                mapping.AuthPointEnabled ? "Ready" : "Missing AD email / UPN")];
             row.Tag = mapping.AuthPointRowVersion;
         }
     }

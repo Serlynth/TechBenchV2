@@ -196,6 +196,27 @@ internal sealed class SqlAdminRepository(AppPaths paths)
         }
     }
 
+    public bool TrySyncAuthPointDirectoryMappings(
+        IReadOnlyCollection<AuthPointMappingAssignment> mappings)
+    {
+        if (mappings.Count == 0)
+        {
+            return true;
+        }
+
+        try
+        {
+            SaveAuthPointMappings(mappings);
+            return true;
+        }
+        catch (SqlException exception) when (exception.Number == 2812)
+        {
+            // The shared Server Manager remains usable until the additive
+            // AuthPoint SQL package is installed.
+            return false;
+        }
+    }
+
     public int ReconcileAuthorizedUsers(IReadOnlyCollection<DirectoryUser> users)
     {
         ArgumentNullException.ThrowIfNull(users);

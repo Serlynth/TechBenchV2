@@ -56,6 +56,11 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("TechBench_Users", directory, StringComparison.Ordinal);
         Assert.Contains("TechBench_Admins", directory, StringComparison.Ordinal);
         Assert.Contains("GetMembers(recursive: true)", directory, StringComparison.Ordinal);
+        Assert.Contains("user.EmailAddress", directory, StringComparison.Ordinal);
+        Assert.Contains("user.UserPrincipalName", directory, StringComparison.Ordinal);
+        Assert.Contains("Refresh from Active Directory", form, StringComparison.Ordinal);
+        Assert.Contains("AD email / AuthPoint identity", form, StringComparison.Ordinal);
+        Assert.DoesNotContain("Save AuthPoint mappings", form, StringComparison.Ordinal);
         Assert.Contains("SaveMappings", sql, StringComparison.Ordinal);
         Assert.Contains("ReconcileAuthorizedUsers", sql, StringComparison.Ordinal);
         Assert.Contains("AdminReconcileWhdAuthorizedUsers", sql, StringComparison.Ordinal);
@@ -103,8 +108,16 @@ public sealed class CompiledServerManagerTests
     {
         var directoryUsers = new[]
         {
-            new DirectoryUser("CSRI\\alice", "Alice Admin", true),
-            new DirectoryUser("CSRI\\bob", "Bob User", false)
+            new DirectoryUser(
+                "CSRI\\alice",
+                "Alice Admin",
+                true,
+                AuthPointLogin: "alice@csri-qt.com"),
+            new DirectoryUser(
+                "CSRI\\bob",
+                "Bob User",
+                false,
+                AuthPointLogin: "bob@csri-qt.com")
         };
         var savedMappings = new[]
         {
@@ -122,12 +135,96 @@ public sealed class CompiledServerManagerTests
                 Assert.Equal("Alice Admin", alice.DisplayName);
                 Assert.True(alice.IsAdmin);
                 Assert.Equal("WHD-TECH-1", alice.TechnicianExternalId);
+                Assert.Equal("alice@csri-qt.com", alice.AuthPointLogin);
+                Assert.True(alice.AuthPointEnabled);
             },
             bob =>
             {
                 Assert.Equal("CSRI\\bob", bob.LoginName);
                 Assert.False(bob.IsAdmin);
                 Assert.Empty(bob.TechnicianExternalId);
+                Assert.Equal("bob@csri-qt.com", bob.AuthPointLogin);
+                Assert.True(bob.AuthPointEnabled);
+            });
+    }
+
+    [Fact]
+    public void DirectoryEmailDrivesAuthPointIdentityAndUpnIsTheFallback()
+    {
+        Assert.Equal(
+            "alice@csri-qt.com",
+            ActiveDirectoryUserProvider.ResolveAuthPointLogin(
+                " alice@csri-qt.com ",
+                "alice@CSRI.local"));
+        Assert.Equal(
+            "bob@CSRI.local",
+            ActiveDirectoryUserProvider.ResolveAuthPointLogin(
+                null,
+                " bob@CSRI.local "));
+        Assert.Empty(ActiveDirectoryUserProvider.ResolveAuthPointLogin(null, null));
+    }
+
+    [Fact]
+    public void DirectoryAuthPointSyncWritesOnlyChangedIdentities()
+    {
+        var rowVersion = new byte[] { 0, 0, 0, 0, 0, 0, 0, 7 };
+        var directoryUsers = new[]
+        {
+            new DirectoryUser(
+                "CSRI\\alice",
+                "Alice",
+                false,
+                AuthPointLogin: "alice@csri-qt.com"),
+            new DirectoryUser(
+                "CSRI\\bob",
+                "Bob",
+                false,
+                AuthPointLogin: "new-bob@csri-qt.com"),
+            new DirectoryUser(
+                "CSRI\\carol",
+                "Carol",
+                false,
+                AuthPointLogin: "carol@csri-qt.com")
+        };
+        var savedMappings = new[]
+        {
+            new UserMapping(
+                "CSRI\\alice",
+                "Alice",
+                false,
+                string.Empty,
+                "alice@csri-qt.com",
+                true,
+                rowVersion),
+            new UserMapping(
+                "CSRI\\bob",
+                "Bob",
+                false,
+                string.Empty,
+                "old-bob@csri-qt.com",
+                true,
+                rowVersion)
+        };
+
+        var assignments = ActiveDirectoryUserProvider.BuildAuthPointSyncAssignments(
+            directoryUsers,
+            savedMappings);
+
+        Assert.Collection(
+            assignments,
+            bob =>
+            {
+                Assert.Equal("CSRI\\bob", bob.LoginName);
+                Assert.Equal("new-bob@csri-qt.com", bob.AuthPointLogin);
+                Assert.True(bob.IsEnabled);
+                Assert.Equal(rowVersion, bob.ExpectedRowVersion);
+            },
+            carol =>
+            {
+                Assert.Equal("CSRI\\carol", carol.LoginName);
+                Assert.Equal("carol@csri-qt.com", carol.AuthPointLogin);
+                Assert.True(carol.IsEnabled);
+                Assert.Null(carol.ExpectedRowVersion);
             });
     }
 

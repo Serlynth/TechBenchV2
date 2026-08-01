@@ -39,16 +39,59 @@ internal sealed class ActiveDirectoryUserProvider
                 saved.TryGetValue(user.LoginName, out var mapping)
                     ? mapping.TechnicianExternalId
                     : string.Empty,
-                saved.TryGetValue(user.LoginName, out mapping)
-                    ? mapping.AuthPointLogin
-                    : string.Empty,
-                saved.TryGetValue(user.LoginName, out mapping)
-                    && mapping.AuthPointEnabled,
+                user.AuthPointLogin,
+                !string.IsNullOrWhiteSpace(user.AuthPointLogin),
                 saved.TryGetValue(user.LoginName, out mapping)
                     ? mapping.AuthPointRowVersion
                     : null))
             .OrderBy(static mapping => mapping.DisplayName, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(static mapping => mapping.LoginName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    internal static IReadOnlyList<AuthPointMappingAssignment> BuildAuthPointSyncAssignments(
+        IEnumerable<DirectoryUser> directoryUsers,
+        IEnumerable<UserMapping> savedMappings)
+    {
+        var saved = savedMappings.ToDictionary(
+            static mapping => mapping.LoginName,
+            StringComparer.OrdinalIgnoreCase);
+
+        return directoryUsers
+            .Select(user =>
+            {
+                saved.TryGetValue(user.LoginName, out var mapping);
+                var providerLogin = user.AuthPointLogin.Trim();
+                var shouldEnable = providerLogin.Length > 0;
+                var changed = mapping is null
+                    ? shouldEnable
+                    : !string.Equals(
+                          mapping.AuthPointLogin.Trim(),
+                          providerLogin,
+                          StringComparison.OrdinalIgnoreCase)
+                      || mapping.AuthPointEnabled != shouldEnable;
+
+                if (!changed)
+                {
+                    return null;
+                }
+
+                if (!shouldEnable && mapping is not null)
+                {
+                    providerLogin = mapping.AuthPointLogin.Trim();
+                }
+
+                return string.IsNullOrWhiteSpace(providerLogin)
+                    ? null
+                    : new AuthPointMappingAssignment(
+                        user.LoginName,
+                        providerLogin,
+                        shouldEnable,
+                        mapping?.AuthPointRowVersion);
+            })
+            .Where(static assignment => assignment is not null)
+            .Select(static assignment => assignment!)
+            .OrderBy(static assignment => assignment.LoginName, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
@@ -140,11 +183,19 @@ internal sealed class ActiveDirectoryUserProvider
                             loginName,
                             displayName,
                             isAdmin,
-                            ToSqlSidHex(user.Sid)));
+                            ToSqlSidHex(user.Sid),
+                            ResolveAuthPointLogin(
+                                user.EmailAddress,
+                                user.UserPrincipalName)));
                 }
             }
         }
     }
+
+    internal static string ResolveAuthPointLogin(
+        string? emailAddress,
+        string? userPrincipalName) =>
+        FirstNonBlankValue(emailAddress, userPrincipalName);
 
     private static string ToSqlSidHex(System.Security.Principal.SecurityIdentifier? sid)
     {
@@ -163,4 +214,8 @@ internal sealed class ActiveDirectoryUserProvider
     private static string FirstNonBlank(params string?[] values) =>
         values.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value))?.Trim()
         ?? "Unknown user";
+
+    private static string FirstNonBlankValue(params string?[] values) =>
+        values.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value))?.Trim()
+        ?? string.Empty;
 }
