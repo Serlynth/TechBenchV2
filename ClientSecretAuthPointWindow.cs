@@ -77,7 +77,7 @@ public sealed class ClientSecretAuthPointWindow : Window
             Content = "Cancel",
             MinWidth = 96,
             IsCancel = true,
-            HorizontalAlignment = HorizontalAlignment.Right,
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Right,
             Margin = new Thickness(0, 20, 0, 0)
         };
         _cancel.Click += (_, _) => Close();
