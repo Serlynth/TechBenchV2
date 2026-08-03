@@ -27,9 +27,12 @@ public sealed class ClientInfoBetaTests
             ClientInfoResourceCategories.All,
             demo.Snapshot.Resources.Select(resource => resource.Category).Distinct());
         Assert.All(
-            demo.Snapshot.Resources.Where(resource =>
-                resource.Category != ClientInfoResourceCategories.NeedsSorting),
-            resource => Assert.NotEmpty(resource.OverviewFields));
+            ClientInfoResourceCategories.All,
+            category => Assert.NotEmpty(ClientInfoCategoryOverviewBuilder.Build(
+                category,
+                demo.Snapshot.Resources.Where(resource => resource.Category == category).ToArray(),
+                demo.Snapshot.Credentials.Where(credential =>
+                    ClientInfoResourceCategories.ClassifyCredential(credential) == category).ToArray())));
     }
 
     [Fact]
@@ -53,28 +56,30 @@ public sealed class ClientInfoBetaTests
         Assert.DoesNotContain("Content=\"At-a-glance\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("UseCompactView", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Move\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("OverviewCards", xaml, StringComparison.Ordinal);
-        Assert.Contains("RelatedCredentials", xaml, StringComparison.Ordinal);
-        Assert.Contains("OverviewFields", xaml, StringComparison.Ordinal);
+        Assert.Contains("OverviewSections", xaml, StringComparison.Ordinal);
+        Assert.Contains("Important category information", xaml, StringComparison.Ordinal);
+        Assert.Contains("controls:ClientInfoResourceDataGrid", xaml, StringComparison.Ordinal);
+        Assert.Contains("BasedOn=\"{StaticResource {x:Type DataGrid}}\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("MouseDoubleClick=\"ResourceOverview_DoubleClick\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("\"category\",\n                \"Category\"", viewModel, StringComparison.Ordinal);
         Assert.Contains("TypeOptionsForCategory", viewModel, StringComparison.Ordinal);
         Assert.Contains("MoveResourceCommand", viewModel, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ResourceOverviewIncludesCoreStandardCustomAndProtectedAccessDetails()
+    public void CategoryOverviewShowsImportantFactsWithoutGrowingOneCardPerItem()
     {
-        var resource = new ClientInfoResource
+        var resources = Enumerable.Range(1, 8).Select(index => new ClientInfoResource
         {
-            ResourceId = 42,
+            ResourceId = index,
             ResourceType = ClientInfoResourceCategories.Encode(
                 ClientInfoResourceCategories.ConnectionInternet,
                 "WatchGuard Firewall"),
-            Name = "Main Firebox",
+            Name = $"Firebox {index}",
             Provider = "WatchGuard",
             LocationName = "Main Office",
-            AddressOrUrl = "https://10.0.0.1",
-            Notes = "Failover WAN is connected.",
+            AddressOrUrl = $"https://10.0.0.{index}",
+            Notes = $"Unimportant item note {index}",
             ReviewStatus = "Verified",
             Fields =
             [
@@ -82,45 +87,71 @@ public sealed class ClientInfoBetaTests
                 {
                     FieldKey = "public_wan_ip",
                     FieldLabel = "Public / WAN IP",
-                    ValueText = "203.0.113.10",
+                    ValueText = $"203.0.113.{index}",
                     SortOrder = 10
                 },
                 new ClientInfoResourceField
                 {
                     FieldKey = "custom.authpoint_tenant",
                     FieldLabel = "AuthPoint Tenant",
-                    ValueText = "Demo Tenant",
+                    ValueText = $"Unimportant custom value {index}",
                     SortOrder = 150
                 }
             ]
-        };
-        var credential = new ClientInfoCredential
-        {
-            CredentialId = 88,
-            ResourceId = 42,
-            Name = "WatchGuard Admin",
-            Category = "WatchGuard",
-            Username = "csriadmin",
-            LoginUrl = "https://10.0.0.1",
-            SecretCount = 2,
-            ReviewStatus = "Verified"
-        };
-        var card = ClientInfoResourceOverviewCard.ForResource(
-            resource,
-            [credential]);
+        }).ToArray();
+        var sections = ClientInfoCategoryOverviewBuilder.Build(
+            ClientInfoResourceCategories.ConnectionInternet,
+            resources,
+            [new ClientInfoCredential
+            {
+                CredentialId = 88,
+                ResourceId = 1,
+                Name = "WatchGuard Admin",
+                Category = "WatchGuard",
+                Username = "csriadmin",
+                LoginUrl = "https://10.0.0.1",
+                SecretCount = 2
+            }]);
 
-        Assert.Contains(resource.OverviewFields,
-            field => field.Label == "Provider" && field.Value == "WatchGuard");
-        Assert.Contains(resource.OverviewFields,
-            field => field.Label == "Public / WAN IP" && field.Value == "203.0.113.10");
-        Assert.Contains(resource.OverviewFields,
-            field => field.Label == "AuthPoint Tenant" && field.Value == "Demo Tenant");
-        Assert.Contains(resource.OverviewFields,
-            field => field.Label == "Notes" && field.Value.Contains("Failover WAN"));
-        Assert.True(card.HasRelatedCredentials);
-        Assert.Contains(credential.OverviewFields,
-            field => field.Label == "Protected Values"
-                     && field.Value == "*** · 2 protected values");
+        Assert.Equal(3, sections.Count);
+        Assert.DoesNotContain(sections.SelectMany(section => section.Fields),
+            field => field.Label == "Notes" || field.Label == "AuthPoint Tenant");
+        Assert.Contains(sections.SelectMany(section => section.Fields),
+            field => field.Label == "Public / WAN IP"
+                     && field.Value.Contains("+5 more in full list"));
+        Assert.Contains(sections.SelectMany(section => section.Fields),
+            field => field.Label == "Protected values"
+                     && field.Value == "2 stored secrets");
+    }
+
+    [Fact]
+    public void CategoryOverviewRecognizesFireDrillStyleLabelsWithoutReadingFireDrillData()
+    {
+        var sections = ClientInfoCategoryOverviewBuilder.Build(
+            ClientInfoResourceCategories.ServersInfrastructure,
+            [new ClientInfoResource
+            {
+                ResourceId = 9,
+                ResourceType = ClientInfoResourceCategories.ServersInfrastructure,
+                Name = "ILO Host 1",
+                Fields =
+                [
+                    new ClientInfoResourceField
+                    {
+                        FieldKey = "custom.ilo_host_1_ip",
+                        FieldLabel = "ILO Host 1 IP",
+                        ValueText = "10.2.0.15"
+                    }
+                ]
+            }],
+            []);
+
+        Assert.Contains(sections.SelectMany(section => section.Fields),
+            field => field.Label == "Management IP" && field.Value == "10.2.0.15");
+        Assert.DoesNotContain(
+            "FireDrillRepository",
+            Read("Models", "ClientInfoCategoryOverviewBuilder.cs"),
+            StringComparison.Ordinal);
     }
 
     [Theory]

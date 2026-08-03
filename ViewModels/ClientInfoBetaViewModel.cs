@@ -1704,8 +1704,6 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 public sealed class ClientInfoResourceGroup : ObservableObject
 {
     private ClientInfoResource? _selectedResource;
-    private ClientInfoResourceOverviewCard? _selectedOverviewCard;
-    private bool _synchronizingSelection;
 
     public ClientInfoResourceGroup(
         string categoryName,
@@ -1718,10 +1716,10 @@ public sealed class ClientInfoResourceGroup : ObservableObject
             OnPropertyChanged(nameof(CountLabel));
             OnPropertyChanged(nameof(HasResources));
         };
-        OverviewCards.CollectionChanged += (_, _) =>
+        OverviewSections.CollectionChanged += (_, _) =>
         {
             OnPropertyChanged(nameof(OverviewCountLabel));
-            OnPropertyChanged(nameof(HasOverviewCards));
+            OnPropertyChanged(nameof(HasOverviewSections));
         };
     }
 
@@ -1731,47 +1729,17 @@ public sealed class ClientInfoResourceGroup : ObservableObject
         ? "1 record"
         : $"{Resources.Count} records";
     public bool HasResources => Resources.Count > 0;
-    public bool HasOverviewCards => OverviewCards.Count > 0;
-    public string OverviewCountLabel => OverviewCards.Count == 1
-        ? "1 overview card"
-        : $"{OverviewCards.Count} overview cards";
+    public bool HasOverviewSections => OverviewSections.Count > 0;
+    public string OverviewCountLabel => OverviewSections.Count == 1
+        ? "1 important summary"
+        : $"{OverviewSections.Count} important summaries";
     public ClientInfoResource? SelectedResource
     {
         get => _selectedResource;
-        set
-        {
-            if (!SetProperty(ref _selectedResource, value)
-                || _synchronizingSelection)
-            {
-                return;
-            }
-
-            _synchronizingSelection = true;
-            SelectedOverviewCard = value is null
-                ? null
-                : OverviewCards.FirstOrDefault(card =>
-                    card.Resource?.ResourceId == value.ResourceId);
-            _synchronizingSelection = false;
-        }
-    }
-    public ClientInfoResourceOverviewCard? SelectedOverviewCard
-    {
-        get => _selectedOverviewCard;
-        set
-        {
-            if (!SetProperty(ref _selectedOverviewCard, value)
-                || _synchronizingSelection)
-            {
-                return;
-            }
-
-            _synchronizingSelection = true;
-            SelectedResource = value?.Resource;
-            _synchronizingSelection = false;
-        }
+        set => SetProperty(ref _selectedResource, value);
     }
     public ObservableCollection<ClientInfoResource> Resources { get; } = [];
-    public ObservableCollection<ClientInfoResourceOverviewCard> OverviewCards { get; } = [];
+    public ObservableCollection<ClientInfoCategoryOverviewSection> OverviewSections { get; } = [];
 
     public void Replace(
         IEnumerable<ClientInfoResource> resources,
@@ -1779,38 +1747,38 @@ public sealed class ClientInfoResourceGroup : ObservableObject
         IEnumerable<ClientInfoCredential> standaloneCredentials)
     {
         var selectedId = SelectedResource?.ResourceId;
-        var selectedCredentialId = SelectedOverviewCard?.Credential?.CredentialId;
         var resourceArray = resources.ToArray();
         var credentialArray = credentials.ToArray();
         _selectedResource = null;
-        _selectedOverviewCard = null;
         OnPropertyChanged(nameof(SelectedResource));
-        OnPropertyChanged(nameof(SelectedOverviewCard));
         Resources.Clear();
-        OverviewCards.Clear();
+        OverviewSections.Clear();
         foreach (var resource in resourceArray)
         {
             Resources.Add(resource);
-            OverviewCards.Add(ClientInfoResourceOverviewCard.ForResource(
-                resource,
-                credentialArray.Where(credential =>
-                        credential.ResourceId == resource.ResourceId)
-                    .ToArray()));
         }
 
-        foreach (var credential in standaloneCredentials)
+        var resourceIds = resourceArray
+            .Select(resource => resource.ResourceId)
+            .ToHashSet();
+        var overviewCredentials = credentialArray
+            .Where(credential =>
+                credential.ResourceId.HasValue
+                && resourceIds.Contains(credential.ResourceId.Value))
+            .Concat(standaloneCredentials)
+            .GroupBy(credential => credential.CredentialId)
+            .Select(group => group.First())
+            .ToArray();
+        foreach (var section in ClientInfoCategoryOverviewBuilder.Build(
+                     CategoryName,
+                     resourceArray,
+                     overviewCredentials))
         {
-            OverviewCards.Add(
-                ClientInfoResourceOverviewCard.ForCredential(credential));
+            OverviewSections.Add(section);
         }
 
         SelectedResource = selectedId.HasValue
             ? Resources.FirstOrDefault(resource => resource.ResourceId == selectedId.Value)
             : null;
-        if (SelectedResource is null && selectedCredentialId.HasValue)
-        {
-            SelectedOverviewCard = OverviewCards.FirstOrDefault(card =>
-                card.Credential?.CredentialId == selectedCredentialId.Value);
-        }
     }
 }

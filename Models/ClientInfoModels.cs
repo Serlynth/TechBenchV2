@@ -158,59 +158,6 @@ public sealed record ClientInfoResource
         ClientInfoResourceCategories.Classify(ResourceType);
     public string TypeLabel =>
         ClientInfoResourceCategories.GetTypeLabel(ResourceType);
-    public string OverviewSubtitle => string.Join(
-        " · ",
-        new[] { Provider, LocationName }
-            .Where(value => !string.IsNullOrWhiteSpace(value)));
-    public string OverviewStatus => string.IsNullOrWhiteSpace(Status)
-        ? IsActive ? "Active" : "Inactive"
-        : Status;
-    public IReadOnlyList<ClientInfoOverviewField> OverviewFields
-    {
-        get
-        {
-            var values = new List<ClientInfoOverviewField>();
-            var labels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var standardKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            void Add(string label, string? value)
-            {
-                if (!string.IsNullOrWhiteSpace(label)
-                    && !string.IsNullOrWhiteSpace(value)
-                    && labels.Add(label.Trim()))
-                {
-                    values.Add(new(label.Trim(), value.Trim()));
-                }
-            }
-
-            Add("Provider", Provider);
-            Add("Location", LocationName);
-            Add(
-                ClientInfoResourceFieldDefinitions.AddressLabelForCategory(Category),
-                AddressOrUrl);
-            foreach (var definition in ClientInfoResourceFieldDefinitions
-                         .ForEditorCategory(Category))
-            {
-                standardKeys.Add(definition.FieldKey);
-                Add(definition.FieldLabel, GetFieldValue(definition.FieldKey));
-            }
-
-            foreach (var field in Fields
-                         .Where(field => !standardKeys.Contains(field.FieldKey))
-                         .OrderBy(field => field.SortOrder)
-                         .ThenBy(field => field.FieldLabel, StringComparer.OrdinalIgnoreCase))
-            {
-                Add(field.FieldLabel, field.ValueText);
-            }
-
-            Add("Notes", Notes);
-            Add("Active", IsActive ? "Yes" : "No");
-            Add("Review Status", ReviewStatus);
-            Add(
-                "Last Verified",
-                LastVerifiedAtUtc?.ToLocalTime().ToString("g"));
-            return values;
-        }
-    }
 
     public string GetFieldValue(string fieldKey) =>
         Fields.FirstOrDefault(field => string.Equals(
@@ -220,6 +167,11 @@ public sealed record ClientInfoResource
 }
 
 public sealed record ClientInfoOverviewField(string Label, string Value);
+
+public sealed record ClientInfoCategoryOverviewSection(
+    string Title,
+    string Description,
+    IReadOnlyList<ClientInfoOverviewField> Fields);
 
 public sealed record ClientInfoResourceField
 {
@@ -253,77 +205,6 @@ public sealed record ClientInfoCredential
     public byte[]? RowVersion { get; init; }
     public int SecretCount { get; init; }
     public IReadOnlyList<ClientInfoSecretSummary> Secrets { get; init; } = [];
-    public string OverviewStatus => IsActive ? "Protected" : "Inactive";
-    public string OverviewSubtitle => string.IsNullOrWhiteSpace(Category)
-        ? "Credential"
-        : $"{Category} credential";
-    public IReadOnlyList<ClientInfoOverviewField> OverviewFields
-    {
-        get
-        {
-            var values = new List<ClientInfoOverviewField>();
-            void Add(string label, string? value)
-            {
-                if (!string.IsNullOrWhiteSpace(value))
-                {
-                    values.Add(new(label, value.Trim()));
-                }
-            }
-
-            Add("Username", Username);
-            Add("Login URL", LoginUrl);
-            Add("Protected Values", SecretCount == 1
-                ? "*** · 1 protected value"
-                : SecretCount > 1
-                    ? $"*** · {SecretCount} protected values"
-                    : "No protected value stored");
-            Add("Notes", Notes);
-            Add("Active", IsActive ? "Yes" : "No");
-            Add("Review Status", ReviewStatus);
-            Add(
-                "Last Verified",
-                LastVerifiedAtUtc?.ToLocalTime().ToString("g"));
-            return values;
-        }
-    }
-}
-
-public sealed record ClientInfoResourceOverviewCard
-{
-    public ClientInfoResource? Resource { get; init; }
-    public ClientInfoCredential? Credential { get; init; }
-    public IReadOnlyList<ClientInfoCredential> RelatedCredentials { get; init; } = [];
-    public bool IsResource => Resource is not null;
-    public bool IsCredential => Credential is not null;
-    public bool HasRelatedCredentials => RelatedCredentials.Count > 0;
-    public string Name => Resource?.Name ?? Credential?.Name ?? string.Empty;
-    public string TypeLabel => Resource?.TypeLabel
-        ?? Credential?.OverviewSubtitle
-        ?? string.Empty;
-    public string Status => Resource?.OverviewStatus
-        ?? Credential?.OverviewStatus
-        ?? string.Empty;
-    public string Subtitle => Resource?.OverviewSubtitle
-        ?? (Credential is null ? string.Empty : "Not linked to a technology record");
-    public IReadOnlyList<ClientInfoOverviewField> Fields =>
-        Resource?.OverviewFields ?? Credential?.OverviewFields ?? [];
-    public string RelatedCredentialLabel => RelatedCredentials.Count == 1
-        ? "1 related access record"
-        : $"{RelatedCredentials.Count} related access records";
-
-    public static ClientInfoResourceOverviewCard ForResource(
-        ClientInfoResource resource,
-        IReadOnlyList<ClientInfoCredential> relatedCredentials) => new()
-        {
-            Resource = resource,
-            RelatedCredentials = relatedCredentials
-        };
-
-    public static ClientInfoResourceOverviewCard ForCredential(
-        ClientInfoCredential credential) => new()
-        {
-            Credential = credential
-        };
 }
 
 public sealed record ClientInfoSecretSummary
