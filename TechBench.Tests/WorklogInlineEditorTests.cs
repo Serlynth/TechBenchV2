@@ -1,5 +1,7 @@
 namespace TechBench.Tests;
 
+using System.Text.RegularExpressions;
+
 public sealed class WorklogInlineEditorTests
 {
     [Fact]
@@ -36,6 +38,34 @@ public sealed class WorklogInlineEditorTests
         Assert.Contains("remains open for posting or further edits", saveMethod, StringComparison.Ordinal);
         Assert.Contains("The saved ticket stays selected for posting", xaml, StringComparison.Ordinal);
         Assert.Contains("Save and keep this entry open (Ctrl+S)", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InlineEditorStaticResourcesAreRegisteredBeforeItsDeferredTemplate()
+    {
+        var xaml = ReadRepositoryFile("MainWindow.xaml");
+        const string templateMarker = "<DataTemplate x:Key=\"InlineWorkEntryEditorTemplate\">";
+        var templateStart = xaml.IndexOf(templateMarker, StringComparison.Ordinal);
+        var templateEnd = xaml.IndexOf("</DataTemplate>", templateStart, StringComparison.Ordinal);
+
+        Assert.True(templateStart >= 0, "The inline editor template was not found.");
+        Assert.True(templateEnd > templateStart, "The inline editor template is incomplete.");
+
+        var template = xaml[templateStart..templateEnd];
+        var referencedKeys = Regex.Matches(template, @"\{StaticResource\s+([^,}\s]+)")
+            .Select(match => match.Groups[1].Value)
+            .Distinct(StringComparer.Ordinal);
+
+        foreach (var key in referencedKeys)
+        {
+            var localDeclaration = xaml.IndexOf($"x:Key=\"{key}\"", StringComparison.Ordinal);
+            if (localDeclaration >= 0)
+            {
+                Assert.True(
+                    localDeclaration < templateStart,
+                    $"StaticResource '{key}' must be registered before InlineWorkEntryEditorTemplate is created.");
+            }
+        }
     }
 
     private static string ReadRepositoryFile(params string[] parts)
