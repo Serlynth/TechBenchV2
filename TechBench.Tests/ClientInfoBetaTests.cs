@@ -60,6 +60,9 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("Important category information", xaml, StringComparison.Ordinal);
         Assert.Contains("controls:ClientInfoResourceDataGrid", xaml, StringComparison.Ordinal);
         Assert.Contains("BasedOn=\"{StaticResource {x:Type DataGrid}}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("IsReadOnly=\"True\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Select text and press Ctrl+C to copy", xaml, StringComparison.Ordinal);
+        Assert.Contains("ClipboardCopyMode=\"IncludeHeader\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("MouseDoubleClick=\"ResourceOverview_DoubleClick\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("\"category\",\n                \"Category\"", viewModel, StringComparison.Ordinal);
         Assert.Contains("TypeOptionsForCategory", viewModel, StringComparison.Ordinal);
@@ -113,7 +116,8 @@ public sealed class ClientInfoBetaTests
                 SecretCount = 2
             }]);
 
-        Assert.Equal(3, sections.Count);
+        var watchGuard = Assert.Single(sections);
+        Assert.Equal("WatchGuard", watchGuard.Title);
         Assert.DoesNotContain(sections.SelectMany(section => section.Fields),
             field => field.Label == "Notes" || field.Label == "AuthPoint Tenant");
         Assert.Contains(sections.SelectMany(section => section.Fields),
@@ -122,6 +126,35 @@ public sealed class ClientInfoBetaTests
         Assert.Contains(sections.SelectMany(section => section.Fields),
             field => field.Label == "Protected values"
                      && field.Value == "2 stored secrets");
+    }
+
+    [Fact]
+    public void DemoOverviewPlacesTheActualFireDrillGroupsInTheirCanonicalCategories()
+    {
+        var demo = ClientInfoDemoData.Create().Snapshot;
+
+        string[] Titles(string category) => ClientInfoCategoryOverviewBuilder.Build(
+                category,
+                demo.Resources.Where(resource => resource.Category == category).ToArray(),
+                demo.Credentials.Where(credential =>
+                    ClientInfoResourceCategories.ClassifyCredential(credential) == category).ToArray())
+            .Select(section => section.Title)
+            .ToArray();
+
+        Assert.Contains("ILO / iDRAC", Titles(ClientInfoResourceCategories.ServersInfrastructure));
+        Assert.Contains("UPS", Titles(ClientInfoResourceCategories.ServersInfrastructure));
+        Assert.Contains("WatchGuard", Titles(ClientInfoResourceCategories.ConnectionInternet));
+        Assert.Equal(["WiFi"], Titles(ClientInfoResourceCategories.Wifi));
+        Assert.Contains("Microsoft 365", Titles(ClientInfoResourceCategories.ApplicationsCloud));
+        Assert.Contains("Remote Access", Titles(ClientInfoResourceCategories.ApplicationsCloud));
+        Assert.Equal(["Domain & AD"], Titles(ClientInfoResourceCategories.DomainsEmail));
+        Assert.Contains("Veeam", Titles(ClientInfoResourceCategories.BackupSecurity));
+        Assert.Contains("ESET", Titles(ClientInfoResourceCategories.BackupSecurity));
+        Assert.Contains("Barracuda", Titles(ClientInfoResourceCategories.BackupSecurity));
+
+        var builder = Read("Models", "ClientInfoCategoryOverviewBuilder.cs");
+        Assert.Contains("CredentialFieldGrouper.Group", builder, StringComparison.Ordinal);
+        Assert.DoesNotContain("DiscoverWorkspaceSections", builder, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -148,6 +181,7 @@ public sealed class ClientInfoBetaTests
 
         Assert.Contains(sections.SelectMany(section => section.Fields),
             field => field.Label == "Management IP" && field.Value == "10.2.0.15");
+        Assert.Contains(sections, section => section.Title == "ILO / iDRAC");
         Assert.DoesNotContain(
             "FireDrillRepository",
             Read("Models", "ClientInfoCategoryOverviewBuilder.cs"),
