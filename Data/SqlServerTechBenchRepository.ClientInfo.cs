@@ -44,6 +44,129 @@ public sealed partial class SqlServerTechBenchRepository
             CancellationToken.None).GetAwaiter().GetResult();
     }
 
+    public ClientAttachmentStorageConfiguration GetClientAttachmentStorageConfiguration() =>
+        QueryAsync(
+            Procedures.GetClientAttachmentStorageConfiguration,
+            null,
+            (reader, token) => ReadSingleAsync(
+                reader,
+                token,
+                row => new ClientAttachmentStorageConfiguration
+                {
+                    RootPath = GetString(row, "RootPath"),
+                    MaximumFileSizeMegabytes = Math.Clamp(
+                        GetInt32(row, "MaximumFileSizeMegabytes", 50),
+                        1,
+                        2048),
+                    AllowedExtensions = GetString(
+                        row,
+                        "AllowedExtensions",
+                        new ClientAttachmentStorageConfiguration()
+                            .AllowedExtensions)
+                }),
+            CancellationToken.None).GetAwaiter().GetResult()
+        ?? new ClientAttachmentStorageConfiguration();
+
+    public IReadOnlyList<ClientInfoAttachment> GetClientInfoAttachments(
+        int clientId,
+        bool includeArchived = false)
+    {
+        if (clientId <= 0)
+        {
+            return [];
+        }
+
+        return QueryAsync(
+            Procedures.GetClientInfoAttachments,
+            command =>
+            {
+                AddInt(command, "@ClientId", clientId);
+                AddBit(command, "@IncludeArchived", includeArchived);
+            },
+            (reader, token) => ReadListAsync(
+                reader,
+                token,
+                ReadClientInfoAttachment),
+            CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    public ClientInfoAttachment SaveClientInfoAttachment(
+        ClientInfoAttachment attachment)
+    {
+        ArgumentNullException.ThrowIfNull(attachment);
+        return QueryAsync(
+            Procedures.SaveClientInfoAttachment,
+            command =>
+            {
+                AddGuid(command, "@AttachmentId", attachment.AttachmentId);
+                AddInt(command, "@ClientId", attachment.ClientId);
+                AddRequiredText(
+                    command,
+                    "@RelativePath",
+                    400,
+                    attachment.RelativePath);
+                AddRequiredText(
+                    command,
+                    "@OriginalFileName",
+                    260,
+                    attachment.OriginalFileName);
+                AddRequiredText(
+                    command,
+                    "@ContentType",
+                    160,
+                    attachment.ContentType);
+                AddRequiredText(command, "@Category", 80, attachment.Category);
+                AddText(command, "@Caption", 500, attachment.Caption);
+                AddBigInt(command, "@FileSizeBytes", attachment.FileSizeBytes);
+                AddBinary(
+                    command,
+                    "@ContentSha256",
+                    32,
+                    attachment.ContentSha256);
+                AddBinary(
+                    command,
+                    "@ExpectedRowVersion",
+                    8,
+                    attachment.RowVersion);
+                AddGuid(command, "@RequestId", Guid.NewGuid());
+            },
+            (reader, token) => ReadSingleAsync(
+                reader,
+                token,
+                ReadClientInfoAttachment),
+            CancellationToken.None).GetAwaiter().GetResult()
+        ?? throw new InvalidOperationException(
+            "SQL Server did not return the saved client attachment.");
+    }
+
+    public ClientInfoAttachment SetClientInfoAttachmentArchived(
+        ClientInfoAttachment attachment,
+        bool isArchived)
+    {
+        ArgumentNullException.ThrowIfNull(attachment);
+        return QueryAsync(
+            Procedures.SetClientInfoAttachmentArchived,
+            command =>
+            {
+                AddGuid(command, "@AttachmentId", attachment.AttachmentId);
+                AddInt(command, "@ClientId", attachment.ClientId);
+                AddBit(command, "@IsArchived", isArchived);
+                AddBinary(
+                    command,
+                    "@ExpectedRowVersion",
+                    8,
+                    attachment.RowVersion);
+                AddGuid(command, "@RequestId", Guid.NewGuid());
+            },
+            (reader, token) => ReadSingleAsync(
+                reader,
+                token,
+                ReadClientInfoAttachment),
+            CancellationToken.None).GetAwaiter().GetResult()
+        ?? throw new InvalidOperationException(
+            "SQL Server did not return the archived client attachment.");
+    }
+
     public ClientInfoProfile SaveClientInfoProfile(ClientInfoProfile profile)
     {
         ArgumentNullException.ThrowIfNull(profile);
@@ -806,6 +929,29 @@ public sealed partial class SqlServerTechBenchRepository
         RowVersion = GetBytes(reader, "RowVersion"),
         CutoverState = GetString(reader, "CutoverState", "NotStarted"),
         CutoverRowVersion = GetBytes(reader, "CutoverRowVersion")
+    };
+
+    private static ClientInfoAttachment ReadClientInfoAttachment(
+        SqlDataReader reader) => new()
+    {
+        AttachmentId = GetNullableGuid(reader, "AttachmentId") ?? Guid.Empty,
+        ClientId = GetInt32(reader, "ClientId"),
+        RelativePath = GetString(reader, "RelativePath"),
+        OriginalFileName = GetString(reader, "OriginalFileName"),
+        ContentType = GetString(
+            reader,
+            "ContentType",
+            "application/octet-stream"),
+        Category = GetString(reader, "Category", "Other"),
+        Caption = GetString(reader, "Caption"),
+        FileSizeBytes = GetInt64(reader, "FileSizeBytes"),
+        ContentSha256 = GetBytes(reader, "ContentSha256") ?? [],
+        UploadedBy = GetString(reader, "UploadedBy"),
+        UploadedAtUtc = GetNullableDateTime(reader, "UploadedAtUtc") ?? default,
+        IsArchived = GetBoolean(reader, "IsArchived"),
+        ArchivedBy = GetString(reader, "ArchivedBy"),
+        ArchivedAtUtc = GetNullableDateTime(reader, "ArchivedAtUtc"),
+        RowVersion = GetBytes(reader, "RowVersion")
     };
 
     private static ClientInfoLocation ReadClientInfoLocation(

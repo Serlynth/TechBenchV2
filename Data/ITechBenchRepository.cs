@@ -134,6 +134,23 @@ public interface ITechBenchRepository
 
     ClientInfoSnapshot? GetClientInfoSnapshot(int clientId) => null;
 
+    ClientAttachmentStorageConfiguration GetClientAttachmentStorageConfiguration() =>
+        new();
+
+    IReadOnlyList<ClientInfoAttachment> GetClientInfoAttachments(
+        int clientId,
+        bool includeArchived = false) => [];
+
+    ClientInfoAttachment SaveClientInfoAttachment(ClientInfoAttachment attachment) =>
+        throw new NotSupportedException(
+            "Client attachments require the matching shared SQL Server extension.");
+
+    ClientInfoAttachment SetClientInfoAttachmentArchived(
+        ClientInfoAttachment attachment,
+        bool isArchived) =>
+        throw new NotSupportedException(
+            "Client attachments require the matching shared SQL Server extension.");
+
     ClientInfoProfile SaveClientInfoProfile(ClientInfoProfile profile) =>
         throw new NotSupportedException(
             "Canonical Client Info requires the shared SQL Server beta extension.");

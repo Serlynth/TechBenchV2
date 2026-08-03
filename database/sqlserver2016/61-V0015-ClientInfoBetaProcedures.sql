@@ -276,6 +276,17 @@ BEGIN
             END
     WHERE [ClientId] = @SourceClientId;
 
+    /* Attachment metadata follows a merged client. Relative file paths stay
+       unchanged so the files never need to be moved during a SQL transaction. */
+    IF OBJECT_ID(N'tb_client.ClientAttachments', N'U') IS NOT NULL
+        EXEC sys.sp_executesql
+            N'UPDATE [tb_client].[ClientAttachments]
+              SET [ClientId]=@TargetClientId
+              WHERE [ClientId]=@SourceClientId;',
+            N'@SourceClientId int,@TargetClientId int',
+            @SourceClientId=@SourceClientId,
+            @TargetClientId=@TargetClientId;
+
     UPDATE provenance
     SET [SourceDocumentId] = target_document.[SourceDocumentId]
     FROM [tb_client].[RecordProvenance] AS provenance

@@ -1,6 +1,10 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Microsoft.Data.SqlClient;
 using Microsoft.Win32;
 using TechBench.Data;
@@ -21,12 +25,17 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     ];
 
     private static readonly string[] BooleanOptions = ["Yes", "No"];
+    private static readonly string[] AttachmentCategories =
+    [
+        "Photos", "Documents", "Hardware", "Location", "Diagram", "Other"
+    ];
     private static readonly string[] ResourceCategories =
         ClientInfoResourceCategories.All;
     private readonly ITechBenchRepository _repository;
     private readonly CurrentUserContext _currentUser;
     private readonly IUserDialogService _dialogs;
     private readonly ClientInfoWorkbookService _workbooks = new();
+    private readonly ClientAttachmentStorageService _attachmentStorage;
     private ClientInfoProfile _profile = new();
     private string _summary = "";
     private string _reviewStatus = "Unverified";
@@ -37,6 +46,15 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     private ClientInfoCredential? _selectedCredential;
     private ClientInfoFact? _selectedFact;
     private ClientInfoImportBatch? _selectedImportBatch;
+    private ClientInfoAttachment? _selectedAttachment;
+    private ImageSource? _selectedAttachmentPreview;
+    private string _selectedAttachmentPreviewMessage =
+        "Select an attachment to preview it.";
+    private string _attachmentStorageStatus =
+        "Checking attachment storage...";
+    private ClientAttachmentStorageConfiguration _attachmentConfiguration = new();
+    private bool _showArchivedAttachments;
+    private bool _isAttachmentOperationRunning;
 
     public ClientInfoBetaViewModel(
         int clientId,
@@ -48,6 +66,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         _repository = repository;
         _currentUser = currentUser;
         _dialogs = dialogs;
+        _attachmentStorage = new ClientAttachmentStorageService(repository);
 
         RefreshCommand = new RelayCommand(_ => Refresh());
         SaveProfileCommand = new RelayCommand(
@@ -121,6 +140,41 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             _ => PromoteImport(),
             _ => CanManageImports
                 && SelectedImportBatch is { State: "Approved" });
+        UploadAttachmentCommand = new AsyncRelayCommand(
+            _ => UploadAttachmentsFromDialogAsync(),
+            _ => CanUploadAttachments);
+        PasteAttachmentCommand = new AsyncRelayCommand(
+            _ => PasteAttachmentAsync(),
+            _ => CanUploadAttachments);
+        EditAttachmentCommand = new RelayCommand(
+            item => EditAttachment(item as ClientInfoAttachment
+                ?? SelectedAttachment),
+            _ => CanEditAttachments && SelectedAttachment is not null);
+        OpenAttachmentCommand = new RelayCommand(
+            item => OpenAttachment(item as ClientInfoAttachment
+                ?? SelectedAttachment),
+            _ => SelectedAttachment is not null);
+        CopyAttachmentCommand = new RelayCommand(
+            item => CopyAttachment(item as ClientInfoAttachment
+                ?? SelectedAttachment),
+            _ => SelectedAttachment is not null);
+        DownloadAttachmentCommand = new RelayCommand(
+            item => DownloadAttachment(item as ClientInfoAttachment
+                ?? SelectedAttachment),
+            _ => SelectedAttachment is not null);
+        ArchiveAttachmentCommand = new RelayCommand(
+            item => SetAttachmentArchived(
+                item as ClientInfoAttachment ?? SelectedAttachment,
+                true),
+            _ => CanEditAttachments
+                && SelectedAttachment is { IsArchived: false });
+        RestoreAttachmentCommand = new RelayCommand(
+            item => SetAttachmentArchived(
+                item as ClientInfoAttachment ?? SelectedAttachment,
+                false),
+            _ => CanEditAttachments
+                && SelectedAttachment is { IsArchived: true });
+        RefreshAttachmentsCommand = new RelayCommand(_ => RefreshAttachments());
         Refresh();
     }
 
@@ -137,6 +191,10 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     public bool CanEdit => _currentUser.CanWrite;
     public bool CanRevealSecrets => !_currentUser.IsReadOnlyPreview;
     public bool CanManageImports => _currentUser.IsAdmin && _currentUser.CanWrite;
+    public bool CanEditAttachments =>
+        CanEdit && !_isAttachmentOperationRunning;
+    public bool CanUploadAttachments =>
+        CanEditAttachments && _attachmentConfiguration.IsConfigured;
     public bool HasImportBatches => ImportBatches.Count > 0;
     public bool HasSelectedImportBatch => SelectedImportBatch is not null;
     public string ImportPermissionText => CanManageImports
@@ -212,6 +270,65 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     public ObservableCollection<ClientInfoFact> Facts { get; } = [];
     public ObservableCollection<ClientInfoImportBatch> ImportBatches { get; } = [];
     public ObservableCollection<ClientInfoImportIssue> ImportIssues { get; } = [];
+    public ObservableCollection<ClientInfoAttachment> Attachments { get; } = [];
+
+    public string AttachmentStorageStatus
+    {
+        get => _attachmentStorageStatus;
+        private set => SetProperty(ref _attachmentStorageStatus, value);
+    }
+
+    public bool ShowArchivedAttachments
+    {
+        get => _showArchivedAttachments;
+        set
+        {
+            if (SetProperty(ref _showArchivedAttachments, value))
+            {
+                RefreshAttachments();
+            }
+        }
+    }
+
+    public ClientInfoAttachment? SelectedAttachment
+    {
+        get => _selectedAttachment;
+        set
+        {
+            if (!SetProperty(ref _selectedAttachment, value))
+            {
+                return;
+            }
+
+            LoadAttachmentPreview(value);
+            RaiseAttachmentCommandState();
+        }
+    }
+
+    public ImageSource? SelectedAttachmentPreview
+    {
+        get => _selectedAttachmentPreview;
+        private set
+        {
+            if (SetProperty(ref _selectedAttachmentPreview, value))
+            {
+                OnPropertyChanged(nameof(HasSelectedAttachmentPreview));
+            }
+        }
+    }
+
+    public bool HasSelectedAttachmentPreview =>
+        SelectedAttachmentPreview is not null;
+
+    public string SelectedAttachmentPreviewMessage
+    {
+        get => _selectedAttachmentPreviewMessage;
+        private set => SetProperty(ref _selectedAttachmentPreviewMessage, value);
+    }
+
+    public string AttachmentCountLabel => Attachments.Count == 1
+        ? "1 attachment"
+        : $"{Attachments.Count} attachments";
 
     public ClientInfoLocation? SelectedLocation
     {
@@ -325,6 +442,15 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     public RelayCommand CompareImportCommand { get; }
     public RelayCommand ApproveImportCommand { get; }
     public RelayCommand PromoteImportCommand { get; }
+    public AsyncRelayCommand UploadAttachmentCommand { get; }
+    public AsyncRelayCommand PasteAttachmentCommand { get; }
+    public RelayCommand EditAttachmentCommand { get; }
+    public RelayCommand OpenAttachmentCommand { get; }
+    public RelayCommand CopyAttachmentCommand { get; }
+    public RelayCommand DownloadAttachmentCommand { get; }
+    public RelayCommand ArchiveAttachmentCommand { get; }
+    public RelayCommand RestoreAttachmentCommand { get; }
+    public RelayCommand RefreshAttachmentsCommand { get; }
 
     public void Refresh()
     {
@@ -350,15 +476,424 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             Replace(ImportBatches, snapshot.ImportBatches);
             OnPropertyChanged(nameof(HasImportBatches));
             SelectedImportBatch = null;
+            RefreshAttachments();
             StatusMessage =
                 $"Loaded {Locations.Count} locations, {People.Count} people, "
                 + $"{Equipment.Count} equipment records, {Resources.Count} technology records, "
-                + $"and {Credentials.Count} passwords.";
+                + $"{Credentials.Count} passwords, and {Attachments.Count} attachments.";
         }
         catch (Exception exception)
         {
             ShowError("Client Info could not be loaded", exception);
         }
+    }
+
+    private void RefreshAttachments()
+    {
+        var selectedId = SelectedAttachment?.AttachmentId;
+        try
+        {
+            _attachmentConfiguration = _attachmentStorage.GetConfiguration();
+            Replace(
+                Attachments,
+                _repository.GetClientInfoAttachments(
+                    ClientId,
+                    ShowArchivedAttachments));
+            SelectedAttachment = selectedId.HasValue
+                ? Attachments.FirstOrDefault(
+                    attachment => attachment.AttachmentId == selectedId.Value)
+                : null;
+            AttachmentStorageStatus = _attachmentConfiguration.IsConfigured
+                ? $"Automatic client-ID storage is ready. Maximum file size: "
+                  + $"{_attachmentConfiguration.MaximumFileSizeMegabytes} MB."
+                : "Uploads are disabled until Attachment Storage is configured in Server Manager.";
+        }
+        catch (SqlException exception) when (exception.Number == 2812)
+        {
+            _attachmentConfiguration = new ClientAttachmentStorageConfiguration();
+            Attachments.Clear();
+            SelectedAttachment = null;
+            AttachmentStorageStatus =
+                "Client attachments require the matching TechBench server/SQL update.";
+        }
+        catch (Exception exception)
+        {
+            _attachmentConfiguration = new ClientAttachmentStorageConfiguration();
+            Attachments.Clear();
+            SelectedAttachment = null;
+            AttachmentStorageStatus =
+                "Attachment metadata is temporarily unavailable: "
+                + exception.Message;
+        }
+
+        OnPropertyChanged(nameof(AttachmentCountLabel));
+        OnPropertyChanged(nameof(CanEditAttachments));
+        OnPropertyChanged(nameof(CanUploadAttachments));
+        RaiseAttachmentCommandState();
+    }
+
+    private async Task UploadAttachmentsFromDialogAsync()
+    {
+        var allowed = ClientAttachmentStorageService.ParseAllowedExtensions(
+            _attachmentConfiguration.AllowedExtensions);
+        var patterns = string.Join(
+            ";",
+            allowed.OrderBy(extension => extension)
+                .Select(extension => "*" + extension));
+        var dialog = new OpenFileDialog
+        {
+            Title = $"Add attachments to {ClientName}",
+            Multiselect = true,
+            CheckFileExists = true,
+            Filter = string.IsNullOrWhiteSpace(patterns)
+                ? "All files (*.*)|*.*"
+                : $"Allowed attachments ({patterns})|{patterns}|All files (*.*)|*.*"
+        };
+        if (dialog.ShowDialog(FindOwner()) == true)
+        {
+            await UploadAttachmentFilesAsync(dialog.FileNames);
+        }
+    }
+
+    public async Task UploadAttachmentFilesAsync(IEnumerable<string> paths)
+    {
+        var files = paths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (files.Length == 0)
+        {
+            return;
+        }
+
+        if (!CanUploadAttachments)
+        {
+            _dialogs.Error(
+                "Attachments are not available",
+                "Configure Attachment Storage in TechBench Server Manager before uploading files.");
+            return;
+        }
+
+        SetAttachmentOperationRunning(true);
+        var errors = new List<string>();
+        var uploaded = 0;
+        try
+        {
+            foreach (var path in files)
+            {
+                try
+                {
+                    StatusMessage = $"Uploading {Path.GetFileName(path)}...";
+                    await Task.Run(() => _attachmentStorage.Upload(ClientId, path));
+                    uploaded++;
+                }
+                catch (Exception exception)
+                {
+                    errors.Add($"{Path.GetFileName(path)}: {exception.Message}");
+                }
+            }
+        }
+        finally
+        {
+            SetAttachmentOperationRunning(false);
+            RefreshAttachments();
+        }
+
+        StatusMessage = uploaded == 1
+            ? "1 attachment uploaded."
+            : $"{uploaded} attachments uploaded.";
+        if (errors.Count > 0)
+        {
+            _dialogs.Error(
+                "Some attachments were not uploaded",
+                string.Join(Environment.NewLine, errors));
+        }
+    }
+
+    private async Task PasteAttachmentAsync()
+    {
+        if (WpfClipboard.ContainsFileDropList())
+        {
+            var paths = WpfClipboard.GetFileDropList()
+                .Cast<string>()
+                .ToArray();
+            await UploadAttachmentFilesAsync(paths);
+            return;
+        }
+
+        if (!WpfClipboard.ContainsImage())
+        {
+            _dialogs.Info(
+                "Nothing to paste",
+                "Copy an image or one or more files, then choose Paste again.");
+            return;
+        }
+
+        var image = WpfClipboard.GetImage();
+        if (image is null)
+        {
+            return;
+        }
+
+        var temporaryDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "TechBench",
+            "AttachmentPaste");
+        Directory.CreateDirectory(temporaryDirectory);
+        var temporaryPath = Path.Combine(
+            temporaryDirectory,
+            $"Clipboard-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.png");
+        try
+        {
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(image));
+            await using (var stream = new FileStream(
+                             temporaryPath,
+                             FileMode.CreateNew,
+                             FileAccess.Write,
+                             FileShare.None))
+            {
+                encoder.Save(stream);
+            }
+
+            await UploadAttachmentFilesAsync([temporaryPath]);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    private void EditAttachment(ClientInfoAttachment? attachment)
+    {
+        if (attachment is null)
+        {
+            return;
+        }
+
+        var values = ShowEditor(
+            "Edit attachment",
+            [
+                new(
+                    "category",
+                    "Category",
+                    attachment.Category,
+                    true,
+                    Options: AttachmentCategories),
+                new("caption", "Caption / description", attachment.Caption)
+            ]);
+        if (values is null)
+        {
+            return;
+        }
+
+        ExecuteAttachmentSave(
+            "Attachment metadata",
+            () => _attachmentStorage.SaveMetadata(
+                attachment,
+                values["category"],
+                values["caption"]));
+    }
+
+    private void OpenAttachment(ClientInfoAttachment? attachment)
+    {
+        if (attachment is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var path = RequireAttachmentFile(attachment);
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            StatusMessage = $"Opened {attachment.OriginalFileName}.";
+        }
+        catch (Exception exception)
+        {
+            ShowError("Attachment could not be opened", exception);
+        }
+    }
+
+    private void CopyAttachment(ClientInfoAttachment? attachment)
+    {
+        if (attachment is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var files = new StringCollection
+            {
+                RequireAttachmentFile(attachment)
+            };
+            WpfClipboard.SetFileDropList(files);
+            StatusMessage =
+                $"Copied {attachment.OriginalFileName} to the clipboard.";
+        }
+        catch (Exception exception)
+        {
+            ShowError("Attachment could not be copied", exception);
+        }
+    }
+
+    private void DownloadAttachment(ClientInfoAttachment? attachment)
+    {
+        if (attachment is null)
+        {
+            return;
+        }
+
+        var dialog = new SaveFileDialog
+        {
+            Title = "Save attachment copy",
+            FileName = attachment.OriginalFileName,
+            OverwritePrompt = true
+        };
+        if (dialog.ShowDialog(FindOwner()) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            File.Copy(
+                RequireAttachmentFile(attachment),
+                dialog.FileName,
+                overwrite: true);
+            StatusMessage = $"Saved a copy of {attachment.OriginalFileName}.";
+        }
+        catch (Exception exception)
+        {
+            ShowError("Attachment copy could not be saved", exception);
+        }
+    }
+
+    private void SetAttachmentArchived(
+        ClientInfoAttachment? attachment,
+        bool isArchived)
+    {
+        if (attachment is null)
+        {
+            return;
+        }
+
+        if (isArchived && !_dialogs.Confirm(
+                "Archive attachment",
+                $"Archive {attachment.OriginalFileName}? The file will be retained and can be restored later.",
+                "Archive",
+                "Cancel"))
+        {
+            return;
+        }
+
+        ExecuteAttachmentSave(
+            isArchived ? "Attachment archive" : "Attachment restore",
+            () => _attachmentStorage.SetArchived(attachment, isArchived));
+    }
+
+    private void ExecuteAttachmentSave(
+        string operation,
+        Func<ClientInfoAttachment> action)
+    {
+        try
+        {
+            var saved = action();
+            RefreshAttachments();
+            SelectedAttachment = Attachments.FirstOrDefault(
+                attachment => attachment.AttachmentId == saved.AttachmentId);
+            StatusMessage = operation + " completed.";
+        }
+        catch (SqlException exception) when (exception.Number == 52608)
+        {
+            RefreshAttachments();
+            _dialogs.Error(
+                "Another editor saved first",
+                "The attachment changed on another workstation. The latest version has been loaded.");
+        }
+        catch (Exception exception)
+        {
+            ShowError(operation + " failed", exception);
+        }
+    }
+
+    private string RequireAttachmentFile(ClientInfoAttachment attachment)
+    {
+        var path = _attachmentStorage.ResolvePath(attachment);
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException(
+                "The file is missing from the configured attachment share. "
+                + "The SQL metadata was left unchanged.",
+                path);
+        }
+
+        return path;
+    }
+
+    private void LoadAttachmentPreview(ClientInfoAttachment? attachment)
+    {
+        SelectedAttachmentPreview = null;
+        if (attachment is null)
+        {
+            SelectedAttachmentPreviewMessage =
+                "Select an attachment to preview it.";
+            return;
+        }
+
+        if (!attachment.IsImage)
+        {
+            SelectedAttachmentPreviewMessage =
+                $"{attachment.OriginalFileName} is a document. Choose Open to preview it in its normal application.";
+            return;
+        }
+
+        try
+        {
+            var path = RequireAttachmentFile(attachment);
+            using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite);
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.DecodePixelWidth = 1000;
+            image.StreamSource = stream;
+            image.EndInit();
+            image.Freeze();
+            SelectedAttachmentPreview = image;
+            SelectedAttachmentPreviewMessage = string.Empty;
+        }
+        catch (Exception exception)
+        {
+            SelectedAttachmentPreviewMessage =
+                "Preview unavailable: " + exception.Message;
+        }
+    }
+
+    private void SetAttachmentOperationRunning(bool value)
+    {
+        _isAttachmentOperationRunning = value;
+        OnPropertyChanged(nameof(CanEditAttachments));
+        OnPropertyChanged(nameof(CanUploadAttachments));
+        RaiseAttachmentCommandState();
+    }
+
+    private void RaiseAttachmentCommandState()
+    {
+        UploadAttachmentCommand.RaiseCanExecuteChanged();
+        PasteAttachmentCommand.RaiseCanExecuteChanged();
+        EditAttachmentCommand.RaiseCanExecuteChanged();
+        OpenAttachmentCommand.RaiseCanExecuteChanged();
+        CopyAttachmentCommand.RaiseCanExecuteChanged();
+        DownloadAttachmentCommand.RaiseCanExecuteChanged();
+        ArchiveAttachmentCommand.RaiseCanExecuteChanged();
+        RestoreAttachmentCommand.RaiseCanExecuteChanged();
     }
 
     private void SaveProfile()
