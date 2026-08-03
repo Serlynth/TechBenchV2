@@ -36,6 +36,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     private readonly IUserDialogService _dialogs;
     private readonly ClientInfoWorkbookService _workbooks = new();
     private readonly ClientAttachmentStorageService _attachmentStorage;
+    private readonly ClientInfoDemoSnapshotData? _demoData;
     private ClientInfoProfile _profile = new();
     private string _summary = "";
     private string _reviewStatus = "Unverified";
@@ -60,9 +61,11 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         int clientId,
         ITechBenchRepository repository,
         CurrentUserContext currentUser,
-        IUserDialogService dialogs)
+        IUserDialogService dialogs,
+        ClientInfoDemoSnapshotData? demoData = null)
     {
-        ClientId = clientId;
+        _demoData = demoData;
+        ClientId = demoData?.Summary.ClientId ?? clientId;
         _repository = repository;
         _currentUser = currentUser;
         _dialogs = dialogs;
@@ -89,10 +92,13 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             _ => CanEdit);
         EditResourceCommand = new RelayCommand(
             item => EditResource(item as ClientInfoResource ?? SelectedResource),
-            _ => CanEdit && SelectedResource is not null);
+            item => CanEdit && (item is ClientInfoResource || SelectedResource is not null));
+        MoveResourceCommand = new RelayCommand(
+            item => MoveResource(item as ClientInfoResource ?? SelectedResource),
+            item => CanEdit && (item is ClientInfoResource || SelectedResource is not null));
         ManageResourceFieldsCommand = new RelayCommand(
-            _ => ManageResourceFields(),
-            _ => CanEdit && SelectedResource is not null);
+            item => ManageResourceFields(item as ClientInfoResource ?? SelectedResource),
+            item => CanEdit && (item is ClientInfoResource || SelectedResource is not null));
         AddCredentialCommand = new RelayCommand(
             _ => EditCredential(null),
             _ => CanEdit);
@@ -181,16 +187,19 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     public int ClientId { get; }
     public string WindowTitle => $"{ClientName} · Client Info Beta";
     public string ClientName => Profile.ClientName;
-    public string InternalClientIdLabel => $"Internal client ID {ClientId}";
+    public bool IsDemo => _demoData is not null;
+    public string InternalClientIdLabel => IsDemo ? "Local demo · not stored" : $"Internal client ID {ClientId}";
     public string CutoverLabel => Profile.IsLive
         ? $"Canonical SQL is live · {Profile.CutoverState}"
         : $"Migration workspace · {Profile.CutoverState}";
-    public string ClientInfoStatusLabel => Profile.IsLive
+    public string ClientInfoStatusLabel => IsDemo
+        ? "Read-only example data"
+        : Profile.IsLive
         ? $"Client Information is live - {Profile.CutoverState}"
         : $"Client Information draft - {Profile.CutoverState}";
-    public bool CanEdit => _currentUser.CanWrite;
-    public bool CanRevealSecrets => !_currentUser.IsReadOnlyPreview;
-    public bool CanManageImports => _currentUser.IsAdmin && _currentUser.CanWrite;
+    public bool CanEdit => !IsDemo && _currentUser.CanWrite;
+    public bool CanRevealSecrets => !IsDemo && !_currentUser.IsReadOnlyPreview;
+    public bool CanManageImports => !IsDemo && _currentUser.IsAdmin && _currentUser.CanWrite;
     public bool CanEditAttachments =>
         CanEdit && !_isAttachmentOperationRunning;
     public bool CanUploadAttachments =>
@@ -362,6 +371,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             if (SetProperty(ref _selectedResource, value))
             {
                 EditResourceCommand.RaiseCanExecuteChanged();
+                MoveResourceCommand.RaiseCanExecuteChanged();
                 ManageResourceFieldsCommand.RaiseCanExecuteChanged();
             }
         }
@@ -427,6 +437,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     public RelayCommand EditPersonCommand { get; }
     public RelayCommand AddResourceCommand { get; }
     public RelayCommand EditResourceCommand { get; }
+    public RelayCommand MoveResourceCommand { get; }
     public RelayCommand ManageResourceFieldsCommand { get; }
     public RelayCommand AddCredentialCommand { get; }
     public RelayCommand EditCredentialCommand { get; }
@@ -456,7 +467,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     {
         try
         {
-            var snapshot = _repository.GetClientInfoSnapshot(ClientId)
+            var snapshot = _demoData?.Snapshot
+                ?? _repository.GetClientInfoSnapshot(ClientId)
                 ?? throw new InvalidOperationException(
                     "The selected client is no longer available.");
             Profile = snapshot.Profile;
@@ -467,20 +479,30 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             Replace(Resources, snapshot.Resources);
             Replace(
                 Equipment,
-                _repository.EquipmentBoardAvailable
+                _demoData?.Equipment
+                ?? (_repository.EquipmentBoardAvailable
                     ? _repository.GetEquipmentInventory(ClientId)
-                    : []);
+                    : []));
             RefreshResourceGroups();
             Replace(Credentials, snapshot.Credentials);
             Replace(Facts, snapshot.Facts);
             Replace(ImportBatches, snapshot.ImportBatches);
             OnPropertyChanged(nameof(HasImportBatches));
             SelectedImportBatch = null;
-            RefreshAttachments();
-            StatusMessage =
+            if (IsDemo)
+            {
+                Attachments.Clear();
+                AttachmentStorageStatus = "Demo Client is local and does not use attachment storage.";
+                StatusMessage = "Showing fictional, read-only example data. Nothing on this page is stored in SQL.";
+            }
+            else
+            {
+                RefreshAttachments();
+                StatusMessage =
                 $"Loaded {Locations.Count} locations, {People.Count} people, "
                 + $"{Equipment.Count} equipment records, {Resources.Count} technology records, "
                 + $"{Credentials.Count} passwords, and {Attachments.Count} attachments.";
+            }
         }
         catch (Exception exception)
         {
@@ -1026,21 +1048,21 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     {
         var editingCategory = current?.Category
             ?? ClientInfoResourceCategories.NormalizeCategory(requestedCategory);
-        var standardFields = ClientInfoResourceFieldDefinitions.ForCategory(
+        var standardFields = ClientInfoResourceFieldDefinitions.ForEditorCategory(
             editingCategory);
         var locationOptions = new[] { "(None)" }
             .Concat(Locations.Select(item => item.Name))
             .ToArray();
         var editorFields = new List<ClientInfoEditField>
         {
-            new(
-                "category",
-                "Category",
-                editingCategory,
-                true,
-                Options: ResourceCategories),
             new("name", "Name", current?.Name ?? "", true),
-            new("type", "Type", current?.TypeLabel ?? "", true),
+            new(
+                "type",
+                "Type",
+                current?.TypeLabel ?? "",
+                true,
+                Options: ClientInfoResourceFieldDefinitions.TypeOptionsForCategory(editingCategory),
+                AllowCustomValue: true),
             new(
                 "location",
                 "Location",
@@ -1074,8 +1096,9 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 Options: ReviewStatuses)
         ]);
         var values = ShowEditor(
-            current is null ? "Add technology or service" : "Edit technology or service",
-            editorFields);
+            current is null ? $"Add {editingCategory}" : $"Edit {editingCategory}",
+            editorFields,
+            ClientInfoResourceFieldDefinitions.EditorDescriptionForCategory(editingCategory));
         if (values is null)
         {
             return;
@@ -1097,7 +1120,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 {
                     Name = values["name"],
                     ResourceType = ClientInfoResourceCategories.Encode(
-                        values["category"],
+                        editingCategory,
                         values["type"]),
                     LocationId = location?.LocationId,
                     LocationName = location?.Name ?? "",
@@ -1145,15 +1168,53 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             });
     }
 
-    private void ManageResourceFields()
+    private void MoveResource(ClientInfoResource? resource)
     {
-        if (SelectedResource is null)
+        if (resource is null)
+        {
+            return;
+        }
+
+        var values = ShowEditor(
+            "Move technology or service",
+            [
+                new(
+                    "category",
+                    "Move to section",
+                    resource.Category,
+                    true,
+                    Options: ResourceCategories)
+            ],
+            $"Move {resource.Name} without changing its details or custom fields.");
+        if (values is null
+            || string.Equals(values["category"], resource.Category, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        ExecuteSave(
+            "technology or service",
+            () =>
+            {
+                _repository.SaveClientInfoResource(resource with
+                {
+                    ResourceType = ClientInfoResourceCategories.Encode(
+                        values["category"],
+                        resource.TypeLabel)
+                });
+                Refresh();
+            });
+    }
+
+    private void ManageResourceFields(ClientInfoResource? resource)
+    {
+        if (resource is null)
         {
             return;
         }
 
         var editor = new ClientInfoResourceFieldsWindow(
-            SelectedResource,
+            resource,
             _repository,
             _dialogs)
         {
@@ -1549,9 +1610,10 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 
     private IReadOnlyDictionary<string, string>? ShowEditor(
         string title,
-        IReadOnlyList<ClientInfoEditField> fields)
+        IReadOnlyList<ClientInfoEditField> fields,
+        string? description = null)
     {
-        var editor = new ClientInfoRecordEditorWindow(title, fields)
+        var editor = new ClientInfoRecordEditorWindow(title, fields, description)
         {
             Owner = FindOwner()
         };
@@ -1628,6 +1690,9 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 
 public sealed class ClientInfoResourceGroup : ObservableObject
 {
+    private ClientInfoResource? _selectedResource;
+    private bool _useCompactView = true;
+
     public ClientInfoResourceGroup(
         string categoryName,
         string description)
@@ -1635,7 +1700,10 @@ public sealed class ClientInfoResourceGroup : ObservableObject
         CategoryName = categoryName;
         Description = description;
         Resources.CollectionChanged += (_, _) =>
+        {
             OnPropertyChanged(nameof(CountLabel));
+            OnPropertyChanged(nameof(HasResources));
+        };
     }
 
     public string CategoryName { get; }
@@ -1643,14 +1711,30 @@ public sealed class ClientInfoResourceGroup : ObservableObject
     public string CountLabel => Resources.Count == 1
         ? "1 record"
         : $"{Resources.Count} records";
+    public bool HasResources => Resources.Count > 0;
+    public bool UseCompactView
+    {
+        get => _useCompactView;
+        set => SetProperty(ref _useCompactView, value);
+    }
+    public ClientInfoResource? SelectedResource
+    {
+        get => _selectedResource;
+        set => SetProperty(ref _selectedResource, value);
+    }
     public ObservableCollection<ClientInfoResource> Resources { get; } = [];
 
     public void Replace(IEnumerable<ClientInfoResource> resources)
     {
+        var selectedId = SelectedResource?.ResourceId;
         Resources.Clear();
         foreach (var resource in resources)
         {
             Resources.Add(resource);
         }
+
+        SelectedResource = selectedId.HasValue
+            ? Resources.FirstOrDefault(resource => resource.ResourceId == selectedId.Value)
+            : null;
     }
 }

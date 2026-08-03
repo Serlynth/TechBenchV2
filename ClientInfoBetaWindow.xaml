@@ -134,6 +134,8 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <StackPanel>
                         <TextBlock Text="{Binding CategoryName}"
@@ -143,27 +145,160 @@
                                    TextWrapping="Wrap"
                                    Margin="0,3,0,10" />
                     </StackPanel>
-                    <Button Grid.Column="1"
+                    <CheckBox Grid.Column="1"
+                              Content="At-a-glance"
+                              IsChecked="{Binding UseCompactView}"
+                              VerticalAlignment="Center"
+                              Margin="0,0,14,8" />
+                    <Button Grid.Column="2"
                             Content="Add"
                             Command="{Binding DataContext.AddResourceCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                             CommandParameter="{Binding CategoryName}"
                             MinWidth="76"
                             Margin="0,0,8,8" />
-                    <Button Grid.Column="2"
+                    <Button Grid.Column="3"
                             Content="Edit"
                             Command="{Binding DataContext.EditResourceCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding SelectedResource}"
                             MinWidth="76"
                             Margin="0,0,8,8" />
-                    <Button Grid.Column="3"
+                    <Button Grid.Column="4"
+                            Content="Move"
+                            Command="{Binding DataContext.MoveResourceCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding SelectedResource}"
+                            MinWidth="76"
+                            Margin="0,0,8,8" />
+                    <Button Grid.Column="5"
                             Content="Custom Fields"
                             Command="{Binding DataContext.ManageResourceFieldsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding SelectedResource}"
                             MinWidth="108"
                             Margin="0,0,0,8" />
                 </Grid>
-                <controls:ClientInfoResourceDataGrid Grid.Row="1"
-                                                     ItemsSource="{Binding Resources}"
-                                                     SelectedItem="{Binding DataContext.SelectedResource, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}"
-                                                     MouseDoubleClick="Resources_DoubleClick" />
+                <Grid Grid.Row="1">
+                    <TextBlock Text="No records in this section yet. Use Add to create the first one."
+                               Foreground="{DynamicResource MutedTextBrush}"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               Visibility="{Binding HasResources, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                    <ListBox ItemsSource="{Binding Resources}"
+                             SelectedItem="{Binding SelectedResource, Mode=TwoWay}"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             Padding="0"
+                             MouseDoubleClick="Resources_DoubleClick"
+                             Visibility="{Binding UseCompactView, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel IsItemsHost="True" />
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Margin" Value="0,0,12,12" />
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListBoxItem">
+                                            <Border x:Name="CardBorder"
+                                                    Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                    BorderBrush="{DynamicResource BorderBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="10">
+                                                <ContentPresenter />
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                                    <Setter TargetName="CardBorder" Property="BorderThickness" Value="2" />
+                                                </Trigger>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ControlBackgroundBrush}" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Width="320" MinHeight="190" Margin="15">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Name}"
+                                                   FontSize="15"
+                                                   FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <Border Grid.Column="1"
+                                                Background="{DynamicResource ControlBackgroundBrush}"
+                                                BorderBrush="{DynamicResource BorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="9"
+                                                Padding="8,3"
+                                                Margin="8,0,0,0">
+                                            <TextBlock Text="{Binding CompactStatus}"
+                                                       FontSize="10"
+                                                       Foreground="{DynamicResource SecondaryTextBrush}" />
+                                        </Border>
+                                    </Grid>
+                                    <TextBlock Grid.Row="1"
+                                               Text="{Binding TypeLabel}"
+                                               Foreground="{DynamicResource AccentBrush}"
+                                               FontWeight="SemiBold"
+                                               Margin="0,5,0,2" />
+                                    <TextBlock Grid.Row="2"
+                                               Text="{Binding CompactSubtitle}"
+                                               Foreground="{DynamicResource MutedTextBrush}"
+                                               TextTrimming="CharacterEllipsis"
+                                               Margin="0,0,0,10" />
+                                    <ItemsControl Grid.Row="3" ItemsSource="{Binding CompactFields}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,0,0,5">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="112" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding Label}"
+                                                               Foreground="{DynamicResource MutedTextBrush}"
+                                                               FontSize="10"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Grid.Column="1"
+                                                               Text="{Binding Value}"
+                                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <Button Grid.Row="4"
+                                            Content="Edit details"
+                                            Command="{Binding DataContext.EditResourceCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}"
+                                            HorizontalAlignment="Right"
+                                            MinWidth="92"
+                                            Margin="0,12,0,0" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <controls:ClientInfoResourceDataGrid ItemsSource="{Binding Resources}"
+                                                         SelectedItem="{Binding SelectedResource, Mode=TwoWay}"
+                                                         MouseDoubleClick="Resources_DoubleClick"
+                                                         Visibility="{Binding UseCompactView, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                </Grid>
             </Grid>
         </DataTemplate>
 

@@ -14,8 +14,9 @@ public sealed record ClientInfoClientSummary
     public long PersonCount { get; init; }
     public long ResourceCount { get; init; }
     public long CredentialCount { get; init; }
+    public bool IsDemo { get; init; }
 
-    public string InternalIdLabel => $"ID {ClientId}";
+    public string InternalIdLabel => IsDemo ? "DEMO" : $"ID {ClientId}";
     public string CountLabel =>
         $"{LocationCount} locations · {PersonCount} people · {ResourceCount} systems · {CredentialCount} credentials";
 }
@@ -157,6 +158,34 @@ public sealed record ClientInfoResource
         ClientInfoResourceCategories.Classify(ResourceType);
     public string TypeLabel =>
         ClientInfoResourceCategories.GetTypeLabel(ResourceType);
+    public string CompactSubtitle => string.Join(
+        " · ",
+        new[] { Provider, LocationName }
+            .Where(value => !string.IsNullOrWhiteSpace(value)));
+    public string CompactStatus => string.IsNullOrWhiteSpace(Status)
+        ? IsActive ? "Active" : "Inactive"
+        : Status;
+    public IReadOnlyList<ClientInfoResourceCompactField> CompactFields
+    {
+        get
+        {
+            var values = new List<ClientInfoResourceCompactField>();
+            if (!string.IsNullOrWhiteSpace(AddressOrUrl))
+            {
+                values.Add(new(
+                    ClientInfoResourceFieldDefinitions.AddressLabelForCategory(Category),
+                    AddressOrUrl));
+            }
+
+            values.AddRange(ClientInfoResourceFieldDefinitions.ForEditorCategory(Category)
+                .Where(definition => definition.ShowInCompact)
+                .Select(definition => new ClientInfoResourceCompactField(
+                    definition.FieldLabel,
+                    GetFieldValue(definition.FieldKey)))
+                .Where(field => !string.IsNullOrWhiteSpace(field.Value)));
+            return values.Take(6).ToArray();
+        }
+    }
 
     public string GetFieldValue(string fieldKey) =>
         Fields.FirstOrDefault(field => string.Equals(
@@ -164,6 +193,8 @@ public sealed record ClientInfoResource
             fieldKey,
             StringComparison.OrdinalIgnoreCase))?.ValueText ?? string.Empty;
 }
+
+public sealed record ClientInfoResourceCompactField(string Label, string Value);
 
 public sealed record ClientInfoResourceField
 {

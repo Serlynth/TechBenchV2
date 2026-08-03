@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using TechBench.ViewModels;
 
@@ -20,22 +21,23 @@ public partial class ClientInfoBetaWindow : Window
         Func<ClientInfoBetaViewModel, RelayCommand> commandSelector)
     {
         if (e.ChangedButton != MouseButton.Left
-            || sender is not DataGrid dataGrid)
+            || sender is not Selector selector)
         {
             return;
         }
 
-        var viewModel = dataGrid.DataContext as ClientInfoBetaViewModel
-            ?? Window.GetWindow(dataGrid)?.DataContext as ClientInfoBetaViewModel;
+        var viewModel = selector.DataContext as ClientInfoBetaViewModel
+            ?? Window.GetWindow(selector)?.DataContext as ClientInfoBetaViewModel;
         if (viewModel is null)
         {
             return;
         }
 
         var command = commandSelector(viewModel);
-        if (command.CanExecute(null))
+        var item = selector.SelectedItem;
+        if (command.CanExecute(item))
         {
-            command.Execute(null);
+            command.Execute(item);
             e.Handled = true;
         }
     }

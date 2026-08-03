@@ -1,12 +1,60 @@
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using TechBench.Data;
+using TechBench.Models;
 using TechBench.Services;
 
 namespace TechBench.Tests;
 
 public sealed class ClientInfoBetaTests
 {
+    [Fact]
+    public void DemoClientIsCompleteDeterministicAndClearlyIsolated()
+    {
+        var demo = ClientInfoDemoData.Create();
+
+        Assert.True(demo.Summary.IsDemo);
+        Assert.Equal("Demo Client", demo.Summary.ClientName);
+        Assert.True(demo.Summary.ClientId < 0);
+        Assert.Equal("DEMO", demo.Summary.InternalIdLabel);
+        Assert.Equal("Demo Client", demo.Snapshot.Profile.ClientName);
+        Assert.Equal(2, demo.Snapshot.Locations.Count);
+        Assert.Equal(3, demo.Snapshot.People.Count);
+        Assert.Equal(8, demo.Snapshot.Resources.Count);
+        Assert.Equal(4, demo.Snapshot.Credentials.Count);
+        Assert.Equal(3, demo.Equipment.Count);
+        Assert.Equal(
+            ClientInfoResourceCategories.All,
+            demo.Snapshot.Resources.Select(resource => resource.Category));
+        Assert.All(
+            demo.Snapshot.Resources.Where(resource =>
+                resource.Category != ClientInfoResourceCategories.NeedsSorting),
+            resource => Assert.NotEmpty(resource.CompactFields));
+    }
+
+    [Fact]
+    public void ResourceCategoriesProvideContextualFormsAndCompactViews()
+    {
+        foreach (var category in ClientInfoResourceCategories.All)
+        {
+            Assert.NotEmpty(
+                ClientInfoResourceFieldDefinitions.TypeOptionsForCategory(category));
+            Assert.Contains(
+                category,
+                ClientInfoResourceFieldDefinitions.EditorDescriptionForCategory(category),
+                StringComparison.Ordinal);
+        }
+
+        var xaml = Read("ClientInfoBetaWindow.xaml");
+        var viewModel = Read("ViewModels", "ClientInfoBetaViewModel.cs");
+        Assert.Contains("Content=\"At-a-glance\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Move\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("CompactFields", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"category\",\n                \"Category\"", viewModel, StringComparison.Ordinal);
+        Assert.Contains("TypeOptionsForCategory", viewModel, StringComparison.Ordinal);
+        Assert.Contains("MoveResourceCommand", viewModel, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void GeneratedWorkbookRoundTripsTheInternalClientIdentity()
     {
