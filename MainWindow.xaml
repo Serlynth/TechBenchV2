@@ -386,6 +386,255 @@
             </Setter>
         </Style>
 
+        <DataTemplate x:Key="InlineWorkEntryEditorTemplate">
+            <Border Style="{StaticResource CardStyle}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Edit note"
+                                       FontSize="18"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding EditorSubtitle}"
+                                       Style="{StaticResource MutedTextStyle}"
+                                       TextTrimming="CharacterEllipsis"
+                                       Margin="0,3,0,0" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1"
+                                    Orientation="Horizontal"
+                                    VerticalAlignment="Center"
+                                    Margin="10,0,0,0">
+                            <Border>
+                                <Border.Style>
+                                    <Style TargetType="{x:Type Border}" BasedOn="{StaticResource BadgeStyle}">
+                                        <Setter Property="Background" Value="{DynamicResource SuccessBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Editor.IsDirty}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource WarningBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock Text="{Binding EditorSaveStatus}"
+                                           Style="{StaticResource BadgeTextStyle}" />
+                            </Border>
+                            <Button Content="Full editor"
+                                    Command="{Binding NavigateCommand}"
+                                    CommandParameter="Today"
+                                    Padding="9,4"
+                                    Margin="6,0,0,0"
+                                    ToolTip="Open the complete editor without losing this entry" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Border Grid.Row="1"
+                            Background="{DynamicResource AccentSoftBrush}"
+                            BorderBrush="{DynamicResource AccentBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="10,8"
+                            Margin="0,0,0,12"
+                            Visibility="{Binding IsEntryOperationRunning, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <DockPanel>
+                            <ProgressBar DockPanel.Dock="Left"
+                                         IsIndeterminate="True"
+                                         Width="60"
+                                         Height="5"
+                                         Margin="0,0,10,0"
+                                         VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding EntryOperationText}"
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                       TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
+                    </Border>
+
+                    <ScrollViewer Grid.Row="2"
+                                  VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="0,0,6,0">
+                            <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                    BorderBrush="{DynamicResource WarningBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="8"
+                                    Padding="10,8"
+                                    Margin="0,0,0,10"
+                                    Visibility="{Binding IsEditorLocked, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <TextBlock Text="This entry is locked because it was posted to Sage."
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap" />
+                            </Border>
+
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="145" />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" IsEnabled="{Binding IsEditorEditable}">
+                                    <TextBlock Text="Work date" Style="{StaticResource FieldLabelStyle}" />
+                                    <DatePicker SelectedDate="{Binding Editor.WorkDate}"
+                                                SelectedDateFormat="Short" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Ticket" Style="{StaticResource FieldLabelStyle}" />
+                                    <TextBox Text="{Binding Editor.SelectedTicket.DisplayName, Mode=OneWay, TargetNullValue=No ticket}"
+                                             IsReadOnly="True"
+                                             IsReadOnlyCaretVisible="True"
+                                             ToolTip="The saved ticket stays selected for posting" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Sage/WHD Note" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding Editor.NoteCountLabel}"
+                                           Style="{StaticResource MutedTextStyle}"
+                                           Margin="10,0,1,7" />
+                            </Grid>
+                            <TextBox Text="{Binding Editor.Note, UpdateSourceTrigger=PropertyChanged}"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     SpellCheck.IsEnabled="True"
+                                     UndoLimit="200"
+                                     MinHeight="230"
+                                     IsReadOnly="{Binding IsEditorReadOnly}" />
+
+                            <Grid Margin="0,11,0,0" IsEnabled="{Binding IsEditorEditable}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="86" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Start" Style="{StaticResource FieldLabelStyle}" />
+                                    <TextBox Text="{Binding Editor.StartTimeText, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="End" Style="{StaticResource FieldLabelStyle}" />
+                                    <TextBox Text="{Binding Editor.EndTimeText, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="4" VerticalAlignment="Bottom" Margin="0,0,0,6">
+                                    <CheckBox Content="Billable"
+                                              IsChecked="{Binding Editor.Billable}" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Grid Margin="0,11,0,0" IsEnabled="{Binding IsEditorEditable}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition Width="150" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Tags" Style="{StaticResource FieldLabelStyle}" />
+                                    <ComboBox ItemsSource="{Binding TagSuggestions}"
+                                              Text="{Binding Editor.Tags, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                              IsEditable="True"
+                                              IsTextSearchEnabled="True"
+                                              StaysOpenOnEdit="True" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Follow-up" Style="{StaticResource FieldLabelStyle}" />
+                                    <ComboBox ItemsSource="{Binding FollowUpOptions}"
+                                              DisplayMemberPath="DisplayName"
+                                              SelectedValuePath="Value"
+                                              SelectedValue="{Binding Editor.FollowUpState}" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Expander Header="{Binding Editor.InternalNoteHeader}"
+                                      Margin="0,10,0,0">
+                                <StackPanel Margin="0,8,0,0">
+                                    <CheckBox Content="Include Personal Note when posting to WHD"
+                                              IsChecked="{Binding Editor.IncludePersonalNoteInWhd}"
+                                              IsEnabled="{Binding IsEditorEditable}"
+                                              Margin="0,0,0,7" />
+                                    <TextBox Text="{Binding Editor.InternalNote, UpdateSourceTrigger=PropertyChanged}"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto"
+                                             SpellCheck.IsEnabled="True"
+                                             MinHeight="100"
+                                             IsReadOnly="{Binding IsEditorReadOnly}" />
+                                </StackPanel>
+                            </Expander>
+
+                            <TextBlock Text="{Binding Editor.LastError}"
+                                       Foreground="{DynamicResource DangerBrush}"
+                                       Visibility="{Binding Editor.LastError, Converter={StaticResource StringToVisibilityConverter}}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,9,0,0" />
+                            <TextBlock Text="{Binding Editor.PostingSuccessMessage}"
+                                       Foreground="{DynamicResource SuccessBrush}"
+                                       FontWeight="SemiBold"
+                                       Visibility="{Binding Editor.HasPostingSuccess, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,9,0,0" />
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <Grid Grid.Row="3" Margin="0,12,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding StatusMessage}"
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   FontSize="11"
+                                   VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"
+                                   ToolTip="{Binding StatusMessage}"
+                                   Margin="0,0,10,0" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                            <Button Content="Open WHD"
+                                    Command="{Binding OpenWhdTicketCommand}"
+                                    Padding="10,5"
+                                    Margin="0,0,6,0"
+                                    Visibility="{Binding ShowOpenWhdAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <Button Content="Save"
+                                    Command="{Binding SaveEntryCommand}"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Padding="12,5"
+                                    Margin="0,0,6,0"
+                                    ToolTip="Save and keep this entry open (Ctrl+S)" />
+                            <Button Content="Post"
+                                    Click="PostActionsButton_Click"
+                                    Padding="12,5">
+                                <Button.ContextMenu>
+                                    <ContextMenu Style="{StaticResource EditorContextMenuStyle}"
+                                                 Placement="Top"
+                                                 DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                        <MenuItem Header="{Binding WhdPostActionLabel}"
+                                                  Command="{Binding PostWhdCommand}"
+                                                  Style="{StaticResource EditorContextMenuItemStyle}" />
+                                        <MenuItem Header="Create Sage Ticket"
+                                                  Command="{Binding PostSageCommand}"
+                                                  Style="{StaticResource EditorContextMenuItemStyle}" />
+                                    </ContextMenu>
+                                </Button.ContextMenu>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
         <Style x:Key="SelectableEntryCardStyle" TargetType="{x:Type Border}" BasedOn="{StaticResource CardStyle}">
             <Setter Property="Padding" Value="14,11" />
             <Style.Triggers>
@@ -1406,7 +1655,7 @@
                                         <Button Content="Save"
                                                 Command="{Binding SaveEntryCommand}"
                                                 Style="{StaticResource EditorActionButtonStyle}"
-                                                ToolTip="Save and start a new entry (Ctrl+S)" />
+                                                ToolTip="Save and keep this entry open (Ctrl+S)" />
                                         <Button Content="Post"
                                                 Click="PostActionsButton_Click"
                                                 Style="{StaticResource EditorActionButtonStyle}"
@@ -1460,8 +1709,15 @@
                     </Grid>
                 </Grid>
 
-                <ScrollViewer Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=This Week}"
-                              VerticalScrollBarVisibility="Auto">
+                <DockPanel Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=This Week}"
+                           LastChildFill="True">
+                    <ContentControl DockPanel.Dock="Right"
+                                    Width="500"
+                                    Margin="14,0,0,0"
+                                    Content="{Binding}"
+                                    ContentTemplate="{StaticResource InlineWorkEntryEditorTemplate}"
+                                    Visibility="{Binding Editor.IsExistingEntry, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
                         <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
                             <Grid>
@@ -1607,10 +1863,18 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </StackPanel>
-                </ScrollViewer>
+                    </ScrollViewer>
+                </DockPanel>
 
-                <ScrollViewer Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=History}"
-                              VerticalScrollBarVisibility="Auto">
+                <DockPanel Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=History}"
+                           LastChildFill="True">
+                    <ContentControl DockPanel.Dock="Right"
+                                    Width="500"
+                                    Margin="14,0,0,0"
+                                    Content="{Binding}"
+                                    ContentTemplate="{StaticResource InlineWorkEntryEditorTemplate}"
+                                    Visibility="{Binding Editor.IsExistingEntry, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
                         <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
                             <DockPanel LastChildFill="True">
@@ -1861,7 +2125,8 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </StackPanel>
-                </ScrollViewer>
+                    </ScrollViewer>
+                </DockPanel>
 
                 <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Client Match}">
                     <Border Style="{StaticResource CardStyle}">
