@@ -93,6 +93,14 @@ public sealed class V2AppUpdateServiceTests
             source,
             StringComparison.Ordinal);
         Assert.Contains(
+            "git/matching-refs/tags/$Tag",
+            source,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "git/ref/tags/$Tag",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "--raw-field \"tagger[date]=$tagDate\"",
             source,
             StringComparison.Ordinal);
