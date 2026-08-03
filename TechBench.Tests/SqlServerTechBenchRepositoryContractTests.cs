@@ -37,6 +37,34 @@ public sealed class SqlServerTechBenchRepositoryContractTests
     }
 
     [Fact]
+    public void EditorDraftConcurrencyDoesNotUseTheDeviceGuidHashAsAnEntityId()
+    {
+        var repositorySource = File.ReadAllText(FindRepositoryFile(
+            "Data",
+            "SqlServerTechBenchRepository.PersonalShared.cs"));
+        var sharedSource = File.ReadAllText(FindRepositoryFile(
+            "Data",
+            "SqlServerTechBenchRepository.cs"));
+
+        Assert.DoesNotContain(
+            "DeviceId.GetHashCode()",
+            repositorySource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "draft.RowVersion = rowVersion;",
+            repositorySource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "?? _editorDraftRowVersion",
+            repositorySource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "private byte[]? _editorDraftRowVersion;",
+            sharedSource,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void StoredProcedureContractUsesOnlyQualifiedApplicationProcedures()
     {
         var procedureFields = typeof(SqlServerTechBenchRepository.Procedures)
