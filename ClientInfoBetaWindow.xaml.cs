@@ -2,7 +2,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
-using TechBench.Models;
 using TechBench.ViewModels;
 
 namespace TechBench;
@@ -51,32 +50,6 @@ public partial class ClientInfoBetaWindow : Window
 
     private void Resources_DoubleClick(object sender, MouseButtonEventArgs e) =>
         ExecuteEdit(sender, e, viewModel => viewModel.EditResourceCommand);
-
-    private void ResourceOverview_DoubleClick(
-        object sender,
-        MouseButtonEventArgs e)
-    {
-        if (e.ChangedButton != MouseButton.Left
-            || sender is not System.Windows.Controls.ListBox
-            {
-                SelectedItem: ClientInfoResourceOverviewCard card
-            } listBox
-            || Window.GetWindow(listBox)?.DataContext
-                is not ClientInfoBetaViewModel viewModel)
-        {
-            return;
-        }
-
-        var command = card.IsResource
-            ? viewModel.EditResourceCommand
-            : viewModel.EditCredentialCommand;
-        var parameter = (object?)card.Resource ?? card.Credential;
-        if (command.CanExecute(parameter))
-        {
-            command.Execute(parameter);
-            e.Handled = true;
-        }
-    }
 
     private void Credentials_DoubleClick(object sender, MouseButtonEventArgs e) =>
         ExecuteEdit(sender, e, viewModel => viewModel.EditCredentialCommand);

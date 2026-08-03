@@ -186,7 +186,7 @@
                             <TextBlock Text="Overview"
                                        FontSize="14"
                                        FontWeight="SemiBold" />
-                            <TextBlock Text="Operational details, custom fields, and protected access references"
+                            <TextBlock Text="Important category information from Client Information"
                                        Foreground="{DynamicResource MutedTextBrush}"
                                        Margin="10,1,0,0" />
                         </StackPanel>
@@ -207,14 +207,13 @@
                                    Foreground="{DynamicResource MutedTextBrush}"
                                    HorizontalAlignment="Center"
                                    VerticalAlignment="Center"
-                                   Visibility="{Binding HasOverviewCards, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
-                        <ListBox ItemsSource="{Binding OverviewCards}"
-                             SelectedItem="{Binding SelectedOverviewCard, Mode=TwoWay}"
+                                   Visibility="{Binding HasOverviewSections, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                        <ListBox ItemsSource="{Binding OverviewSections}"
                              Background="Transparent"
                              BorderThickness="0"
                              Padding="0"
-                             MouseDoubleClick="ResourceOverview_DoubleClick"
-                             Visibility="{Binding HasOverviewCards, Converter={StaticResource BooleanToVisibilityConverter}}">
+                             Focusable="False"
+                             Visibility="{Binding HasOverviewSections, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <WrapPanel IsItemsHost="True" />
@@ -251,47 +250,24 @@
                         </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Grid Width="410" MinHeight="190" Margin="15">
+                                <Grid Width="500" MinHeight="190" Margin="15">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
                                         <RowDefinition Height="*" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
                                     <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding Name}"
+                                        <TextBlock Text="{Binding Title}"
                                                    FontSize="15"
                                                    FontWeight="SemiBold"
                                                    TextTrimming="CharacterEllipsis" />
-                                        <Border Grid.Column="1"
-                                                Background="{DynamicResource ControlBackgroundBrush}"
-                                                BorderBrush="{DynamicResource BorderBrush}"
-                                                BorderThickness="1"
-                                                CornerRadius="9"
-                                                Padding="8,3"
-                                                Margin="8,0,0,0">
-                                            <TextBlock Text="{Binding Status}"
-                                                       FontSize="10"
-                                                       Foreground="{DynamicResource SecondaryTextBrush}" />
-                                        </Border>
                                     </Grid>
                                     <TextBlock Grid.Row="1"
-                                               Text="{Binding TypeLabel}"
-                                               Foreground="{DynamicResource AccentBrush}"
-                                               FontWeight="SemiBold"
-                                               Margin="0,5,0,2" />
-                                    <TextBlock Grid.Row="2"
-                                               Text="{Binding Subtitle}"
-                                               Foreground="{DynamicResource MutedTextBrush}"
-                                               TextTrimming="CharacterEllipsis"
-                                               Margin="0,0,0,10" />
-                                    <ItemsControl Grid.Row="3" ItemsSource="{Binding Fields}">
+                                               Text="{Binding Description}"
+                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,5,0,10" />
+                                    <ItemsControl Grid.Row="2" ItemsSource="{Binding Fields}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
                                                 <Grid Margin="0,0,0,5">
@@ -300,95 +276,19 @@
                                                         <ColumnDefinition Width="*" />
                                                     </Grid.ColumnDefinitions>
                                                     <TextBlock Text="{Binding Label}"
-                                                               Foreground="{DynamicResource MutedTextBrush}"
-                                                               FontSize="10"
+                                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                                               FontSize="12"
+                                                               FontWeight="SemiBold"
                                                                TextWrapping="Wrap" />
                                                     <TextBlock Grid.Column="1"
                                                                Text="{Binding Value}"
                                                                Foreground="{DynamicResource PrimaryTextBrush}"
+                                                               FontSize="13"
                                                                TextWrapping="Wrap" />
                                                 </Grid>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
-                                    <Border Grid.Row="4"
-                                            Background="{DynamicResource ControlBackgroundBrush}"
-                                            BorderBrush="{DynamicResource BorderBrush}"
-                                            BorderThickness="1"
-                                            CornerRadius="8"
-                                            Padding="10"
-                                            Margin="0,12,0,0"
-                                            Visibility="{Binding HasRelatedCredentials, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                        <StackPanel>
-                                            <TextBlock Text="{Binding RelatedCredentialLabel}"
-                                                       Foreground="{DynamicResource AccentBrush}"
-                                                       FontSize="10"
-                                                       FontWeight="Bold"
-                                                       Margin="0,0,0,7" />
-                                            <ItemsControl ItemsSource="{Binding RelatedCredentials}">
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <Border BorderBrush="{DynamicResource BorderBrush}"
-                                                                BorderThickness="0,1,0,0"
-                                                                Padding="0,7,0,2">
-                                                            <StackPanel>
-                                                                <Grid>
-                                                                    <Grid.ColumnDefinitions>
-                                                                        <ColumnDefinition Width="*" />
-                                                                        <ColumnDefinition Width="Auto" />
-                                                                    </Grid.ColumnDefinitions>
-                                                                    <TextBlock Text="{Binding Name}"
-                                                                               FontWeight="SemiBold"
-                                                                               TextWrapping="Wrap" />
-                                                                    <Button Grid.Column="1"
-                                                                            Content="Edit access"
-                                                                            Command="{Binding DataContext.EditCredentialCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                            CommandParameter="{Binding}"
-                                                                            Padding="8,3"
-                                                                            Margin="8,0,0,0" />
-                                                                </Grid>
-                                                                <ItemsControl ItemsSource="{Binding OverviewFields}"
-                                                                              Margin="0,5,0,0">
-                                                                    <ItemsControl.ItemTemplate>
-                                                                        <DataTemplate>
-                                                                            <Grid Margin="0,0,0,4">
-                                                                                <Grid.ColumnDefinitions>
-                                                                                    <ColumnDefinition Width="122" />
-                                                                                    <ColumnDefinition Width="*" />
-                                                                                </Grid.ColumnDefinitions>
-                                                                                <TextBlock Text="{Binding Label}"
-                                                                                           Foreground="{DynamicResource MutedTextBrush}"
-                                                                                           FontSize="10"
-                                                                                           TextWrapping="Wrap" />
-                                                                                <TextBlock Grid.Column="1"
-                                                                                           Text="{Binding Value}"
-                                                                                           TextWrapping="Wrap" />
-                                                                            </Grid>
-                                                                        </DataTemplate>
-                                                                    </ItemsControl.ItemTemplate>
-                                                                </ItemsControl>
-                                                            </StackPanel>
-                                                        </Border>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
-                                        </StackPanel>
-                                    </Border>
-                                    <StackPanel Grid.Row="5"
-                                                Orientation="Horizontal"
-                                                HorizontalAlignment="Right"
-                                                Margin="0,12,0,0">
-                                        <Button Content="Edit details"
-                                                Command="{Binding DataContext.EditResourceCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                CommandParameter="{Binding Resource}"
-                                                MinWidth="92"
-                                                Visibility="{Binding IsResource, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                        <Button Content="Edit access"
-                                                Command="{Binding DataContext.EditCredentialCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                CommandParameter="{Binding Credential}"
-                                                MinWidth="92"
-                                                Visibility="{Binding IsCredential, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    </StackPanel>
                                 </Grid>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
@@ -433,6 +333,17 @@
             <Setter Property="ColumnHeaderHeight" Value="38" />
             <Setter Property="RowHeight" Value="38" />
             <Setter Property="AlternationCount" Value="2" />
+        </Style>
+
+        <!-- Implicit DataGrid styles do not flow to a derived custom control. -->
+        <Style TargetType="{x:Type controls:ClientInfoResourceDataGrid}"
+               BasedOn="{StaticResource {x:Type DataGrid}}">
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ControlBackgroundBrush}" />
+            <Setter Property="RowBackground" Value="{DynamicResource ControlBackgroundBrush}" />
+            <Setter Property="AlternatingRowBackground" Value="{DynamicResource PanelAltBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="Opacity" Value="1" />
         </Style>
 
         <Style TargetType="DataGridColumnHeader">
