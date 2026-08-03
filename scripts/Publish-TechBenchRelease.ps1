@@ -70,6 +70,54 @@ function Invoke-Checked {
     }
 }
 
+function New-AnnotatedClientReleaseTag {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositorySlug,
+        [Parameter(Mandatory = $true)][string]$Tag,
+        [Parameter(Mandatory = $true)][string]$ReleaseVersion
+    )
+
+    $existingObjectType = & gh api "repos/$RepositorySlug/git/ref/tags/$Tag" `
+        --jq '.object.type' 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        if (($existingObjectType -join '').Trim() -eq 'tag') {
+            return
+        }
+
+        throw "Release tag $Tag already exists but is not an annotated tag."
+    }
+
+    $commitSha = & gh api "repos/$RepositorySlug/git/ref/heads/main" --jq '.object.sha'
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($commitSha)) {
+        throw "Could not resolve the release repository main branch for $Tag."
+    }
+
+    # GitHub orders releases by the tagged object's creation time. A lightweight
+    # tag on the release repository's old main commit can make a newly published
+    # client invisible to Velopack behind older releases.
+    $tagDate = [DateTime]::UtcNow.ToString('o')
+    $tagObjectSha = & gh api --method POST "repos/$RepositorySlug/git/tags" `
+        --raw-field "tag=$Tag" `
+        --raw-field "message=TechBench Client $ReleaseVersion" `
+        --raw-field "object=$($commitSha.Trim())" `
+        --raw-field 'type=commit' `
+        --raw-field 'tagger[name]=TechBench Release Publisher' `
+        --raw-field 'tagger[email]=noreply@csri-qt.com' `
+        --raw-field "tagger[date]=$tagDate" `
+        --jq '.sha'
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tagObjectSha)) {
+        throw "Could not create the annotated Git tag object for $Tag."
+    }
+
+    & gh api --method POST "repos/$RepositorySlug/git/refs" `
+        --raw-field "ref=refs/tags/$Tag" `
+        --raw-field "sha=$($tagObjectSha.Trim())" `
+        --silent
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not publish the annotated Git tag for $Tag."
+    }
+}
+
 function Reset-WorkspaceDirectory {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -305,6 +353,11 @@ try {
         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
             throw 'GitHub CLI is not authenticated.'
         }
+
+        New-AnnotatedClientReleaseTag `
+            -RepositorySlug $repositorySlug `
+            -Tag "v$Version" `
+            -ReleaseVersion $Version
 
         Invoke-Checked $dotnet @(
             'tool', 'run', 'vpk', '--',
