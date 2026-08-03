@@ -11,6 +11,7 @@ namespace TechBench.Models;
 public static class ClientInfoCategoryOverviewBuilder
 {
     private const int MaximumValuesPerField = 3;
+    private const int MaximumAccessRecordsPerSection = 2;
 
     public static IReadOnlyList<ClientInfoCategoryOverviewSection> Build(
         string category,
@@ -159,15 +160,13 @@ public static class ClientInfoCategoryOverviewBuilder
 
         return
         [
-            Section("Microsoft 365", "Tenant, administrative portal, plan, support, and access references.",
+            Section("Microsoft 365", "Tenant and administrative access.",
                 WithAccess(
                     [
-                        Names("Services", microsoftResources),
                         Values("Tenant / instance", microsoftResources, "tenant_instance", "tenant name", "tenant id", "onmicrosoft"),
-                        Values("Admin portal", microsoftResources, "admin_portal", "portal url", "console url"),
-                        Values("Plan / version", microsoftResources, "version", "plan", "subscription"),
-                        Values("Support", microsoftResources, "support_contact", "support phone", "support email"),
-                        Values("Renewal", microsoftResources, "renewal_date", "renewal", "expiration")
+                        Coalesce("Admin portal",
+                            Values("Admin portal", microsoftResources, "admin_portal", "portal url", "console url"),
+                            Addresses("Admin portal", microsoftResources))
                     ],
                     microsoftCredentials)),
             Section("Remote Access", "RustDesk, ScreenConnect, ConnectWise, Splashtop, and TeamViewer references.",
@@ -199,17 +198,11 @@ public static class ClientInfoCategoryOverviewBuilder
         IReadOnlyList<ClientInfoResource> resources,
         IReadOnlyList<ClientInfoCredential> credentials) =>
     [
-        Section("Domain & AD", "Active Directory, domain, DNS, registrar, email, and administrative access information.",
+        Section("Domain & AD", "Domain controllers and administrative access.",
             WithAccess(
                 [
                     Values("Domain", resources, "domain_name", "local domain", "ad domain", "domain"),
-                    Names("Directory / domain records", resources),
-                    Values("Domain controllers", resources, "domain controller", "dns_provider", "dc name", "dc ip"),
-                    Values("Registrar", resources, "registrar", "domain registrar"),
-                    Values("DNS provider", resources, "dns_provider", "name servers", "dns"),
-                    Values("Mail provider", resources, "mail_provider", "email provider", "mail host"),
-                    Values("Tenant", resources, "tenant_name", "tenant id", "onmicrosoft"),
-                    Values("Expiration", resources, "expiration_date", "domain expiration", "expires"),
+                    Values("Domain controllers", resources, "domain_controller", "domain controller", "dc name", "dc ip"),
                     Addresses("Domain / admin URL", resources)
                 ],
                 credentials))
@@ -296,16 +289,37 @@ public static class ClientInfoCategoryOverviewBuilder
         IEnumerable<ClientInfoOverviewField?> fields,
         IReadOnlyList<ClientInfoCredential> credentials)
     {
-        var secretCount = credentials.Sum(credential => credential.SecretCount);
-        return fields.Concat(
-        [
-            Aggregate("Access records", credentials.Select(credential => credential.Name)),
-            Aggregate("Usernames", credentials.Select(credential => credential.Username), credentials.Select(credential => credential.Name)),
-            Aggregate("Login URLs", credentials.Select(credential => credential.LoginUrl), credentials.Select(credential => credential.Name)),
-            Field("Protected values", secretCount == 1
-                ? "1 stored secret"
-                : secretCount > 1 ? $"{secretCount} stored secrets" : string.Empty)
-        ]).ToArray();
+        var accessRecords = credentials
+            .Where(credential => credential.IsActive)
+            .OrderBy(credential => credential.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var visibleAccessRecords = accessRecords
+            .Take(MaximumAccessRecordsPerSection)
+            .Select(AccessField)
+            .Cast<ClientInfoOverviewField?>();
+        var remainingCount = accessRecords.Length - MaximumAccessRecordsPerSection;
+
+        return fields
+            .Concat(visibleAccessRecords)
+            .Append(remainingCount > 0
+                ? Field("More access", $"+{remainingCount} more in Passwords")
+                : null)
+            .ToArray();
+    }
+
+    private static ClientInfoOverviewField AccessField(ClientInfoCredential credential)
+    {
+        var details = new[] { credential.Username, credential.LoginUrl }
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var value = details.Length > 0
+            ? string.Join(Environment.NewLine, details)
+            : credential.Secrets.Count > 0 ? "Password available" : "Access record";
+        return new ClientInfoOverviewField(
+            string.IsNullOrWhiteSpace(credential.Name) ? "Access" : credential.Name.Trim(),
+            value,
+            credential.Secrets.Where(secret => secret.IsCurrent).ToArray());
     }
 
     private static ClientInfoCategoryOverviewSection Section(

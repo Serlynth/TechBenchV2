@@ -43,6 +43,46 @@
             <Setter Property="Cursor" Value="IBeam" />
             <Setter Property="ToolTip" Value="Select text and press Ctrl+C to copy" />
         </Style>
+        <DataTemplate x:Key="OverviewFieldTemplate">
+            <Grid Margin="0,0,0,7">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="132" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding Label}"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           FontSize="12"
+                           FontWeight="SemiBold"
+                           TextWrapping="Wrap" />
+                <StackPanel Grid.Column="1">
+                    <TextBox Text="{Binding Value, Mode=OneWay}"
+                             Style="{StaticResource SelectableValueStyle}" />
+                    <ItemsControl ItemsSource="{Binding Secrets}"
+                                  Visibility="{Binding HasSecrets, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <WrapPanel Margin="0,5,0,0">
+                                    <TextBlock Text="{Binding SecretLabel}"
+                                               Foreground="{DynamicResource MutedTextBrush}"
+                                               FontSize="11"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,7,0" />
+                                    <Button Content="Reveal"
+                                            Command="{Binding DataContext.RevealSecretCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}"
+                                            Padding="8,3"
+                                            Margin="0,0,5,0" />
+                                    <Button Content="Copy"
+                                            Command="{Binding DataContext.CopySecretCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}"
+                                            Padding="8,3" />
+                                </WrapPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
 
         <Style TargetType="TabControl">
             <Setter Property="Background" Value="{DynamicResource PanelBackgroundBrush}" />
@@ -280,26 +320,9 @@
                                                Foreground="{DynamicResource SecondaryTextBrush}"
                                                TextWrapping="Wrap"
                                                Margin="0,5,0,10" />
-                                    <ItemsControl Grid.Row="2" ItemsSource="{Binding Fields}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <Grid Margin="0,0,0,5">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="132" />
-                                                        <ColumnDefinition Width="*" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <TextBlock Text="{Binding Label}"
-                                                               Foreground="{DynamicResource SecondaryTextBrush}"
-                                                               FontSize="12"
-                                                               FontWeight="SemiBold"
-                                                               TextWrapping="Wrap" />
-                                                    <TextBox Grid.Column="1"
-                                                             Text="{Binding Value, Mode=OneWay}"
-                                                             Style="{StaticResource SelectableValueStyle}" />
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
+                                    <ItemsControl Grid.Row="2"
+                                                  ItemsSource="{Binding Fields}"
+                                                  ItemTemplate="{StaticResource OverviewFieldTemplate}" />
                                 </Grid>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
@@ -628,26 +651,8 @@
                                                            Foreground="{DynamicResource SecondaryTextBrush}"
                                                            TextWrapping="Wrap"
                                                            Margin="0,5,0,10" />
-                                                <ItemsControl ItemsSource="{Binding Fields}">
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <Grid Margin="0,0,0,5">
-                                                                <Grid.ColumnDefinitions>
-                                                                    <ColumnDefinition Width="112" />
-                                                                    <ColumnDefinition Width="*" />
-                                                                </Grid.ColumnDefinitions>
-                                                                <TextBlock Text="{Binding Label}"
-                                                                           Foreground="{DynamicResource SecondaryTextBrush}"
-                                                                           FontSize="12"
-                                                                           FontWeight="SemiBold"
-                                                                           TextWrapping="Wrap" />
-                                                                <TextBox Grid.Column="1"
-                                                                         Text="{Binding Value, Mode=OneWay}"
-                                                                         Style="{StaticResource SelectableValueStyle}" />
-                                                            </Grid>
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
+                                                <ItemsControl ItemsSource="{Binding Fields}"
+                                                              ItemTemplate="{StaticResource OverviewFieldTemplate}" />
                                             </StackPanel>
                                         </Border>
                                     </DataTemplate>
