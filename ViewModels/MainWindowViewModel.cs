@@ -2173,10 +2173,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var savedEntry = _repository.GetWorkEntry(entry.Id) ?? entry;
-        CurrentSection = "Today";
-        SelectedDate = DateTime.Today;
-        SelectedEntry = Entries.FirstOrDefault(candidate => candidate.Id == savedEntry.Id) ?? savedEntry;
-        StatusMessage = $"Editing {savedEntry.ClientDisplay} from worklog history.";
+        var editInline = CurrentSection is "This Week" or "History";
+        if (!editInline)
+        {
+            CurrentSection = "Today";
+            SelectedDate = DateTime.Today;
+        }
+
+        SelectedEntry = editInline
+            ? savedEntry
+            : Entries.FirstOrDefault(candidate => candidate.Id == savedEntry.Id) ?? savedEntry;
+        StatusMessage = editInline
+            ? $"Editing {savedEntry.ClientDisplay} here. The list and filters will stay in place."
+            : $"Editing {savedEntry.ClientDisplay} from worklog history.";
     }
 
     private async Task SaveEntryAsync(object? parameter)
@@ -2209,9 +2218,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
         }
 
-        var savedStatus = StatusMessage;
-        NewEntry();
-        StatusMessage = $"{savedStatus} New entry ready.";
+        StatusMessage = $"{StatusMessage} The saved entry remains open for posting or further edits.";
     }
 
     private WorkEntry? SaveEditor()
@@ -2247,8 +2254,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         Editor.RunWithoutDirtyTracking(() => Editor.Id = id);
         Editor.MarkClean();
         ClearPersistedEditorDraft();
-        _selectedDate = DateTime.Today;
-        OnPropertyChanged(nameof(SelectedDate));
+        if (CurrentSection is not ("This Week" or "History"))
+        {
+            _selectedDate = DateTime.Today;
+            OnPropertyChanged(nameof(SelectedDate));
+        }
         RefreshAll();
         var savedEntry = Entries.FirstOrDefault(saved => saved.Id == id) ?? _repository.GetWorkEntry(id);
         if (savedEntry is not null)
