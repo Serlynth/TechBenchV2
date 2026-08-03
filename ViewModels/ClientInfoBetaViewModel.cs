@@ -1691,7 +1691,6 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 public sealed class ClientInfoResourceGroup : ObservableObject
 {
     private ClientInfoResource? _selectedResource;
-    private bool _useCompactView = true;
 
     public ClientInfoResourceGroup(
         string categoryName,
@@ -1712,11 +1711,6 @@ public sealed class ClientInfoResourceGroup : ObservableObject
         ? "1 record"
         : $"{Resources.Count} records";
     public bool HasResources => Resources.Count > 0;
-    public bool UseCompactView
-    {
-        get => _useCompactView;
-        set => SetProperty(ref _useCompactView, value);
-    }
     public ClientInfoResource? SelectedResource
     {
         get => _selectedResource;
