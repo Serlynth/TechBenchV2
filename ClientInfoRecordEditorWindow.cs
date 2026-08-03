@@ -20,7 +20,8 @@ public sealed record ClientInfoEditField(
     bool IsRequired = false,
     bool IsMultiline = false,
     bool IsSecret = false,
-    IReadOnlyList<string>? Options = null);
+    IReadOnlyList<string>? Options = null,
+    bool AllowCustomValue = false);
 
 public sealed class ClientInfoRecordEditorWindow : Window
 {
@@ -30,7 +31,8 @@ public sealed class ClientInfoRecordEditorWindow : Window
 
     public ClientInfoRecordEditorWindow(
         string title,
-        IReadOnlyList<ClientInfoEditField> fields)
+        IReadOnlyList<ClientInfoEditField> fields,
+        string? description = null)
     {
         _fields = fields;
         Title = title;
@@ -52,6 +54,16 @@ public sealed class ClientInfoRecordEditorWindow : Window
             Height = GridLength.Auto
         });
         var panel = new StackPanel();
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = description,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = (System.Windows.Media.Brush)FindResource("SecondaryTextBrush"),
+                Margin = new Thickness(0, 0, 0, 18)
+            });
+        }
         foreach (var field in fields)
         {
             panel.Children.Add(new TextBlock
@@ -111,14 +123,15 @@ public sealed class ClientInfoRecordEditorWindow : Window
         {
             var combo = new ComboBox
             {
-                IsEditable = false,
+                IsEditable = field.AllowCustomValue,
                 ItemsSource = field.Options,
                 SelectedItem = field.Options.FirstOrDefault(value =>
                     string.Equals(
                         value,
                         field.Value,
                         StringComparison.OrdinalIgnoreCase))
-                    ?? field.Options[0],
+                    ?? (field.AllowCustomValue ? null : field.Options[0]),
+                Text = field.AllowCustomValue ? field.Value : string.Empty,
                 MinHeight = 34
             };
             return combo;
@@ -176,7 +189,9 @@ public sealed class ClientInfoRecordEditorWindow : Window
         {
             TextBox textBox => textBox.Text,
             PasswordBox passwordBox => passwordBox.Password,
-            ComboBox comboBox => comboBox.SelectedItem?.ToString() ?? "",
+            ComboBox comboBox => comboBox.IsEditable
+                ? comboBox.Text
+                : comboBox.SelectedItem?.ToString() ?? "",
             _ => ""
         };
 }

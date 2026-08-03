@@ -87,6 +87,18 @@ public sealed partial class MainWindowViewModel
 
         try
         {
+            var isClientDatabase = CurrentSection.Equals(
+                ClientInfoWorkspaceSection,
+                StringComparison.Ordinal);
+            if (isClientDatabase
+                && (string.IsNullOrWhiteSpace(ClientInfoSearchText)
+                    || "Demo Client".Contains(
+                        ClientInfoSearchText.Trim(),
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                ClientInfoClients.Add(ClientInfoDemoData.Summary);
+            }
+
             foreach (var client in _repository.SearchClientInfoClients(
                          ClientInfoSearchText))
             {
@@ -139,6 +151,7 @@ public sealed partial class MainWindowViewModel
             summary.ClientId,
             _repository,
             _currentUser,
-            _dialogService);
+            _dialogService,
+            summary.IsDemo ? ClientInfoDemoData.Create() : null);
     }
 }
