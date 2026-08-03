@@ -20,16 +20,16 @@ public sealed class ClientInfoBetaTests
         Assert.Equal("Demo Client", demo.Snapshot.Profile.ClientName);
         Assert.Equal(2, demo.Snapshot.Locations.Count);
         Assert.Equal(3, demo.Snapshot.People.Count);
-        Assert.Equal(8, demo.Snapshot.Resources.Count);
-        Assert.Equal(4, demo.Snapshot.Credentials.Count);
+        Assert.Equal(14, demo.Snapshot.Resources.Count);
+        Assert.Equal(10, demo.Snapshot.Credentials.Count);
         Assert.Equal(3, demo.Equipment.Count);
         Assert.Equal(
             ClientInfoResourceCategories.All,
-            demo.Snapshot.Resources.Select(resource => resource.Category));
+            demo.Snapshot.Resources.Select(resource => resource.Category).Distinct());
         Assert.All(
             demo.Snapshot.Resources.Where(resource =>
                 resource.Category != ClientInfoResourceCategories.NeedsSorting),
-            resource => Assert.NotEmpty(resource.CompactFields));
+            resource => Assert.NotEmpty(resource.OverviewFields));
     }
 
     [Fact]
@@ -53,10 +53,95 @@ public sealed class ClientInfoBetaTests
         Assert.DoesNotContain("Content=\"At-a-glance\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("UseCompactView", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Move\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("CompactFields", xaml, StringComparison.Ordinal);
+        Assert.Contains("OverviewCards", xaml, StringComparison.Ordinal);
+        Assert.Contains("RelatedCredentials", xaml, StringComparison.Ordinal);
+        Assert.Contains("OverviewFields", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("\"category\",\n                \"Category\"", viewModel, StringComparison.Ordinal);
         Assert.Contains("TypeOptionsForCategory", viewModel, StringComparison.Ordinal);
         Assert.Contains("MoveResourceCommand", viewModel, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResourceOverviewIncludesCoreStandardCustomAndProtectedAccessDetails()
+    {
+        var resource = new ClientInfoResource
+        {
+            ResourceId = 42,
+            ResourceType = ClientInfoResourceCategories.Encode(
+                ClientInfoResourceCategories.ConnectionInternet,
+                "WatchGuard Firewall"),
+            Name = "Main Firebox",
+            Provider = "WatchGuard",
+            LocationName = "Main Office",
+            AddressOrUrl = "https://10.0.0.1",
+            Notes = "Failover WAN is connected.",
+            ReviewStatus = "Verified",
+            Fields =
+            [
+                new ClientInfoResourceField
+                {
+                    FieldKey = "public_wan_ip",
+                    FieldLabel = "Public / WAN IP",
+                    ValueText = "203.0.113.10",
+                    SortOrder = 10
+                },
+                new ClientInfoResourceField
+                {
+                    FieldKey = "custom.authpoint_tenant",
+                    FieldLabel = "AuthPoint Tenant",
+                    ValueText = "Demo Tenant",
+                    SortOrder = 150
+                }
+            ]
+        };
+        var credential = new ClientInfoCredential
+        {
+            CredentialId = 88,
+            ResourceId = 42,
+            Name = "WatchGuard Admin",
+            Category = "WatchGuard",
+            Username = "csriadmin",
+            LoginUrl = "https://10.0.0.1",
+            SecretCount = 2,
+            ReviewStatus = "Verified"
+        };
+        var card = ClientInfoResourceOverviewCard.ForResource(
+            resource,
+            [credential]);
+
+        Assert.Contains(resource.OverviewFields,
+            field => field.Label == "Provider" && field.Value == "WatchGuard");
+        Assert.Contains(resource.OverviewFields,
+            field => field.Label == "Public / WAN IP" && field.Value == "203.0.113.10");
+        Assert.Contains(resource.OverviewFields,
+            field => field.Label == "AuthPoint Tenant" && field.Value == "Demo Tenant");
+        Assert.Contains(resource.OverviewFields,
+            field => field.Label == "Notes" && field.Value.Contains("Failover WAN"));
+        Assert.True(card.HasRelatedCredentials);
+        Assert.Contains(credential.OverviewFields,
+            field => field.Label == "Protected Values"
+                     && field.Value == "*** · 2 protected values");
+    }
+
+    [Theory]
+    [InlineData("WatchGuard", "Admin", ClientInfoResourceCategories.ConnectionInternet)]
+    [InlineData("Wireless", "Aruba Central", ClientInfoResourceCategories.Wifi)]
+    [InlineData("Veeam", "Backup Console", ClientInfoResourceCategories.BackupSecurity)]
+    [InlineData("Active Directory", "Domain Admin", ClientInfoResourceCategories.DomainsEmail)]
+    [InlineData("Remote Access", "ScreenConnect", ClientInfoResourceCategories.ApplicationsCloud)]
+    [InlineData("ILO", "ILO Host 1", ClientInfoResourceCategories.ServersInfrastructure)]
+    public void StandaloneFireDrillStyleAccessIsClassifiedIntoTheCorrectOverview(
+        string category,
+        string name,
+        string expected)
+    {
+        Assert.Equal(
+            expected,
+            ClientInfoResourceCategories.ClassifyCredential(new ClientInfoCredential
+            {
+                Category = category,
+                Name = name
+            }));
     }
 
     [Fact]
