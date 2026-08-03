@@ -54,4 +54,44 @@ public partial class ClientInfoBetaWindow : Window
 
     private void Facts_DoubleClick(object sender, MouseButtonEventArgs e) =>
         ExecuteEdit(sender, e, viewModel => viewModel.EditFactCommand);
+
+    private void Attachments_DoubleClick(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left
+            || DataContext is not ClientInfoBetaViewModel viewModel
+            || !viewModel.OpenAttachmentCommand.CanExecute(null))
+        {
+            return;
+        }
+
+        viewModel.OpenAttachmentCommand.Execute(null);
+        e.Handled = true;
+    }
+
+    private void Attachments_PreviewDragOver(
+        object sender,
+        System.Windows.DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)
+            ? System.Windows.DragDropEffects.Copy
+            : System.Windows.DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private async void Attachments_Drop(
+        object sender,
+        System.Windows.DragEventArgs e)
+    {
+        if (DataContext is not ClientInfoBetaViewModel viewModel
+            || e.Data.GetData(System.Windows.DataFormats.FileDrop)
+                is not string[] paths)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        await viewModel.UploadAttachmentFilesAsync(paths);
+    }
 }

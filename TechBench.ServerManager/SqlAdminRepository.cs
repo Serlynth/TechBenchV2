@@ -381,6 +381,8 @@ internal sealed class SqlAdminRepository(AppPaths paths)
             "Whd.BaseUrl", "Whd.AuthenticationMode", "Whd.ServiceUsername", "Whd.AutoSyncEnabled",
             "Whd.AutoSyncMinutes", "Sage.SyncDsn", "Sage.SyncUsername",
             "FireDrill.SourcePath", "FireDrill.DailySyncEnabled", "FireDrill.DailySyncTime",
+            "ClientAttachments.RootPath", "ClientAttachments.MaximumFileSizeMegabytes",
+            "ClientAttachments.AllowedExtensions",
             "AuthPoint.Enabled", "AuthPoint.RequireAllUsers", "AuthPoint.BaseApiUrl", "AuthPoint.AccountId",
             "AuthPoint.ResourceId", "AuthPoint.AccessId"
         };

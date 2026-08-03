@@ -94,6 +94,43 @@ columns in the appropriate category grid. Grid columns can be resized and
 reordered during the session; the canonical data remains in SQL regardless of
 the display order.
 
+## Client attachments
+
+Client Info beta can keep site photos, hardware pictures, diagrams, PDFs, and
+ordinary office documents with the canonical client record. SQL stores the
+attachment metadata, audit history, original filename, size, and SHA-256 hash;
+the file itself stays in a server share so database backups do not become
+unnecessarily large.
+
+Before using attachments:
+
+1. Install the current stable TechBench server package and apply its standalone
+   SQL deployment in SSMS with **SQLCMD Mode** enabled. The attachment extension
+   is additive and keeps the database schema version at 15.
+2. In **Server Manager > Attachments**, choose a dedicated UNC folder below a
+   share, for example
+   `\\CSRI-SQL\TechBenchFiles\ClientAttachments`. Do not select the share root.
+3. Set the maximum upload size and allowed extensions, then choose **Save
+   settings**. Saving performs a create/read/delete test and reports current
+   usage and free space.
+4. Grant the normal TechBench Windows groups the file-share and NTFS access
+   appropriate for their application permissions, and include the attachment
+   root in the normal server backup plan.
+
+TechBench creates `Client-<internal ID>\Photos` and
+`Client-<internal ID>\Documents` automatically. Technicians do not organize
+folders themselves. Client display-name changes do not affect attachment
+paths. If duplicate clients are merged, SQL moves the metadata to the retained
+internal client record while preserving the existing physical path so a file
+operation cannot break the database transaction.
+
+On the **Attachments** tab, files can be selected, dragged onto the page, or
+pasted from the clipboard. Images have an in-app preview; other documents open
+with their normal Windows application. Files can be copied, saved elsewhere,
+categorized, captioned, archived, and restored. Archive is intentionally
+non-destructive: it hides the record by default but retains both the file and
+its audit history.
+
 ## Multiple editors
 
 Edits are saved one small record at a time. Every update supplies the SQL

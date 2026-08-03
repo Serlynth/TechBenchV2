@@ -39,6 +39,51 @@ public sealed record ClientInfoProfile
     public byte[]? CutoverRowVersion { get; init; }
 }
 
+public sealed record ClientAttachmentStorageConfiguration
+{
+    public string RootPath { get; init; } = string.Empty;
+    public int MaximumFileSizeMegabytes { get; init; } = 50;
+    public string AllowedExtensions { get; init; } =
+        ".jpg,.jpeg,.png,.gif,.bmp,.webp,.tif,.tiff,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.rtf,.ppt,.pptx,.zip";
+
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(RootPath);
+    public long MaximumFileSizeBytes =>
+        Math.Clamp(MaximumFileSizeMegabytes, 1, 2048) * 1024L * 1024L;
+}
+
+public sealed record ClientInfoAttachment
+{
+    public Guid AttachmentId { get; init; }
+    public int ClientId { get; init; }
+    public string RelativePath { get; init; } = string.Empty;
+    public string OriginalFileName { get; init; } = string.Empty;
+    public string ContentType { get; init; } = "application/octet-stream";
+    public string Category { get; init; } = "Other";
+    public string Caption { get; init; } = string.Empty;
+    public long FileSizeBytes { get; init; }
+    public byte[] ContentSha256 { get; init; } = [];
+    public string UploadedBy { get; init; } = string.Empty;
+    public DateTime UploadedAtUtc { get; init; }
+    public bool IsArchived { get; init; }
+    public string ArchivedBy { get; init; } = string.Empty;
+    public DateTime? ArchivedAtUtc { get; init; }
+    public byte[]? RowVersion { get; init; }
+
+    public bool IsImage => ContentType.StartsWith(
+        "image/",
+        StringComparison.OrdinalIgnoreCase);
+    public string FileSizeLabel => FileSizeBytes switch
+    {
+        < 1024 => $"{FileSizeBytes} B",
+        < 1024 * 1024 => $"{FileSizeBytes / 1024d:0.#} KB",
+        _ => $"{FileSizeBytes / (1024d * 1024d):0.#} MB"
+    };
+    public string UploadedLabel => UploadedAtUtc == default
+        ? string.Empty
+        : UploadedAtUtc.ToLocalTime().ToString("g");
+    public string StatusLabel => IsArchived ? "Archived" : "Available";
+}
+
 public sealed record ClientInfoLocation
 {
     public long LocationId { get; init; }

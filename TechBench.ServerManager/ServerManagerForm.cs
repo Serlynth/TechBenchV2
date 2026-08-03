@@ -82,6 +82,23 @@ internal sealed class ServerManagerForm : Form
     };
     private readonly Label _fireDrillSyncStatus = StatusLabel();
 
+    private readonly TextBox _attachmentRootPath = Field();
+    private readonly NumericUpDown _attachmentMaximumFileSize = new()
+    {
+        Minimum = 1,
+        Maximum = 2048,
+        Value = 50,
+        Width = 95
+    };
+    private readonly TextBox _attachmentAllowedExtensions = new()
+    {
+        Multiline = true,
+        ScrollBars = ScrollBars.Vertical,
+        Height = 68,
+        Dock = DockStyle.Fill
+    };
+    private readonly Label _attachmentStorageStatus = StatusLabel();
+
     private readonly CheckBox _authPointEnabled = new()
     {
         Text = "Enable AuthPoint at Client Info beta login",
@@ -217,6 +234,7 @@ internal sealed class ServerManagerForm : Form
         tabs.TabPages.Add(BuildWhdTab());
         tabs.TabPages.Add(BuildSageTab());
         tabs.TabPages.Add(BuildFireDrillTab());
+        tabs.TabPages.Add(BuildAttachmentStorageTab());
         tabs.TabPages.Add(BuildAuthPointTab());
         tabs.TabPages.Add(BuildUpdatesTab());
         return tabs;
@@ -564,6 +582,63 @@ internal sealed class ServerManagerForm : Form
         return page;
     }
 
+    private TabPage BuildAttachmentStorageTab()
+    {
+        var storage = Group("Client attachment storage", 430);
+        var layout = Grid(3, 7);
+        _attachmentRootPath.PlaceholderText =
+            @"\\CSRI-SQL\TechBenchFiles\ClientAttachments";
+        layout.Controls.Add(Label("Shared root folder (UNC)"), 0, 0);
+        layout.Controls.Add(_attachmentRootPath, 1, 0);
+        var browse = Button("Browse");
+        browse.Click += (_, _) => BrowseAttachmentStorage();
+        layout.Controls.Add(browse, 2, 0);
+        layout.Controls.Add(Label("Maximum file size"), 0, 1);
+        var sizeRow = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            FlowDirection = FlowDirection.LeftToRight
+        };
+        sizeRow.Controls.Add(_attachmentMaximumFileSize);
+        sizeRow.Controls.Add(new Label
+        {
+            Text = "MB (1-2048)",
+            AutoSize = true,
+            Padding = new Padding(0, 7, 0, 0)
+        });
+        layout.Controls.Add(sizeRow, 1, 1);
+        layout.SetColumnSpan(sizeRow, 2);
+        layout.Controls.Add(Label("Allowed extensions"), 0, 2);
+        layout.Controls.Add(_attachmentAllowedExtensions, 1, 2);
+        layout.SetColumnSpan(_attachmentAllowedExtensions, 2);
+        var save = Button("Save settings");
+        save.Click += async (_, _) => await SaveAttachmentStorageAsync();
+        var test = Button("Test access");
+        test.Click += async (_, _) => await TestAttachmentStorageAsync();
+        var refresh = Button("Refresh");
+        refresh.Click += async (_, _) => await RefreshConfigurationAsync(true);
+        var actions = ButtonRow(save, test, refresh);
+        layout.Controls.Add(actions, 1, 3);
+        layout.SetColumnSpan(actions, 2);
+        layout.Controls.Add(_attachmentStorageStatus, 0, 4);
+        layout.SetColumnSpan(_attachmentStorageStatus, 3);
+        var note = new Label
+        {
+            Text = "TechBench creates Client-<internal ID>\\Photos and Documents folders automatically. "
+                   + "SQL stores only metadata and relative paths. Grant CSRI\\TechBench_Users and "
+                   + "CSRI\\TechBench_Admins Modify permission on this folder, and include it in server backups. "
+                   + "Archiving keeps the file and its audit history; it does not delete data.",
+            AutoSize = true,
+            MaximumSize = new Size(900, 0),
+            ForeColor = Color.DimGray,
+            Margin = new Padding(3, 16, 3, 3)
+        };
+        layout.Controls.Add(note, 0, 5);
+        layout.SetColumnSpan(note, 3);
+        storage.Controls.Add(layout);
+        return BuildStackedTab("Attachments", storage);
+    }
+
     private void AddSecretRow(TableLayoutPanel layout, int row, string label, TextBox box, Label status, ProtectedSecretStore store, string name)
     {
         layout.Controls.Add(Label(label), 0, row); layout.Controls.Add(box, 1, row);
@@ -726,6 +801,7 @@ internal sealed class ServerManagerForm : Form
             _whdSyncStatus.Text = "Configuration unavailable: " + FriendlySqlError(ex);
             _sageSyncStatus.Text = _whdSyncStatus.Text;
             _fireDrillSyncStatus.Text = _whdSyncStatus.Text;
+            _attachmentStorageStatus.Text = _whdSyncStatus.Text;
             _authPointStatus.Text = _whdSyncStatus.Text;
             AddLog("ERROR: " + FriendlySqlError(ex));
             if (showErrors) ShowError(FriendlySqlError(ex));
@@ -746,6 +822,23 @@ internal sealed class ServerManagerForm : Form
         _fireDrillDaily.Checked = !bool.TryParse(Setting("FireDrill.DailySyncEnabled", "True"), out var fireDrillEnabled) || fireDrillEnabled;
         if (TimeSpan.TryParse(Setting("FireDrill.DailySyncTime", "04:00"), out var dailyTime))
             _fireDrillTime.Value = DateTime.Today.Add(dailyTime);
+        _attachmentRootPath.Text = Setting("ClientAttachments.RootPath");
+        if (decimal.TryParse(
+                Setting("ClientAttachments.MaximumFileSizeMegabytes", "50"),
+                out var attachmentMaximum))
+        {
+            _attachmentMaximumFileSize.Value = Math.Clamp(
+                attachmentMaximum,
+                _attachmentMaximumFileSize.Minimum,
+                _attachmentMaximumFileSize.Maximum);
+        }
+        _attachmentAllowedExtensions.Text = Setting(
+            "ClientAttachments.AllowedExtensions",
+            ".jpg,.jpeg,.png,.gif,.bmp,.webp,.tif,.tiff,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.rtf,.ppt,.pptx,.zip");
+        _attachmentStorageStatus.Text = string.IsNullOrWhiteSpace(
+            _attachmentRootPath.Text)
+            ? "Not configured. Client Information remains available, but uploads are disabled."
+            : "Configured. Use Test access to verify create, read, delete, usage, and free space.";
         _authPointEnabled.Checked = bool.TryParse(
             Setting("AuthPoint.Enabled", "False"),
             out var authPointEnabled) && authPointEnabled;
@@ -829,6 +922,108 @@ internal sealed class ServerManagerForm : Form
             RefreshSecretStatus();
             await RefreshConfigurationAsync(false);
         });
+    }
+
+    private void BrowseAttachmentStorage()
+    {
+        using var dialog = new FolderBrowserDialog
+        {
+            Description =
+                "Choose the shared Client Attachments folder. A UNC path is required.",
+            UseDescriptionForTitle = true,
+            ShowNewFolderButton = true,
+            SelectedPath = Directory.Exists(_attachmentRootPath.Text.Trim())
+                ? _attachmentRootPath.Text.Trim()
+                : string.Empty
+        };
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+        {
+            _attachmentRootPath.Text = dialog.SelectedPath;
+        }
+    }
+
+    private async Task TestAttachmentStorageAsync()
+    {
+        await RunAsync("Testing client attachment storage...", async () =>
+        {
+            var result = await Task.Run(
+                () => AttachmentStorageProbe.Test(_attachmentRootPath.Text));
+            _attachmentRootPath.Text = result.RootPath;
+            _attachmentStorageStatus.Text = result.Summary;
+            AddLog("Client attachment storage test passed. " + result.Summary);
+        });
+    }
+
+    private async Task SaveAttachmentStorageAsync()
+    {
+        await RunAsync("Saving client attachment storage...", async () =>
+        {
+            var path = AttachmentStorageProbe.ValidateRootPath(
+                _attachmentRootPath.Text);
+            var extensions = NormalizeAttachmentExtensions(
+                _attachmentAllowedExtensions.Text);
+            var result = await Task.Run(() => AttachmentStorageProbe.Test(path));
+            var settings = new Dictionary<string, string>
+            {
+                ["ClientAttachments.RootPath"] = result.RootPath,
+                ["ClientAttachments.MaximumFileSizeMegabytes"] =
+                    decimal.ToInt32(_attachmentMaximumFileSize.Value).ToString(),
+                ["ClientAttachments.AllowedExtensions"] = extensions
+            };
+            await Task.Run(() => _repository.SaveSettings(
+                settings,
+                _configuration?.RowVersions
+                ?? new Dictionary<string, byte[]>()));
+            AddLog("Client attachment storage settings saved. " + result.Summary);
+            await RefreshConfigurationAsync(false);
+            _attachmentStorageStatus.Text = result.Summary;
+        });
+    }
+
+    internal static string NormalizeAttachmentExtensions(string value)
+    {
+        var prohibited = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".ade", ".adp", ".app", ".application", ".bat", ".chm",
+            ".cmd", ".com", ".cpl", ".dll", ".exe", ".hta", ".inf",
+            ".ins", ".isp", ".jar", ".js", ".jse", ".lnk", ".msc",
+            ".msi", ".msp", ".mst", ".pif", ".ps1", ".reg", ".scr",
+            ".sct", ".shb", ".sys", ".url", ".vb", ".vbe", ".vbs",
+            ".ws", ".wsc", ".wsf", ".wsh"
+        };
+        var extensions = value.Split(
+                [',', ';', ' ', '\r', '\n', '\t'],
+                StringSplitOptions.RemoveEmptyEntries
+                | StringSplitOptions.TrimEntries)
+            .Select(item => item.StartsWith('.')
+                ? item.ToLowerInvariant()
+                : "." + item.ToLowerInvariant())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (extensions.Length == 0)
+        {
+            throw new InvalidOperationException(
+                "Enter at least one allowed attachment extension.");
+        }
+
+        var blocked = extensions.Where(prohibited.Contains).ToArray();
+        if (blocked.Length > 0)
+        {
+            throw new InvalidOperationException(
+                "Executable or script attachment types are blocked: "
+                + string.Join(", ", blocked));
+        }
+
+        if (extensions.Any(extension => extension.Length is < 2 or > 16
+                                        || extension.Skip(1).Any(
+                                            character => !char.IsLetterOrDigit(character))))
+        {
+            throw new InvalidOperationException(
+                "Allowed attachment extensions may contain only a dot followed by letters or numbers.");
+        }
+
+        return string.Join(",", extensions);
     }
 
     private void ConfigureAuthPointMappingGrid()

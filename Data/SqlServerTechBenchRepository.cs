@@ -101,6 +101,14 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         public const string RevealFireDrillCredential = "[tb_app].[RevealFireDrillCredential]";
         public const string SearchClientInfoClients = "[tb_app].[SearchClientInfoClients]";
         public const string GetClientInfoSnapshot = "[tb_app].[GetClientInfoSnapshot]";
+        public const string GetClientAttachmentStorageConfiguration =
+            "[tb_app].[GetClientAttachmentStorageConfiguration]";
+        public const string GetClientInfoAttachments =
+            "[tb_app].[GetClientInfoAttachments]";
+        public const string SaveClientInfoAttachment =
+            "[tb_app].[SaveClientInfoAttachment]";
+        public const string SetClientInfoAttachmentArchived =
+            "[tb_app].[SetClientInfoAttachmentArchived]";
         public const string SaveClientInfoProfile = "[tb_app].[SaveClientInfoProfile]";
         public const string SaveClientInfoLocation = "[tb_app].[SaveClientInfoLocation]";
         public const string SaveClientInfoPerson = "[tb_app].[SaveClientInfoPerson]";
