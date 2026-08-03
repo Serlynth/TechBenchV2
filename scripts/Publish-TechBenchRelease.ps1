@@ -77,10 +77,19 @@ function New-AnnotatedClientReleaseTag {
         [Parameter(Mandatory = $true)][string]$ReleaseVersion
     )
 
-    $existingObjectType = & gh api "repos/$RepositorySlug/git/ref/tags/$Tag" `
-        --jq '.object.type' 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        if (($existingObjectType -join '').Trim() -eq 'tag') {
+    # matching-refs returns HTTP 200 with an empty array when the tag is absent.
+    # A direct ref lookup returns 404, which Windows PowerShell promotes to a
+    # terminating native-command error under ErrorActionPreference=Stop.
+    $existingObjectTypes = @(& gh api `
+        "repos/$RepositorySlug/git/matching-refs/tags/$Tag" `
+        --jq '.[].object.type')
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not inspect the release tag $Tag."
+    }
+
+    if ($existingObjectTypes.Count -gt 0) {
+        if ($existingObjectTypes.Count -eq 1 `
+            -and ($existingObjectTypes[0] -join '').Trim() -eq 'tag') {
             return
         }
 
