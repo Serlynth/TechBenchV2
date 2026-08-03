@@ -47,7 +47,11 @@ public sealed class ClientInfoBetaTests
 
         var xaml = Read("ClientInfoBetaWindow.xaml");
         var viewModel = Read("ViewModels", "ClientInfoBetaViewModel.cs");
-        Assert.Contains("Content=\"At-a-glance\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"Overview\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"Full list\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ResizeDirection=\"Rows\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Content=\"At-a-glance\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("UseCompactView", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Move\"", xaml, StringComparison.Ordinal);
         Assert.Contains("CompactFields", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("\"category\",\n                \"Category\"", viewModel, StringComparison.Ordinal);

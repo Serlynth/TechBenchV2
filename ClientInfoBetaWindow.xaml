@@ -135,7 +135,6 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <StackPanel>
                         <TextBlock Text="{Binding CategoryName}"
@@ -145,30 +144,25 @@
                                    TextWrapping="Wrap"
                                    Margin="0,3,0,10" />
                     </StackPanel>
-                    <CheckBox Grid.Column="1"
-                              Content="At-a-glance"
-                              IsChecked="{Binding UseCompactView}"
-                              VerticalAlignment="Center"
-                              Margin="0,0,14,8" />
-                    <Button Grid.Column="2"
+                    <Button Grid.Column="1"
                             Content="Add"
                             Command="{Binding DataContext.AddResourceCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                             CommandParameter="{Binding CategoryName}"
                             MinWidth="76"
                             Margin="0,0,8,8" />
-                    <Button Grid.Column="3"
+                    <Button Grid.Column="2"
                             Content="Edit"
                             Command="{Binding DataContext.EditResourceCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                             CommandParameter="{Binding SelectedResource}"
                             MinWidth="76"
                             Margin="0,0,8,8" />
-                    <Button Grid.Column="4"
+                    <Button Grid.Column="3"
                             Content="Move"
                             Command="{Binding DataContext.MoveResourceCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                             CommandParameter="{Binding SelectedResource}"
                             MinWidth="76"
                             Margin="0,0,8,8" />
-                    <Button Grid.Column="5"
+                    <Button Grid.Column="4"
                             Content="Custom Fields"
                             Command="{Binding DataContext.ManageResourceFieldsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                             CommandParameter="{Binding SelectedResource}"
@@ -176,18 +170,51 @@
                             Margin="0,0,0,8" />
                 </Grid>
                 <Grid Grid.Row="1">
-                    <TextBlock Text="No records in this section yet. Use Add to create the first one."
-                               Foreground="{DynamicResource MutedTextBrush}"
-                               HorizontalAlignment="Center"
-                               VerticalAlignment="Center"
-                               Visibility="{Binding HasResources, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
-                    <ListBox ItemsSource="{Binding Resources}"
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="0.48*" MinHeight="170" />
+                        <RowDefinition Height="8" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="0.52*" MinHeight="170" />
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="Overview"
+                                       FontSize="14"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="Useful details from every record"
+                                       Foreground="{DynamicResource MutedTextBrush}"
+                                       Margin="10,1,0,0" />
+                        </StackPanel>
+                        <Border Grid.Column="1"
+                                Background="{DynamicResource ControlBackgroundBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="10"
+                                Padding="9,3"
+                                Margin="8,0,0,7">
+                            <TextBlock Text="{Binding CountLabel}"
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                       FontSize="10" />
+                        </Border>
+                    </Grid>
+                    <Grid Grid.Row="1">
+                        <TextBlock Text="No records in this section yet. Use Add to create the first one."
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Visibility="{Binding HasResources, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                        <ListBox ItemsSource="{Binding Resources}"
                              SelectedItem="{Binding SelectedResource, Mode=TwoWay}"
                              Background="Transparent"
                              BorderThickness="0"
                              Padding="0"
                              MouseDoubleClick="Resources_DoubleClick"
-                             Visibility="{Binding UseCompactView, Converter={StaticResource BooleanToVisibilityConverter}}">
+                             Visibility="{Binding HasResources, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <WrapPanel IsItemsHost="True" />
@@ -293,11 +320,29 @@
                                 </Grid>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
-                    </ListBox>
-                    <controls:ClientInfoResourceDataGrid ItemsSource="{Binding Resources}"
+                        </ListBox>
+                    </Grid>
+                    <GridSplitter Grid.Row="2"
+                                  Height="4"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Center"
+                                  Background="{DynamicResource BorderBrush}"
+                                  ResizeDirection="Rows"
+                                  ResizeBehavior="PreviousAndNext" />
+                    <StackPanel Grid.Row="3"
+                                Orientation="Horizontal"
+                                Margin="0,8,0,7">
+                        <TextBlock Text="Full list"
+                                   FontSize="14"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Text="All fields · select or double-click to edit"
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   Margin="10,1,0,0" />
+                    </StackPanel>
+                    <controls:ClientInfoResourceDataGrid Grid.Row="4"
+                                                         ItemsSource="{Binding Resources}"
                                                          SelectedItem="{Binding SelectedResource, Mode=TwoWay}"
-                                                         MouseDoubleClick="Resources_DoubleClick"
-                                                         Visibility="{Binding UseCompactView, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                                                         MouseDoubleClick="Resources_DoubleClick" />
                 </Grid>
             </Grid>
         </DataTemplate>
