@@ -189,6 +189,39 @@ public static class ClientInfoResourceCategories
             StringComparison.OrdinalIgnoreCase))
         ?? NeedsSorting;
 
+    public static string ClassifyCredential(ClientInfoCredential credential)
+    {
+        ArgumentNullException.ThrowIfNull(credential);
+        var searchable = $"{credential.Category} {credential.Name}";
+        var lower = searchable.ToLowerInvariant();
+        if (ContainsAny(lower, "rustdesk", "screenconnect", "connectwise", "splashtop", "teamviewer", "remote access"))
+        {
+            return ApplicationsCloud;
+        }
+
+        if (ContainsAny(lower, "watchguard", "firebox", "firewall", "vpn"))
+        {
+            return ConnectionInternet;
+        }
+
+        if (ContainsAny(lower, "veeam", "eset", "barracuda", "backup", "security", "antivirus", "edr", "mfa"))
+        {
+            return BackupSecurity;
+        }
+
+        if (ContainsAny(lower, "active directory", "domain admin", "domain", "dns", "registrar"))
+        {
+            return DomainsEmail;
+        }
+
+        if (ContainsAny(lower, "ilo", "idrac", "ups", "server", "hyper-v", "vmware", "switch"))
+        {
+            return ServersInfrastructure;
+        }
+
+        return Classify(searchable);
+    }
+
     private static bool ContainsAny(
         string value,
         params string[] candidates) =>

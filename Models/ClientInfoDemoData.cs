@@ -19,8 +19,8 @@ public static class ClientInfoDemoData
         IsLive = false,
         LocationCount = 2,
         PersonCount = 3,
-        ResourceCount = 8,
-        CredentialCount = 4,
+        ResourceCount = 14,
+        CredentialCount = 10,
         IsDemo = true
     };
 
@@ -78,16 +78,28 @@ public static class ClientInfoDemoData
         {
             Resource(-101, ClientInfoResourceCategories.ServersInfrastructure, "Primary Hyper-V Host", "Hyper-V Host", "Dell", "hv-demo-01", "Main Office", -1,
                 new Dictionary<string, string> { ["primary_ip"]="10.20.0.10", ["management_ip"]="10.20.0.11", ["role_purpose"]="Virtualization host", ["operating_system"]="Windows Server 2025", ["manufacturer_model"]="Dell PowerEdge R760", ["serial_number"]="DEMO-R760-01", ["additional_ips_subnet"]="10.20.0.0/24" }),
+            Resource(-109, ClientInfoResourceCategories.ServersInfrastructure, "ILO Host 1", "Network Appliance", "HPE", "https://10.20.0.12", "Main Office", -1,
+                new Dictionary<string, string> { ["primary_ip"]="10.20.0.12", ["management_ip"]="10.20.0.12", ["role_purpose"]="Out-of-band management for application server", ["operating_system"]="HPE iLO 6", ["manufacturer_model"]="HPE ProLiant DL380 Gen11", ["serial_number"]="ILO-DEMO-01", ["additional_ips_subnet"]="10.20.0.0/24" }),
+            Resource(-110, ClientInfoResourceCategories.ServersInfrastructure, "Server Room UPS", "UPS", "APC", "https://10.20.0.18", "Main Office", -1,
+                new Dictionary<string, string> { ["primary_ip"]="10.20.0.18", ["management_ip"]="10.20.0.18", ["role_purpose"]="Power protection for server rack", ["operating_system"]="APC Network Management Card", ["manufacturer_model"]="APC Smart-UPS 2200", ["serial_number"]="UPS-DEMO-01", ["additional_ips_subnet"]="Rack A · 208V · 42 minute runtime" }),
             Resource(-102, ClientInfoResourceCategories.ConnectionInternet, "Main WatchGuard", "WatchGuard Firewall", "WatchGuard", "https://10.20.0.1", "Main Office", -1,
                 new Dictionary<string, string> { ["public_wan_ip"]="203.0.113.24", ["gateway"]="203.0.113.1", ["subnet_cidr"]="203.0.113.24/29", ["circuit_id"]="FIBER-DEMO-4821", ["device_model"]="Firebox M390", ["serial_number"]="WG-DEMO-390", ["firmware_version"]="Fireware 12.10.4", ["isp_provider"]="Example Fiber", ["support_phone"]="800-555-0140" }),
             Resource(-103, ClientInfoResourceCategories.Wifi, "Corporate Wireless", "Wireless Network / SSID", "Aruba", "https://aruba-central.example.test", "Main Office", -1,
                 new Dictionary<string, string> { ["management_ip"]="10.20.0.20", ["ssid"]="DemoClient-Staff", ["vlan"]="20", ["wireless_security"]="WPA3 Enterprise", ["controller_name"]="Aruba Central", ["guest_ssid"]="DemoClient-Guest", ["coverage_notes"]="Office and conference rooms; warehouse uses a separate AP group." }),
             Resource(-104, ClientInfoResourceCategories.ApplicationsCloud, "Microsoft 365", "Microsoft 365 Tenant", "Microsoft", "https://admin.microsoft.com", "Main Office", -1,
                 new Dictionary<string, string> { ["tenant_instance"]="democlient.onmicrosoft.com", ["hosting_type"]="Cloud / SaaS", ["primary_ip"]="198.51.100.12", ["admin_portal"]="https://admin.microsoft.com", ["version"]="Microsoft 365 Business Premium", ["support_contact"]="Cloud Services Team · 800-555-0115", ["renewal_date"]="2027-01-15" }),
+            Resource(-111, ClientInfoResourceCategories.ApplicationsCloud, "ScreenConnect Remote Access", "Hosted Application", "ConnectWise", "https://remote.example.test", "Main Office", -1,
+                new Dictionary<string, string> { ["tenant_instance"]="demo-client", ["hosting_type"]="Cloud / SaaS", ["primary_ip"]="198.51.100.44", ["admin_portal"]="https://remote.example.test", ["version"]="ScreenConnect 25", ["support_contact"]="CSRI Help Desk", ["renewal_date"]="2027-04-01" }),
             Resource(-105, ClientInfoResourceCategories.DomainsEmail, "Primary Domain", "Domain", "Example Registrar", "https://example.test", "Main Office", -1,
                 new Dictionary<string, string> { ["domain_name"]="example.test", ["registrar"]="Example Registrar", ["dns_provider"]="Cloudflare", ["mail_provider"]="Microsoft 365", ["tenant_name"]="democlient.onmicrosoft.com", ["expiration_date"]="2027-06-30" }),
+            Resource(-112, ClientInfoResourceCategories.DomainsEmail, "Active Directory", "Domain", "Microsoft", "https://dc01.example.test", "Main Office", -1,
+                new Dictionary<string, string> { ["domain_name"]="DEMOCLIENT.local", ["registrar"]="Internal Active Directory", ["dns_provider"]="DC01 and DC02", ["mail_provider"]="Microsoft 365", ["tenant_name"]="DEMOCLIENT", ["expiration_date"]="Not applicable" }),
             Resource(-106, ClientInfoResourceCategories.BackupSecurity, "Veeam Backup", "Veeam Backup", "Veeam", "https://backup-console.example.test", "Main Office", -1,
                 new Dictionary<string, string> { ["product_service"]="Veeam Backup & Replication", ["protected_scope"]="All servers and Microsoft 365", ["console_url"]="https://backup-console.example.test", ["retention"]="30 daily · 12 monthly", ["backup_schedule"]="Nightly at 10:00 PM", ["last_restore_test"]="2026-07-15", ["renewal_date"]="2027-03-01" }),
+            Resource(-113, ClientInfoResourceCategories.BackupSecurity, "ESET Protect", "Antivirus / EDR", "ESET", "https://eset.example.test", "Main Office", -1,
+                new Dictionary<string, string> { ["product_service"]="ESET Protect Advanced", ["protected_scope"]="42 endpoints and 4 servers", ["console_url"]="https://eset.example.test", ["retention"]="90 days of detections", ["backup_schedule"]="Continuous policy enforcement", ["last_restore_test"]="2026-07-20", ["renewal_date"]="2027-05-15" }),
+            Resource(-114, ClientInfoResourceCategories.BackupSecurity, "Barracuda Email Security", "Spam Filtering", "Barracuda", "https://login.barracudanetworks.com", "Main Office", -1,
+                new Dictionary<string, string> { ["product_service"]="Barracuda Email Security Gateway", ["protected_scope"]="All Microsoft 365 mailboxes", ["console_url"]="https://login.barracudanetworks.com", ["retention"]="30-day message log", ["backup_schedule"]="Continuous mail filtering", ["last_restore_test"]="2026-07-21", ["renewal_date"]="2027-02-28" }),
             Resource(-107, ClientInfoResourceCategories.VendorsServices, "Example Fiber Support", "Internet Provider", "Example Fiber", "https://support.example.test", "Main Office", -1,
                 new Dictionary<string, string> { ["account_number"]="ACCT-DEMO-1048", ["primary_contact"]="Business Support", ["support_phone"]="800-555-0140", ["support_email"]="support@example.test", ["portal_url"]="https://support.example.test", ["contract_expiration"]="2028-01-31" }),
             Resource(-108, ClientInfoResourceCategories.NeedsSorting, "Legacy Monitoring Note", "Unknown", "Legacy Vendor", "https://monitoring.example.test", "Warehouse", -2, new Dictionary<string, string>())
@@ -98,7 +110,13 @@ public static class ClientInfoDemoData
             Credential(-201, -102, "WatchGuard Admin", "Firewall", "demo-admin", "https://10.20.0.1", updated),
             Credential(-202, -103, "Aruba Central", "Wi-Fi", "network-admin@example.test", "https://aruba-central.example.test", updated),
             Credential(-203, -104, "Microsoft 365 Global Admin", "Cloud", "m365-admin@example.test", "https://admin.microsoft.com", updated),
-            Credential(-204, -106, "Veeam Console", "Backup", "backup-admin", "https://backup-console.example.test", updated)
+            Credential(-204, -106, "Veeam Console", "Veeam", "backup-admin", "https://backup-console.example.test", updated),
+            Credential(-205, -109, "ILO Host 1 Admin", "ILO", "Administrator", "https://10.20.0.12", updated),
+            Credential(-206, -112, "Domain Admin", "Active Directory", "DEMOCLIENT\\csriadmin", "https://dc01.example.test", updated),
+            Credential(-207, -113, "ESET Protect Admin", "ESET", "security-admin@example.test", "https://eset.example.test", updated),
+            Credential(-208, -114, "Barracuda Admin", "Barracuda", "mail-admin@example.test", "https://login.barracudanetworks.com", updated),
+            Credential(-209, -111, "ScreenConnect Admin", "Remote Access", "remote-admin@example.test", "https://remote.example.test", updated),
+            Credential(-210, -110, "UPS Network Card", "UPS", "apc-admin", "https://10.20.0.18", updated)
         };
         var facts = new ClientInfoFact[]
         {
