@@ -7,6 +7,30 @@ namespace TechBench.Tests;
 public sealed class SageNativeUiPosterTests
 {
     [Fact]
+    public void IdentifierFieldsUseOneAtomicWriteBeforeSageValidation()
+    {
+        var source = ReadRepositoryFile(
+            Path.Combine("Services", "SageNativeUiAutomation.cs"));
+        var validatedEntry = ExtractMethod(
+            source,
+            "private static IntPtr EnterValidatedTextField(",
+            "private static IntPtr WaitForStableTextFieldValue(");
+        var atomicEntry = ExtractMethod(
+            source,
+            "private static void EnterAtomicTextField(",
+            "private static IntPtr EnterValidatedTextField(");
+
+        Assert.Contains("EnterAtomicTextField(", validatedEntry, StringComparison.Ordinal);
+        Assert.Contains("NativeMethods.SetWindowText(field, value)", atomicEntry, StringComparison.Ordinal);
+        Assert.Contains("NativeMethods.ReadWindowText(field)", atomicEntry, StringComparison.Ordinal);
+        Assert.Contains("NativeMethods.VkTab", atomicEntry, StringComparison.Ordinal);
+        Assert.DoesNotContain("SendUnicodeText", atomicEntry, StringComparison.Ordinal);
+        Assert.True(
+            atomicEntry.IndexOf("SetWindowText", StringComparison.Ordinal)
+            < atomicEntry.IndexOf("VkTab", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void AllowsBoundedWaitForSlowSageNoteDialog()
     {
         Assert.InRange(
@@ -172,6 +196,31 @@ public sealed class SageNativeUiPosterTests
             ["Sage.EmployeeId"] = "RS",
             ["Sage.ActivityItemId"] = "13001A"
         };
+
+    private static string ExtractMethod(
+        string source,
+        string startMarker,
+        string endMarker)
+    {
+        var start = source.IndexOf(startMarker, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Missing source marker: {startMarker}");
+        var end = source.IndexOf(endMarker, start + startMarker.Length, StringComparison.Ordinal);
+        Assert.True(end > start, $"Missing source marker: {endMarker}");
+        return source[start..end];
+    }
+
+    private static string ReadRepositoryFile(string relativePath)
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null
+               && !File.Exists(Path.Combine(directory.FullName, "TechBenchV2.sln")))
+        {
+            directory = directory.Parent;
+        }
+
+        Assert.NotNull(directory);
+        return File.ReadAllText(Path.Combine(directory.FullName, relativePath));
+    }
 
     private sealed class RecordingAutomation(SageTimeTicketAutomationResult result) : ISageTimeTicketAutomation
     {
