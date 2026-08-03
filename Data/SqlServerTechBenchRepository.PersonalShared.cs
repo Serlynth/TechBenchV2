@@ -166,6 +166,7 @@ public sealed partial class SqlServerTechBenchRepository
             {
                 if (!await reader.ReadAsync(token).ConfigureAwait(false))
                 {
+                    _editorDraftRowVersion = null;
                     return null;
                 }
 
@@ -173,8 +174,8 @@ public sealed partial class SqlServerTechBenchRepository
                 var rowVersion = GetBytes(reader, "RowVersion");
                 if (rowVersion is { Length: > 0 })
                 {
-                    _rowVersions[BuildRowVersionKey("EditorDraft", DeviceId.GetHashCode())] =
-                        rowVersion;
+                    draft.RowVersion = rowVersion;
+                    _editorDraftRowVersion = rowVersion;
                 }
 
                 return draft;
@@ -200,7 +201,7 @@ public sealed partial class SqlServerTechBenchRepository
                         "@ExpectedRowVersion",
                         8,
                         draft.RowVersion
-                        ?? GetTrackedRowVersion("EditorDraft", DeviceId.GetHashCode()));
+                        ?? _editorDraftRowVersion);
                 },
                 async (reader, token) =>
                 {
@@ -213,9 +214,7 @@ public sealed partial class SqlServerTechBenchRepository
                     draft.RowVersion = rowVersion;
                     if (rowVersion is { Length: > 0 })
                     {
-                        _rowVersions[
-                            BuildRowVersionKey("EditorDraft", DeviceId.GetHashCode())] =
-                            rowVersion;
+                        _editorDraftRowVersion = rowVersion;
                     }
 
                     return true;
@@ -239,13 +238,11 @@ public sealed partial class SqlServerTechBenchRepository
                         command,
                         "@ExpectedRowVersion",
                         8,
-                        GetTrackedRowVersion("EditorDraft", DeviceId.GetHashCode()));
+                        _editorDraftRowVersion);
                 },
                 cancellationToken)
             .ConfigureAwait(false);
-        _rowVersions.TryRemove(
-            BuildRowVersionKey("EditorDraft", DeviceId.GetHashCode()),
-            out _);
+        _editorDraftRowVersion = null;
     }
 
     public IReadOnlyDictionary<string, int> GetClientAliases() =>

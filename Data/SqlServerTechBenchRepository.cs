@@ -29,6 +29,7 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, long> _clientAliasIds =
         new(StringComparer.OrdinalIgnoreCase);
+    private byte[]? _editorDraftRowVersion;
     private bool _fullTextSearchAvailable;
     private bool _equipmentBoardAvailable;
     private bool _clientInfoBetaAvailable;
