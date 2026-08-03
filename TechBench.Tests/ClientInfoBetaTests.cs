@@ -66,6 +66,9 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("ClipboardCopyMode=\"IncludeHeader\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Technician quick reference", xaml, StringComparison.Ordinal);
         Assert.Contains("ItemsSource=\"{Binding QuickReferenceSections}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Key=\"OverviewFieldTemplate\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("DataContext.RevealSecretCommand", xaml, StringComparison.Ordinal);
+        Assert.Contains("DataContext.CopySecretCommand", xaml, StringComparison.Ordinal);
         Assert.Contains("QuickReferenceSections", viewModel, StringComparison.Ordinal);
         Assert.Contains("SelectMany(group => group.OverviewSections)", viewModel, StringComparison.Ordinal);
         Assert.Contains("QuickReferencePriority", viewModel, StringComparison.Ordinal);
@@ -128,7 +131,26 @@ public sealed class ClientInfoBetaTests
                 Category = "WatchGuard",
                 Username = "csriadmin",
                 LoginUrl = "https://10.0.0.1",
-                SecretCount = 2
+                SecretCount = 2,
+                Secrets =
+                [
+                    new ClientInfoSecretSummary
+                    {
+                        SecretId = 880,
+                        CredentialId = 88,
+                        SecretType = "Password",
+                        SecretLabel = "Password",
+                        IsCurrent = true
+                    },
+                    new ClientInfoSecretSummary
+                    {
+                        SecretId = 881,
+                        CredentialId = 88,
+                        SecretType = "RecoveryCode",
+                        SecretLabel = "Recovery code",
+                        IsCurrent = true
+                    }
+                ]
             }]);
 
         var watchGuard = Assert.Single(sections);
@@ -138,9 +160,45 @@ public sealed class ClientInfoBetaTests
         Assert.Contains(sections.SelectMany(section => section.Fields),
             field => field.Label == "Public / WAN IP"
                      && field.Value.Contains("+5 more in full list"));
-        Assert.Contains(sections.SelectMany(section => section.Fields),
-            field => field.Label == "Protected values"
-                     && field.Value == "2 stored secrets");
+        var access = Assert.Single(sections.SelectMany(section => section.Fields),
+            field => field.Label == "WatchGuard Admin");
+        Assert.Equal(2, access.Secrets.Count);
+        Assert.DoesNotContain(sections.SelectMany(section => section.Fields),
+            field => field.Label == "Protected values");
+    }
+
+    [Fact]
+    public void Microsoft365AndDomainQuickReferenceStayFocusedOnDailyUse()
+    {
+        ClientInfoResource Resource(string category, string type, params (string Key, string Value)[] fields) =>
+            new()
+            {
+                ResourceId = category == ClientInfoResourceCategories.ApplicationsCloud ? 1 : 2,
+                ResourceType = ClientInfoResourceCategories.Encode(category, type),
+                Name = type,
+                AddressOrUrl = "https://admin.example.test",
+                Fields = fields.Select((field, index) => new ClientInfoResourceField
+                {
+                    FieldKey = field.Key,
+                    FieldLabel = field.Key,
+                    ValueText = field.Value,
+                    SortOrder = index
+                }).ToArray()
+            };
+
+        var microsoft = ClientInfoCategoryOverviewBuilder.Build(
+            ClientInfoResourceCategories.ApplicationsCloud,
+            [Resource(ClientInfoResourceCategories.ApplicationsCloud, "Microsoft 365", ("tenant_instance", "example.onmicrosoft.com"), ("plan", "Business Premium"), ("support_contact", "Support"), ("renewal_date", "2030-01-01"))],
+            []);
+        var domain = ClientInfoCategoryOverviewBuilder.Build(
+            ClientInfoResourceCategories.DomainsEmail,
+            [Resource(ClientInfoResourceCategories.DomainsEmail, "Active Directory", ("domain_name", "example.local"), ("domain controller", "DC01"), ("registrar", "Registrar"), ("dns_provider", "DNS host"), ("mail_provider", "Mail host"), ("expiration_date", "2030-01-01"))],
+            []);
+
+        var microsoftFields = Assert.Single(microsoft, section => section.Title == "Microsoft 365").Fields;
+        Assert.Equal(["Tenant / instance", "Admin portal"], microsoftFields.Select(field => field.Label));
+        var domainFields = Assert.Single(domain).Fields;
+        Assert.Equal(["Domain", "Domain controllers", "Domain / admin URL"], domainFields.Select(field => field.Label));
     }
 
     [Fact]

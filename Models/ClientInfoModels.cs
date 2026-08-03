@@ -166,7 +166,23 @@ public sealed record ClientInfoResource
             StringComparison.OrdinalIgnoreCase))?.ValueText ?? string.Empty;
 }
 
-public sealed record ClientInfoOverviewField(string Label, string Value);
+public sealed record ClientInfoOverviewField
+{
+    public ClientInfoOverviewField(
+        string label,
+        string value,
+        IReadOnlyList<ClientInfoSecretSummary>? secrets = null)
+    {
+        Label = label;
+        Value = value;
+        Secrets = secrets ?? [];
+    }
+
+    public string Label { get; }
+    public string Value { get; }
+    public IReadOnlyList<ClientInfoSecretSummary> Secrets { get; }
+    public bool HasSecrets => Secrets.Count > 0;
+}
 
 public sealed record ClientInfoCategoryOverviewSection(
     string Title,
