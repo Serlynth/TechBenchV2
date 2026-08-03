@@ -30,6 +30,19 @@
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
             <Setter Property="Margin" Value="3,0" />
         </Style>
+        <Style x:Key="SelectableValueStyle" TargetType="TextBox">
+            <Setter Property="IsReadOnly" Value="True" />
+            <Setter Property="IsReadOnlyCaretVisible" Value="True" />
+            <Setter Property="AcceptsReturn" Value="True" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Cursor" Value="IBeam" />
+            <Setter Property="ToolTip" Value="Select text and press Ctrl+C to copy" />
+        </Style>
 
         <Style TargetType="TabControl">
             <Setter Property="Background" Value="{DynamicResource PanelBackgroundBrush}" />
@@ -282,17 +295,7 @@
                                                                TextWrapping="Wrap" />
                                                     <TextBox Grid.Column="1"
                                                              Text="{Binding Value, Mode=OneWay}"
-                                                             IsReadOnly="True"
-                                                             IsReadOnlyCaretVisible="True"
-                                                             AcceptsReturn="True"
-                                                             TextWrapping="Wrap"
-                                                             Background="Transparent"
-                                                             Foreground="{DynamicResource PrimaryTextBrush}"
-                                                             BorderThickness="0"
-                                                             Padding="0"
-                                                             FontSize="13"
-                                                             Cursor="IBeam"
-                                                             ToolTip="Select text and press Ctrl+C to copy" />
+                                                             Style="{StaticResource SelectableValueStyle}" />
                                                 </Grid>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
@@ -505,22 +508,25 @@
                                 <StackPanel>
                                     <TextBlock Text="MAIN CONTACT"
                                                Style="{StaticResource SubtleLabelStyle}" />
-                                    <TextBlock Text="{Binding Profile.WhdContactName}"
-                                               FontSize="16"
-                                               Margin="0,4,0,12" />
+                                    <TextBox Text="{Binding Profile.WhdContactName, Mode=OneWay}"
+                                             Style="{StaticResource SelectableValueStyle}"
+                                             FontSize="16"
+                                             Margin="0,4,0,12" />
                                     <TextBlock Text="EMAIL"
                                                Style="{StaticResource SubtleLabelStyle}" />
-                                    <TextBlock Text="{Binding Profile.WhdContactEmail}"
-                                               Margin="0,4,0,12" />
+                                    <TextBox Text="{Binding Profile.WhdContactEmail, Mode=OneWay}"
+                                             Style="{StaticResource SelectableValueStyle}"
+                                             Margin="0,4,0,12" />
                                     <TextBlock Text="PHONE"
                                                Style="{StaticResource SubtleLabelStyle}" />
-                                    <TextBlock Text="{Binding Profile.WhdPhone}"
-                                               Margin="0,4,0,12" />
+                                    <TextBox Text="{Binding Profile.WhdPhone, Mode=OneWay}"
+                                             Style="{StaticResource SelectableValueStyle}"
+                                             Margin="0,4,0,12" />
                                     <TextBlock Text="ADDRESS"
                                                Style="{StaticResource SubtleLabelStyle}" />
-                                    <TextBlock Text="{Binding Profile.WhdAddress}"
-                                               Margin="0,4,0,0"
-                                               TextWrapping="Wrap" />
+                                    <TextBox Text="{Binding Profile.WhdAddress, Mode=OneWay}"
+                                             Style="{StaticResource SelectableValueStyle}"
+                                             Margin="0,4,0,0" />
                                 </StackPanel>
                             </Border>
                             <Border Grid.Column="1"
@@ -563,6 +569,91 @@
                                 </Grid>
                             </Border>
                         </Grid>
+
+                        <Grid Margin="0,24,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Technician quick reference"
+                                           Style="{StaticResource SectionHeaderStyle}" />
+                                <TextBlock Text="The most-used operational details across every category. Select any value to copy it; use the category tabs for every record, every field, and editing."
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,4,12,10" />
+                            </StackPanel>
+                            <Border Grid.Column="1"
+                                    Background="{DynamicResource ControlBackgroundBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="10"
+                                    Padding="9,3"
+                                    VerticalAlignment="Top">
+                                <TextBlock Text="{Binding QuickReferenceCountLabel}"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           FontSize="10" />
+                            </Border>
+                        </Grid>
+                        <Grid>
+                            <TextBlock Text="Add information in the category tabs to build this quick reference."
+                                       Foreground="{DynamicResource MutedTextBrush}"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,18"
+                                       Visibility="{Binding HasQuickReferenceSections, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                            <ItemsControl ItemsSource="{Binding QuickReferenceSections}"
+                                          Focusable="False"
+                                          Visibility="{Binding HasQuickReferenceSections, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel IsItemsHost="True" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Width="360"
+                                                MinHeight="170"
+                                                Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                BorderBrush="{DynamicResource BorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="10"
+                                                Padding="15"
+                                                Margin="0,0,12,12">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Title}"
+                                                           FontSize="15"
+                                                           FontWeight="SemiBold"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{Binding Description}"
+                                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                                           TextWrapping="Wrap"
+                                                           Margin="0,5,0,10" />
+                                                <ItemsControl ItemsSource="{Binding Fields}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Grid Margin="0,0,0,5">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="112" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="{Binding Label}"
+                                                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                                                           FontSize="12"
+                                                                           FontWeight="SemiBold"
+                                                                           TextWrapping="Wrap" />
+                                                                <TextBox Grid.Column="1"
+                                                                         Text="{Binding Value, Mode=OneWay}"
+                                                                         Style="{StaticResource SelectableValueStyle}" />
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Grid>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
@@ -603,6 +694,7 @@
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"
                                   CanUserAddRows="False"
+                                  ClipboardCopyMode="IncludeHeader"
                                   MouseDoubleClick="Locations_DoubleClick">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Name"
@@ -614,9 +706,27 @@
                                 <DataGridTextColumn Header="Address"
                                                     Binding="{Binding AddressLabel}"
                                                     Width="1.5*" />
+                                <DataGridTextColumn Header="Main Phone"
+                                                    Binding="{Binding MainPhone}"
+                                                    MinWidth="110" />
+                                <DataGridTextColumn Header="Time Zone"
+                                                    Binding="{Binding TimeZoneId}"
+                                                    MinWidth="110" />
+                                <DataGridCheckBoxColumn Header="Primary"
+                                                        Binding="{Binding IsPrimary}"
+                                                        MinWidth="70" />
+                                <DataGridCheckBoxColumn Header="Active"
+                                                        Binding="{Binding IsActive}"
+                                                        MinWidth="65" />
                                 <DataGridTextColumn Header="Review"
                                                     Binding="{Binding ReviewStatus}"
-                                                    Width="0.8*" />
+                                                    MinWidth="100" />
+                                <DataGridTextColumn Header="Last Verified"
+                                                    Binding="{Binding LastVerifiedAtUtc, StringFormat={}{0:g}}"
+                                                    MinWidth="125" />
+                                <DataGridTextColumn Header="Updated"
+                                                    Binding="{Binding UpdatedAtUtc, StringFormat={}{0:g}}"
+                                                    MinWidth="125" />
                             </DataGrid.Columns>
                         </DataGrid>
                     </Grid>
@@ -650,6 +760,7 @@
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"
                                   CanUserAddRows="False"
+                                  ClipboardCopyMode="IncludeHeader"
                                   MouseDoubleClick="People_DoubleClick">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Name"
@@ -661,12 +772,33 @@
                                 <DataGridTextColumn Header="Email"
                                                     Binding="{Binding Email}"
                                                     Width="1.2*" />
+                                <DataGridTextColumn Header="Phone"
+                                                    Binding="{Binding Phone}"
+                                                    MinWidth="110" />
+                                <DataGridTextColumn Header="Mobile"
+                                                    Binding="{Binding MobilePhone}"
+                                                    MinWidth="110" />
+                                <DataGridTextColumn Header="Contact Type"
+                                                    Binding="{Binding ContactType}"
+                                                    MinWidth="105" />
                                 <DataGridTextColumn Header="Location"
                                                     Binding="{Binding LocationName}"
                                                     Width="0.8*" />
+                                <DataGridCheckBoxColumn Header="Primary"
+                                                        Binding="{Binding IsPrimary}"
+                                                        MinWidth="70" />
+                                <DataGridCheckBoxColumn Header="Active"
+                                                        Binding="{Binding IsActive}"
+                                                        MinWidth="65" />
                                 <DataGridTextColumn Header="Review"
                                                     Binding="{Binding ReviewStatus}"
-                                                    Width="0.8*" />
+                                                    MinWidth="100" />
+                                <DataGridTextColumn Header="Last Verified"
+                                                    Binding="{Binding LastVerifiedAtUtc, StringFormat={}{0:g}}"
+                                                    MinWidth="125" />
+                                <DataGridTextColumn Header="Updated"
+                                                    Binding="{Binding UpdatedAtUtc, StringFormat={}{0:g}}"
+                                                    MinWidth="125" />
                             </DataGrid.Columns>
                         </DataGrid>
                     </Grid>
@@ -691,7 +823,8 @@
                               ItemsSource="{Binding Equipment}"
                               AutoGenerateColumns="False"
                               IsReadOnly="True"
-                              CanUserAddRows="False">
+                              CanUserAddRows="False"
+                              ClipboardCopyMode="IncludeHeader">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Name"
                                                 Binding="{Binding Name}"
@@ -705,18 +838,39 @@
                             <DataGridTextColumn Header="Serial Number"
                                                 Binding="{Binding SerialNumber}"
                                                 Width="1*" />
+                            <DataGridTextColumn Header="Part Number"
+                                                Binding="{Binding PartNumber}"
+                                                MinWidth="105" />
                             <DataGridTextColumn Header="Asset Tag"
                                                 Binding="{Binding AssetTag}"
                                                 Width="0.8*" />
                             <DataGridTextColumn Header="IP Address"
                                                 Binding="{Binding IpAddress}"
                                                 Width="0.9*" />
+                            <DataGridTextColumn Header="AnyDesk"
+                                                Binding="{Binding AnyDeskNumber}"
+                                                MinWidth="105" />
                             <DataGridTextColumn Header="Location"
                                                 Binding="{Binding LocationName}"
                                                 Width="0.9*" />
                             <DataGridTextColumn Header="Assigned To"
                                                 Binding="{Binding ClientUserDisplayName}"
                                                 Width="0.8*" />
+                            <DataGridTextColumn Header="User Email"
+                                                Binding="{Binding ClientUserEmail}"
+                                                MinWidth="150" />
+                            <DataGridTextColumn Header="Technician"
+                                                Binding="{Binding TechnicianLabel}"
+                                                MinWidth="110" />
+                            <DataGridTextColumn Header="Stage"
+                                                Binding="{Binding InventoryStatusLabel}"
+                                                MinWidth="105" />
+                            <DataGridTextColumn Header="Notes"
+                                                Binding="{Binding Notes}"
+                                                MinWidth="180" />
+                            <DataGridTextColumn Header="Updated"
+                                                Binding="{Binding UpdatedAtUtc, StringFormat={}{0:g}}"
+                                                MinWidth="125" />
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
@@ -790,6 +944,7 @@
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"
                                   CanUserAddRows="False"
+                                  ClipboardCopyMode="IncludeHeader"
                                   MouseDoubleClick="Credentials_DoubleClick">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Name"
@@ -804,12 +959,24 @@
                                 <DataGridTextColumn Header="Login URL"
                                                     Binding="{Binding LoginUrl}"
                                                     Width="1.3*" />
+                                <DataGridTextColumn Header="Notes"
+                                                    Binding="{Binding Notes}"
+                                                    MinWidth="180" />
                                 <DataGridTextColumn Header="Secrets"
                                                     Binding="{Binding SecretCount}"
                                                     Width="0.5*" />
+                                <DataGridCheckBoxColumn Header="Active"
+                                                        Binding="{Binding IsActive}"
+                                                        MinWidth="65" />
                                 <DataGridTextColumn Header="Review"
                                                     Binding="{Binding ReviewStatus}"
-                                                    Width="0.8*" />
+                                                    MinWidth="100" />
+                                <DataGridTextColumn Header="Last Verified"
+                                                    Binding="{Binding LastVerifiedAtUtc, StringFormat={}{0:g}}"
+                                                    MinWidth="125" />
+                                <DataGridTextColumn Header="Updated"
+                                                    Binding="{Binding UpdatedAtUtc, StringFormat={}{0:g}}"
+                                                    MinWidth="125" />
                             </DataGrid.Columns>
                         </DataGrid>
                     </Grid>
@@ -950,6 +1117,7 @@
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"
                                   CanUserAddRows="False"
+                                  ClipboardCopyMode="IncludeHeader"
                                   MouseDoubleClick="Attachments_DoubleClick">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="File"
@@ -1095,6 +1263,7 @@
                               AutoGenerateColumns="False"
                               IsReadOnly="True"
                               CanUserAddRows="False"
+                              ClipboardCopyMode="IncludeHeader"
                               MouseDoubleClick="Facts_DoubleClick">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Section"
@@ -1111,7 +1280,16 @@
                                                 Width="0.7*" />
                             <DataGridTextColumn Header="Review"
                                                 Binding="{Binding ReviewStatus}"
-                                                Width="0.8*" />
+                                                MinWidth="100" />
+                            <DataGridCheckBoxColumn Header="Active"
+                                                    Binding="{Binding IsActive}"
+                                                    MinWidth="65" />
+                            <DataGridTextColumn Header="Last Verified"
+                                                Binding="{Binding LastVerifiedAtUtc, StringFormat={}{0:g}}"
+                                                MinWidth="125" />
+                            <DataGridTextColumn Header="Updated"
+                                                Binding="{Binding UpdatedAtUtc, StringFormat={}{0:g}}"
+                                                MinWidth="125" />
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>

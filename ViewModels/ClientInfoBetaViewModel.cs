@@ -250,6 +250,12 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     public ObservableCollection<ClientInfoLocation> Locations { get; } = [];
     public ObservableCollection<ClientInfoPerson> People { get; } = [];
     public ObservableCollection<ClientInfoResource> Resources { get; } = [];
+    public ObservableCollection<ClientInfoCategoryOverviewSection>
+        QuickReferenceSections { get; } = [];
+    public bool HasQuickReferenceSections => QuickReferenceSections.Count > 0;
+    public string QuickReferenceCountLabel => QuickReferenceSections.Count == 1
+        ? "1 quick-reference group"
+        : $"{QuickReferenceSections.Count} quick-reference groups";
     public ObservableCollection<EquipmentItem> Equipment { get; } = [];
     public ClientInfoResourceGroup ServerInfrastructureGroup { get; } = new(
         ClientInfoResourceCategories.ServersInfrastructure,
@@ -1230,17 +1236,18 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         var allResourceIds = Resources
             .Select(resource => resource.ResourceId)
             .ToHashSet();
-        foreach (var group in new[]
-                 {
-                     ServerInfrastructureGroup,
-                     ConnectionInternetGroup,
-                     WifiGroup,
-                     ApplicationsCloudGroup,
-                     DomainsEmailGroup,
-                     BackupSecurityGroup,
-                     VendorsServicesGroup,
-                     NeedsSortingGroup
-                 })
+        var groups = new[]
+        {
+            ServerInfrastructureGroup,
+            ConnectionInternetGroup,
+            WifiGroup,
+            ApplicationsCloudGroup,
+            DomainsEmailGroup,
+            BackupSecurityGroup,
+            VendorsServicesGroup,
+            NeedsSortingGroup
+        };
+        foreach (var group in groups)
         {
             var resources = Resources.Where(resource => string.Equals(
                     resource.Category,
@@ -1257,7 +1264,34 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 .ToArray();
             group.Replace(resources, Credentials, standaloneCredentials);
         }
+
+        Replace(
+            QuickReferenceSections,
+            groups
+                .Where(group => !ReferenceEquals(group, NeedsSortingGroup))
+                .SelectMany(group => group.OverviewSections)
+                .OrderBy(section => QuickReferencePriority(section.Title))
+                .ThenBy(section => section.Title));
+        OnPropertyChanged(nameof(HasQuickReferenceSections));
+        OnPropertyChanged(nameof(QuickReferenceCountLabel));
     }
+
+    private static int QuickReferencePriority(string title) => title switch
+    {
+        "WiFi" => 10,
+        "WatchGuard" => 20,
+        "Domain & AD" => 30,
+        "Microsoft 365" => 40,
+        "Remote Access" => 50,
+        "Core infrastructure" => 60,
+        "ILO / iDRAC" => 70,
+        "UPS" => 80,
+        "Internet & circuits" => 90,
+        "Veeam" => 100,
+        "ESET" => 110,
+        "Barracuda" => 120,
+        _ => 200
+    };
 
     private void EditCredential(ClientInfoCredential? current)
     {
