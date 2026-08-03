@@ -50,6 +50,7 @@ public sealed class ClientInfoBetaTests
 
         var xaml = Read("ClientInfoBetaWindow.xaml");
         var viewModel = Read("ViewModels", "ClientInfoBetaViewModel.cs");
+        var resourceGrid = Read("Controls", "ClientInfoResourceDataGrid.cs");
         Assert.Contains("Text=\"Overview\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"Full list\"", xaml, StringComparison.Ordinal);
         Assert.Contains("ResizeDirection=\"Rows\"", xaml, StringComparison.Ordinal);
@@ -63,6 +64,20 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("IsReadOnly=\"True\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Select text and press Ctrl+C to copy", xaml, StringComparison.Ordinal);
         Assert.Contains("ClipboardCopyMode=\"IncludeHeader\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Technician quick reference", xaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding QuickReferenceSections}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("QuickReferenceSections", viewModel, StringComparison.Ordinal);
+        Assert.Contains("SelectMany(group => group.OverviewSections)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("QuickReferencePriority", viewModel, StringComparison.Ordinal);
+        Assert.Contains("!ReferenceEquals(group, NeedsSortingGroup)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("ForEditorCategory(group.CategoryName)", resourceGrid, StringComparison.Ordinal);
+        Assert.DoesNotContain(".Where(field => field.ShowInGrid)", resourceGrid, StringComparison.Ordinal);
+        Assert.Contains("TextColumn(\"Notes\", \"Notes\"", resourceGrid, StringComparison.Ordinal);
+        Assert.Contains("TextColumn(\"Active\", \"IsActive\"", resourceGrid, StringComparison.Ordinal);
+        Assert.Contains("TextColumn(\"Last verified\", \"LastVerifiedAtUtc\"", resourceGrid, StringComparison.Ordinal);
+        Assert.Contains("TextColumn(\"Updated\", \"UpdatedAtUtc\"", resourceGrid, StringComparison.Ordinal);
+        Assert.True(
+            xaml.Split("ClipboardCopyMode=\"IncludeHeader\"", StringSplitOptions.None).Length - 1 >= 7);
         Assert.DoesNotContain("MouseDoubleClick=\"ResourceOverview_DoubleClick\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("\"category\",\n                \"Category\"", viewModel, StringComparison.Ordinal);
         Assert.Contains("TypeOptionsForCategory", viewModel, StringComparison.Ordinal);

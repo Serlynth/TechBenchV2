@@ -72,9 +72,11 @@ public sealed class ClientInfoResourceDataGrid : DataGrid
             "AddressOrUrl",
             1.2));
 
+        // The lower table is the complete record view. Compact/ShowInGrid flags
+        // belong to summaries and workbook layouts; they must not hide canonical
+        // fields from technicians here.
         foreach (var field in ClientInfoResourceFieldDefinitions
-                     .ForCategory(group.CategoryName)
-                     .Where(field => field.ShowInGrid))
+                     .ForEditorCategory(group.CategoryName))
         {
             Columns.Add(FieldColumn(field.FieldLabel, field.FieldKey));
         }
@@ -99,7 +101,11 @@ public sealed class ClientInfoResourceDataGrid : DataGrid
 
         Columns.Add(TextColumn("Location", "LocationName", 0.9));
         Columns.Add(TextColumn("Status", "Status", 0.7));
+        Columns.Add(TextColumn("Notes", "Notes", 1.5));
+        Columns.Add(TextColumn("Active", "IsActive", 0.6));
         Columns.Add(TextColumn("Review", "ReviewStatus", 0.8));
+        Columns.Add(TextColumn("Last verified", "LastVerifiedAtUtc", 0.9));
+        Columns.Add(TextColumn("Updated", "UpdatedAtUtc", 0.9));
     }
 
     private static DataGridTextColumn TextColumn(
