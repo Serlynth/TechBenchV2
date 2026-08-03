@@ -386,6 +386,12 @@
             </Setter>
         </Style>
 
+        <Style x:Key="BadgeTextStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="#101820" />
+        </Style>
+
         <DataTemplate x:Key="InlineWorkEntryEditorTemplate">
             <Border Style="{StaticResource CardStyle}">
                 <Grid>
@@ -644,12 +650,6 @@
                     <Setter Property="BorderThickness" Value="2" />
                 </DataTrigger>
             </Style.Triggers>
-        </Style>
-
-        <Style x:Key="BadgeTextStyle" TargetType="{x:Type TextBlock}">
-            <Setter Property="FontSize" Value="11" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="#101820" />
         </Style>
 
         <DataTemplate x:Key="EntryCardTemplate">
