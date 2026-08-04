@@ -3,6 +3,7 @@ using DocumentFormat.OpenXml.Spreadsheet;
 using TechBench.Data;
 using TechBench.Models;
 using TechBench.Services;
+using TechBench.ViewModels;
 
 namespace TechBench.Tests;
 
@@ -60,7 +61,8 @@ public sealed class ClientInfoBetaTests
         Assert.DoesNotContain("UseCompactView", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Move\"", xaml, StringComparison.Ordinal);
         Assert.Contains("OverviewSections", xaml, StringComparison.Ordinal);
-        Assert.Contains("Important category information", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"Selected record\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding SelectedOverviewLabel}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("controls:ClientInfoResourceDataGrid", xaml, StringComparison.Ordinal);
         Assert.Contains("BasedOn=\"{StaticResource {x:Type DataGrid}}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("IsReadOnly=\"True\"", xaml, StringComparison.Ordinal);
@@ -86,7 +88,7 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("ApplyColumnWidths", Read("ClientInfoBetaWindow.xaml.cs"), StringComparison.Ordinal);
         Assert.Contains("SaveColumnWidths", Read("ClientInfoBetaWindow.xaml.cs"), StringComparison.Ordinal);
         Assert.Contains("QuickReferenceSections", viewModel, StringComparison.Ordinal);
-        Assert.Contains("SelectMany(group => group.OverviewSections)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("SelectMany(group => group.AllOverviewSections)", viewModel, StringComparison.Ordinal);
         Assert.Contains("QuickReferencePriority", viewModel, StringComparison.Ordinal);
         Assert.Contains("!ReferenceEquals(group, NeedsSortingGroup)", viewModel, StringComparison.Ordinal);
         Assert.Contains("or \"Core infrastructure\"", viewModel, StringComparison.Ordinal);
@@ -215,6 +217,55 @@ public sealed class ClientInfoBetaTests
         Assert.Equal(2, access.Secrets.Count);
         Assert.DoesNotContain(sections.SelectMany(section => section.Fields),
             field => field.Label == "Protected values");
+    }
+
+    [Fact]
+    public void CategoryOverviewTracksTheSelectedRecordWhileQuickReferenceSourceStaysComplete()
+    {
+        ClientInfoResource Connection(long id, string name, string address) => new()
+        {
+            ResourceId = id,
+            ResourceType = ClientInfoResourceCategories.Encode(
+                ClientInfoResourceCategories.ConnectionInternet,
+                "WatchGuard Firewall"),
+            Name = name,
+            Fields =
+            [
+                new ClientInfoResourceField
+                {
+                    FieldKey = "public_wan_ip",
+                    FieldLabel = "Public / WAN IP",
+                    ValueText = address
+                }
+            ]
+        };
+
+        var primary = Connection(201, "Primary Firebox", "203.0.113.10");
+        var backup = Connection(202, "Backup Firebox", "198.51.100.20");
+        var group = new ClientInfoResourceGroup(
+            ClientInfoResourceCategories.ConnectionInternet,
+            "Connections");
+
+        group.Replace([primary, backup], [], []);
+
+        Assert.Same(primary, group.SelectedResource);
+        Assert.Equal(
+            "203.0.113.10",
+            Assert.Single(group.OverviewSections)
+                .Fields.Single(field => field.Label == "External IP").Value);
+        var completeExternalIps = Assert.Single(group.AllOverviewSections)
+            .Fields.Single(field => field.Label == "External IP").Value;
+        Assert.Contains("203.0.113.10", completeExternalIps, StringComparison.Ordinal);
+        Assert.Contains("198.51.100.20", completeExternalIps, StringComparison.Ordinal);
+
+        group.SelectedResource = backup;
+
+        Assert.Equal(
+            "198.51.100.20",
+            Assert.Single(group.OverviewSections)
+                .Fields.Single(field => field.Label == "External IP").Value);
+        Assert.Equal(completeExternalIps, Assert.Single(group.AllOverviewSections)
+            .Fields.Single(field => field.Label == "External IP").Value);
     }
 
     [Fact]

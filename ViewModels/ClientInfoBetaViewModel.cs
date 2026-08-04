@@ -1268,7 +1268,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 
         var categorySections = groups
             .Where(group => !ReferenceEquals(group, NeedsSortingGroup))
-            .SelectMany(group => group.OverviewSections)
+            .SelectMany(group => group.AllOverviewSections)
             .Where(section => section.Title is not
                 ("Microsoft 365"
                 or "ESET"
@@ -1791,6 +1791,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 public sealed class ClientInfoResourceGroup : ObservableObject
 {
     private ClientInfoResource? _selectedResource;
+    private ClientInfoCredential[] _overviewCredentials = [];
+    private ClientInfoCredential[] _standaloneCredentials = [];
 
     public ClientInfoResourceGroup(
         string categoryName,
@@ -1820,13 +1822,23 @@ public sealed class ClientInfoResourceGroup : ObservableObject
     public string OverviewCountLabel => OverviewSections.Count == 1
         ? "1 important summary"
         : $"{OverviewSections.Count} important summaries";
+    public string SelectedOverviewLabel => SelectedResource?.Name
+        ?? "Select a record from the full list";
     public ClientInfoResource? SelectedResource
     {
         get => _selectedResource;
-        set => SetProperty(ref _selectedResource, value);
+        set
+        {
+            if (SetProperty(ref _selectedResource, value))
+            {
+                OnPropertyChanged(nameof(SelectedOverviewLabel));
+                RefreshSelectedOverview();
+            }
+        }
     }
     public ObservableCollection<ClientInfoResource> Resources { get; } = [];
     public ObservableCollection<ClientInfoCategoryOverviewSection> OverviewSections { get; } = [];
+    public IReadOnlyList<ClientInfoCategoryOverviewSection> AllOverviewSections { get; private set; } = [];
 
     public void Replace(
         IEnumerable<ClientInfoResource> resources,
@@ -1836,8 +1848,10 @@ public sealed class ClientInfoResourceGroup : ObservableObject
         var selectedId = SelectedResource?.ResourceId;
         var resourceArray = resources.ToArray();
         var credentialArray = credentials.ToArray();
+        _standaloneCredentials = standaloneCredentials.ToArray();
         _selectedResource = null;
         OnPropertyChanged(nameof(SelectedResource));
+        OnPropertyChanged(nameof(SelectedOverviewLabel));
         Resources.Clear();
         OverviewSections.Clear();
         foreach (var resource in resourceArray)
@@ -1852,20 +1866,92 @@ public sealed class ClientInfoResourceGroup : ObservableObject
             .Where(credential =>
                 credential.ResourceId.HasValue
                 && resourceIds.Contains(credential.ResourceId.Value))
-            .Concat(standaloneCredentials)
+            .Concat(_standaloneCredentials)
             .GroupBy(credential => credential.CredentialId)
             .Select(group => group.First())
             .ToArray();
-        foreach (var section in ClientInfoCategoryOverviewBuilder.Build(
-                     CategoryName,
-                     resourceArray,
-                     overviewCredentials))
-        {
-            OverviewSections.Add(section);
-        }
+        _overviewCredentials = overviewCredentials;
+        AllOverviewSections = ClientInfoCategoryOverviewBuilder.Build(
+            CategoryName,
+            resourceArray,
+            overviewCredentials);
+        OnPropertyChanged(nameof(AllOverviewSections));
 
         SelectedResource = selectedId.HasValue
             ? Resources.FirstOrDefault(resource => resource.ResourceId == selectedId.Value)
-            : null;
+                ?? Resources.FirstOrDefault()
+            : Resources.FirstOrDefault();
+    }
+
+    private void RefreshSelectedOverview()
+    {
+        OverviewSections.Clear();
+        if (SelectedResource is null)
+        {
+            return;
+        }
+
+        var credentials = CredentialsForSelectedResource(SelectedResource);
+        foreach (var section in ClientInfoCategoryOverviewBuilder.BuildSelected(
+                     CategoryName,
+                     SelectedResource,
+                     credentials))
+        {
+            OverviewSections.Add(section);
+        }
+    }
+
+    private ClientInfoCredential[] CredentialsForSelectedResource(
+        ClientInfoResource resource)
+    {
+        var linked = _overviewCredentials
+            .Where(credential => credential.ResourceId == resource.ResourceId)
+            .ToArray();
+        var matchedStandalone = Resources.Count == 1
+            ? _standaloneCredentials
+            : _standaloneCredentials
+                .Where(credential => CredentialMatchesResource(
+                    credential,
+                    resource))
+                .ToArray();
+        return linked
+            .Concat(matchedStandalone)
+            .GroupBy(credential => credential.CredentialId)
+            .Select(group => group.First())
+            .ToArray();
+    }
+
+    private static bool CredentialMatchesResource(
+        ClientInfoCredential credential,
+        ClientInfoResource resource)
+    {
+        var credentialText = string.Join(
+            " ",
+            credential.Name,
+            credential.Category,
+            credential.Username,
+            credential.LoginUrl);
+        var resourceTerms = new[]
+        {
+            resource.Name,
+            resource.TypeLabel,
+            resource.Provider
+        }
+            .Where(term => !string.IsNullOrWhiteSpace(term))
+            .Select(term => term.Trim())
+            .Where(term => term.Length >= 3);
+        if (resourceTerms.Any(term => credentialText.Contains(
+                term,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return Uri.TryCreate(resource.AddressOrUrl, UriKind.Absolute, out var resourceUri)
+            && Uri.TryCreate(credential.LoginUrl, UriKind.Absolute, out var credentialUri)
+            && string.Equals(
+                resourceUri.Host,
+                credentialUri.Host,
+                StringComparison.OrdinalIgnoreCase);
     }
 }
