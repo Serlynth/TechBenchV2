@@ -1266,11 +1266,16 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             group.Replace(resources, Credentials, standaloneCredentials);
         }
 
+        var categorySections = groups
+            .Where(group => !ReferenceEquals(group, NeedsSortingGroup))
+            .SelectMany(group => group.OverviewSections)
+            .Where(section => section.Title is not
+                ("Microsoft 365" or "ESET" or "Barracuda"));
         Replace(
             QuickReferenceSections,
-            groups
-                .Where(group => !ReferenceEquals(group, NeedsSortingGroup))
-                .SelectMany(group => group.OverviewSections)
+            categorySections
+                .Append(ClientInfoCategoryOverviewBuilder.BuildCloudAccounts(
+                    Credentials.ToArray()))
                 .OrderBy(section => QuickReferencePriority(section.Title))
                 .ThenBy(section => section.Title));
         OnPropertyChanged(nameof(HasQuickReferenceSections));
@@ -1283,7 +1288,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         "Connection" => 20,
         "WatchGuard" => 20,
         "Domain & AD" => 30,
-        "Microsoft 365" => 40,
+        "Cloud Accounts" => 40,
         "Remote Access" => 50,
         "Core infrastructure" => 60,
         "ILO / iDRAC" => 70,

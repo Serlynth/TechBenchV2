@@ -495,6 +495,55 @@ public sealed class ClientInfoBetaTests
     }
 
     [Fact]
+    public void CloudAccountsQuickReferenceCombinesOnlyTheRequestedLogins()
+    {
+        ClientInfoCredential Credential(
+            long id,
+            string name,
+            string username,
+            string loginUrl) => new()
+        {
+            CredentialId = id,
+            Name = name,
+            Category = "Cloud",
+            Username = username,
+            LoginUrl = loginUrl,
+            IsActive = true,
+            Secrets =
+            [
+                new ClientInfoSecretSummary
+                {
+                    SecretId = id * 10,
+                    CredentialId = id,
+                    SecretType = "Password",
+                    SecretLabel = "Password",
+                    IsCurrent = true
+                }
+            ]
+        };
+
+        var section = ClientInfoCategoryOverviewBuilder.BuildCloudAccounts(
+        [
+            Credential(701, "Barracuda Admin", "barracuda-admin", "https://barracuda.example.test"),
+            Credential(702, "ESET Protect Admin", "eset-admin", "https://eset.example.test"),
+            Credential(703, "M365 Global Admin", "m365-admin@example.test", "https://admin.microsoft.com"),
+            Credential(704, "Unrelated Cloud App", "other-admin", "https://other.example.test")
+        ]);
+
+        Assert.Equal("Cloud Accounts", section.Title);
+        Assert.Equal(
+            ["Barracuda", "ESET", "Microsoft 365"],
+            section.Fields.Select(field => field.Label));
+        Assert.Equal("barracuda-admin", section.Fields[0].Value);
+        Assert.Equal("eset-admin", section.Fields[1].Value);
+        Assert.Equal("m365-admin@example.test", section.Fields[2].Value);
+        Assert.All(section.Fields, field => Assert.Single(field.Secrets));
+        Assert.DoesNotContain(
+            section.Fields,
+            field => field.Value.Contains("https://", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void DemoOverviewPlacesTheActualFireDrillGroupsInTheirCanonicalCategories()
     {
         var demo = ClientInfoDemoData.Create().Snapshot;
@@ -521,6 +570,9 @@ public sealed class ClientInfoBetaTests
         var builder = Read("Models", "ClientInfoCategoryOverviewBuilder.cs");
         Assert.Contains("CredentialFieldGrouper.Group", builder, StringComparison.Ordinal);
         Assert.DoesNotContain("DiscoverWorkspaceSections", builder, StringComparison.Ordinal);
+        var viewModel = Read("ViewModels", "ClientInfoBetaViewModel.cs");
+        Assert.Contains("BuildCloudAccounts", viewModel, StringComparison.Ordinal);
+        Assert.Contains("\"Microsoft 365\" or \"ESET\" or \"Barracuda\"", viewModel, StringComparison.Ordinal);
     }
 
     [Fact]
