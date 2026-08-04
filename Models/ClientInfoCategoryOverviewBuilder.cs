@@ -81,7 +81,7 @@ public static class ClientInfoCategoryOverviewBuilder
                         Values("Manufacturer / model", coreResources, "manufacturer_model", "server model", "hardware model")
                     ],
                     coreCredentials)),
-            Section("ILO / iDRAC", "Out-of-band server management information from the canonical infrastructure records.",
+            Section("ILO", "Out-of-band HPE server management information.",
                 WithAccess(
                     [
                         Names("Managed hosts", iloResources),
@@ -91,16 +91,24 @@ public static class ClientInfoCategoryOverviewBuilder
                         Values("Serial number", iloResources, "serial_number", "serial")
                     ],
                     iloCredentials)),
-            Section("UPS", "Power protection and network-management information.",
-                WithAccess(
-                    [
-                        Names("UPS systems", upsResources),
-                        Values("Management IP", upsResources, "management_ip", "ups ip"),
-                        Addresses("Management URL", upsResources),
-                        Values("Manufacturer / model", upsResources, "manufacturer_model", "ups model"),
-                        Values("Rack / runtime", upsResources, "additional_ips_subnet", "rack", "runtime")
-                    ],
-                    upsCredentials))
+            Section("UPS", "Location, model, network address, and administrator access.",
+                RequiredField("Location", Coalesce(
+                    "Location",
+                    Aggregate("Location", upsResources.Select(resource => resource.LocationName)),
+                    Values("Location", upsResources, "location", "site", "room"))),
+                RequiredField("Model", Coalesce(
+                    "Model",
+                    Values("Model", upsResources, "manufacturer_model", "ups model", "model"),
+                    Aggregate("Model", upsResources.Select(resource => resource.TypeLabel)))),
+                RequiredField("IP", Values(
+                    "IP",
+                    upsResources,
+                    "management_ip",
+                    "ups ip",
+                    "ip address",
+                    "primary_ip")),
+                RequiredCredentialUsernameField("Username", upsCredentials),
+                RequiredCredentialPasswordField("Password", upsCredentials))
         ];
     }
 
@@ -424,6 +432,36 @@ public static class ClientInfoCategoryOverviewBuilder
         IEnumerable<ClientInfoCredential> credentials) =>
         CredentialField(label, credentials)
         ?? new ClientInfoOverviewField(label, "Not entered");
+
+    private static ClientInfoOverviewField RequiredCredentialUsernameField(
+        string label,
+        IEnumerable<ClientInfoCredential> credentials) =>
+        RequiredField(
+            label,
+            Aggregate(
+                label,
+                credentials
+                    .Where(credential => credential.IsActive)
+                    .Select(credential => credential.Username)));
+
+    private static ClientInfoOverviewField RequiredCredentialPasswordField(
+        string label,
+        IEnumerable<ClientInfoCredential> credentials)
+    {
+        var secrets = credentials
+            .Where(credential => credential.IsActive)
+            .SelectMany(credential => credential.Secrets)
+            .Where(secret => secret.IsCurrent)
+            .GroupBy(secret =>
+                $"{secret.CredentialId}:{secret.SecretId}:{secret.SecretType}:{secret.SecretLabel}",
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+        return new ClientInfoOverviewField(
+            label,
+            secrets.Length > 0 ? "Password available" : "Not entered",
+            secrets);
+    }
 
     private static ClientInfoOverviewField RequiredField(
         string label,

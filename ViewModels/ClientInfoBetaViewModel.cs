@@ -1275,6 +1275,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 or "Barracuda"
                 or "Core infrastructure"
                 or "Other backup & security"
+                or "Remote Access"
                 or "Veeam"
                 or "Vendors & services"));
         Replace(
@@ -1295,8 +1296,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         "WatchGuard" => 20,
         "Domain & AD" => 30,
         "Cloud Accounts" => 40,
-        "Remote Access" => 50,
-        "ILO / iDRAC" => 70,
+        "ILO" => 70,
         "UPS" => 80,
         "Internet & circuits" => 90,
         _ => 200
