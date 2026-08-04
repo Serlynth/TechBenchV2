@@ -1279,6 +1279,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     private static int QuickReferencePriority(string title) => title switch
     {
         "WiFi" => 10,
+        "Connection" => 20,
         "WatchGuard" => 20,
         "Domain & AD" => 30,
         "Microsoft 365" => 40,

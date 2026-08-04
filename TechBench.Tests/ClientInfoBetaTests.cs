@@ -154,17 +154,187 @@ public sealed class ClientInfoBetaTests
             }]);
 
         var watchGuard = Assert.Single(sections);
-        Assert.Equal("WatchGuard", watchGuard.Title);
+        Assert.Equal("Connection", watchGuard.Title);
         Assert.DoesNotContain(sections.SelectMany(section => section.Fields),
             field => field.Label == "Notes" || field.Label == "AuthPoint Tenant");
         Assert.Contains(sections.SelectMany(section => section.Fields),
-            field => field.Label == "Public / WAN IP"
+            field => field.Label == "External IP"
                      && field.Value.Contains("+5 more in full list"));
         var access = Assert.Single(sections.SelectMany(section => section.Fields),
-            field => field.Label == "WatchGuard Admin");
+            field => field.Label == "Admin password");
         Assert.Equal(2, access.Secrets.Count);
         Assert.DoesNotContain(sections.SelectMany(section => section.Fields),
             field => field.Label == "Protected values");
+    }
+
+    [Fact]
+    public void WifiOverviewContainsOnlyManagementAdminAndEverySsid()
+    {
+        ClientInfoSecretSummary Secret(long secretId, long credentialId) => new()
+        {
+            SecretId = secretId,
+            CredentialId = credentialId,
+            SecretType = "Password",
+            SecretLabel = "Password",
+            IsCurrent = true
+        };
+        ClientInfoCredential Credential(
+            long id,
+            string name,
+            string username,
+            string loginUrl) => new()
+        {
+            CredentialId = id,
+            ResourceId = 41,
+            Name = name,
+            Category = "Wireless",
+            Username = username,
+            LoginUrl = loginUrl,
+            IsActive = true,
+            Secrets = [Secret(id * 10, id)]
+        };
+
+        var sections = ClientInfoCategoryOverviewBuilder.Build(
+            ClientInfoResourceCategories.Wifi,
+            [new ClientInfoResource
+            {
+                ResourceId = 41,
+                ResourceType = ClientInfoResourceCategories.Encode(
+                    ClientInfoResourceCategories.Wifi,
+                    "Wireless Controller"),
+                Name = "Main Wi-Fi",
+                AddressOrUrl = "https://wifi.example.test",
+                Fields =
+                [
+                    new ClientInfoResourceField
+                    {
+                        FieldKey = "ssid",
+                        FieldLabel = "SSID",
+                        ValueText = "Example-Staff"
+                    },
+                    new ClientInfoResourceField
+                    {
+                        FieldKey = "guest_ssid",
+                        FieldLabel = "Guest SSID",
+                        ValueText = "Example-Guest"
+                    },
+                    new ClientInfoResourceField
+                    {
+                        FieldKey = "vlan",
+                        FieldLabel = "VLAN",
+                        ValueText = "20"
+                    }
+                ]
+            }],
+            [
+                Credential(501, "Wireless Admin", "wifi-admin", "https://wifi.example.test"),
+                Credential(502, "Staff SSID Password", "", ""),
+                Credential(503, "Guest SSID Password", "", "")
+            ]);
+
+        var fields = Assert.Single(sections).Fields;
+        Assert.Equal(
+            ["Type", "Management URL", "Admin username / password", "SSID", "Guest SSID"],
+            fields.Select(field => field.Label));
+        Assert.Equal("wifi-admin", fields.Single(field =>
+            field.Label == "Admin username / password").Value);
+        Assert.Single(fields.Single(field => field.Label == "SSID").Secrets);
+        Assert.Equal(502, fields.Single(field => field.Label == "SSID").Secrets[0].CredentialId);
+        Assert.Single(fields.Single(field => field.Label == "Guest SSID").Secrets);
+        Assert.Equal(503, fields.Single(field => field.Label == "Guest SSID").Secrets[0].CredentialId);
+        Assert.DoesNotContain(fields, field => field.Label is "VLAN" or "Security" or "Management IP");
+    }
+
+    [Fact]
+    public void ConnectionOverviewUsesTheExactRequestedFieldsAndConditionalCsriAccess()
+    {
+        ClientInfoCredential Credential(long id, string name, string username = "") => new()
+        {
+            CredentialId = id,
+            ResourceId = 61,
+            Name = name,
+            Category = "WatchGuard",
+            Username = username,
+            IsActive = true,
+            Secrets =
+            [
+                new ClientInfoSecretSummary
+                {
+                    SecretId = id * 10,
+                    CredentialId = id,
+                    SecretType = "Password",
+                    SecretLabel = "Password",
+                    IsCurrent = true
+                }
+            ]
+        };
+        var resource = new ClientInfoResource
+        {
+            ResourceId = 61,
+            ResourceType = ClientInfoResourceCategories.Encode(
+                ClientInfoResourceCategories.ConnectionInternet,
+                "WatchGuard Firewall"),
+            Name = "Main Firebox",
+            Fields =
+            [
+                new ClientInfoResourceField
+                {
+                    FieldKey = "public_wan_ip",
+                    FieldLabel = "Public / WAN IP",
+                    ValueText = "203.0.113.44"
+                },
+                new ClientInfoResourceField
+                {
+                    FieldKey = "device_model",
+                    FieldLabel = "Device Model",
+                    ValueText = "Firebox M390"
+                },
+                new ClientInfoResourceField
+                {
+                    FieldKey = "gateway",
+                    FieldLabel = "Gateway",
+                    ValueText = "203.0.113.41"
+                }
+            ]
+        };
+        var credentials = new[]
+        {
+            Credential(601, "Status"),
+            Credential(602, "WatchGuard Admin"),
+            Credential(603, "Firebox Database CSRI"),
+            Credential(604, "AuthPoint User", "authpoint-user@example.test"),
+            Credential(605, "SSLVPN Password"),
+            Credential(606, "WatchGuard Cloud", "cloud-user@example.test"),
+            Credential(607, "WatchGuard AD Auth", "EXAMPLE\\wg-auth")
+        };
+
+        var fields = Assert.Single(ClientInfoCategoryOverviewBuilder.Build(
+            ClientInfoResourceCategories.ConnectionInternet,
+            [resource],
+            credentials)).Fields;
+
+        Assert.Equal(
+            [
+                "External IP",
+                "Model",
+                "Status password",
+                "Admin password",
+                "Firebox-DB\\csri",
+                "AuthPoint user",
+                "SSL VPN password",
+                "WatchGuard Cloud user / password",
+                "WatchGuard AD auth user / password"
+            ],
+            fields.Select(field => field.Label));
+        Assert.DoesNotContain(fields, field => field.Label is "Gateway" or "Firmware" or "Subnet / CIDR");
+        Assert.All(fields.Skip(2), field => Assert.NotEmpty(field.Secrets));
+
+        var fallbackFields = Assert.Single(ClientInfoCategoryOverviewBuilder.Build(
+            ClientInfoResourceCategories.ConnectionInternet,
+            [resource],
+            [Credential(608, "CSRIAdmin AuthPoint", "csriadmin")])).Fields;
+        Assert.Contains(fallbackFields, field => field.Label == "CSRIAdmin AuthPoint");
+        Assert.DoesNotContain(fallbackFields, field => field.Label == "Firebox-DB\\csri");
     }
 
     [Fact]
@@ -216,7 +386,7 @@ public sealed class ClientInfoBetaTests
 
         Assert.Contains("ILO / iDRAC", Titles(ClientInfoResourceCategories.ServersInfrastructure));
         Assert.Contains("UPS", Titles(ClientInfoResourceCategories.ServersInfrastructure));
-        Assert.Contains("WatchGuard", Titles(ClientInfoResourceCategories.ConnectionInternet));
+        Assert.Contains("Connection", Titles(ClientInfoResourceCategories.ConnectionInternet));
         Assert.Equal(["WiFi"], Titles(ClientInfoResourceCategories.Wifi));
         Assert.Contains("Microsoft 365", Titles(ClientInfoResourceCategories.ApplicationsCloud));
         Assert.Contains("Remote Access", Titles(ClientInfoResourceCategories.ApplicationsCloud));

@@ -91,61 +91,98 @@ public static class ClientInfoCategoryOverviewBuilder
         IReadOnlyList<ClientInfoResource> resources,
         IReadOnlyList<ClientInfoCredential> credentials)
     {
-        var watchGuardResources = resources.Where(resource => IsFireDrillGroup(resource, "WatchGuard")).ToArray();
-        var watchGuardCredentials = credentials.Where(credential => IsFireDrillGroup(credential, "WatchGuard")).ToArray();
-        var otherResources = resources.Except(watchGuardResources).ToArray();
-        var otherCredentials = credentials.Except(watchGuardCredentials).ToArray();
+        var status = MatchingCredentials(credentials, ["status"]);
+        var admin = MatchingCredentials(
+            credentials,
+            ["watchguard admin", "firebox admin", "firewall admin", "admin password", "admin"],
+            ["status", "firebox db", "firebox database", "csriadmin", "authpoint", "ssl vpn", "sslvpn", "cloud", "ad auth", "active directory"]);
+        var fireboxDatabase = MatchingCredentials(
+            credentials,
+            ["firebox db", "firebox database", "firebox-db"]);
+        var csriAdminAuthPoint = credentials
+            .Where(credential => credential.IsActive)
+            .Where(credential =>
+                ContainsCredentialTerm(credential, "csriadmin")
+                || (Normalize(credential.Username).Contains("csriadmin", StringComparison.Ordinal)
+                    && ContainsCredentialTerm(credential, "authpoint")))
+            .ToArray();
+        var authPoint = MatchingCredentials(
+            credentials,
+            ["authpoint user", "authpoint"],
+            ["csriadmin"]);
+        var sslVpn = MatchingCredentials(
+            credentials,
+            ["ssl vpn", "sslvpn"]);
+        var watchGuardCloud = MatchingCredentials(
+            credentials,
+            ["watchguard cloud", "cloud user", "cloud password"]);
+        var watchGuardAd = MatchingCredentials(
+            credentials,
+            ["watchguard ad auth", "ad auth", "ad user", "ad password", "active directory auth"],
+            ["authpoint"]);
 
         return
         [
-            Section("WatchGuard", "Firebox, AuthPoint, SSL VPN, and administrative access references.",
-                WithAccess(
-                    [
-                        Names("Firewalls", watchGuardResources),
-                        Coalesce("Firebox IP",
-                            Values("Firebox IP", watchGuardResources, "firebox ip", "management_ip", "device ip"),
-                            Addresses("Firebox IP", watchGuardResources)),
-                        Aggregate("Status", watchGuardResources.Select(resource => resource.Status), watchGuardResources.Select(resource => resource.Name)),
-                        Values("Device model", watchGuardResources, "device_model", "firebox model", "firewall model"),
-                        Values("Firmware", watchGuardResources, "firmware_version", "fireware", "firmware"),
-                        Values("Public / WAN IP", watchGuardResources, "public_wan_ip", "wan ip", "public ip"),
-                        Values("Gateway", watchGuardResources, "gateway", "default gateway"),
-                        Values("Subnet / CIDR", watchGuardResources, "subnet_cidr", "subnet", "cidr")
-                    ],
-                    watchGuardCredentials)),
-            Section("Internet & circuits", "Provider, circuit, addressing, and support information outside WatchGuard.",
-                WithAccess(
-                    [
-                        Names("Connections", otherResources),
-                        Providers("Provider", otherResources),
-                        Values("Public / WAN IP", otherResources, "public_wan_ip", "wan ip", "public ip"),
-                        Values("Gateway", otherResources, "gateway", "default gateway"),
-                        Values("Subnet / CIDR", otherResources, "subnet_cidr", "subnet", "cidr"),
-                        Values("Circuit ID", otherResources, "circuit_id", "circuit", "account number"),
-                        Values("Support phone", otherResources, "support_phone", "isp phone")
-                    ],
-                    otherCredentials))
+            Section("Connection", "The connection details technicians use most often.",
+                Values("External IP", resources, "public_wan_ip", "external ip", "firebox ip", "wan ip", "public ip"),
+                Values("Model", resources, "device_model", "model", "firebox model", "firewall model"),
+                CredentialField("Status password", status),
+                CredentialField("Admin password", admin),
+                fireboxDatabase.Length > 0
+                    ? CredentialField("Firebox-DB\\csri", fireboxDatabase)
+                    : CredentialField("CSRIAdmin AuthPoint", csriAdminAuthPoint),
+                CredentialField("AuthPoint user", authPoint),
+                CredentialField("SSL VPN password", sslVpn),
+                CredentialField("WatchGuard Cloud user / password", watchGuardCloud),
+                CredentialField("WatchGuard AD auth user / password", watchGuardAd))
         ];
     }
 
     private static IReadOnlyList<ClientInfoCategoryOverviewSection> BuildWifi(
         IReadOnlyList<ClientInfoResource> resources,
-        IReadOnlyList<ClientInfoCredential> credentials) =>
-    [
-        Section("WiFi", "The Wireless fields from FireDrill, plus canonical controller and network details.",
-            WithAccess(
-                [
-                    Names("Wireless systems", resources),
-                    Values("Controller", resources, "controller_name", "wireless controller", "controller"),
-                    Addresses("Controller / URL", resources),
-                    Values("Management IP", resources, "management_ip", "controller ip", "wireless ip"),
-                    Values("Staff SSID", resources, "ssid", "wireless ssid", "staff ssid", "corporate ssid"),
-                    Values("Guest SSID", resources, "guest_ssid", "wireless guest", "guest wifi"),
-                    Values("Security", resources, "wireless_security", "wifi security", "encryption"),
-                    Values("VLAN", resources, "vlan", "wifi vlan")
-                ],
-                credentials))
-    ];
+        IReadOnlyList<ClientInfoCredential> credentials)
+    {
+        var activeCredentials = credentials
+            .Where(credential => credential.IsActive)
+            .ToArray();
+        var admin = MatchingCredentials(
+            activeCredentials,
+            ["wireless admin", "wifi admin", "controller", "management", "central", "unifi", "meraki"]);
+        if (admin.Length == 0)
+        {
+            admin = activeCredentials
+                .Where(credential =>
+                    !string.IsNullOrWhiteSpace(credential.Username)
+                    && !string.IsNullOrWhiteSpace(credential.LoginUrl)
+                    && !IsWifiPasswordCredential(credential))
+                .ToArray();
+        }
+
+        var fields = new List<ClientInfoOverviewField?>
+        {
+            Aggregate("Type", resources.Select(resource => resource.TypeLabel)),
+            Aggregate(
+                "Management URL",
+                resources.Select(resource => FindValue(
+                        resource,
+                        ["management_url", "management url", "controller url"]))
+                    .Concat(resources.Select(resource => resource.AddressOrUrl))
+                    .Concat(admin.Select(credential => credential.LoginUrl))),
+            CredentialField("Admin username / password", admin)
+        };
+        fields.AddRange(BuildSsidFields(
+            resources,
+            activeCredentials,
+            admin.Select(credential => credential.CredentialId).ToHashSet()));
+
+        return
+        [
+            Section(
+                "WiFi",
+                "Wireless management access plus every configured SSID and password.",
+                fields.ToArray())
+        ];
+    }
 
     private static IReadOnlyList<ClientInfoCategoryOverviewSection> BuildApplications(
         IReadOnlyList<ClientInfoResource> resources,
@@ -284,6 +321,140 @@ public static class ClientInfoCategoryOverviewBuilder
                     Aggregate("Types", resources.Select(resource => resource.TypeLabel)),
                     Aggregate("Providers", resources.Select(resource => resource.Provider)))
             ];
+
+    private static ClientInfoCredential[] MatchingCredentials(
+        IEnumerable<ClientInfoCredential> credentials,
+        IReadOnlyList<string> includedTerms,
+        IReadOnlyList<string>? excludedTerms = null) =>
+        credentials
+            .Where(credential => credential.IsActive)
+            .Where(credential => includedTerms.Any(term =>
+                ContainsCredentialTerm(credential, term)))
+            .Where(credential => excludedTerms is null || excludedTerms.All(term =>
+                !ContainsCredentialTerm(credential, term)))
+            .OrderBy(credential => credential.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    private static bool ContainsCredentialTerm(
+        ClientInfoCredential credential,
+        string term) =>
+        Normalize(CredentialMetadata(credential)).Contains(
+            Normalize(term),
+            StringComparison.Ordinal);
+
+    private static string CredentialMetadata(ClientInfoCredential credential) =>
+        string.Join(
+            " ",
+            new[] { credential.Name, credential.Category }
+                .Concat(credential.Secrets.SelectMany(secret =>
+                    new[] { secret.SecretType, secret.SecretLabel })));
+
+    private static ClientInfoOverviewField? CredentialField(
+        string label,
+        IEnumerable<ClientInfoCredential> credentials)
+    {
+        var matches = credentials
+            .Where(credential => credential.IsActive)
+            .OrderBy(credential => credential.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (matches.Length == 0)
+        {
+            return null;
+        }
+
+        var usernames = matches
+            .Select(credential => credential.Username?.Trim() ?? string.Empty)
+            .Where(value => value.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var secrets = matches
+            .SelectMany(credential => credential.Secrets)
+            .Where(secret => secret.IsCurrent)
+            .GroupBy(secret =>
+                $"{secret.CredentialId}:{secret.SecretId}:{secret.SecretType}:{secret.SecretLabel}",
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+        var value = usernames.Length > 0
+            ? string.Join(Environment.NewLine, usernames)
+            : secrets.Length > 0
+                ? "Password available"
+                : "Configured";
+        return new ClientInfoOverviewField(label, value, secrets);
+    }
+
+    private static IReadOnlyList<ClientInfoOverviewField?> BuildSsidFields(
+        IReadOnlyList<ClientInfoResource> resources,
+        IReadOnlyList<ClientInfoCredential> credentials,
+        IReadOnlySet<long> adminCredentialIds)
+    {
+        var entries = resources
+            .SelectMany(resource => resource.Fields
+                .Where(field =>
+                    Normalize(field.FieldKey).Contains("ssid", StringComparison.Ordinal)
+                    || Normalize(field.FieldLabel).Contains("ssid", StringComparison.Ordinal))
+                .Where(field => !string.IsNullOrWhiteSpace(field.ValueText))
+                .Select(field => new
+                {
+                    resource.ResourceId,
+                    Label = string.IsNullOrWhiteSpace(field.FieldLabel)
+                        ? "SSID"
+                        : field.FieldLabel.Trim(),
+                    Value = field.ValueText.Trim()
+                }))
+            .GroupBy(entry => entry.Value, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new
+            {
+                Value = group.Key,
+                Label = group.First().Label,
+                ResourceIds = group.Select(entry => entry.ResourceId).ToHashSet()
+            })
+            .ToArray();
+
+        return entries.Select(entry =>
+        {
+            var normalizedSsid = Normalize(entry.Value);
+            var candidates = credentials
+                .Where(credential => credential.IsActive)
+                .Where(credential => !adminCredentialIds.Contains(credential.CredentialId))
+                .ToArray();
+            var exactMatches = candidates
+                .Where(credential =>
+                    normalizedSsid.Length > 0
+                    && (CredentialMetadata(credential).Contains(
+                        entry.Value,
+                        StringComparison.OrdinalIgnoreCase)
+                    || Normalize(CredentialMetadata(credential)).Contains(
+                        normalizedSsid,
+                        StringComparison.Ordinal)))
+                .ToArray();
+            var isGuest = Normalize(entry.Label).Contains("guest", StringComparison.Ordinal);
+            var linkedMatches = candidates
+                .Where(credential =>
+                    credential.ResourceId.HasValue
+                    && entry.ResourceIds.Contains(credential.ResourceId.Value)
+                    && IsWifiPasswordCredential(credential))
+                .Where(credential =>
+                    isGuest == ContainsCredentialTerm(credential, "guest"))
+                .ToArray();
+            var matches = exactMatches.Length > 0
+                ? exactMatches
+                : linkedMatches;
+            var secrets = matches
+                .SelectMany(credential => credential.Secrets)
+                .Where(secret => secret.IsCurrent)
+                .GroupBy(secret =>
+                    $"{secret.CredentialId}:{secret.SecretId}:{secret.SecretType}:{secret.SecretLabel}",
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToArray();
+            return new ClientInfoOverviewField(entry.Label, entry.Value, secrets);
+        }).Cast<ClientInfoOverviewField?>().ToArray();
+    }
+
+    private static bool IsWifiPasswordCredential(ClientInfoCredential credential) =>
+        new[] { "ssid", "wireless", "wifi", "guest", "network password" }
+            .Any(term => ContainsCredentialTerm(credential, term));
 
     private static ClientInfoOverviewField?[] WithAccess(
         IEnumerable<ClientInfoOverviewField?> fields,
