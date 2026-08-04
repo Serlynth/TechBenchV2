@@ -705,11 +705,8 @@
                                                 <TextBlock Text="{Binding Title}"
                                                            FontSize="15"
                                                            FontWeight="SemiBold"
-                                                           TextTrimming="CharacterEllipsis" />
-                                                <TextBlock Text="{Binding Description}"
-                                                           Foreground="{DynamicResource SecondaryTextBrush}"
-                                                           TextWrapping="Wrap"
-                                                           Margin="0,5,0,10" />
+                                                           TextTrimming="CharacterEllipsis"
+                                                           Margin="0,0,0,10" />
                                                 <ItemsControl ItemsSource="{Binding Fields}"
                                                               ItemTemplate="{StaticResource OverviewFieldTemplate}" />
                                             </StackPanel>

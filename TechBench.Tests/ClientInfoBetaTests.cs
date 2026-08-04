@@ -68,6 +68,10 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("ClipboardCopyMode=\"IncludeHeader\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Technician quick reference", xaml, StringComparison.Ordinal);
         Assert.Contains("ItemsSource=\"{Binding QuickReferenceSections}\"", xaml, StringComparison.Ordinal);
+        var quickReferenceMarkup = xaml[
+            xaml.IndexOf("ItemsSource=\"{Binding QuickReferenceSections}\"", StringComparison.Ordinal)..
+            xaml.IndexOf("<TabItem Header=\"People &amp; Locations\">", StringComparison.Ordinal)];
+        Assert.DoesNotContain("Text=\"{Binding Description}\"", quickReferenceMarkup, StringComparison.Ordinal);
         Assert.Contains("x:Key=\"OverviewFieldTemplate\"", xaml, StringComparison.Ordinal);
         Assert.Contains("DataContext.RevealSecretCommand", xaml, StringComparison.Ordinal);
         Assert.Contains("DataContext.CopySecretCommand", xaml, StringComparison.Ordinal);
@@ -638,7 +642,7 @@ public sealed class ClientInfoBetaTests
             []);
 
         Assert.Contains(sections.SelectMany(section => section.Fields),
-            field => field.Label == "Management IP" && field.Value == "10.2.0.15");
+            field => field.Label == "Host IP" && field.Value == "10.2.0.15");
         Assert.Contains(sections, section => section.Title == "ILO");
         Assert.DoesNotContain(
             "FireDrillRepository",
@@ -664,6 +668,15 @@ public sealed class ClientInfoBetaTests
 
         Assert.Contains(sections, section => section.Title == "ILO");
         Assert.DoesNotContain(sections, section => section.Title.Contains("iDRAC", StringComparison.OrdinalIgnoreCase));
+        var ilo = Assert.Single(sections, section => section.Title == "ILO");
+        Assert.Equal(
+            ["Host name", "Host IP", "Username", "Password"],
+            ilo.Fields.Select(field => field.Label));
+        Assert.Equal("ILO Host 1", ilo.Fields[0].Value);
+        Assert.Equal("10.20.0.12", ilo.Fields[1].Value);
+        Assert.Equal("Administrator", ilo.Fields[2].Value);
+        Assert.Equal("Password available", ilo.Fields[3].Value);
+        Assert.Single(ilo.Fields[3].Secrets);
         var ups = Assert.Single(sections, section => section.Title == "UPS");
         Assert.Equal(
             ["Location", "Model", "IP", "Username", "Password"],
@@ -677,6 +690,70 @@ public sealed class ClientInfoBetaTests
         Assert.DoesNotContain(
             ups.Fields,
             field => field.Value.Contains("https://", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void IloQuickReferenceBuildsOneCredentialMatchedCardPerServer()
+    {
+        ClientInfoResource Server(long id, string name, string ip) => new()
+        {
+            ResourceId = id,
+            ResourceType = ClientInfoResourceCategories.Encode(
+                ClientInfoResourceCategories.ServersInfrastructure,
+                "ILO"),
+            Name = name,
+            Fields =
+            [
+                new ClientInfoResourceField
+                {
+                    FieldKey = "management_ip",
+                    FieldLabel = "Host IP",
+                    ValueText = ip
+                }
+            ]
+        };
+
+        ClientInfoCredential Access(long id, long resourceId, string username) => new()
+        {
+            CredentialId = id,
+            ResourceId = resourceId,
+            Name = $"ILO {resourceId} Admin",
+            Category = "ILO",
+            Username = username,
+            IsActive = true,
+            Secrets =
+            [
+                new ClientInfoSecretSummary
+                {
+                    SecretId = id * 10,
+                    CredentialId = id,
+                    SecretType = "Password",
+                    SecretLabel = "Password",
+                    IsCurrent = true
+                }
+            ]
+        };
+
+        var sections = ClientInfoCategoryOverviewBuilder.Build(
+            ClientInfoResourceCategories.ServersInfrastructure,
+            [Server(501, "APP-SRV-01 ILO", "10.0.0.11"), Server(502, "FILE-SRV-01 ILO", "10.0.0.12")],
+            [Access(601, 501, "app-admin"), Access(602, 502, "file-admin")]);
+
+        var ilo = sections.Where(section => section.Title == "ILO").ToArray();
+        Assert.Equal(2, ilo.Length);
+        Assert.All(
+            ilo,
+            section => Assert.Equal(
+                ["Host name", "Host IP", "Username", "Password"],
+                section.Fields.Select(field => field.Label)));
+        Assert.Equal("APP-SRV-01 ILO", ilo[0].Fields[0].Value);
+        Assert.Equal("10.0.0.11", ilo[0].Fields[1].Value);
+        Assert.Equal("app-admin", ilo[0].Fields[2].Value);
+        Assert.Equal(6010, Assert.Single(ilo[0].Fields[3].Secrets).SecretId);
+        Assert.Equal("FILE-SRV-01 ILO", ilo[1].Fields[0].Value);
+        Assert.Equal("10.0.0.12", ilo[1].Fields[1].Value);
+        Assert.Equal("file-admin", ilo[1].Fields[2].Value);
+        Assert.Equal(6020, Assert.Single(ilo[1].Fields[3].Secrets).SecretId);
     }
 
     [Theory]

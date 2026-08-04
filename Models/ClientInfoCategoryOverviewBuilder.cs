@@ -68,8 +68,8 @@ public static class ClientInfoCategoryOverviewBuilder
         var coreResources = resources.Except(iloResources).Except(upsResources).ToArray();
         var coreCredentials = credentials.Except(iloCredentials).Except(upsCredentials).ToArray();
 
-        return
-        [
+        var sections = new List<ClientInfoCategoryOverviewSection>
+        {
             Section("Core infrastructure", "Servers, hosts, storage, switches, and their most useful support details.",
                 WithAccess(
                     [
@@ -80,17 +80,10 @@ public static class ClientInfoCategoryOverviewBuilder
                         Values("Operating system", coreResources, "operating_system", "server os", "os version"),
                         Values("Manufacturer / model", coreResources, "manufacturer_model", "server model", "hardware model")
                     ],
-                    coreCredentials)),
-            Section("ILO", "Out-of-band HPE server management information.",
-                WithAccess(
-                    [
-                        Names("Managed hosts", iloResources),
-                        Values("Management IP", iloResources, "management_ip", "ilo ip", "idrac ip"),
-                        Addresses("Management URL", iloResources),
-                        Values("Manufacturer / model", iloResources, "manufacturer_model", "server model", "ilo host", "idrac host"),
-                        Values("Serial number", iloResources, "serial_number", "serial")
-                    ],
-                    iloCredentials)),
+                    coreCredentials))
+        };
+        sections.AddRange(BuildIloSections(iloResources, iloCredentials));
+        sections.Add(
             Section("UPS", "Location, model, network address, and administrator access.",
                 RequiredField("Location", Coalesce(
                     "Location",
@@ -108,8 +101,108 @@ public static class ClientInfoCategoryOverviewBuilder
                     "ip address",
                     "primary_ip")),
                 RequiredCredentialUsernameField("Username", upsCredentials),
-                RequiredCredentialPasswordField("Password", upsCredentials))
-        ];
+                RequiredCredentialPasswordField("Password", upsCredentials)));
+        return sections;
+    }
+
+    private static IReadOnlyList<ClientInfoCategoryOverviewSection> BuildIloSections(
+        IReadOnlyList<ClientInfoResource> resources,
+        IReadOnlyList<ClientInfoCredential> credentials)
+    {
+        if (resources.Count == 0)
+        {
+            return credentials
+                .Where(credential => credential.IsActive)
+                .OrderBy(credential => credential.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(credential => Section(
+                    "ILO",
+                    string.Empty,
+                    RequiredField("Host name", Field("Host name", credential.Name)),
+                    RequiredField("Host IP", Field("Host IP", NetworkHost(credential.LoginUrl))),
+                    RequiredCredentialUsernameField("Username", [credential]),
+                    RequiredCredentialPasswordField("Password", [credential])))
+                .ToArray();
+        }
+
+        return resources
+            .OrderBy(resource => resource.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(resource =>
+            {
+                var access = MatchingIloCredentials(resource, resources, credentials);
+                return Section(
+                    "ILO",
+                    string.Empty,
+                    RequiredField("Host name", Coalesce(
+                        "Host name",
+                        Field("Host name", FindValue(
+                            resource,
+                            ["host_name", "host name", "hostname", "server_name", "server hostname", "server name"])),
+                        Field("Host name", resource.Name))),
+                    RequiredField("Host IP", Coalesce(
+                        "Host IP",
+                        Field("Host IP", FindValue(
+                            resource,
+                            ["management_ip", "ilo ip", "host ip", "ip address", "primary_ip"])),
+                        Field("Host IP", NetworkHost(resource.AddressOrUrl)))),
+                    RequiredCredentialUsernameField("Username", access),
+                    RequiredCredentialPasswordField("Password", access));
+            })
+            .ToArray();
+    }
+
+    private static ClientInfoCredential[] MatchingIloCredentials(
+        ClientInfoResource resource,
+        IReadOnlyList<ClientInfoResource> resources,
+        IReadOnlyList<ClientInfoCredential> credentials)
+    {
+        var linked = credentials
+            .Where(credential => credential.IsActive)
+            .Where(credential => credential.ResourceId == resource.ResourceId)
+            .ToArray();
+        if (linked.Length > 0)
+        {
+            return linked;
+        }
+
+        var normalizedName = Normalize(resource.Name);
+        var host = NetworkHost(resource.AddressOrUrl);
+        var named = credentials
+            .Where(credential => credential.IsActive)
+            .Where(credential =>
+                (normalizedName.Length > 0
+                 && Normalize(CredentialMetadata(credential)).Contains(
+                     normalizedName,
+                     StringComparison.Ordinal))
+                || (host.Length > 0
+                    && string.Equals(
+                        NetworkHost(credential.LoginUrl),
+                        host,
+                        StringComparison.OrdinalIgnoreCase)))
+            .ToArray();
+        if (named.Length > 0)
+        {
+            return named;
+        }
+
+        return resources.Count == 1
+            ? credentials.Where(credential => credential.IsActive).ToArray()
+            : [];
+    }
+
+    private static string NetworkHost(string? address)
+    {
+        var value = address?.Trim() ?? string.Empty;
+        if (value.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        var candidate = value.Contains("://", StringComparison.Ordinal)
+            ? value
+            : $"https://{value}";
+        return Uri.TryCreate(candidate, UriKind.Absolute, out var uri)
+            ? uri.Host
+            : value;
     }
 
     private static IReadOnlyList<ClientInfoCategoryOverviewSection> BuildConnections(
