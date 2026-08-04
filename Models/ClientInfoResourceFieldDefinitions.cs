@@ -35,14 +35,15 @@ public static class ClientInfoResourceFieldDefinitions
             [ClientInfoResourceCategories.ConnectionInternet] =
             [
                 new("public_wan_ip", "Public / WAN IP", "IpAddress", 10),
-                new("gateway", "Gateway", "IpAddress", 20),
-                new("subnet_cidr", "Subnet / CIDR", "Text", 30),
-                new("circuit_id", "Circuit ID", "Text", 40, ShowInGrid: false),
-                new("device_model", "Device Model", "Text", 50, ShowInGrid: false),
-                new("serial_number", "Serial Number", "Text", 60, ShowInGrid: false),
-                new("firmware_version", "Firmware Version", "Text", 70, ShowInGrid: false),
-                new("isp_provider", "ISP / Provider", "Text", 80, ShowInGrid: false),
-                new("support_phone", "Support Phone", "Phone", 90, ShowInGrid: false)
+                new("ssl_vpn_port", "SSL VPN Port", "Text", 20),
+                new("gateway", "Gateway", "IpAddress", 30),
+                new("subnet_cidr", "Subnet / CIDR", "Text", 40),
+                new("circuit_id", "Circuit ID", "Text", 50, ShowInGrid: false),
+                new("device_model", "Device Model", "Text", 60, ShowInGrid: false),
+                new("serial_number", "Serial Number", "Text", 70, ShowInGrid: false),
+                new("firmware_version", "Firmware Version", "Text", 80, ShowInGrid: false),
+                new("isp_provider", "ISP / Provider", "Text", 90, ShowInGrid: false),
+                new("support_phone", "Support Phone", "Phone", 100, ShowInGrid: false)
             ],
             [ClientInfoResourceCategories.Wifi] =
             [

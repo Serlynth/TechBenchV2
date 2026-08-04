@@ -341,6 +341,12 @@ public sealed class ClientInfoBetaTests
                 },
                 new ClientInfoResourceField
                 {
+                    FieldKey = "ssl_vpn_port",
+                    FieldLabel = "SSL VPN Port",
+                    ValueText = "4443"
+                },
+                new ClientInfoResourceField
+                {
                     FieldKey = "gateway",
                     FieldLabel = "Gateway",
                     ValueText = "203.0.113.41"
@@ -366,6 +372,7 @@ public sealed class ClientInfoBetaTests
         Assert.Equal(
             [
                 "External IP",
+                "SSL VPN port",
                 "Model",
                 "Status password",
                 "Admin password",
@@ -376,8 +383,9 @@ public sealed class ClientInfoBetaTests
                 "WatchGuard AD auth user / password"
             ],
             fields.Select(field => field.Label));
+        Assert.Equal("4443", fields[1].Value);
         Assert.DoesNotContain(fields, field => field.Label is "Gateway" or "Firmware" or "Subnet / CIDR");
-        Assert.All(fields.Skip(2), field => Assert.NotEmpty(field.Secrets));
+        Assert.All(fields.Skip(3), field => Assert.NotEmpty(field.Secrets));
 
         var fallbackFields = Assert.Single(ClientInfoCategoryOverviewBuilder.Build(
             ClientInfoResourceCategories.ConnectionInternet,
@@ -406,6 +414,7 @@ public sealed class ClientInfoBetaTests
         Assert.Equal(
             [
                 "External IP",
+                "SSL VPN port",
                 "Model",
                 "Status password",
                 "Admin password",
@@ -453,6 +462,7 @@ public sealed class ClientInfoBetaTests
         Assert.Equal(
             [
                 "External IP",
+                "SSL VPN port",
                 "Model",
                 "Status password",
                 "Admin password",
@@ -463,7 +473,8 @@ public sealed class ClientInfoBetaTests
                 "WatchGuard AD auth user / password"
             ],
             connection.Select(field => field.Label));
-        Assert.All(connection.Skip(2), field => Assert.NotEmpty(field.Secrets));
+        Assert.Equal("443", connection[1].Value);
+        Assert.All(connection.Skip(3), field => Assert.NotEmpty(field.Secrets));
         Assert.All(
             wifi.Concat(connection).SelectMany(field => field.Secrets),
             secret => Assert.True(demo.SecretValues.ContainsKey(secret.SecretId)));
