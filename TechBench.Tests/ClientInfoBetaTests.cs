@@ -1418,6 +1418,27 @@ public sealed class ClientInfoBetaTests
             xaml,
             StringComparison.Ordinal);
         Assert.Contains(
+            "x:Key=\"ColumnHeaderGripperStyle\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "x:Name=\"ResizeIndicator\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<Trigger Property=\"IsDragging\" Value=\"True\">",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Style=\"{StaticResource ColumnHeaderGripperStyle}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            2,
+            xaml.Split(
+                "Style=\"{StaticResource ColumnHeaderGripperStyle}\"",
+                StringSplitOptions.None).Length - 1);
+        Assert.Contains(
             "Value=\"{DynamicResource ControlAltBackgroundBrush}\"",
             xaml,
             StringComparison.Ordinal);
