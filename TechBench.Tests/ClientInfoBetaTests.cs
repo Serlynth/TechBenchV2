@@ -87,6 +87,7 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("!ReferenceEquals(group, NeedsSortingGroup)", viewModel, StringComparison.Ordinal);
         Assert.Contains("or \"Core infrastructure\"", viewModel, StringComparison.Ordinal);
         Assert.Contains("or \"Other backup & security\"", viewModel, StringComparison.Ordinal);
+        Assert.Contains("or \"Remote Access\"", viewModel, StringComparison.Ordinal);
         Assert.Contains("or \"Veeam\"", viewModel, StringComparison.Ordinal);
         Assert.Contains("or \"Vendors & services\"", viewModel, StringComparison.Ordinal);
         Assert.Contains("ForEditorCategory(group.CategoryName)", resourceGrid, StringComparison.Ordinal);
@@ -593,7 +594,7 @@ public sealed class ClientInfoBetaTests
             .Select(section => section.Title)
             .ToArray();
 
-        Assert.Contains("ILO / iDRAC", Titles(ClientInfoResourceCategories.ServersInfrastructure));
+        Assert.Contains("ILO", Titles(ClientInfoResourceCategories.ServersInfrastructure));
         Assert.Contains("UPS", Titles(ClientInfoResourceCategories.ServersInfrastructure));
         Assert.Contains("Connection", Titles(ClientInfoResourceCategories.ConnectionInternet));
         Assert.Equal(["WiFi"], Titles(ClientInfoResourceCategories.Wifi));
@@ -638,11 +639,44 @@ public sealed class ClientInfoBetaTests
 
         Assert.Contains(sections.SelectMany(section => section.Fields),
             field => field.Label == "Management IP" && field.Value == "10.2.0.15");
-        Assert.Contains(sections, section => section.Title == "ILO / iDRAC");
+        Assert.Contains(sections, section => section.Title == "ILO");
         Assert.DoesNotContain(
             "FireDrillRepository",
             Read("Models", "ClientInfoCategoryOverviewBuilder.cs"),
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ServerQuickReferenceUsesIloLabelAndOnlyRequestedUpsFields()
+    {
+        var demo = ClientInfoDemoData.Create().Snapshot;
+        var resources = demo.Resources.Where(resource =>
+            resource.Category == ClientInfoResourceCategories.ServersInfrastructure).ToArray();
+        var resourceIds = resources.Select(resource => resource.ResourceId).ToHashSet();
+        var credentials = demo.Credentials.Where(credential =>
+            credential.ResourceId.HasValue
+            && resourceIds.Contains(credential.ResourceId.Value)).ToArray();
+
+        var sections = ClientInfoCategoryOverviewBuilder.Build(
+            ClientInfoResourceCategories.ServersInfrastructure,
+            resources,
+            credentials);
+
+        Assert.Contains(sections, section => section.Title == "ILO");
+        Assert.DoesNotContain(sections, section => section.Title.Contains("iDRAC", StringComparison.OrdinalIgnoreCase));
+        var ups = Assert.Single(sections, section => section.Title == "UPS");
+        Assert.Equal(
+            ["Location", "Model", "IP", "Username", "Password"],
+            ups.Fields.Select(field => field.Label));
+        Assert.Equal("Main Office", ups.Fields[0].Value);
+        Assert.Equal("APC Smart-UPS 2200", ups.Fields[1].Value);
+        Assert.Equal("10.20.0.18", ups.Fields[2].Value);
+        Assert.Equal("apc-admin", ups.Fields[3].Value);
+        Assert.Equal("Password available", ups.Fields[4].Value);
+        Assert.Single(ups.Fields[4].Secrets);
+        Assert.DoesNotContain(
+            ups.Fields,
+            field => field.Value.Contains("https://", StringComparison.OrdinalIgnoreCase));
     }
 
     [Theory]
