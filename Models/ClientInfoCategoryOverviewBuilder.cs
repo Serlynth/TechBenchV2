@@ -40,6 +40,23 @@ public static class ClientInfoCategoryOverviewBuilder
         return sections.Where(section => section.Fields.Count > 0).ToArray();
     }
 
+    public static ClientInfoCategoryOverviewSection BuildCloudAccounts(
+        IReadOnlyList<ClientInfoCredential> credentials) =>
+        Section(
+            "Cloud Accounts",
+            "Administrative usernames and passwords for Barracuda, ESET, and Microsoft 365.",
+            RequiredCredentialField(
+                "Barracuda",
+                MatchingCredentials(credentials, ["barracuda"])),
+            RequiredCredentialField(
+                "ESET",
+                MatchingCredentials(credentials, ["eset"])),
+            RequiredCredentialField(
+                "Microsoft 365",
+                MatchingCredentials(
+                    credentials,
+                    ["microsoft 365", "office 365", "m365"])));
+
     private static IReadOnlyList<ClientInfoCategoryOverviewSection> BuildServers(
         IReadOnlyList<ClientInfoResource> resources,
         IReadOnlyList<ClientInfoCredential> credentials)
