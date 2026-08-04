@@ -124,17 +124,17 @@ public static class ClientInfoCategoryOverviewBuilder
         return
         [
             Section("Connection", "The connection details technicians use most often.",
-                Values("External IP", resources, "public_wan_ip", "external ip", "firebox ip", "wan ip", "public ip"),
-                Values("Model", resources, "device_model", "model", "firebox model", "firewall model"),
-                CredentialField("Status password", status),
-                CredentialField("Admin password", admin),
+                RequiredField("External IP", Values("External IP", resources, "public_wan_ip", "external ip", "firebox ip", "wan ip", "public ip")),
+                RequiredField("Model", Values("Model", resources, "device_model", "model", "firebox model", "firewall model")),
+                RequiredCredentialField("Status password", status),
+                RequiredCredentialField("Admin password", admin),
                 fireboxDatabase.Length > 0
-                    ? CredentialField("Firebox-DB\\csri", fireboxDatabase)
-                    : CredentialField("CSRIAdmin AuthPoint", csriAdminAuthPoint),
-                CredentialField("AuthPoint user", authPoint),
-                CredentialField("SSL VPN password", sslVpn),
-                CredentialField("WatchGuard Cloud user / password", watchGuardCloud),
-                CredentialField("WatchGuard AD auth user / password", watchGuardAd))
+                    ? RequiredCredentialField("Firebox-DB\\csri", fireboxDatabase)
+                    : RequiredCredentialField("CSRIAdmin AuthPoint", csriAdminAuthPoint),
+                RequiredCredentialField("AuthPoint user", authPoint),
+                RequiredCredentialField("SSL VPN password", sslVpn),
+                RequiredCredentialField("WatchGuard Cloud user / password", watchGuardCloud),
+                RequiredCredentialField("WatchGuard AD auth user / password", watchGuardAd))
         ];
     }
 
@@ -160,20 +160,23 @@ public static class ClientInfoCategoryOverviewBuilder
 
         var fields = new List<ClientInfoOverviewField?>
         {
-            Aggregate("Type", resources.Select(resource => resource.TypeLabel)),
-            Aggregate(
+            RequiredField("Type", Aggregate("Type", resources.Select(resource => resource.TypeLabel))),
+            RequiredField("Management URL", Aggregate(
                 "Management URL",
                 resources.Select(resource => FindValue(
                         resource,
                         ["management_url", "management url", "controller url"]))
                     .Concat(resources.Select(resource => resource.AddressOrUrl))
-                    .Concat(admin.Select(credential => credential.LoginUrl))),
-            CredentialField("Admin username / password", admin)
+                    .Concat(admin.Select(credential => credential.LoginUrl)))),
+            RequiredCredentialField("Admin username / password", admin)
         };
-        fields.AddRange(BuildSsidFields(
+        var ssidFields = BuildSsidFields(
             resources,
             activeCredentials,
-            admin.Select(credential => credential.CredentialId).ToHashSet()));
+            admin.Select(credential => credential.CredentialId).ToHashSet());
+        fields.AddRange(ssidFields.Count > 0
+            ? ssidFields
+            : [new ClientInfoOverviewField("SSID / password", "Not entered")]);
 
         return
         [
@@ -383,6 +386,17 @@ public static class ClientInfoCategoryOverviewBuilder
         return new ClientInfoOverviewField(label, value, secrets);
     }
 
+    private static ClientInfoOverviewField RequiredCredentialField(
+        string label,
+        IEnumerable<ClientInfoCredential> credentials) =>
+        CredentialField(label, credentials)
+        ?? new ClientInfoOverviewField(label, "Not entered");
+
+    private static ClientInfoOverviewField RequiredField(
+        string label,
+        ClientInfoOverviewField? field) =>
+        field ?? new ClientInfoOverviewField(label, "Not entered");
+
     private static IReadOnlyList<ClientInfoOverviewField?> BuildSsidFields(
         IReadOnlyList<ClientInfoResource> resources,
         IReadOnlyList<ClientInfoCredential> credentials,
@@ -448,7 +462,10 @@ public static class ClientInfoCategoryOverviewBuilder
                     StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.First())
                 .ToArray();
-            return new ClientInfoOverviewField(entry.Label, entry.Value, secrets);
+            var value = secrets.Length > 0
+                ? entry.Value
+                : $"{entry.Value}{Environment.NewLine}Password not entered";
+            return new ClientInfoOverviewField(entry.Label, value, secrets);
         }).Cast<ClientInfoOverviewField?>().ToArray();
     }
 

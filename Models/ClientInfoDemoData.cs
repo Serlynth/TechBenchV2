@@ -3,7 +3,8 @@ namespace TechBench.Models;
 public sealed record ClientInfoDemoSnapshotData(
     ClientInfoClientSummary Summary,
     ClientInfoSnapshot Snapshot,
-    IReadOnlyList<EquipmentItem> Equipment);
+    IReadOnlyList<EquipmentItem> Equipment,
+    IReadOnlyDictionary<long, string> SecretValues);
 
 public static class ClientInfoDemoData
 {
@@ -20,7 +21,7 @@ public static class ClientInfoDemoData
         LocationCount = 2,
         PersonCount = 3,
         ResourceCount = 14,
-        CredentialCount = 10,
+        CredentialCount = 18,
         IsDemo = true
     };
 
@@ -105,18 +106,48 @@ public static class ClientInfoDemoData
             Resource(-108, ClientInfoResourceCategories.NeedsSorting, "Legacy Monitoring Note", "Unknown", "Legacy Vendor", "https://monitoring.example.test", "Warehouse", -2, new Dictionary<string, string>())
         };
 
+        var secretValues = new Dictionary<long, string>();
+        ClientInfoCredential DemoCredential(
+            long id,
+            long resourceId,
+            string name,
+            string category,
+            string username,
+            string url,
+            string secretValue)
+        {
+            var credential = Credential(
+                id,
+                resourceId,
+                name,
+                category,
+                username,
+                url,
+                updated);
+            secretValues[credential.Secrets[0].SecretId] = secretValue;
+            return credential;
+        }
+
         var credentials = new ClientInfoCredential[]
         {
-            Credential(-201, -102, "WatchGuard Admin", "Firewall", "demo-admin", "https://10.20.0.1", updated),
-            Credential(-202, -103, "Aruba Central", "Wi-Fi", "network-admin@example.test", "https://aruba-central.example.test", updated),
-            Credential(-203, -104, "Microsoft 365 Global Admin", "Cloud", "m365-admin@example.test", "https://admin.microsoft.com", updated),
-            Credential(-204, -106, "Veeam Console", "Veeam", "backup-admin", "https://backup-console.example.test", updated),
-            Credential(-205, -109, "ILO Host 1 Admin", "ILO", "Administrator", "https://10.20.0.12", updated),
-            Credential(-206, -112, "Domain Admin", "Active Directory", "DEMOCLIENT\\csriadmin", "https://dc01.example.test", updated),
-            Credential(-207, -113, "ESET Protect Admin", "ESET", "security-admin@example.test", "https://eset.example.test", updated),
-            Credential(-208, -114, "Barracuda Admin", "Barracuda", "mail-admin@example.test", "https://login.barracudanetworks.com", updated),
-            Credential(-209, -111, "ScreenConnect Admin", "Remote Access", "remote-admin@example.test", "https://remote.example.test", updated),
-            Credential(-210, -110, "UPS Network Card", "UPS", "apc-admin", "https://10.20.0.18", updated)
+            DemoCredential(-201, -102, "WatchGuard Admin", "Firewall", "demo-admin", "https://10.20.0.1", "Demo-WG-Admin!2026"),
+            DemoCredential(-211, -102, "Status", "WatchGuard", "", "", "Demo-Status!2026"),
+            DemoCredential(-212, -102, "Firebox Database CSRI", "WatchGuard", "Firebox-DB\\csri", "", "Demo-FireboxDB!2026"),
+            DemoCredential(-213, -102, "AuthPoint User", "WatchGuard", "authpoint-user@example.test", "", "Demo-AuthPoint!2026"),
+            DemoCredential(-214, -102, "SSLVPN Password", "WatchGuard", "", "", "Demo-SSLVPN!2026"),
+            DemoCredential(-215, -102, "WatchGuard Cloud", "WatchGuard", "cloud-admin@example.test", "https://cloud.watchguard.com", "Demo-WG-Cloud!2026"),
+            DemoCredential(-216, -102, "WatchGuard AD Auth", "WatchGuard", "DEMOCLIENT\\wg-auth", "", "Demo-WG-AD!2026"),
+            DemoCredential(-202, -103, "Wireless Admin", "Wi-Fi", "network-admin@example.test", "https://aruba-central.example.test", "Demo-WiFi-Admin!2026"),
+            DemoCredential(-217, -103, "DemoClient-Staff SSID Password", "Wireless", "", "", "Demo-Staff-WiFi!2026"),
+            DemoCredential(-218, -103, "DemoClient-Guest SSID Password", "Wireless", "", "", "Demo-Guest-WiFi!2026"),
+            DemoCredential(-203, -104, "Microsoft 365 Global Admin", "Cloud", "m365-admin@example.test", "https://admin.microsoft.com", "Demo-M365!2026"),
+            DemoCredential(-204, -106, "Veeam Console", "Veeam", "backup-admin", "https://backup-console.example.test", "Demo-Veeam!2026"),
+            DemoCredential(-205, -109, "ILO Host 1 Admin", "ILO", "Administrator", "https://10.20.0.12", "Demo-ILO!2026"),
+            DemoCredential(-206, -112, "Domain Admin", "Active Directory", "DEMOCLIENT\\csriadmin", "https://dc01.example.test", "Demo-Domain!2026"),
+            DemoCredential(-207, -113, "ESET Protect Admin", "ESET", "security-admin@example.test", "https://eset.example.test", "Demo-ESET!2026"),
+            DemoCredential(-208, -114, "Barracuda Admin", "Barracuda", "mail-admin@example.test", "https://login.barracudanetworks.com", "Demo-Barracuda!2026"),
+            DemoCredential(-209, -111, "ScreenConnect Admin", "Remote Access", "remote-admin@example.test", "https://remote.example.test", "Demo-Remote!2026"),
+            DemoCredential(-210, -110, "UPS Network Card", "UPS", "apc-admin", "https://10.20.0.18", "Demo-UPS!2026")
         };
         var facts = new ClientInfoFact[]
         {
@@ -151,7 +182,8 @@ public static class ClientInfoDemoData
                 Credentials = credentials,
                 Facts = facts
             },
-            equipment);
+            equipment,
+            secretValues);
     }
 
     private static ClientInfoResource Resource(long id, string category, string name, string type, string provider, string address, string location, long locationId, IReadOnlyDictionary<string, string> values)
