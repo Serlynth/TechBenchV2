@@ -243,6 +243,7 @@ public static class ClientInfoCategoryOverviewBuilder
         [
             Section("Connection", "The connection details technicians use most often.",
                 RequiredField("External IP", Values("External IP", resources, "public_wan_ip", "external ip", "firebox ip", "wan ip", "public ip")),
+                RequiredField("SSL VPN port", Values("SSL VPN port", resources, "ssl_vpn_port", "ssl vpn port", "sslvpn port", "vpn port")),
                 RequiredField("Model", Values("Model", resources, "device_model", "model", "firebox model", "firewall model")),
                 RequiredCredentialField("Status password", status),
                 RequiredCredentialField("Admin password", admin),
