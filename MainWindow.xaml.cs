@@ -613,7 +613,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var canonicalWindow = new ClientInfoBetaWindow
+        var canonicalWindow = new ClientInfoBetaWindow(_localPreferences)
         {
             Owner = this,
             DataContext = canonicalViewModel

@@ -74,6 +74,13 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("InlineDisplayValue", xaml, StringComparison.Ordinal);
         Assert.Contains("InlineRevealLabel", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("new ClientInfoSecretRevealWindow", viewModel, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"LocationsPaneColumn\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"PeoplePaneColumn\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("PeopleLocationsSplitter_DragCompleted", xaml, StringComparison.Ordinal);
+        Assert.Contains("PART_RightHeaderGripper", xaml, StringComparison.Ordinal);
+        Assert.Contains("ScrollViewer.HorizontalScrollBarVisibility\" Value=\"Auto", xaml, StringComparison.Ordinal);
+        Assert.Contains("ApplyColumnWidths", Read("ClientInfoBetaWindow.xaml.cs"), StringComparison.Ordinal);
+        Assert.Contains("SaveColumnWidths", Read("ClientInfoBetaWindow.xaml.cs"), StringComparison.Ordinal);
         Assert.Contains("QuickReferenceSections", viewModel, StringComparison.Ordinal);
         Assert.Contains("SelectMany(group => group.OverviewSections)", viewModel, StringComparison.Ordinal);
         Assert.Contains("QuickReferencePriority", viewModel, StringComparison.Ordinal);

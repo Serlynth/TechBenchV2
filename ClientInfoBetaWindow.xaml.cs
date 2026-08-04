@@ -2,17 +2,31 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using TechBench.Services;
 using TechBench.ViewModels;
 
 namespace TechBench;
 
 public partial class ClientInfoBetaWindow : Window
 {
+    private readonly LocalPreferences _localPreferences;
+
     public ClientInfoBetaWindow()
+        : this(LocalPreferenceStore.LoadOrCreate())
     {
+    }
+
+    public ClientInfoBetaWindow(LocalPreferences localPreferences)
+    {
+        _localPreferences = localPreferences
+            ?? throw new ArgumentNullException(nameof(localPreferences));
         InitializeComponent();
+        ApplyLayoutPreferences();
         Closed += (_, _) =>
+        {
             (DataContext as ClientInfoBetaViewModel)?.ClearRevealedSecrets();
+            SaveLayoutPreferences();
+        };
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
@@ -49,6 +63,136 @@ public partial class ClientInfoBetaWindow : Window
 
     private void People_DoubleClick(object sender, MouseButtonEventArgs e) =>
         ExecuteEdit(sender, e, viewModel => viewModel.EditPersonCommand);
+
+    private void PeopleLocationsSplitter_DragCompleted(
+        object sender,
+        DragCompletedEventArgs e) =>
+        SavePeopleLocationsSplitRatio();
+
+    private void ApplyLayoutPreferences()
+    {
+        if (_localPreferences.ProfileWindowWidth is >= 980 and var width
+            && double.IsFinite(width))
+        {
+            Width = width;
+        }
+
+        if (_localPreferences.ProfileWindowHeight is >= 650 and var height
+            && double.IsFinite(height))
+        {
+            Height = height;
+        }
+
+        var ratio = _localPreferences.PeopleLocationsSplitRatio;
+        LocationsPaneColumn.Width = new GridLength(ratio, GridUnitType.Star);
+        PeoplePaneColumn.Width = new GridLength(1 - ratio, GridUnitType.Star);
+        ApplyColumnWidths(
+            LocationsDataGrid,
+            _localPreferences.LocationGridColumnWidths);
+        ApplyColumnWidths(
+            PeopleDataGrid,
+            _localPreferences.PeopleGridColumnWidths);
+        WindowState = _localPreferences.ProfileWindowState.Equals(
+            "Maximized",
+            StringComparison.OrdinalIgnoreCase)
+            ? WindowState.Maximized
+            : WindowState.Normal;
+    }
+
+    private void SaveLayoutPreferences()
+    {
+        var bounds = WindowState == WindowState.Normal
+            ? new Rect(Left, Top, Width, Height)
+            : RestoreBounds;
+        if (bounds.Width >= MinWidth && double.IsFinite(bounds.Width))
+        {
+            _localPreferences.ProfileWindowWidth = bounds.Width;
+        }
+
+        if (bounds.Height >= MinHeight && double.IsFinite(bounds.Height))
+        {
+            _localPreferences.ProfileWindowHeight = bounds.Height;
+        }
+
+        _localPreferences.ProfileWindowState =
+            WindowState == WindowState.Maximized ? "Maximized" : "Normal";
+        SaveColumnWidths(
+            LocationsDataGrid,
+            _localPreferences.LocationGridColumnWidths,
+            widths => _localPreferences.LocationGridColumnWidths = widths);
+        SaveColumnWidths(
+            PeopleDataGrid,
+            _localPreferences.PeopleGridColumnWidths,
+            widths => _localPreferences.PeopleGridColumnWidths = widths);
+        SavePeopleLocationsSplitRatio(saveToDisk: false);
+        TrySaveLocalPreferences();
+    }
+
+    private static void ApplyColumnWidths(
+        DataGrid grid,
+        IReadOnlyList<double> widths)
+    {
+        if (widths.Count != grid.Columns.Count)
+        {
+            return;
+        }
+
+        for (var index = 0; index < widths.Count; index++)
+        {
+            grid.Columns[index].Width = new DataGridLength(
+                widths[index],
+                DataGridLengthUnitType.Pixel);
+        }
+    }
+
+    private static void SaveColumnWidths(
+        DataGrid grid,
+        IReadOnlyList<double> existingWidths,
+        Action<List<double>> save)
+    {
+        var widths = grid.Columns
+            .Select(static column => column.ActualWidth)
+            .ToList();
+        if (widths.Count != grid.Columns.Count
+            || widths.Any(static width =>
+                !double.IsFinite(width) || width is < 40 or > 1600))
+        {
+            save(existingWidths.ToList());
+            return;
+        }
+
+        save(widths);
+    }
+
+    private void SavePeopleLocationsSplitRatio(bool saveToDisk = true)
+    {
+        var totalWidth = LocationsPaneColumn.ActualWidth
+            + PeoplePaneColumn.ActualWidth;
+        if (totalWidth > 0 && double.IsFinite(totalWidth))
+        {
+            _localPreferences.PeopleLocationsSplitRatio = Math.Clamp(
+                LocationsPaneColumn.ActualWidth / totalWidth,
+                0.2,
+                0.8);
+        }
+
+        if (saveToDisk)
+        {
+            TrySaveLocalPreferences();
+        }
+    }
+
+    private void TrySaveLocalPreferences()
+    {
+        try
+        {
+            LocalPreferenceStore.Save(_localPreferences);
+        }
+        catch
+        {
+            // A local layout preference should never block Client Info.
+        }
+    }
 
     private void Resources_DoubleClick(object sender, MouseButtonEventArgs e) =>
         ExecuteEdit(sender, e, viewModel => viewModel.EditResourceCommand);
