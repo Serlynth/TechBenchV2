@@ -167,6 +167,34 @@ public sealed partial class SqlServerTechBenchRepository
             "SQL Server did not return the archived client attachment.");
     }
 
+    public ClientInfoAttachment SetClientInfoAttachmentEquipmentLink(
+        ClientInfoAttachment attachment,
+        long? equipmentId)
+    {
+        ArgumentNullException.ThrowIfNull(attachment);
+        return QueryAsync(
+            Procedures.SetClientInfoAttachmentEquipmentLink,
+            command =>
+            {
+                AddGuid(command, "@AttachmentId", attachment.AttachmentId);
+                AddInt(command, "@ClientId", attachment.ClientId);
+                AddBigInt(command, "@EquipmentId", equipmentId);
+                AddBinary(
+                    command,
+                    "@ExpectedRowVersion",
+                    8,
+                    attachment.RowVersion);
+                AddGuid(command, "@RequestId", Guid.NewGuid());
+            },
+            (reader, token) => ReadSingleAsync(
+                reader,
+                token,
+                ReadClientInfoAttachment),
+            CancellationToken.None).GetAwaiter().GetResult()
+        ?? throw new InvalidOperationException(
+            "SQL Server did not return the linked client attachment.");
+    }
+
     public ClientInfoProfile SaveClientInfoProfile(ClientInfoProfile profile)
     {
         ArgumentNullException.ThrowIfNull(profile);
@@ -936,6 +964,9 @@ public sealed partial class SqlServerTechBenchRepository
     {
         AttachmentId = GetNullableGuid(reader, "AttachmentId") ?? Guid.Empty,
         ClientId = GetInt32(reader, "ClientId"),
+        EquipmentId = GetNullableInt64(reader, "EquipmentId"),
+        EquipmentName = GetString(reader, "EquipmentName"),
+        EquipmentAssetTag = GetString(reader, "EquipmentAssetTag"),
         RelativePath = GetString(reader, "RelativePath"),
         OriginalFileName = GetString(reader, "OriginalFileName"),
         ContentType = GetString(

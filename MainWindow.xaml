@@ -5416,6 +5416,9 @@
                                       VerticalScrollBarVisibility="Auto">
                             <controls:EquipmentDetailsContent Equipment="{Binding SelectedEquipment}"
                                                               AssignmentHistory="{Binding EquipmentAssignmentHistory}"
+                                                              Attachments="{Binding EquipmentAttachments}"
+                                                              OpenAttachmentCommand="{Binding OpenEquipmentAttachmentCommand}"
+                                                              CopyAttachmentCommand="{Binding CopyEquipmentAttachmentCommand}"
                                                               ShowSensitiveValue="{Binding ShowEquipmentAnyDeskPassword, Mode=TwoWay}"
                                                               LaunchAnyDeskCommand="{Binding LaunchAnyDeskCommand}"
                                                               Margin="0,0,8,8" />

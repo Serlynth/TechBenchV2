@@ -894,6 +894,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <StackPanel>
                         <TextBlock Text="Equipment"
@@ -905,6 +906,7 @@
                     </StackPanel>
                     <DataGrid Grid.Row="1"
                               ItemsSource="{Binding Equipment}"
+                              SelectedItem="{Binding SelectedClientEquipment}"
                               AutoGenerateColumns="False"
                               IsReadOnly="True"
                               CanUserAddRows="False"
@@ -957,6 +959,83 @@
                                                 MinWidth="125" />
                         </DataGrid.Columns>
                     </DataGrid>
+                    <Border Grid.Row="2"
+                            Background="{DynamicResource PanelAltBackgroundBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="9"
+                            Padding="12"
+                            Margin="0,12,0,0"
+                            Visibility="{Binding HasSelectedClientEquipment, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Foreground="{DynamicResource PrimaryTextBrush}"
+                                           FontWeight="SemiBold"
+                                           FontSize="15">
+                                    <Run Text="Linked photos and documents for " />
+                                    <Run Text="{Binding SelectedClientEquipment.Name, Mode=OneWay}" />
+                                </TextBlock>
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding SelectedEquipmentAttachmentCountLabel}"
+                                           Foreground="{DynamicResource SecondaryTextBrush}" />
+                            </Grid>
+                            <ItemsControl Grid.Row="1"
+                                          ItemsSource="{Binding SelectedEquipmentAttachments}"
+                                          Margin="0,9,0,0">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{DynamicResource ControlBackgroundBrush}"
+                                                BorderBrush="{DynamicResource BorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="7"
+                                                Padding="9"
+                                                Margin="0,0,0,6">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding OriginalFileName}"
+                                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                                               FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding Caption}"
+                                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                                               TextWrapping="Wrap" />
+                                                </StackPanel>
+                                                <Button Grid.Column="1"
+                                                        Content="Open"
+                                                        Command="{Binding DataContext.OpenAttachmentCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}"
+                                                        Padding="10,5"
+                                                        Margin="10,0,6,0" />
+                                                <Button Grid.Column="2"
+                                                        Content="Copy"
+                                                        Command="{Binding DataContext.CopyAttachmentCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}"
+                                                        Padding="10,5" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Grid.Row="1"
+                                       Text="No photos or documents are linked to this equipment yet. Link one from the Attachments section."
+                                       Foreground="{DynamicResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,9,0,0"
+                                       Visibility="{Binding HasSelectedEquipmentAttachments, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                        </Grid>
+                    </Border>
                 </Grid>
             </TabItem>
 
@@ -1219,6 +1298,9 @@
                                 <DataGridTextColumn Header="Caption"
                                                     Binding="{Binding Caption}"
                                                     Width="1.3*" />
+                                <DataGridTextColumn Header="Equipment"
+                                                    Binding="{Binding EquipmentLabel}"
+                                                    Width="1.1*" />
                                 <DataGridTextColumn Header="Size"
                                                     Binding="{Binding FileSizeLabel}"
                                                     Width="0.55*" />
@@ -1275,6 +1357,12 @@
                                                Foreground="{DynamicResource SecondaryTextBrush}"
                                                TextWrapping="Wrap"
                                                Margin="0,3,0,0" />
+                                    <TextBlock Foreground="{DynamicResource SecondaryTextBrush}"
+                                               Margin="0,3,0,0">
+                                        <Run Text="Equipment: " />
+                                        <Run Text="{Binding SelectedAttachment.EquipmentLabel, Mode=OneWay}"
+                                             FontWeight="SemiBold" />
+                                    </TextBlock>
                                 </StackPanel>
                                 <WrapPanel Grid.Row="2">
                                     <Button Content="Open"
@@ -1291,6 +1379,10 @@
                                             Margin="0,0,6,6" />
                                     <Button Content="Edit"
                                             Command="{Binding EditAttachmentCommand}"
+                                            Padding="10,5"
+                                            Margin="0,0,6,6" />
+                                    <Button Content="Link equipment"
+                                            Command="{Binding LinkAttachmentToEquipmentCommand}"
                                             Padding="10,5"
                                             Margin="0,0,6,6" />
                                     <Button Content="Archive"

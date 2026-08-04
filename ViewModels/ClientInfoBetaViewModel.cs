@@ -48,6 +48,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     private ClientInfoFact? _selectedFact;
     private ClientInfoImportBatch? _selectedImportBatch;
     private ClientInfoAttachment? _selectedAttachment;
+    private EquipmentItem? _selectedClientEquipment;
     private ImageSource? _selectedAttachmentPreview;
     private string _selectedAttachmentPreviewMessage =
         "Select an attachment to preview it.";
@@ -156,18 +157,23 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             item => EditAttachment(item as ClientInfoAttachment
                 ?? SelectedAttachment),
             _ => CanEditAttachments && SelectedAttachment is not null);
+        LinkAttachmentToEquipmentCommand = new RelayCommand(
+            item => LinkAttachmentToEquipment(item as ClientInfoAttachment
+                ?? SelectedAttachment),
+            item => CanEditAttachments
+                && (item is ClientInfoAttachment || SelectedAttachment is not null));
         OpenAttachmentCommand = new RelayCommand(
             item => OpenAttachment(item as ClientInfoAttachment
                 ?? SelectedAttachment),
-            _ => SelectedAttachment is not null);
+            item => item is ClientInfoAttachment || SelectedAttachment is not null);
         CopyAttachmentCommand = new RelayCommand(
             item => CopyAttachment(item as ClientInfoAttachment
                 ?? SelectedAttachment),
-            _ => SelectedAttachment is not null);
+            item => item is ClientInfoAttachment || SelectedAttachment is not null);
         DownloadAttachmentCommand = new RelayCommand(
             item => DownloadAttachment(item as ClientInfoAttachment
                 ?? SelectedAttachment),
-            _ => SelectedAttachment is not null);
+            item => item is ClientInfoAttachment || SelectedAttachment is not null);
         ArchiveAttachmentCommand = new RelayCommand(
             item => SetAttachmentArchived(
                 item as ClientInfoAttachment ?? SelectedAttachment,
@@ -286,6 +292,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     public ObservableCollection<ClientInfoImportBatch> ImportBatches { get; } = [];
     public ObservableCollection<ClientInfoImportIssue> ImportIssues { get; } = [];
     public ObservableCollection<ClientInfoAttachment> Attachments { get; } = [];
+    public ObservableCollection<ClientInfoAttachment> SelectedEquipmentAttachments { get; } = [];
 
     public string AttachmentStorageStatus
     {
@@ -319,6 +326,27 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             RaiseAttachmentCommandState();
         }
     }
+
+    public EquipmentItem? SelectedClientEquipment
+    {
+        get => _selectedClientEquipment;
+        set
+        {
+            if (SetProperty(ref _selectedClientEquipment, value))
+            {
+                OnPropertyChanged(nameof(HasSelectedClientEquipment));
+                RefreshSelectedEquipmentAttachments();
+            }
+        }
+    }
+
+    public bool HasSelectedClientEquipment => SelectedClientEquipment is not null;
+    public bool HasSelectedEquipmentAttachments =>
+        SelectedEquipmentAttachments.Count > 0;
+    public string SelectedEquipmentAttachmentCountLabel =>
+        SelectedEquipmentAttachments.Count == 1
+            ? "1 linked attachment"
+            : $"{SelectedEquipmentAttachments.Count} linked attachments";
 
     public ImageSource? SelectedAttachmentPreview
     {
@@ -462,6 +490,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     public AsyncRelayCommand UploadAttachmentCommand { get; }
     public AsyncRelayCommand PasteAttachmentCommand { get; }
     public RelayCommand EditAttachmentCommand { get; }
+    public RelayCommand LinkAttachmentToEquipmentCommand { get; }
     public RelayCommand OpenAttachmentCommand { get; }
     public RelayCommand CopyAttachmentCommand { get; }
     public RelayCommand DownloadAttachmentCommand { get; }
@@ -474,6 +503,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         ClearRevealedSecrets();
         try
         {
+            var selectedEquipmentId = SelectedClientEquipment?.EquipmentId;
             var snapshot = _demoData?.Snapshot
                 ?? _repository.GetClientInfoSnapshot(ClientId)
                 ?? throw new InvalidOperationException(
@@ -490,6 +520,11 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 ?? (_repository.EquipmentBoardAvailable
                     ? _repository.GetEquipmentInventory(ClientId)
                     : []));
+            SelectedClientEquipment = selectedEquipmentId is > 0
+                ? Equipment.FirstOrDefault(
+                    item => item.EquipmentId == selectedEquipmentId.Value)
+                    ?? Equipment.FirstOrDefault()
+                : Equipment.FirstOrDefault();
             Replace(Credentials, snapshot.Credentials);
             RefreshResourceGroups();
             Replace(Facts, snapshot.Facts);
@@ -499,6 +534,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             if (IsDemo)
             {
                 Attachments.Clear();
+                RefreshSelectedEquipmentAttachments();
                 AttachmentStorageStatus = "Demo Client is local and does not use attachment storage.";
                 StatusMessage = "Showing fictional, read-only example data. Nothing on this page is stored in SQL.";
             }
@@ -558,7 +594,21 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         OnPropertyChanged(nameof(AttachmentCountLabel));
         OnPropertyChanged(nameof(CanEditAttachments));
         OnPropertyChanged(nameof(CanUploadAttachments));
+        RefreshSelectedEquipmentAttachments();
         RaiseAttachmentCommandState();
+    }
+
+    private void RefreshSelectedEquipmentAttachments()
+    {
+        var equipmentId = SelectedClientEquipment?.EquipmentId;
+        Replace(
+            SelectedEquipmentAttachments,
+            equipmentId is > 0
+                ? Attachments.Where(attachment =>
+                    attachment.EquipmentId == equipmentId)
+                : []);
+        OnPropertyChanged(nameof(HasSelectedEquipmentAttachments));
+        OnPropertyChanged(nameof(SelectedEquipmentAttachmentCountLabel));
     }
 
     private async Task UploadAttachmentsFromDialogAsync()
@@ -727,6 +777,60 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 values["caption"]));
     }
 
+    private void LinkAttachmentToEquipment(ClientInfoAttachment? attachment)
+    {
+        if (attachment is null)
+        {
+            return;
+        }
+
+        const string notLinked = "Not linked";
+        var options = new[] { notLinked }
+            .Concat(Equipment.Select(FormatEquipmentLinkOption))
+            .ToArray();
+        var current = attachment.EquipmentId is > 0
+            ? Equipment
+                .Where(item => item.EquipmentId == attachment.EquipmentId)
+                .Select(FormatEquipmentLinkOption)
+                .FirstOrDefault() ?? notLinked
+            : notLinked;
+        var values = ShowEditor(
+            "Link attachment to equipment",
+            [
+                new(
+                    "equipment",
+                    "Equipment",
+                    current,
+                    true,
+                    Options: options)
+            ],
+            "The file remains in this client's attachment folder and will also appear with the selected equipment record.");
+        if (values is null)
+        {
+            return;
+        }
+
+        var equipment = Equipment.FirstOrDefault(item => string.Equals(
+            FormatEquipmentLinkOption(item),
+            values["equipment"],
+            StringComparison.Ordinal));
+        ExecuteAttachmentSave(
+            "Equipment link",
+            () => _attachmentStorage.SetEquipmentLink(
+                attachment,
+                equipment?.EquipmentId));
+    }
+
+    private static string FormatEquipmentLinkOption(EquipmentItem equipment)
+    {
+        var identifier = !string.IsNullOrWhiteSpace(equipment.AssetTag)
+            ? equipment.AssetTag
+            : !string.IsNullOrWhiteSpace(equipment.SerialNumber)
+                ? equipment.SerialNumber
+                : $"ID {equipment.EquipmentId}";
+        return $"{equipment.Name} - {identifier} [ID {equipment.EquipmentId}]";
+    }
+
     private void OpenAttachment(ClientInfoAttachment? attachment)
     {
         if (attachment is null)
@@ -843,6 +947,12 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 "Another editor saved first",
                 "The attachment changed on another workstation. The latest version has been loaded.");
         }
+        catch (SqlException exception) when (exception.Number == 2812)
+        {
+            _dialogs.Error(
+                operation + " requires the attachment-link update",
+                "Install the current TechBench SQL deployment, then refresh Client Information and try again.");
+        }
         catch (Exception exception)
         {
             ShowError(operation + " failed", exception);
@@ -918,6 +1028,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         UploadAttachmentCommand.RaiseCanExecuteChanged();
         PasteAttachmentCommand.RaiseCanExecuteChanged();
         EditAttachmentCommand.RaiseCanExecuteChanged();
+        LinkAttachmentToEquipmentCommand.RaiseCanExecuteChanged();
         OpenAttachmentCommand.RaiseCanExecuteChanged();
         CopyAttachmentCommand.RaiseCanExecuteChanged();
         DownloadAttachmentCommand.RaiseCanExecuteChanged();

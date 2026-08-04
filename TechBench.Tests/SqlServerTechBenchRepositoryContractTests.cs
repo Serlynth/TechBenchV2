@@ -211,6 +211,27 @@ public sealed class SqlServerTechBenchRepositoryContractTests
     }
 
     [Fact]
+    public void ClientAttachmentsUseADedicatedEquipmentLinkContract()
+    {
+        Assert.Equal(
+            "[tb_app].[SetClientInfoAttachmentEquipmentLink]",
+            SqlServerTechBenchRepository.Procedures
+                .SetClientInfoAttachmentEquipmentLink);
+
+        var repositorySource = File.ReadAllText(FindRepositoryFile(
+            "Data",
+            "SqlServerTechBenchRepository.ClientInfo.cs"));
+        Assert.Contains(
+            "AddBigInt(command, \"@EquipmentId\", equipmentId)",
+            repositorySource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "EquipmentId = GetNullableInt64(reader, \"EquipmentId\")",
+            repositorySource,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SageCustomerSyncUsesOnlyTheAdminServerQueueContract()
     {
         Assert.Equal(

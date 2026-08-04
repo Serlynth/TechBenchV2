@@ -4902,6 +4902,35 @@ BEGIN TRY
                 ([OriginalFileName], [Category], [FileSizeBytes], [ContentType]);
     END;
 
+    IF COL_LENGTH(N'tb_client.ClientAttachments', N'EquipmentId') IS NULL
+        ALTER TABLE [tb_client].[ClientAttachments]
+            ADD [EquipmentId] bigint NULL;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.foreign_keys
+        WHERE [name] = N'FK_ClientAttachments_Equipment'
+          AND [parent_object_id] = OBJECT_ID(N'tb_client.ClientAttachments')
+    )
+        ALTER TABLE [tb_client].[ClientAttachments] WITH CHECK
+            ADD CONSTRAINT [FK_ClientAttachments_Equipment]
+                FOREIGN KEY ([EquipmentId])
+                REFERENCES [tb_inventory].[Equipment]([EquipmentId]);
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.indexes
+        WHERE [name] = N'IX_ClientAttachments_EquipmentStatusDate'
+          AND [object_id] = OBJECT_ID(N'tb_client.ClientAttachments')
+    )
+        CREATE INDEX [IX_ClientAttachments_EquipmentStatusDate]
+            ON [tb_client].[ClientAttachments]
+                ([EquipmentId], [IsArchived], [UploadedAtUtc] DESC)
+            INCLUDE ([OriginalFileName], [Category], [ContentType])
+            WHERE [EquipmentId] IS NOT NULL;
+
     IF NOT EXISTS
     (
         SELECT 1
@@ -4913,6 +4942,18 @@ BEGIN TRY
         VALUES
             (N'SqlServer2016.ClientAttachments.0015', 15, N'0.6.6-beta.4', NULL);
 
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_deploy].[SchemaMigrations]
+        WHERE [MigrationId] = N'SqlServer2016.ClientAttachmentEquipmentLinks.0015'
+    )
+        INSERT INTO [tb_deploy].[SchemaMigrations]
+            ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+        VALUES
+            (N'SqlServer2016.ClientAttachmentEquipmentLinks.0015', 15,
+             N'0.6.6-beta.26', NULL);
+
     COMMIT TRANSACTION;
 END TRY
 BEGIN CATCH
@@ -4920,7 +4961,7 @@ BEGIN CATCH
     THROW;
 END CATCH;
 
-PRINT N'Schema-15-compatible Client Attachments extension installed.';
+PRINT N'Schema-15-compatible Client Attachments and equipment links installed.';
 GO
 
 -- ============================================================================
@@ -23271,6 +23312,11 @@ BEGIN
         END;
 
         IF ISNULL(@PreviousClientId, -1) <> ISNULL(@ClientId, -1)
+            UPDATE [tb_client].[ClientAttachments]
+            SET [EquipmentId]=NULL
+            WHERE [EquipmentId]=@EquipmentId;
+
+        IF ISNULL(@PreviousClientId, -1) <> ISNULL(@ClientId, -1)
            OR ISNULL(@PreviousClientUserId, -1) <> ISNULL(@ClientUserId, -1)
            OR ISNULL(@PreviousLocationName, N'') <> ISNULL(@LocationName, N'')
         BEGIN
@@ -23705,6 +23751,10 @@ BEGIN
 
     IF @@ROWCOUNT = 0
         THROW 52210, N'The equipment record changed or no longer exists. Refresh and try again.', 1;
+
+    UPDATE [tb_client].[ClientAttachments]
+    SET [EquipmentId]=NULL
+    WHERE [EquipmentId]=@EquipmentId;
 END;
 GO
 
@@ -28609,6 +28659,9 @@ BEGIN
 
     SELECT
         attachment.[AttachmentId], attachment.[ClientId],
+        attachment.[EquipmentId],
+        COALESCE(equipment.[Name], N'') AS [EquipmentName],
+        COALESCE(equipment.[AssetTag], N'') AS [EquipmentAssetTag],
         attachment.[RelativePath], attachment.[OriginalFileName],
         attachment.[ContentType], attachment.[Category], attachment.[Caption],
         attachment.[FileSizeBytes], attachment.[ContentSha256],
@@ -28623,6 +28676,8 @@ BEGIN
         ON uploader.[WindowsSid]=attachment.[UploadedByWindowsSid]
     LEFT JOIN [tb_security].[Users] AS archiver
         ON archiver.[WindowsSid]=attachment.[ArchivedByWindowsSid]
+    LEFT JOIN [tb_inventory].[Equipment] AS equipment
+        ON equipment.[EquipmentId]=attachment.[EquipmentId]
     WHERE attachment.[ClientId]=@ClientId
       AND (@IncludeArchived=1 OR attachment.[IsArchived]=0)
     ORDER BY attachment.[IsArchived], attachment.[UploadedAtUtc] DESC,
@@ -28750,7 +28805,10 @@ BEGIN
     END CATCH;
 
     SELECT
-        attachment.[AttachmentId],attachment.[ClientId],attachment.[RelativePath],
+        attachment.[AttachmentId],attachment.[ClientId],attachment.[EquipmentId],
+        COALESCE(equipment.[Name],N'') AS [EquipmentName],
+        COALESCE(equipment.[AssetTag],N'') AS [EquipmentAssetTag],
+        attachment.[RelativePath],
         attachment.[OriginalFileName],attachment.[ContentType],attachment.[Category],
         attachment.[Caption],attachment.[FileSizeBytes],attachment.[ContentSha256],
         COALESCE(NULLIF(uploader.[DisplayName],N''),uploader.[LoginName],N'Unknown') AS [UploadedBy],
@@ -28759,6 +28817,99 @@ BEGIN
     FROM [tb_client].[ClientAttachments] AS attachment
     LEFT JOIN [tb_security].[Users] AS uploader
         ON uploader.[WindowsSid]=attachment.[UploadedByWindowsSid]
+    LEFT JOIN [tb_inventory].[Equipment] AS equipment
+        ON equipment.[EquipmentId]=attachment.[EquipmentId]
+    WHERE attachment.[AttachmentId]=@AttachmentId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SetClientInfoAttachmentEquipmentLink', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SetClientInfoAttachmentEquipmentLink];
+GO
+
+CREATE PROCEDURE [tb_app].[SetClientInfoAttachmentEquipmentLink]
+    @AttachmentId uniqueidentifier,
+    @ClientId int,
+    @EquipmentId bigint = NULL,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit,
+            @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_info_editor')<>1
+        THROW 52601, N'Client Info editor permission is required.', 1;
+    IF @ExpectedRowVersion IS NULL
+        THROW 52607, N'ExpectedRowVersion is required when linking an attachment.', 1;
+    IF @EquipmentId IS NOT NULL
+       AND NOT EXISTS
+       (
+           SELECT 1
+           FROM [tb_inventory].[Equipment]
+           WHERE [EquipmentId]=@EquipmentId
+             AND [ClientId]=@ClientId
+             AND [IsArchived]=0
+       )
+        THROW 52609, N'Attachments can only be linked to active equipment assigned to the same client.', 1;
+    SET @RequestId=COALESCE(@RequestId,NEWID());
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        UPDATE [tb_client].[ClientAttachments]
+        SET [EquipmentId]=@EquipmentId
+        WHERE [AttachmentId]=@AttachmentId
+          AND [ClientId]=@ClientId
+          AND [RowVersion]=@ExpectedRowVersion;
+        IF @@ROWCOUNT<>1
+            THROW 52608, N'The attachment changed on another workstation. Refresh and resolve the conflict.', 1;
+
+        DECLARE @AuditEntityId nvarchar(120)=
+            CONVERT(nvarchar(120),@AttachmentId);
+        DECLARE @AuditAction nvarchar(120)=CASE
+            WHEN @EquipmentId IS NULL
+                THEN N'ClientInfoAttachmentEquipmentUnlinked'
+            ELSE N'ClientInfoAttachmentEquipmentLinked'
+        END;
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=@AuditAction,
+            @EntityType=N'ClientInfoAttachment',
+            @EntityId=@AuditEntityId,
+            @RequestId=@RequestId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        attachment.[AttachmentId],attachment.[ClientId],attachment.[EquipmentId],
+        COALESCE(equipment.[Name],N'') AS [EquipmentName],
+        COALESCE(equipment.[AssetTag],N'') AS [EquipmentAssetTag],
+        attachment.[RelativePath],attachment.[OriginalFileName],
+        attachment.[ContentType],attachment.[Category],attachment.[Caption],
+        attachment.[FileSizeBytes],attachment.[ContentSha256],
+        COALESCE(NULLIF(uploader.[DisplayName],N''),uploader.[LoginName],N'Unknown') AS [UploadedBy],
+        attachment.[UploadedAtUtc],attachment.[IsArchived],
+        COALESCE(NULLIF(archiver.[DisplayName],N''),archiver.[LoginName],N'') AS [ArchivedBy],
+        attachment.[ArchivedAtUtc],attachment.[RowVersion]
+    FROM [tb_client].[ClientAttachments] AS attachment
+    LEFT JOIN [tb_security].[Users] AS uploader
+        ON uploader.[WindowsSid]=attachment.[UploadedByWindowsSid]
+    LEFT JOIN [tb_security].[Users] AS archiver
+        ON archiver.[WindowsSid]=attachment.[ArchivedByWindowsSid]
+    LEFT JOIN [tb_inventory].[Equipment] AS equipment
+        ON equipment.[EquipmentId]=attachment.[EquipmentId]
     WHERE attachment.[AttachmentId]=@AttachmentId;
 END;
 GO
@@ -28824,7 +28975,10 @@ BEGIN
     END CATCH;
 
     SELECT
-        attachment.[AttachmentId],attachment.[ClientId],attachment.[RelativePath],
+        attachment.[AttachmentId],attachment.[ClientId],attachment.[EquipmentId],
+        COALESCE(equipment.[Name],N'') AS [EquipmentName],
+        COALESCE(equipment.[AssetTag],N'') AS [EquipmentAssetTag],
+        attachment.[RelativePath],
         attachment.[OriginalFileName],attachment.[ContentType],attachment.[Category],
         attachment.[Caption],attachment.[FileSizeBytes],attachment.[ContentSha256],
         COALESCE(NULLIF(uploader.[DisplayName],N''),uploader.[LoginName],N'Unknown') AS [UploadedBy],
@@ -28836,6 +28990,8 @@ BEGIN
         ON uploader.[WindowsSid]=attachment.[UploadedByWindowsSid]
     LEFT JOIN [tb_security].[Users] AS archiver
         ON archiver.[WindowsSid]=attachment.[ArchivedByWindowsSid]
+    LEFT JOIN [tb_inventory].[Equipment] AS equipment
+        ON equipment.[EquipmentId]=attachment.[EquipmentId]
     WHERE attachment.[AttachmentId]=@AttachmentId;
 END;
 GO
@@ -29963,6 +30119,8 @@ GRANT EXECUTE ON OBJECT::[tb_app].[GetClientAttachmentStorageConfiguration]
 GRANT EXECUTE ON OBJECT::[tb_app].[GetClientInfoAttachments]
     TO [tb_role_user];
 GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoAttachment]
+    TO [tb_role_client_info_editor];
+GRANT EXECUTE ON OBJECT::[tb_app].[SetClientInfoAttachmentEquipmentLink]
     TO [tb_role_client_info_editor];
 GRANT EXECUTE ON OBJECT::[tb_app].[SetClientInfoAttachmentArchived]
     TO [tb_role_client_info_editor];
@@ -36330,6 +36488,14 @@ IF NOT EXISTS
 )
     THROW 52650,N'Client Attachments migration record is missing.',1;
 
+IF NOT EXISTS
+(
+    SELECT 1 FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId]=N'SqlServer2016.ClientAttachmentEquipmentLinks.0015'
+      AND [SchemaVersion]=15
+)
+    THROW 52656,N'Client Attachment equipment-link migration record is missing.',1;
+
 IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations])<>15
     THROW 52651,N'Client Attachments must remain compatible with schema version 15.',1;
 
@@ -36343,6 +36509,7 @@ FROM
         (N'tb_app.GetClientAttachmentStorageConfiguration',N'P'),
         (N'tb_app.GetClientInfoAttachments',N'P'),
         (N'tb_app.SaveClientInfoAttachment',N'P'),
+        (N'tb_app.SetClientInfoAttachmentEquipmentLink',N'P'),
         (N'tb_app.SetClientInfoAttachmentArchived',N'P')
 ) required([ObjectName],[ObjectType])
 WHERE OBJECT_ID(required.[ObjectName],required.[ObjectType]) IS NULL;
@@ -36379,7 +36546,18 @@ IF @SaveDefinition NOT LIKE N'%@ContentSha256 binary(32)%'
    OR @SaveDefinition NOT LIKE N'%WriteAuditEvent%'
     THROW 52655,N'Attachment writes are missing integrity, concurrency, or audit controls.',1;
 
-PRINT N'PASS: Client Attachments schema-15 compatibility and security verified.';
+IF COL_LENGTH(N'tb_client.ClientAttachments',N'EquipmentId') IS NULL
+    THROW 52657,N'Client Attachments cannot link to equipment.',1;
+
+DECLARE @LinkDefinition nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SetClientInfoAttachmentEquipmentLink'));
+IF CHARINDEX(N'[ClientId]=@ClientId',@LinkDefinition)=0
+   OR CHARINDEX(N'[IsArchived]=0',@LinkDefinition)=0
+   OR @LinkDefinition NOT LIKE N'%@ExpectedRowVersion binary(8)%'
+   OR @LinkDefinition NOT LIKE N'%WriteAuditEvent%'
+    THROW 52658,N'Attachment equipment links are missing client ownership, concurrency, or audit controls.',1;
+
+PRINT N'PASS: Client Attachments, equipment links, schema-15 compatibility, and security verified.';
 GO
 
 -- ============================================================================

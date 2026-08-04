@@ -34,6 +34,24 @@ public partial class EquipmentDetailsContent : System.Windows.Controls.UserContr
             typeof(ICommand),
             typeof(EquipmentDetailsContent));
 
+    public static readonly DependencyProperty AttachmentsProperty =
+        DependencyProperty.Register(
+            nameof(Attachments),
+            typeof(IEnumerable),
+            typeof(EquipmentDetailsContent));
+
+    public static readonly DependencyProperty OpenAttachmentCommandProperty =
+        DependencyProperty.Register(
+            nameof(OpenAttachmentCommand),
+            typeof(ICommand),
+            typeof(EquipmentDetailsContent));
+
+    public static readonly DependencyProperty CopyAttachmentCommandProperty =
+        DependencyProperty.Register(
+            nameof(CopyAttachmentCommand),
+            typeof(ICommand),
+            typeof(EquipmentDetailsContent));
+
     public EquipmentDetailsContent()
     {
         InitializeComponent();
@@ -61,5 +79,23 @@ public partial class EquipmentDetailsContent : System.Windows.Controls.UserContr
     {
         get => (ICommand?)GetValue(LaunchAnyDeskCommandProperty);
         set => SetValue(LaunchAnyDeskCommandProperty, value);
+    }
+
+    public IEnumerable? Attachments
+    {
+        get => (IEnumerable?)GetValue(AttachmentsProperty);
+        set => SetValue(AttachmentsProperty, value);
+    }
+
+    public ICommand? OpenAttachmentCommand
+    {
+        get => (ICommand?)GetValue(OpenAttachmentCommandProperty);
+        set => SetValue(OpenAttachmentCommandProperty, value);
+    }
+
+    public ICommand? CopyAttachmentCommand
+    {
+        get => (ICommand?)GetValue(CopyAttachmentCommandProperty);
+        set => SetValue(CopyAttachmentCommandProperty, value);
     }
 }

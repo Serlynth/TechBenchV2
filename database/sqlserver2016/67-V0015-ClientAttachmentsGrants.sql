@@ -12,6 +12,8 @@ GRANT EXECUTE ON OBJECT::[tb_app].[GetClientInfoAttachments]
     TO [tb_role_user];
 GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoAttachment]
     TO [tb_role_client_info_editor];
+GRANT EXECUTE ON OBJECT::[tb_app].[SetClientInfoAttachmentEquipmentLink]
+    TO [tb_role_client_info_editor];
 GRANT EXECUTE ON OBJECT::[tb_app].[SetClientInfoAttachmentArchived]
     TO [tb_role_client_info_editor];
 GO

@@ -108,6 +108,8 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
             "[tb_app].[GetClientInfoAttachments]";
         public const string SaveClientInfoAttachment =
             "[tb_app].[SaveClientInfoAttachment]";
+        public const string SetClientInfoAttachmentEquipmentLink =
+            "[tb_app].[SetClientInfoAttachmentEquipmentLink]";
         public const string SetClientInfoAttachmentArchived =
             "[tb_app].[SetClientInfoAttachmentArchived]";
         public const string SaveClientInfoProfile = "[tb_app].[SaveClientInfoProfile]";

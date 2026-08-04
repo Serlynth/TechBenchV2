@@ -145,6 +145,12 @@ public interface ITechBenchRepository
         throw new NotSupportedException(
             "Client attachments require the matching shared SQL Server extension.");
 
+    ClientInfoAttachment SetClientInfoAttachmentEquipmentLink(
+        ClientInfoAttachment attachment,
+        long? equipmentId) =>
+        throw new NotSupportedException(
+            "Equipment attachment links require the matching shared SQL Server extension.");
+
     ClientInfoAttachment SetClientInfoAttachmentArchived(
         ClientInfoAttachment attachment,
         bool isArchived) =>

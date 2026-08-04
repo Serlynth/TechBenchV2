@@ -60,6 +60,9 @@ public sealed record ClientInfoAttachment
 {
     public Guid AttachmentId { get; init; }
     public int ClientId { get; init; }
+    public long? EquipmentId { get; init; }
+    public string EquipmentName { get; init; } = string.Empty;
+    public string EquipmentAssetTag { get; init; } = string.Empty;
     public string RelativePath { get; init; } = string.Empty;
     public string OriginalFileName { get; init; } = string.Empty;
     public string ContentType { get; init; } = "application/octet-stream";
@@ -87,6 +90,21 @@ public sealed record ClientInfoAttachment
         ? string.Empty
         : UploadedAtUtc.ToLocalTime().ToString("g");
     public string StatusLabel => IsArchived ? "Archived" : "Available";
+    public bool IsLinkedToEquipment => EquipmentId is > 0;
+    public string EquipmentLabel
+    {
+        get
+        {
+            if (!IsLinkedToEquipment)
+            {
+                return "Not linked";
+            }
+
+            return string.IsNullOrWhiteSpace(EquipmentAssetTag)
+                ? EquipmentName
+                : $"{EquipmentName} · {EquipmentAssetTag}";
+        }
+    }
 }
 
 public sealed record ClientInfoLocation

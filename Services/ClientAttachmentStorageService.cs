@@ -9,6 +9,9 @@ public interface IClientAttachmentMetadataStore
 {
     ClientAttachmentStorageConfiguration GetConfiguration();
     ClientInfoAttachment Save(ClientInfoAttachment attachment);
+    ClientInfoAttachment SetEquipmentLink(
+        ClientInfoAttachment attachment,
+        long? equipmentId);
     ClientInfoAttachment SetArchived(
         ClientInfoAttachment attachment,
         bool isArchived);
@@ -170,6 +173,19 @@ public sealed class ClientAttachmentStorageService
             Caption = caption?.Trim() ?? string.Empty
         });
 
+    public ClientInfoAttachment SetEquipmentLink(
+        ClientInfoAttachment attachment,
+        long? equipmentId)
+    {
+        ArgumentNullException.ThrowIfNull(attachment);
+        if (equipmentId is <= 0)
+        {
+            equipmentId = null;
+        }
+
+        return _store.SetEquipmentLink(attachment, equipmentId);
+    }
+
     public ClientInfoAttachment SetArchived(
         ClientInfoAttachment attachment,
         bool isArchived) =>
@@ -328,6 +344,13 @@ public sealed class ClientAttachmentStorageService
 
         public ClientInfoAttachment Save(ClientInfoAttachment attachment) =>
             repository.SaveClientInfoAttachment(attachment);
+
+        public ClientInfoAttachment SetEquipmentLink(
+            ClientInfoAttachment attachment,
+            long? equipmentId) =>
+            repository.SetClientInfoAttachmentEquipmentLink(
+                attachment,
+                equipmentId);
 
         public ClientInfoAttachment SetArchived(
             ClientInfoAttachment attachment,
