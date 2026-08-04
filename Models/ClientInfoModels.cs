@@ -1,3 +1,7 @@
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+using System.Text.Json.Serialization;
+
 namespace TechBench.Models;
 
 public sealed record ClientInfoClientSummary
@@ -223,8 +227,11 @@ public sealed record ClientInfoCredential
     public IReadOnlyList<ClientInfoSecretSummary> Secrets { get; init; } = [];
 }
 
-public sealed record ClientInfoSecretSummary
+public sealed class ClientInfoSecretSummary : INotifyPropertyChanged
 {
+    private string _inlineSecretValue = string.Empty;
+    private bool _isRevealedInline;
+
     public long SecretId { get; init; }
     public long CredentialId { get; init; }
     public string SecretType { get; init; } = string.Empty;
@@ -233,6 +240,47 @@ public sealed record ClientInfoSecretSummary
     public DateTime? LastVerifiedAtUtc { get; init; }
     public DateTime? UpdatedAtUtc { get; init; }
     public byte[]? RowVersion { get; init; }
+
+    [JsonIgnore]
+    public bool IsRevealedInline => _isRevealedInline;
+    [JsonIgnore]
+    public string InlineDisplayValue =>
+        _isRevealedInline ? _inlineSecretValue : new string('\u2022', 8);
+    [JsonIgnore]
+    public string InlineRevealLabel =>
+        _isRevealedInline ? "Hide" : "Reveal";
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public void RevealInline(string secretValue)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(secretValue);
+        _inlineSecretValue = secretValue;
+        _isRevealedInline = true;
+        NotifyInlineStateChanged();
+    }
+
+    public void HideInline()
+    {
+        if (!_isRevealedInline && _inlineSecretValue.Length == 0)
+        {
+            return;
+        }
+
+        _inlineSecretValue = string.Empty;
+        _isRevealedInline = false;
+        NotifyInlineStateChanged();
+    }
+
+    private void NotifyInlineStateChanged()
+    {
+        OnPropertyChanged(nameof(IsRevealedInline));
+        OnPropertyChanged(nameof(InlineDisplayValue));
+        OnPropertyChanged(nameof(InlineRevealLabel));
+    }
+
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }
 
 public sealed record RevealedClientInfoSecret

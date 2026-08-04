@@ -61,13 +61,20 @@
                                   Visibility="{Binding HasSecrets, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <WrapPanel Margin="0,5,0,0">
+                                <WrapPanel Margin="0,5,0,0"
+                                           VerticalAlignment="Center">
                                     <TextBlock Text="{Binding SecretLabel}"
                                                Foreground="{DynamicResource MutedTextBrush}"
                                                FontSize="11"
                                                VerticalAlignment="Center"
                                                Margin="0,0,7,0" />
-                                    <Button Content="Reveal"
+                                    <TextBox Text="{Binding InlineDisplayValue, Mode=OneWay}"
+                                             Style="{StaticResource SelectableValueStyle}"
+                                             VerticalContentAlignment="Center"
+                                             MinWidth="120"
+                                             MaxWidth="260"
+                                             Margin="0,0,7,0" />
+                                    <Button Content="{Binding InlineRevealLabel}"
                                             Command="{Binding DataContext.RevealSecretCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                             CommandParameter="{Binding}"
                                             Padding="8,3"
@@ -1022,7 +1029,13 @@
                                                                FontSize="11"
                                                                Margin="0,2,0,7" />
                                                     <WrapPanel>
-                                                        <Button Content="Reveal"
+                                                        <TextBox Text="{Binding InlineDisplayValue, Mode=OneWay}"
+                                                                 Style="{StaticResource SelectableValueStyle}"
+                                                                 VerticalContentAlignment="Center"
+                                                                 MinWidth="150"
+                                                                 MaxWidth="280"
+                                                                 Margin="0,0,8,0" />
+                                                        <Button Content="{Binding InlineRevealLabel}"
                                                                 Command="{Binding DataContext.RevealSecretCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                                 CommandParameter="{Binding}"
                                                                 Margin="0,0,6,0"

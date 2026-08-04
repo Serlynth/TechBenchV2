@@ -71,6 +71,9 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("x:Key=\"OverviewFieldTemplate\"", xaml, StringComparison.Ordinal);
         Assert.Contains("DataContext.RevealSecretCommand", xaml, StringComparison.Ordinal);
         Assert.Contains("DataContext.CopySecretCommand", xaml, StringComparison.Ordinal);
+        Assert.Contains("InlineDisplayValue", xaml, StringComparison.Ordinal);
+        Assert.Contains("InlineRevealLabel", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("new ClientInfoSecretRevealWindow", viewModel, StringComparison.Ordinal);
         Assert.Contains("QuickReferenceSections", viewModel, StringComparison.Ordinal);
         Assert.Contains("SelectMany(group => group.OverviewSections)", viewModel, StringComparison.Ordinal);
         Assert.Contains("QuickReferencePriority", viewModel, StringComparison.Ordinal);
@@ -87,6 +90,35 @@ public sealed class ClientInfoBetaTests
         Assert.DoesNotContain("\"category\",\n                \"Category\"", viewModel, StringComparison.Ordinal);
         Assert.Contains("TypeOptionsForCategory", viewModel, StringComparison.Ordinal);
         Assert.Contains("MoveResourceCommand", viewModel, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SecretSummaryRevealsAndHidesOnlyInMemoryForTheCurrentView()
+    {
+        var secret = new ClientInfoSecretSummary
+        {
+            SecretId = 91,
+            CredentialId = 9,
+            SecretLabel = "Admin password",
+            SecretType = "Password",
+            IsCurrent = true
+        };
+
+        Assert.False(secret.IsRevealedInline);
+        Assert.Equal(new string('\u2022', 8), secret.InlineDisplayValue);
+        Assert.Equal("Reveal", secret.InlineRevealLabel);
+
+        secret.RevealInline("temporary-secret");
+
+        Assert.True(secret.IsRevealedInline);
+        Assert.Equal("temporary-secret", secret.InlineDisplayValue);
+        Assert.Equal("Hide", secret.InlineRevealLabel);
+
+        secret.HideInline();
+
+        Assert.False(secret.IsRevealedInline);
+        Assert.Equal(new string('\u2022', 8), secret.InlineDisplayValue);
+        Assert.Equal("Reveal", secret.InlineRevealLabel);
     }
 
     [Fact]
