@@ -253,17 +253,33 @@ public static class ClientInfoCategoryOverviewBuilder
 
     private static IReadOnlyList<ClientInfoCategoryOverviewSection> BuildDomains(
         IReadOnlyList<ClientInfoResource> resources,
-        IReadOnlyList<ClientInfoCredential> credentials) =>
-    [
-        Section("Domain & AD", "Domain controllers and administrative access.",
-            WithAccess(
-                [
-                    Values("Domain", resources, "domain_name", "local domain", "ad domain", "domain"),
-                    Values("Domain controllers", resources, "domain_controller", "domain controller", "dc name", "dc ip"),
-                    Addresses("Domain / admin URL", resources)
-                ],
-                credentials))
-    ];
+        IReadOnlyList<ClientInfoCredential> credentials)
+    {
+        var activeDirectoryResources = resources.Where(resource =>
+                MatchesTerms(resource, "active directory", "domain controller", "directory service")
+                || !string.IsNullOrWhiteSpace(FindValue(
+                    resource,
+                    ["ad_domain", "active_directory_domain", "local_domain"])))
+            .ToArray();
+        var emailDomainResources = resources.Except(activeDirectoryResources).ToArray();
+        var domainAdministrators = MatchingCredentials(
+            credentials,
+            ["domain admin", "active directory admin", "ad admin"]);
+
+        return
+        [
+            Section("Domain & AD", "The domain names and administrative access technicians use most often.",
+                RequiredField("AD domain", Coalesce(
+                    "AD domain",
+                    Values("AD domain", resources, "ad_domain", "active_directory_domain", "local_domain"),
+                    Values("AD domain", activeDirectoryResources, "domain_name", "domain"))),
+                RequiredField("Email domain", Coalesce(
+                    "Email domain",
+                    Values("Email domain", resources, "email_domain", "primary_email_domain", "mail_domain"),
+                    Values("Email domain", emailDomainResources, "domain_name", "domain"))),
+                RequiredCredentialField("Domain admin username / password", domainAdministrators))
+        ];
+    }
 
     private static IReadOnlyList<ClientInfoCategoryOverviewSection> BuildProtection(
         IReadOnlyList<ClientInfoResource> resources,

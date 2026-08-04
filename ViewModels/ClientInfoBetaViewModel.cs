@@ -1270,7 +1270,13 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             .Where(group => !ReferenceEquals(group, NeedsSortingGroup))
             .SelectMany(group => group.OverviewSections)
             .Where(section => section.Title is not
-                ("Microsoft 365" or "ESET" or "Barracuda"));
+                ("Microsoft 365"
+                or "ESET"
+                or "Barracuda"
+                or "Core infrastructure"
+                or "Other backup & security"
+                or "Veeam"
+                or "Vendors & services"));
         Replace(
             QuickReferenceSections,
             categorySections
@@ -1290,13 +1296,9 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         "Domain & AD" => 30,
         "Cloud Accounts" => 40,
         "Remote Access" => 50,
-        "Core infrastructure" => 60,
         "ILO / iDRAC" => 70,
         "UPS" => 80,
         "Internet & circuits" => 90,
-        "Veeam" => 100,
-        "ESET" => 110,
-        "Barracuda" => 120,
         _ => 200
     };
 

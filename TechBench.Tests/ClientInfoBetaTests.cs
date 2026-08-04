@@ -85,6 +85,10 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("SelectMany(group => group.OverviewSections)", viewModel, StringComparison.Ordinal);
         Assert.Contains("QuickReferencePriority", viewModel, StringComparison.Ordinal);
         Assert.Contains("!ReferenceEquals(group, NeedsSortingGroup)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("or \"Core infrastructure\"", viewModel, StringComparison.Ordinal);
+        Assert.Contains("or \"Other backup & security\"", viewModel, StringComparison.Ordinal);
+        Assert.Contains("or \"Veeam\"", viewModel, StringComparison.Ordinal);
+        Assert.Contains("or \"Vendors & services\"", viewModel, StringComparison.Ordinal);
         Assert.Contains("ForEditorCategory(group.CategoryName)", resourceGrid, StringComparison.Ordinal);
         Assert.DoesNotContain(".Where(field => field.ShowInGrid)", resourceGrid, StringComparison.Ordinal);
         Assert.Contains("TextColumn(\"Notes\", \"Notes\"", resourceGrid, StringComparison.Ordinal);
@@ -485,13 +489,46 @@ public sealed class ClientInfoBetaTests
             []);
         var domain = ClientInfoCategoryOverviewBuilder.Build(
             ClientInfoResourceCategories.DomainsEmail,
-            [Resource(ClientInfoResourceCategories.DomainsEmail, "Active Directory", ("domain_name", "example.local"), ("domain controller", "DC01"), ("registrar", "Registrar"), ("dns_provider", "DNS host"), ("mail_provider", "Mail host"), ("expiration_date", "2030-01-01"))],
-            []);
+            [
+                Resource(ClientInfoResourceCategories.DomainsEmail, "Active Directory", ("domain_name", "example.local"), ("domain controller", "DC01")),
+                Resource(ClientInfoResourceCategories.DomainsEmail, "Email Domain", ("domain_name", "example.test"), ("registrar", "Registrar"), ("dns_provider", "DNS host"), ("mail_provider", "Mail host"), ("expiration_date", "2030-01-01"))
+            ],
+            [
+                new ClientInfoCredential
+                {
+                    CredentialId = 75,
+                    Name = "Domain Admin",
+                    Category = "Active Directory",
+                    Username = "EXAMPLE\\admin",
+                    LoginUrl = "https://dc01.example.local",
+                    IsActive = true,
+                    Secrets =
+                    [
+                        new ClientInfoSecretSummary
+                        {
+                            SecretId = 750,
+                            CredentialId = 75,
+                            SecretType = "Password",
+                            SecretLabel = "Password",
+                            IsCurrent = true
+                        }
+                    ]
+                }
+            ]);
 
         var microsoftFields = Assert.Single(microsoft, section => section.Title == "Microsoft 365").Fields;
         Assert.Equal(["Tenant / instance", "Admin portal"], microsoftFields.Select(field => field.Label));
         var domainFields = Assert.Single(domain).Fields;
-        Assert.Equal(["Domain", "Domain controllers", "Domain / admin URL"], domainFields.Select(field => field.Label));
+        Assert.Equal(
+            ["AD domain", "Email domain", "Domain admin username / password"],
+            domainFields.Select(field => field.Label));
+        Assert.Equal("example.local", domainFields[0].Value);
+        Assert.Equal("example.test", domainFields[1].Value);
+        Assert.Equal("EXAMPLE\\admin", domainFields[2].Value);
+        Assert.Single(domainFields[2].Secrets);
+        Assert.DoesNotContain(
+            domainFields,
+            field => field.Value.Contains("https://", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -572,7 +609,9 @@ public sealed class ClientInfoBetaTests
         Assert.DoesNotContain("DiscoverWorkspaceSections", builder, StringComparison.Ordinal);
         var viewModel = Read("ViewModels", "ClientInfoBetaViewModel.cs");
         Assert.Contains("BuildCloudAccounts", viewModel, StringComparison.Ordinal);
-        Assert.Contains("\"Microsoft 365\" or \"ESET\" or \"Barracuda\"", viewModel, StringComparison.Ordinal);
+        Assert.Contains("\"Microsoft 365\"", viewModel, StringComparison.Ordinal);
+        Assert.Contains("or \"ESET\"", viewModel, StringComparison.Ordinal);
+        Assert.Contains("or \"Barracuda\"", viewModel, StringComparison.Ordinal);
     }
 
     [Fact]
