@@ -375,6 +375,9 @@
             <Setter Property="ColumnHeaderHeight" Value="38" />
             <Setter Property="RowHeight" Value="38" />
             <Setter Property="AlternationCount" Value="2" />
+            <Setter Property="CanUserResizeColumns" Value="True" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto" />
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
         </Style>
 
         <!-- Implicit DataGrid styles do not flow to a derived custom control. -->
@@ -399,15 +402,27 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="DataGridColumnHeader">
-                        <Border Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                              VerticalAlignment="Center"
-                                              TextElement.Foreground="{TemplateBinding Foreground}"
-                                              SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
-                        </Border>
+                        <Grid>
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="Center"
+                                                  TextElement.Foreground="{TemplateBinding Foreground}"
+                                                  SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                            </Border>
+                            <Thumb x:Name="PART_LeftHeaderGripper"
+                                   Width="8"
+                                   HorizontalAlignment="Left"
+                                   Cursor="SizeWE"
+                                   Background="Transparent" />
+                            <Thumb x:Name="PART_RightHeaderGripper"
+                                   Width="8"
+                                   HorizontalAlignment="Right"
+                                   Cursor="SizeWE"
+                                   Background="Transparent" />
+                        </Grid>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -673,10 +688,15 @@
             <TabItem Header="People &amp; Locations">
                 <Grid Margin="18">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="1.05*" />
-                        <ColumnDefinition Width="1.25*" />
+                        <ColumnDefinition x:Name="LocationsPaneColumn"
+                                          Width="1.05*"
+                                          MinWidth="260" />
+                        <ColumnDefinition Width="10" />
+                        <ColumnDefinition x:Name="PeoplePaneColumn"
+                                          Width="1.25*"
+                                          MinWidth="300" />
                     </Grid.ColumnDefinitions>
-                    <Grid Margin="0,0,9,0">
+                    <Grid Margin="0,0,4,0">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
@@ -701,6 +721,7 @@
                                     MinWidth="70" />
                         </Grid>
                         <DataGrid Grid.Row="1"
+                                  x:Name="LocationsDataGrid"
                                   ItemsSource="{Binding Locations}"
                                   SelectedItem="{Binding SelectedLocation}"
                                   AutoGenerateColumns="False"
@@ -711,13 +732,16 @@
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Name"
                                                     Binding="{Binding Name}"
-                                                    Width="1.1*" />
+                                                    Width="1.1*"
+                                                    MinWidth="130" />
                                 <DataGridTextColumn Header="Type"
                                                     Binding="{Binding LocationType}"
-                                                    Width="0.7*" />
+                                                    Width="0.7*"
+                                                    MinWidth="100" />
                                 <DataGridTextColumn Header="Address"
                                                     Binding="{Binding AddressLabel}"
-                                                    Width="1.5*" />
+                                                    Width="1.5*"
+                                                    MinWidth="220" />
                                 <DataGridTextColumn Header="Main Phone"
                                                     Binding="{Binding MainPhone}"
                                                     MinWidth="110" />
@@ -742,7 +766,16 @@
                             </DataGrid.Columns>
                         </DataGrid>
                     </Grid>
-                    <Grid Grid.Column="1" Margin="9,0,0,0">
+                    <GridSplitter Grid.Column="1"
+                                  Width="10"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
+                                  ResizeDirection="Columns"
+                                  ResizeBehavior="PreviousAndNext"
+                                  ShowsPreview="False"
+                                  Background="{DynamicResource BorderBrush}"
+                                  DragCompleted="PeopleLocationsSplitter_DragCompleted" />
+                    <Grid Grid.Column="2" Margin="4,0,0,0">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
@@ -767,6 +800,7 @@
                                     MinWidth="70" />
                         </Grid>
                         <DataGrid Grid.Row="1"
+                                  x:Name="PeopleDataGrid"
                                   ItemsSource="{Binding People}"
                                   SelectedItem="{Binding SelectedPerson}"
                                   AutoGenerateColumns="False"
@@ -777,13 +811,16 @@
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Name"
                                                     Binding="{Binding DisplayName}"
-                                                    Width="1.1*" />
+                                                    Width="1.1*"
+                                                    MinWidth="150" />
                                 <DataGridTextColumn Header="Role"
                                                     Binding="{Binding RoleDepartment}"
-                                                    Width="1*" />
+                                                    Width="1*"
+                                                    MinWidth="140" />
                                 <DataGridTextColumn Header="Email"
                                                     Binding="{Binding Email}"
-                                                    Width="1.2*" />
+                                                    Width="1.2*"
+                                                    MinWidth="220" />
                                 <DataGridTextColumn Header="Phone"
                                                     Binding="{Binding Phone}"
                                                     MinWidth="110" />
@@ -795,7 +832,8 @@
                                                     MinWidth="105" />
                                 <DataGridTextColumn Header="Location"
                                                     Binding="{Binding LocationName}"
-                                                    Width="0.8*" />
+                                                    Width="0.8*"
+                                                    MinWidth="130" />
                                 <DataGridCheckBoxColumn Header="Primary"
                                                         Binding="{Binding IsPrimary}"
                                                         MinWidth="70" />

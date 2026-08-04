@@ -21,6 +21,12 @@ public sealed class LocalPreferenceStoreTests
             created.WindowWidth = 1440;
             created.WindowHeight = 900;
             created.WindowState = "Maximized";
+            created.ProfileWindowWidth = 1320;
+            created.ProfileWindowHeight = 840;
+            created.ProfileWindowState = "Maximized";
+            created.PeopleLocationsSplitRatio = 0.38;
+            created.LocationGridColumnWidths = [140, 110, 260];
+            created.PeopleGridColumnWidths = [160, 150, 240];
             created.LastBenchModule = "AdminBench";
             created.TechBenchWorkspace = "Inventory";
             created.AdminBenchWorkspace = "Admin Center";
@@ -60,6 +66,12 @@ public sealed class LocalPreferenceStoreTests
             Assert.Equal(1440, loaded.WindowWidth);
             Assert.Equal(900, loaded.WindowHeight);
             Assert.Equal("Maximized", loaded.WindowState);
+            Assert.Equal(1320, loaded.ProfileWindowWidth);
+            Assert.Equal(840, loaded.ProfileWindowHeight);
+            Assert.Equal("Maximized", loaded.ProfileWindowState);
+            Assert.Equal(0.38, loaded.PeopleLocationsSplitRatio);
+            Assert.Equal([140, 110, 260], loaded.LocationGridColumnWidths);
+            Assert.Equal([160, 150, 240], loaded.PeopleGridColumnWidths);
             Assert.Equal("AdminBench", loaded.LastBenchModule);
             Assert.Equal("Inventory", loaded.TechBenchWorkspace);
             Assert.Equal("Admin Center", loaded.AdminBenchWorkspace);
@@ -147,6 +159,10 @@ public sealed class LocalPreferenceStoreTests
             {
                 Theme = "unexpected",
                 WindowState = "Minimized",
+                ProfileWindowState = "Minimized",
+                PeopleLocationsSplitRatio = 5,
+                LocationGridColumnWidths = [20, 120, double.NaN, 1700],
+                PeopleGridColumnWidths = [160, 220],
                 LastBenchModule = "unexpected",
                 TechBenchWorkspace = "   ",
                 AdminBenchWorkspace = new string('x', 121),
@@ -173,6 +189,10 @@ public sealed class LocalPreferenceStoreTests
             var loaded = LocalPreferenceStore.LoadOrCreate(path);
             Assert.Equal("Dark", loaded.Theme);
             Assert.Equal("Normal", loaded.WindowState);
+            Assert.Equal("Normal", loaded.ProfileWindowState);
+            Assert.Equal(0.8, loaded.PeopleLocationsSplitRatio);
+            Assert.Equal([120], loaded.LocationGridColumnWidths);
+            Assert.Equal([160, 220], loaded.PeopleGridColumnWidths);
             Assert.Equal("TechBench", loaded.LastBenchModule);
             Assert.Equal("Today", loaded.TechBenchWorkspace);
             Assert.Equal("Client Match", loaded.AdminBenchWorkspace);
