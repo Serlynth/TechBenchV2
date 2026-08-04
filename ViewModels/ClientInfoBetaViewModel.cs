@@ -198,7 +198,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         ? $"Client Information is live - {Profile.CutoverState}"
         : $"Client Information draft - {Profile.CutoverState}";
     public bool CanEdit => !IsDemo && _currentUser.CanWrite;
-    public bool CanRevealSecrets => !IsDemo && !_currentUser.IsReadOnlyPreview;
+    public bool CanRevealSecrets => IsDemo || !_currentUser.IsReadOnlyPreview;
     public bool CanManageImports => !IsDemo && _currentUser.IsAdmin && _currentUser.CanWrite;
     public bool CanEditAttachments =>
         CanEdit && !_isAttachmentOperationRunning;
@@ -1444,8 +1444,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 
         try
         {
-            var revealed = _repository.RevealClientInfoSecret(
-                secret.SecretId)
+            var revealed = ResolveSecret(secret, forClipboard: false)
                 ?? throw new InvalidOperationException(
                     "The secret is no longer available.");
             var window = new ClientInfoSecretRevealWindow(revealed)
@@ -1453,7 +1452,9 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 Owner = FindOwner()
             };
             window.ShowDialog();
-            StatusMessage = $"Revealed {secret.SecretLabel}; access was audited.";
+            StatusMessage = IsDemo
+                ? $"Revealed sample {secret.SecretLabel}; no real credential was accessed."
+                : $"Revealed {secret.SecretLabel}; access was audited.";
         }
         catch (Exception exception)
         {
@@ -1470,19 +1471,51 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 
         try
         {
-            var revealed = _repository.RevealClientInfoSecret(
-                secret.SecretId,
-                forClipboard: true)
+            var revealed = ResolveSecret(secret, forClipboard: true)
                 ?? throw new InvalidOperationException(
                     "The secret is no longer available.");
             WpfClipboard.SetText(revealed.SecretValue);
-            StatusMessage =
-                $"Copied {secret.SecretLabel}; clipboard access was audited.";
+            StatusMessage = IsDemo
+                ? $"Copied sample {secret.SecretLabel}; no real credential was accessed."
+                : $"Copied {secret.SecretLabel}; clipboard access was audited.";
         }
         catch (Exception exception)
         {
             ShowError("Secret could not be copied", exception);
         }
+    }
+
+    private RevealedClientInfoSecret? ResolveSecret(
+        ClientInfoSecretSummary secret,
+        bool forClipboard)
+    {
+        if (_demoData is null)
+        {
+            return _repository.RevealClientInfoSecret(
+                secret.SecretId,
+                forClipboard);
+        }
+
+        if (!_demoData.SecretValues.TryGetValue(
+                secret.SecretId,
+                out var secretValue))
+        {
+            return null;
+        }
+
+        var credential = _demoData.Snapshot.Credentials.FirstOrDefault(item =>
+            item.CredentialId == secret.CredentialId);
+        return new RevealedClientInfoSecret
+        {
+            SecretId = secret.SecretId,
+            CredentialId = secret.CredentialId,
+            ClientId = ClientId,
+            CredentialName = credential?.Name ?? "Demo credential",
+            SecretType = secret.SecretType,
+            SecretLabel = secret.SecretLabel,
+            SecretValue = secretValue,
+            RowVersion = secret.RowVersion
+        };
     }
 
     private void CreateTemplate()

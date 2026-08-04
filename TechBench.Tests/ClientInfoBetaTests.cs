@@ -21,7 +21,9 @@ public sealed class ClientInfoBetaTests
         Assert.Equal(2, demo.Snapshot.Locations.Count);
         Assert.Equal(3, demo.Snapshot.People.Count);
         Assert.Equal(14, demo.Snapshot.Resources.Count);
-        Assert.Equal(10, demo.Snapshot.Credentials.Count);
+        Assert.Equal(18, demo.Snapshot.Credentials.Count);
+        Assert.Equal(18, demo.Summary.CredentialCount);
+        Assert.Equal(18, demo.SecretValues.Count);
         Assert.Equal(3, demo.Equipment.Count);
         Assert.Equal(
             ClientInfoResourceCategories.All,
@@ -335,6 +337,88 @@ public sealed class ClientInfoBetaTests
             [Credential(608, "CSRIAdmin AuthPoint", "csriadmin")])).Fields;
         Assert.Contains(fallbackFields, field => field.Label == "CSRIAdmin AuthPoint");
         Assert.DoesNotContain(fallbackFields, field => field.Label == "Firebox-DB\\csri");
+    }
+
+    [Fact]
+    public void RequestedNetworkRowsStayVisibleWhenInformationIsMissing()
+    {
+        var wifi = Assert.Single(ClientInfoCategoryOverviewBuilder.Build(
+            ClientInfoResourceCategories.Wifi,
+            [],
+            [])).Fields;
+        Assert.Equal(
+            ["Type", "Management URL", "Admin username / password", "SSID / password"],
+            wifi.Select(field => field.Label));
+        Assert.All(wifi, field => Assert.Equal("Not entered", field.Value));
+
+        var connection = Assert.Single(ClientInfoCategoryOverviewBuilder.Build(
+            ClientInfoResourceCategories.ConnectionInternet,
+            [],
+            [])).Fields;
+        Assert.Equal(
+            [
+                "External IP",
+                "Model",
+                "Status password",
+                "Admin password",
+                "CSRIAdmin AuthPoint",
+                "AuthPoint user",
+                "SSL VPN password",
+                "WatchGuard Cloud user / password",
+                "WatchGuard AD auth user / password"
+            ],
+            connection.Select(field => field.Label));
+        Assert.All(connection, field => Assert.Equal("Not entered", field.Value));
+    }
+
+    [Fact]
+    public void DemoClientPopulatesEveryRequestedNetworkOverviewValueAndSecret()
+    {
+        var demo = ClientInfoDemoData.Create();
+        var wifiResources = demo.Snapshot.Resources.Where(resource =>
+            resource.Category == ClientInfoResourceCategories.Wifi).ToArray();
+        var wifiResourceIds = wifiResources.Select(resource => resource.ResourceId).ToHashSet();
+        var wifiCredentials = demo.Snapshot.Credentials.Where(credential =>
+            credential.ResourceId.HasValue
+            && wifiResourceIds.Contains(credential.ResourceId.Value)).ToArray();
+        var wifi = Assert.Single(ClientInfoCategoryOverviewBuilder.Build(
+            ClientInfoResourceCategories.Wifi,
+            wifiResources,
+            wifiCredentials)).Fields;
+        Assert.Equal(
+            ["Type", "Management URL", "Admin username / password", "SSID", "Guest SSID"],
+            wifi.Select(field => field.Label));
+        Assert.NotEmpty(wifi.Single(field => field.Label == "Admin username / password").Secrets);
+        Assert.NotEmpty(wifi.Single(field => field.Label == "SSID").Secrets);
+        Assert.NotEmpty(wifi.Single(field => field.Label == "Guest SSID").Secrets);
+
+        var connectionResources = demo.Snapshot.Resources.Where(resource =>
+            resource.Category == ClientInfoResourceCategories.ConnectionInternet).ToArray();
+        var connectionResourceIds = connectionResources.Select(resource => resource.ResourceId).ToHashSet();
+        var connectionCredentials = demo.Snapshot.Credentials.Where(credential =>
+            credential.ResourceId.HasValue
+            && connectionResourceIds.Contains(credential.ResourceId.Value)).ToArray();
+        var connection = Assert.Single(ClientInfoCategoryOverviewBuilder.Build(
+            ClientInfoResourceCategories.ConnectionInternet,
+            connectionResources,
+            connectionCredentials)).Fields;
+        Assert.Equal(
+            [
+                "External IP",
+                "Model",
+                "Status password",
+                "Admin password",
+                "Firebox-DB\\csri",
+                "AuthPoint user",
+                "SSL VPN password",
+                "WatchGuard Cloud user / password",
+                "WatchGuard AD auth user / password"
+            ],
+            connection.Select(field => field.Label));
+        Assert.All(connection.Skip(2), field => Assert.NotEmpty(field.Secrets));
+        Assert.All(
+            wifi.Concat(connection).SelectMany(field => field.Secrets),
+            secret => Assert.True(demo.SecretValues.ContainsKey(secret.SecretId)));
     }
 
     [Fact]
