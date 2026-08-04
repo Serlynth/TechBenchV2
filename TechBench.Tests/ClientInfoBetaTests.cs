@@ -63,6 +63,9 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("OverviewSections", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"Selected record\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding SelectedOverviewLabel}\"", xaml, StringComparison.Ordinal);
+        Assert.True(
+            xaml.IndexOf("Header=\"Needs Sorting\"", StringComparison.Ordinal)
+            > xaml.IndexOf("Header=\"Other Information\"", StringComparison.Ordinal));
         var selectedRecordMarkup = xaml[
             xaml.IndexOf("ItemsSource=\"{Binding OverviewSections}\"", StringComparison.Ordinal)..
             xaml.IndexOf("<GridSplitter Grid.Row=\"2\"", StringComparison.Ordinal)];

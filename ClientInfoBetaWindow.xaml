@@ -1062,10 +1062,6 @@
                      Content="{Binding VendorsServicesGroup}"
                      ContentTemplate="{StaticResource ResourceCategoryContentTemplate}" />
 
-            <TabItem Header="Needs Sorting"
-                     Content="{Binding NeedsSortingGroup}"
-                     ContentTemplate="{StaticResource ResourceCategoryContentTemplate}" />
-
             <TabItem Header="Passwords">
                 <Grid Margin="18">
                     <Grid.ColumnDefinitions>
@@ -1471,6 +1467,10 @@
                     </DataGrid>
                 </Grid>
             </TabItem>
+
+            <TabItem Header="Needs Sorting"
+                     Content="{Binding NeedsSortingGroup}"
+                     ContentTemplate="{StaticResource ResourceCategoryContentTemplate}" />
 
             <TabItem Header="Migration" Visibility="Collapsed">
                 <Grid Margin="18">
