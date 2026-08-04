@@ -243,10 +243,10 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="Overview"
+                            <TextBlock Text="Selected record"
                                        FontSize="14"
                                        FontWeight="SemiBold" />
-                            <TextBlock Text="Important category information from Client Information"
+                            <TextBlock Text="{Binding SelectedOverviewLabel}"
                                        Foreground="{DynamicResource MutedTextBrush}"
                                        Margin="10,1,0,0" />
                         </StackPanel>
@@ -263,7 +263,7 @@
                         </Border>
                     </Grid>
                     <Grid Grid.Row="1">
-                        <TextBlock Text="No overview information is available in this section yet."
+                        <TextBlock Text="Select a record in the full list to see its important information."
                                    Foreground="{DynamicResource MutedTextBrush}"
                                    HorizontalAlignment="Center"
                                    VerticalAlignment="Center"

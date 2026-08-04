@@ -40,6 +40,48 @@ public static class ClientInfoCategoryOverviewBuilder
         return sections.Where(section => section.Fields.Count > 0).ToArray();
     }
 
+    public static IReadOnlyList<ClientInfoCategoryOverviewSection> BuildSelected(
+        string category,
+        ClientInfoResource resource,
+        IReadOnlyList<ClientInfoCredential> credentials)
+    {
+        var title = category switch
+        {
+            ClientInfoResourceCategories.ServersInfrastructure =>
+                MatchesTerms(resource, "ilo", "idrac")
+                    ? "ILO"
+                    : MatchesTerms(resource, "ups")
+                        ? "UPS"
+                        : "Core infrastructure",
+            ClientInfoResourceCategories.ConnectionInternet => "Connection",
+            ClientInfoResourceCategories.Wifi => "WiFi",
+            ClientInfoResourceCategories.ApplicationsCloud =>
+                IsFireDrillGroup(resource, "Microsoft 365")
+                    ? "Microsoft 365"
+                    : IsFireDrillGroup(resource, "Remote Access")
+                        ? "Remote Access"
+                        : "Other applications & cloud",
+            ClientInfoResourceCategories.DomainsEmail => "Domain & AD",
+            ClientInfoResourceCategories.BackupSecurity =>
+                IsFireDrillGroup(resource, "Veeam")
+                    ? "Veeam"
+                    : IsFireDrillGroup(resource, "ESET")
+                        ? "ESET"
+                        : IsFireDrillGroup(resource, "Barracuda")
+                            ? "Barracuda"
+                            : "Other backup & security",
+            ClientInfoResourceCategories.VendorsServices => "Vendors & services",
+            _ => "Sorting queue"
+        };
+
+        return Build(category, [resource], credentials)
+            .Where(section => string.Equals(
+                section.Title,
+                title,
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+    }
+
     public static ClientInfoCategoryOverviewSection BuildCloudAccounts(
         IReadOnlyList<ClientInfoCredential> credentials) =>
         Section(
