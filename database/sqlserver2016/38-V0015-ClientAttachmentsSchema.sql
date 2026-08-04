@@ -98,6 +98,35 @@ BEGIN TRY
                 ([OriginalFileName], [Category], [FileSizeBytes], [ContentType]);
     END;
 
+    IF COL_LENGTH(N'tb_client.ClientAttachments', N'EquipmentId') IS NULL
+        ALTER TABLE [tb_client].[ClientAttachments]
+            ADD [EquipmentId] bigint NULL;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.foreign_keys
+        WHERE [name] = N'FK_ClientAttachments_Equipment'
+          AND [parent_object_id] = OBJECT_ID(N'tb_client.ClientAttachments')
+    )
+        ALTER TABLE [tb_client].[ClientAttachments] WITH CHECK
+            ADD CONSTRAINT [FK_ClientAttachments_Equipment]
+                FOREIGN KEY ([EquipmentId])
+                REFERENCES [tb_inventory].[Equipment]([EquipmentId]);
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.indexes
+        WHERE [name] = N'IX_ClientAttachments_EquipmentStatusDate'
+          AND [object_id] = OBJECT_ID(N'tb_client.ClientAttachments')
+    )
+        CREATE INDEX [IX_ClientAttachments_EquipmentStatusDate]
+            ON [tb_client].[ClientAttachments]
+                ([EquipmentId], [IsArchived], [UploadedAtUtc] DESC)
+            INCLUDE ([OriginalFileName], [Category], [ContentType])
+            WHERE [EquipmentId] IS NOT NULL;
+
     IF NOT EXISTS
     (
         SELECT 1
@@ -109,6 +138,18 @@ BEGIN TRY
         VALUES
             (N'SqlServer2016.ClientAttachments.0015', 15, N'0.6.6-beta.4', NULL);
 
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_deploy].[SchemaMigrations]
+        WHERE [MigrationId] = N'SqlServer2016.ClientAttachmentEquipmentLinks.0015'
+    )
+        INSERT INTO [tb_deploy].[SchemaMigrations]
+            ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+        VALUES
+            (N'SqlServer2016.ClientAttachmentEquipmentLinks.0015', 15,
+             N'0.6.6-beta.26', NULL);
+
     COMMIT TRANSACTION;
 END TRY
 BEGIN CATCH
@@ -116,5 +157,5 @@ BEGIN CATCH
     THROW;
 END CATCH;
 
-PRINT N'Schema-15-compatible Client Attachments extension installed.';
+PRINT N'Schema-15-compatible Client Attachments and equipment links installed.';
 GO

@@ -140,22 +140,63 @@ public sealed class ClientAttachmentTests
             "database",
             "sqlserver2016",
             "66-V0015-ClientAttachmentsProcedures.sql");
+        var equipmentProcedures = ReadRepositoryFile(
+            "database",
+            "sqlserver2016",
+            "54-V0014-EquipmentBoardProcedures.sql");
         var xaml = ReadRepositoryFile("ClientInfoBetaWindow.xaml");
+        var equipmentDetails = ReadRepositoryFile(
+            "Controls",
+            "EquipmentDetailsContent.xaml");
+        var mainWindow = ReadRepositoryFile("MainWindow.xaml");
         var manager = ReadRepositoryFile(
             "TechBench.ServerManager",
             "ServerManagerForm.cs");
 
         Assert.Contains("[RelativePath] nvarchar(400)", schema, StringComparison.Ordinal);
         Assert.Contains("[ContentSha256] binary(32)", schema, StringComparison.Ordinal);
+        Assert.Contains("[EquipmentId] bigint NULL", schema, StringComparison.Ordinal);
+        Assert.Contains("FK_ClientAttachments_Equipment", schema, StringComparison.Ordinal);
         Assert.DoesNotContain("varbinary(max)", schema, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("GetClientAttachmentStorageConfiguration", procedures, StringComparison.Ordinal);
+        Assert.Contains("SetClientInfoAttachmentEquipmentLink", procedures, StringComparison.Ordinal);
+        Assert.Contains("[ClientId]=@ClientId", procedures, StringComparison.Ordinal);
+        Assert.True(
+            CountOccurrences(
+                equipmentProcedures,
+                "UPDATE [tb_client].[ClientAttachments]") >= 2);
+        Assert.Contains(
+            "SET [EquipmentId]=NULL",
+            equipmentProcedures,
+            StringComparison.Ordinal);
         Assert.Contains("WriteAuditEvent", procedures, StringComparison.Ordinal);
-        Assert.Equal(2, CountOccurrences(procedures, "BEGIN TRANSACTION;"));
-        Assert.Equal(2, CountOccurrences(procedures, "COMMIT TRANSACTION;"));
+        Assert.Equal(3, CountOccurrences(procedures, "BEGIN TRANSACTION;"));
+        Assert.Equal(3, CountOccurrences(procedures, "COMMIT TRANSACTION;"));
         Assert.Contains("Header=\"Attachments\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Attachments_Drop", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Link equipment\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("SelectedEquipmentAttachments", xaml, StringComparison.Ordinal);
+        Assert.Contains("LINKED PHOTOS &amp; DOCUMENTS", equipmentDetails, StringComparison.Ordinal);
+        Assert.Contains("Attachments=\"{Binding EquipmentAttachments}\"", mainWindow, StringComparison.Ordinal);
         Assert.Contains("BuildAttachmentStorageTab", manager, StringComparison.Ordinal);
         Assert.Contains("Test access", manager, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EquipmentLinkIsOptionalAndUsesTheEquipmentLabel()
+    {
+        var unlinked = new ClientInfoAttachment();
+        var linked = unlinked with
+        {
+            EquipmentId = 42,
+            EquipmentName = "Front Desk Laptop",
+            EquipmentAssetTag = "TB-0042"
+        };
+
+        Assert.False(unlinked.IsLinkedToEquipment);
+        Assert.Equal("Not linked", unlinked.EquipmentLabel);
+        Assert.True(linked.IsLinkedToEquipment);
+        Assert.Equal("Front Desk Laptop · TB-0042", linked.EquipmentLabel);
     }
 
     private static string NewTestDirectory()
@@ -227,6 +268,14 @@ public sealed class ClientAttachmentTests
             };
             return Saved;
         }
+
+        public ClientInfoAttachment SetEquipmentLink(
+            ClientInfoAttachment attachment,
+            long? equipmentId) => attachment with
+        {
+            EquipmentId = equipmentId,
+            EquipmentName = equipmentId.HasValue ? "Test equipment" : string.Empty
+        };
 
         public ClientInfoAttachment SetArchived(
             ClientInfoAttachment attachment,

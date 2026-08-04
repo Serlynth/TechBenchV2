@@ -73,6 +73,9 @@ BEGIN
 
     SELECT
         attachment.[AttachmentId], attachment.[ClientId],
+        attachment.[EquipmentId],
+        COALESCE(equipment.[Name], N'') AS [EquipmentName],
+        COALESCE(equipment.[AssetTag], N'') AS [EquipmentAssetTag],
         attachment.[RelativePath], attachment.[OriginalFileName],
         attachment.[ContentType], attachment.[Category], attachment.[Caption],
         attachment.[FileSizeBytes], attachment.[ContentSha256],
@@ -87,6 +90,8 @@ BEGIN
         ON uploader.[WindowsSid]=attachment.[UploadedByWindowsSid]
     LEFT JOIN [tb_security].[Users] AS archiver
         ON archiver.[WindowsSid]=attachment.[ArchivedByWindowsSid]
+    LEFT JOIN [tb_inventory].[Equipment] AS equipment
+        ON equipment.[EquipmentId]=attachment.[EquipmentId]
     WHERE attachment.[ClientId]=@ClientId
       AND (@IncludeArchived=1 OR attachment.[IsArchived]=0)
     ORDER BY attachment.[IsArchived], attachment.[UploadedAtUtc] DESC,
@@ -214,7 +219,10 @@ BEGIN
     END CATCH;
 
     SELECT
-        attachment.[AttachmentId],attachment.[ClientId],attachment.[RelativePath],
+        attachment.[AttachmentId],attachment.[ClientId],attachment.[EquipmentId],
+        COALESCE(equipment.[Name],N'') AS [EquipmentName],
+        COALESCE(equipment.[AssetTag],N'') AS [EquipmentAssetTag],
+        attachment.[RelativePath],
         attachment.[OriginalFileName],attachment.[ContentType],attachment.[Category],
         attachment.[Caption],attachment.[FileSizeBytes],attachment.[ContentSha256],
         COALESCE(NULLIF(uploader.[DisplayName],N''),uploader.[LoginName],N'Unknown') AS [UploadedBy],
@@ -223,6 +231,99 @@ BEGIN
     FROM [tb_client].[ClientAttachments] AS attachment
     LEFT JOIN [tb_security].[Users] AS uploader
         ON uploader.[WindowsSid]=attachment.[UploadedByWindowsSid]
+    LEFT JOIN [tb_inventory].[Equipment] AS equipment
+        ON equipment.[EquipmentId]=attachment.[EquipmentId]
+    WHERE attachment.[AttachmentId]=@AttachmentId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SetClientInfoAttachmentEquipmentLink', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SetClientInfoAttachmentEquipmentLink];
+GO
+
+CREATE PROCEDURE [tb_app].[SetClientInfoAttachmentEquipmentLink]
+    @AttachmentId uniqueidentifier,
+    @ClientId int,
+    @EquipmentId bigint = NULL,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit,
+            @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_info_editor')<>1
+        THROW 52601, N'Client Info editor permission is required.', 1;
+    IF @ExpectedRowVersion IS NULL
+        THROW 52607, N'ExpectedRowVersion is required when linking an attachment.', 1;
+    IF @EquipmentId IS NOT NULL
+       AND NOT EXISTS
+       (
+           SELECT 1
+           FROM [tb_inventory].[Equipment]
+           WHERE [EquipmentId]=@EquipmentId
+             AND [ClientId]=@ClientId
+             AND [IsArchived]=0
+       )
+        THROW 52609, N'Attachments can only be linked to active equipment assigned to the same client.', 1;
+    SET @RequestId=COALESCE(@RequestId,NEWID());
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        UPDATE [tb_client].[ClientAttachments]
+        SET [EquipmentId]=@EquipmentId
+        WHERE [AttachmentId]=@AttachmentId
+          AND [ClientId]=@ClientId
+          AND [RowVersion]=@ExpectedRowVersion;
+        IF @@ROWCOUNT<>1
+            THROW 52608, N'The attachment changed on another workstation. Refresh and resolve the conflict.', 1;
+
+        DECLARE @AuditEntityId nvarchar(120)=
+            CONVERT(nvarchar(120),@AttachmentId);
+        DECLARE @AuditAction nvarchar(120)=CASE
+            WHEN @EquipmentId IS NULL
+                THEN N'ClientInfoAttachmentEquipmentUnlinked'
+            ELSE N'ClientInfoAttachmentEquipmentLinked'
+        END;
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=@AuditAction,
+            @EntityType=N'ClientInfoAttachment',
+            @EntityId=@AuditEntityId,
+            @RequestId=@RequestId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        attachment.[AttachmentId],attachment.[ClientId],attachment.[EquipmentId],
+        COALESCE(equipment.[Name],N'') AS [EquipmentName],
+        COALESCE(equipment.[AssetTag],N'') AS [EquipmentAssetTag],
+        attachment.[RelativePath],attachment.[OriginalFileName],
+        attachment.[ContentType],attachment.[Category],attachment.[Caption],
+        attachment.[FileSizeBytes],attachment.[ContentSha256],
+        COALESCE(NULLIF(uploader.[DisplayName],N''),uploader.[LoginName],N'Unknown') AS [UploadedBy],
+        attachment.[UploadedAtUtc],attachment.[IsArchived],
+        COALESCE(NULLIF(archiver.[DisplayName],N''),archiver.[LoginName],N'') AS [ArchivedBy],
+        attachment.[ArchivedAtUtc],attachment.[RowVersion]
+    FROM [tb_client].[ClientAttachments] AS attachment
+    LEFT JOIN [tb_security].[Users] AS uploader
+        ON uploader.[WindowsSid]=attachment.[UploadedByWindowsSid]
+    LEFT JOIN [tb_security].[Users] AS archiver
+        ON archiver.[WindowsSid]=attachment.[ArchivedByWindowsSid]
+    LEFT JOIN [tb_inventory].[Equipment] AS equipment
+        ON equipment.[EquipmentId]=attachment.[EquipmentId]
     WHERE attachment.[AttachmentId]=@AttachmentId;
 END;
 GO
@@ -288,7 +389,10 @@ BEGIN
     END CATCH;
 
     SELECT
-        attachment.[AttachmentId],attachment.[ClientId],attachment.[RelativePath],
+        attachment.[AttachmentId],attachment.[ClientId],attachment.[EquipmentId],
+        COALESCE(equipment.[Name],N'') AS [EquipmentName],
+        COALESCE(equipment.[AssetTag],N'') AS [EquipmentAssetTag],
+        attachment.[RelativePath],
         attachment.[OriginalFileName],attachment.[ContentType],attachment.[Category],
         attachment.[Caption],attachment.[FileSizeBytes],attachment.[ContentSha256],
         COALESCE(NULLIF(uploader.[DisplayName],N''),uploader.[LoginName],N'Unknown') AS [UploadedBy],
@@ -300,6 +404,8 @@ BEGIN
         ON uploader.[WindowsSid]=attachment.[UploadedByWindowsSid]
     LEFT JOIN [tb_security].[Users] AS archiver
         ON archiver.[WindowsSid]=attachment.[ArchivedByWindowsSid]
+    LEFT JOIN [tb_inventory].[Equipment] AS equipment
+        ON equipment.[EquipmentId]=attachment.[EquipmentId]
     WHERE attachment.[AttachmentId]=@AttachmentId;
 END;
 GO

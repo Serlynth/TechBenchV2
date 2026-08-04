@@ -131,6 +131,14 @@ categorized, captioned, archived, and restored. Archive is intentionally
 non-destructive: it hides the record by default but retains both the file and
 its audit history.
 
+An attachment can optionally be linked to one active equipment record assigned
+to the same client. Choose **Link equipment** from the attachment preview and
+select the device; choose **Not linked** to remove the relationship. The file
+does not move or get duplicated. Linked photos and documents appear beneath the
+selected device on the client's Equipment page and in TechBench's regular
+equipment details pane. The relationship uses the internal equipment ID, so
+renaming the device or changing its asset tag does not break the link.
+
 ## Multiple editors
 
 Edits are saved one small record at a time. Every update supplies the SQL

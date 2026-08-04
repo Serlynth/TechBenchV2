@@ -13,6 +13,14 @@ IF NOT EXISTS
 )
     THROW 52650,N'Client Attachments migration record is missing.',1;
 
+IF NOT EXISTS
+(
+    SELECT 1 FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId]=N'SqlServer2016.ClientAttachmentEquipmentLinks.0015'
+      AND [SchemaVersion]=15
+)
+    THROW 52656,N'Client Attachment equipment-link migration record is missing.',1;
+
 IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations])<>15
     THROW 52651,N'Client Attachments must remain compatible with schema version 15.',1;
 
@@ -26,6 +34,7 @@ FROM
         (N'tb_app.GetClientAttachmentStorageConfiguration',N'P'),
         (N'tb_app.GetClientInfoAttachments',N'P'),
         (N'tb_app.SaveClientInfoAttachment',N'P'),
+        (N'tb_app.SetClientInfoAttachmentEquipmentLink',N'P'),
         (N'tb_app.SetClientInfoAttachmentArchived',N'P')
 ) required([ObjectName],[ObjectType])
 WHERE OBJECT_ID(required.[ObjectName],required.[ObjectType]) IS NULL;
@@ -62,5 +71,16 @@ IF @SaveDefinition NOT LIKE N'%@ContentSha256 binary(32)%'
    OR @SaveDefinition NOT LIKE N'%WriteAuditEvent%'
     THROW 52655,N'Attachment writes are missing integrity, concurrency, or audit controls.',1;
 
-PRINT N'PASS: Client Attachments schema-15 compatibility and security verified.';
+IF COL_LENGTH(N'tb_client.ClientAttachments',N'EquipmentId') IS NULL
+    THROW 52657,N'Client Attachments cannot link to equipment.',1;
+
+DECLARE @LinkDefinition nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SetClientInfoAttachmentEquipmentLink'));
+IF CHARINDEX(N'[ClientId]=@ClientId',@LinkDefinition)=0
+   OR CHARINDEX(N'[IsArchived]=0',@LinkDefinition)=0
+   OR @LinkDefinition NOT LIKE N'%@ExpectedRowVersion binary(8)%'
+   OR @LinkDefinition NOT LIKE N'%WriteAuditEvent%'
+    THROW 52658,N'Attachment equipment links are missing client ownership, concurrency, or audit controls.',1;
+
+PRINT N'PASS: Client Attachments, equipment links, schema-15 compatibility, and security verified.';
 GO
