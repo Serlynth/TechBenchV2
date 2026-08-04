@@ -63,6 +63,13 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("OverviewSections", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"Selected record\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding SelectedOverviewLabel}\"", xaml, StringComparison.Ordinal);
+        var selectedRecordMarkup = xaml[
+            xaml.IndexOf("ItemsSource=\"{Binding OverviewSections}\"", StringComparison.Ordinal)..
+            xaml.IndexOf("<GridSplitter Grid.Row=\"2\"", StringComparison.Ordinal)];
+        Assert.DoesNotContain(
+            "Text=\"{Binding Description}\"",
+            selectedRecordMarkup,
+            StringComparison.Ordinal);
         Assert.Contains("controls:ClientInfoResourceDataGrid", xaml, StringComparison.Ordinal);
         Assert.Contains("BasedOn=\"{StaticResource {x:Type DataGrid}}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("IsReadOnly=\"True\"", xaml, StringComparison.Ordinal);
