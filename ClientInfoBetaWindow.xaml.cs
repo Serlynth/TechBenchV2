@@ -11,6 +11,8 @@ public partial class ClientInfoBetaWindow : Window
     public ClientInfoBetaWindow()
     {
         InitializeComponent();
+        Closed += (_, _) =>
+            (DataContext as ClientInfoBetaViewModel)?.ClearRevealedSecrets();
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();

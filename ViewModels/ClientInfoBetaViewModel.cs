@@ -121,7 +121,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 && SelectedCredential is not null
                 && item is ClientInfoSecretSummary);
         RevealSecretCommand = new RelayCommand(
-            item => RevealSecret(item as ClientInfoSecretSummary),
+            item => ToggleSecret(item as ClientInfoSecretSummary),
             item => CanRevealSecrets && item is ClientInfoSecretSummary);
         CopySecretCommand = new RelayCommand(
             item => CopySecret(item as ClientInfoSecretSummary),
@@ -471,6 +471,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 
     public void Refresh()
     {
+        ClearRevealedSecrets();
         try
         {
             var snapshot = _demoData?.Snapshot
@@ -1435,10 +1436,17 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             });
     }
 
-    private void RevealSecret(ClientInfoSecretSummary? secret)
+    private void ToggleSecret(ClientInfoSecretSummary? secret)
     {
         if (secret is null)
         {
+            return;
+        }
+
+        if (secret.IsRevealedInline)
+        {
+            secret.HideInline();
+            StatusMessage = $"Hidden {secret.SecretLabel}.";
             return;
         }
 
@@ -1447,14 +1455,10 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             var revealed = ResolveSecret(secret, forClipboard: false)
                 ?? throw new InvalidOperationException(
                     "The secret is no longer available.");
-            var window = new ClientInfoSecretRevealWindow(revealed)
-            {
-                Owner = FindOwner()
-            };
-            window.ShowDialog();
+            secret.RevealInline(revealed.SecretValue);
             StatusMessage = IsDemo
-                ? $"Revealed sample {secret.SecretLabel}; no real credential was accessed."
-                : $"Revealed {secret.SecretLabel}; access was audited.";
+                ? $"Showing sample {secret.SecretLabel} inline; no real credential was accessed."
+                : $"Showing {secret.SecretLabel} inline; access was audited.";
         }
         catch (Exception exception)
         {
@@ -1482,6 +1486,14 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         catch (Exception exception)
         {
             ShowError("Secret could not be copied", exception);
+        }
+    }
+
+    public void ClearRevealedSecrets()
+    {
+        foreach (var secret in Credentials.SelectMany(credential => credential.Secrets))
+        {
+            secret.HideInline();
         }
     }
 
