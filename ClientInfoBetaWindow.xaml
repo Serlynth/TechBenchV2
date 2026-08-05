@@ -714,97 +714,58 @@
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem Header="People &amp; Locations">
+            <TabItem Header="Locations">
                 <Grid Margin="18">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition x:Name="LocationsPaneColumn"
-                                          Width="1.05*"
-                                          MinWidth="260" />
-                        <ColumnDefinition Width="10" />
-                        <ColumnDefinition x:Name="PeoplePaneColumn"
-                                          Width="1.25*"
-                                          MinWidth="300" />
-                    </Grid.ColumnDefinitions>
-                    <Grid Margin="0,0,4,0">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="Locations"
-                                       Style="{StaticResource SectionHeaderStyle}" />
-                            <Button Grid.Column="1"
-                                    Content="Add"
-                                    Command="{Binding AddLocationCommand}"
-                                    Margin="0,0,8,8"
-                                    MinWidth="70" />
-                            <Button Grid.Column="2"
-                                    Content="Edit"
-                                    Command="{Binding EditLocationCommand}"
-                                    Margin="0,0,0,8"
-                                    MinWidth="70" />
-                        </Grid>
-                        <DataGrid Grid.Row="1"
-                                  x:Name="LocationsDataGrid"
-                                  ItemsSource="{Binding Locations}"
-                                  SelectedItem="{Binding SelectedLocation}"
-                                  AutoGenerateColumns="False"
-                                  IsReadOnly="True"
-                                  CanUserAddRows="False"
-                                  ClipboardCopyMode="IncludeHeader"
-                                  MouseDoubleClick="Locations_DoubleClick">
-                            <DataGrid.Columns>
-                                <DataGridTextColumn Header="Name"
-                                                    Binding="{Binding Name}"
-                                                    Width="1.1*"
-                                                    MinWidth="130" />
-                                <DataGridTextColumn Header="Type"
-                                                    Binding="{Binding LocationType}"
-                                                    Width="0.7*"
-                                                    MinWidth="100" />
-                                <DataGridTextColumn Header="Address"
-                                                    Binding="{Binding AddressLabel}"
-                                                    Width="1.5*"
-                                                    MinWidth="220" />
-                                <DataGridTextColumn Header="Main Phone"
-                                                    Binding="{Binding MainPhone}"
-                                                    MinWidth="110" />
-                                <DataGridTextColumn Header="Time Zone"
-                                                    Binding="{Binding TimeZoneId}"
-                                                    MinWidth="110" />
-                                <DataGridCheckBoxColumn Header="Primary"
-                                                        Binding="{Binding IsPrimary}"
-                                                        MinWidth="70" />
-                                <DataGridCheckBoxColumn Header="Active"
-                                                        Binding="{Binding IsActive}"
-                                                        MinWidth="65" />
-                                <DataGridTextColumn Header="Review"
-                                                    Binding="{Binding ReviewStatus}"
-                                                    MinWidth="100" />
-                                <DataGridTextColumn Header="Last Verified"
-                                                    Binding="{Binding LastVerifiedAtUtc, StringFormat={}{0:g}}"
-                                                    MinWidth="125" />
-                                <DataGridTextColumn Header="Updated"
-                                                    Binding="{Binding UpdatedAtUtc, StringFormat={}{0:g}}"
-                                                    MinWidth="125" />
-                            </DataGrid.Columns>
-                        </DataGrid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Locations"
+                                   Style="{StaticResource SectionHeaderStyle}" />
+                        <Button Grid.Column="1"
+                                Content="Add"
+                                Command="{Binding AddLocationCommand}"
+                                Margin="0,0,8,8"
+                                MinWidth="70" />
+                        <Button Grid.Column="2"
+                                Content="Edit"
+                                Command="{Binding EditLocationCommand}"
+                                Margin="0,0,0,8"
+                                MinWidth="70" />
                     </Grid>
-                    <GridSplitter Grid.Column="1"
-                                  Width="10"
-                                  HorizontalAlignment="Stretch"
-                                  VerticalAlignment="Stretch"
-                                  ResizeDirection="Columns"
-                                  ResizeBehavior="PreviousAndNext"
-                                  ShowsPreview="False"
-                                  Background="{DynamicResource BorderBrush}"
-                                  DragCompleted="PeopleLocationsSplitter_DragCompleted" />
-                    <Grid Grid.Column="2" Margin="4,0,0,0">
+                    <DataGrid Grid.Row="1"
+                              x:Name="LocationsDataGrid"
+                              ItemsSource="{Binding Locations}"
+                              SelectedItem="{Binding SelectedLocation}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False"
+                              ClipboardCopyMode="IncludeHeader"
+                              MouseDoubleClick="Locations_DoubleClick">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="1.1*" MinWidth="130" />
+                            <DataGridTextColumn Header="Type" Binding="{Binding LocationType}" Width="0.7*" MinWidth="100" />
+                            <DataGridTextColumn Header="Address" Binding="{Binding AddressLabel}" Width="1.5*" MinWidth="220" />
+                            <DataGridTextColumn Header="Main Phone" Binding="{Binding MainPhone}" MinWidth="110" />
+                            <DataGridTextColumn Header="Time Zone" Binding="{Binding TimeZoneId}" MinWidth="110" />
+                            <DataGridCheckBoxColumn Header="Primary" Binding="{Binding IsPrimary}" MinWidth="70" />
+                            <DataGridCheckBoxColumn Header="Active" Binding="{Binding IsActive}" MinWidth="65" />
+                            <DataGridTextColumn Header="Review" Binding="{Binding ReviewStatus}" MinWidth="100" />
+                            <DataGridTextColumn Header="Last Verified" Binding="{Binding LastVerifiedAtUtc, StringFormat={}{0:g}}" MinWidth="125" />
+                            <DataGridTextColumn Header="Updated" Binding="{Binding UpdatedAtUtc, StringFormat={}{0:g}}" MinWidth="125" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Users">
+                <Grid Margin="18">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
@@ -815,7 +776,7 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="People"
+                            <TextBlock Text="Users"
                                        Style="{StaticResource SectionHeaderStyle}" />
                             <Button Grid.Column="1"
                                     Content="Add"
@@ -836,7 +797,7 @@
                                   IsReadOnly="True"
                                   CanUserAddRows="False"
                                   ClipboardCopyMode="IncludeHeader"
-                                  MouseDoubleClick="People_DoubleClick">
+                                  MouseDoubleClick="Users_DoubleClick">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Name"
                                                     Binding="{Binding DisplayName}"
@@ -846,10 +807,48 @@
                                                     Binding="{Binding RoleDepartment}"
                                                     Width="1*"
                                                     MinWidth="140" />
+                                <DataGridTextColumn Header="Location"
+                                                    Binding="{Binding LocationName}"
+                                                    Width="0.8*"
+                                                    MinWidth="130" />
+                                <DataGridTextColumn Header="AD Username"
+                                                    Binding="{Binding AdUsernameDisplay}"
+                                                    MinWidth="170" />
+                                <DataGridTemplateColumn Header="AD Password"
+                                                        MinWidth="265">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <WrapPanel VerticalAlignment="Center">
+                                                <TextBox Text="{Binding AdPassword.InlineDisplayValue, Mode=OneWay, TargetNullValue=Not stored}"
+                                                         Style="{StaticResource SelectableValueStyle}"
+                                                         MinWidth="82"
+                                                         Margin="0,0,5,0" />
+                                                <Button Content="{Binding AdPassword.InlineRevealLabel, TargetNullValue=Reveal}"
+                                                        Command="{Binding DataContext.RevealSecretCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding AdPassword}"
+                                                        Padding="7,2"
+                                                        Margin="0,0,5,0" />
+                                                <Button Content="Copy"
+                                                        Command="{Binding DataContext.CopySecretCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding AdPassword}"
+                                                        Padding="7,2" />
+                                            </WrapPanel>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
                                 <DataGridTextColumn Header="Email"
                                                     Binding="{Binding Email}"
                                                     Width="1.2*"
                                                     MinWidth="220" />
+                                <DataGridCheckBoxColumn Header="Microsoft 365"
+                                                        Binding="{Binding HasMicrosoft365}"
+                                                        MinWidth="100" />
+                                <DataGridTextColumn Header="365 License"
+                                                    Binding="{Binding Microsoft365License}"
+                                                    MinWidth="175" />
+                                <DataGridTextColumn Header="PC Name"
+                                                    Binding="{Binding PcName}"
+                                                    MinWidth="145" />
                                 <DataGridTextColumn Header="Phone"
                                                     Binding="{Binding Phone}"
                                                     MinWidth="110" />
@@ -859,10 +858,6 @@
                                 <DataGridTextColumn Header="Contact Type"
                                                     Binding="{Binding ContactType}"
                                                     MinWidth="105" />
-                                <DataGridTextColumn Header="Location"
-                                                    Binding="{Binding LocationName}"
-                                                    Width="0.8*"
-                                                    MinWidth="130" />
                                 <DataGridCheckBoxColumn Header="Primary"
                                                         Binding="{Binding IsPrimary}"
                                                         MinWidth="70" />
@@ -880,7 +875,6 @@
                                                     MinWidth="125" />
                             </DataGrid.Columns>
                         </DataGrid>
-                    </Grid>
                 </Grid>
             </TabItem>
 

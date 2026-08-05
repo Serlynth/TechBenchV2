@@ -3965,7 +3965,12 @@ BEGIN TRY
             [LocalKey] nvarchar(120) NULL,
             [DisplayName] nvarchar(240) NOT NULL,
             [RoleDepartment] nvarchar(240) NULL,
+            [AdUsername] nvarchar(256) NULL,
             [Email] nvarchar(320) NULL,
+            [HasMicrosoft365] bit NOT NULL
+                CONSTRAINT [DF_ClientPeople_HasMicrosoft365] DEFAULT (0),
+            [Microsoft365License] nvarchar(240) NULL,
+            [PcName] nvarchar(240) NULL,
             [Phone] nvarchar(80) NULL,
             [MobilePhone] nvarchar(80) NULL,
             [ContactType] nvarchar(80) NULL,
@@ -4009,6 +4014,23 @@ BEGIN TRY
             ON [tb_client].[People]([ClientId], [LocalKey])
             WHERE [LocalKey] IS NOT NULL;
     END;
+
+    IF COL_LENGTH(N'tb_client.People', N'AdUsername') IS NULL
+        ALTER TABLE [tb_client].[People]
+            ADD [AdUsername] nvarchar(256) NULL;
+
+    IF COL_LENGTH(N'tb_client.People', N'HasMicrosoft365') IS NULL
+        ALTER TABLE [tb_client].[People]
+            ADD [HasMicrosoft365] bit NOT NULL
+                CONSTRAINT [DF_ClientPeople_HasMicrosoft365] DEFAULT (0);
+
+    IF COL_LENGTH(N'tb_client.People', N'Microsoft365License') IS NULL
+        ALTER TABLE [tb_client].[People]
+            ADD [Microsoft365License] nvarchar(240) NULL;
+
+    IF COL_LENGTH(N'tb_client.People', N'PcName') IS NULL
+        ALTER TABLE [tb_client].[People]
+            ADD [PcName] nvarchar(240) NULL;
 
     IF OBJECT_ID(N'tb_client.Resources', N'U') IS NULL
     BEGIN
@@ -24920,7 +24942,9 @@ BEGIN
     SELECT
         person.[PersonId], person.[ClientId], person.[LocationId],
         location.[Name] AS [LocationName], person.[LocalKey],
-        person.[DisplayName], person.[RoleDepartment], person.[Email],
+        person.[DisplayName], person.[RoleDepartment], person.[AdUsername],
+        person.[Email], person.[HasMicrosoft365],
+        person.[Microsoft365License], person.[PcName],
         person.[Phone], person.[MobilePhone], person.[ContactType],
         person.[IsPrimary], person.[ReviewStatus], person.[IsActive],
         person.[LastVerifiedAtUtc], person.[UpdatedAtUtc], person.[RowVersion]
@@ -25292,7 +25316,11 @@ CREATE PROCEDURE [tb_app].[SaveClientInfoPerson]
     @LocalKey nvarchar(120) = NULL,
     @DisplayName nvarchar(240),
     @RoleDepartment nvarchar(240) = NULL,
+    @AdUsername nvarchar(256) = NULL,
     @Email nvarchar(320) = NULL,
+    @HasMicrosoft365 bit = 0,
+    @Microsoft365License nvarchar(240) = NULL,
+    @PcName nvarchar(240) = NULL,
     @Phone nvarchar(80) = NULL,
     @MobilePhone nvarchar(80) = NULL,
     @ContactType nvarchar(80) = NULL,
@@ -25343,7 +25371,8 @@ BEGIN
             INSERT INTO [tb_client].[People]
             (
                 [ClientId], [LocationId], [LocalKey], [DisplayName],
-                [RoleDepartment], [Email], [Phone], [MobilePhone],
+                [RoleDepartment], [AdUsername], [Email], [HasMicrosoft365],
+                [Microsoft365License], [PcName], [Phone], [MobilePhone],
                 [ContactType], [IsPrimary], [ReviewStatus], [IsActive],
                 [LastVerifiedAtUtc], [CreatedByWindowsSid], [UpdatedByWindowsSid],
                 [CreatedAtUtc], [UpdatedAtUtc]
@@ -25351,7 +25380,9 @@ BEGIN
             VALUES
             (
                 @ClientId, @LocationId, @LocalKey, @DisplayName,
-                NULLIF(@RoleDepartment,N''), NULLIF(@Email,N''),
+                NULLIF(@RoleDepartment,N''), NULLIF(@AdUsername,N''),
+                NULLIF(@Email,N''), @HasMicrosoft365,
+                NULLIF(@Microsoft365License,N''), NULLIF(@PcName,N''),
                 NULLIF(@Phone,N''), NULLIF(@MobilePhone,N''),
                 NULLIF(@ContactType,N''), @IsPrimary, @ReviewStatus, @IsActive,
                 CASE WHEN @ReviewStatus=N'Verified' THEN @NowUtc END,
@@ -25368,7 +25399,12 @@ BEGIN
             SET [LocationId]=@LocationId, [LocalKey]=@LocalKey,
                 [DisplayName]=@DisplayName,
                 [RoleDepartment]=NULLIF(@RoleDepartment,N''),
-                [Email]=NULLIF(@Email,N''), [Phone]=NULLIF(@Phone,N''),
+                [AdUsername]=NULLIF(@AdUsername,N''),
+                [Email]=NULLIF(@Email,N''),
+                [HasMicrosoft365]=@HasMicrosoft365,
+                [Microsoft365License]=NULLIF(@Microsoft365License,N''),
+                [PcName]=NULLIF(@PcName,N''),
+                [Phone]=NULLIF(@Phone,N''),
                 [MobilePhone]=NULLIF(@MobilePhone,N''),
                 [ContactType]=NULLIF(@ContactType,N''),
                 [IsPrimary]=@IsPrimary, [ReviewStatus]=@ReviewStatus,
@@ -26975,7 +27011,8 @@ BEGIN
                     INSERT INTO [tb_client].[People]
                     (
                         [ClientId],[LocationId],[LocalKey],[DisplayName],
-                        [RoleDepartment],[Email],[Phone],[MobilePhone],[ContactType],
+                        [RoleDepartment],[AdUsername],[Email],[HasMicrosoft365],
+                        [Microsoft365License],[PcName],[Phone],[MobilePhone],[ContactType],
                         [IsPrimary],[ReviewStatus],[CreatedByWindowsSid],
                         [UpdatedByWindowsSid],[CreatedAtUtc],[UpdatedAtUtc]
                     )
@@ -26984,7 +27021,11 @@ BEGIN
                         @ClientId,@LocationId,@LocalKey,
                         JSON_VALUE(@PayloadJson,N'$.displayName'),
                         NULLIF(JSON_VALUE(@PayloadJson,N'$.roleDepartment'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.adUsername'),N''),
                         NULLIF(JSON_VALUE(@PayloadJson,N'$.email'),N''),
+                        COALESCE(TRY_CONVERT(bit,JSON_VALUE(@PayloadJson,N'$.hasMicrosoft365')),0),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.microsoft365License'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.pcName'),N''),
                         NULLIF(JSON_VALUE(@PayloadJson,N'$.phone'),N''),
                         NULLIF(JSON_VALUE(@PayloadJson,N'$.mobilePhone'),N''),
                         NULLIF(JSON_VALUE(@PayloadJson,N'$.contactType'),N''),
@@ -26999,7 +27040,14 @@ BEGIN
                         [LocationId]=@LocationId,
                         [DisplayName]=JSON_VALUE(@PayloadJson,N'$.displayName'),
                         [RoleDepartment]=NULLIF(JSON_VALUE(@PayloadJson,N'$.roleDepartment'),N''),
+                        [AdUsername]=NULLIF(JSON_VALUE(@PayloadJson,N'$.adUsername'),N''),
                         [Email]=NULLIF(JSON_VALUE(@PayloadJson,N'$.email'),N''),
+                        [HasMicrosoft365]=COALESCE(
+                            TRY_CONVERT(bit,JSON_VALUE(@PayloadJson,N'$.hasMicrosoft365')),
+                            0),
+                        [Microsoft365License]=NULLIF(
+                            JSON_VALUE(@PayloadJson,N'$.microsoft365License'),N''),
+                        [PcName]=NULLIF(JSON_VALUE(@PayloadJson,N'$.pcName'),N''),
                         [Phone]=NULLIF(JSON_VALUE(@PayloadJson,N'$.phone'),N''),
                         [MobilePhone]=NULLIF(JSON_VALUE(@PayloadJson,N'$.mobilePhone'),N''),
                         [ContactType]=NULLIF(JSON_VALUE(@PayloadJson,N'$.contactType'),N''),
@@ -36333,6 +36381,12 @@ BEGIN
     SELECT [ObjectName] FROM @MissingObjects ORDER BY [ObjectName];
     THROW 52502,N'One or more Client Info beta objects are missing.',1;
 END;
+
+IF COL_LENGTH(N'tb_client.People', N'AdUsername') IS NULL
+   OR COL_LENGTH(N'tb_client.People', N'HasMicrosoft365') IS NULL
+   OR COL_LENGTH(N'tb_client.People', N'Microsoft365License') IS NULL
+   OR COL_LENGTH(N'tb_client.People', N'PcName') IS NULL
+    THROW 52508,N'One or more Client Info user identity columns are missing.',1;
 
 IF CERT_ID(N'tb_ClientSecretCertificate') IS NULL
     THROW 52503,N'The canonical client-secret certificate is missing.',1;

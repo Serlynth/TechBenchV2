@@ -19,6 +19,7 @@ namespace TechBench.ViewModels;
 
 public sealed class ClientInfoBetaViewModel : ObservableObject
 {
+    private const string UserAdCredentialCategory = "Active Directory User";
     private static readonly string[] ReviewStatuses =
     [
         "Unverified", "Verified", "AcceptedUnverified", "NeedsReview"
@@ -512,7 +513,14 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             Summary = snapshot.Profile.Summary;
             ReviewStatus = snapshot.Profile.ReviewStatus;
             Replace(Locations, snapshot.Locations);
-            Replace(People, snapshot.People);
+            Replace(
+                People,
+                snapshot.People.Select(person => person with
+                {
+                    AdCredential = FindUserAdCredential(
+                        person,
+                        snapshot.Credentials)
+                }));
             Replace(Resources, snapshot.Resources);
             Replace(
                 Equipment,
@@ -542,7 +550,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             {
                 RefreshAttachments();
                 StatusMessage =
-                $"Loaded {Locations.Count} locations, {People.Count} people, "
+                $"Loaded {Locations.Count} locations, {People.Count} users, "
                 + $"{Equipment.Count} equipment records, {Resources.Count} technology records, "
                 + $"{Credentials.Count} passwords, and {Attachments.Count} attachments.";
             }
@@ -1105,17 +1113,36 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 
     private void EditPerson(ClientInfoPerson? current)
     {
+        var currentAdCredential = current?.AdCredential
+            ?? (current is null ? null : FindUserAdCredential(current, Credentials));
         var locationOptions = new[] { "(None)" }
             .Concat(Locations.Select(item => item.Name))
             .ToArray();
         var values = ShowEditor(
-            current is null ? "Add person" : "Edit person",
+            current is null ? "Add user" : "Edit user",
             [
                 new("name", "Display name", current?.DisplayName ?? "", true),
                 new("location", "Location", current?.LocationName ?? "(None)",
                     Options: locationOptions),
                 new("role", "Role / department", current?.RoleDepartment ?? ""),
+                new("adusername", "AD username",
+                    !string.IsNullOrWhiteSpace(current?.AdUsername)
+                        ? current.AdUsername
+                        : currentAdCredential?.Username ?? ""),
+                new(
+                    "adpassword",
+                    FindCurrentPassword(currentAdCredential) is null
+                        ? "AD password"
+                        : "AD password (leave blank to keep stored password)",
+                    "",
+                    IsSecret: true),
                 new("email", "Email", current?.Email ?? ""),
+                new("has365", "Has Microsoft 365", YesNo(
+                        current?.HasMicrosoft365 ?? false),
+                    Options: BooleanOptions),
+                new("license", "Microsoft 365 license",
+                    current?.Microsoft365License ?? ""),
+                new("pcname", "PC name", current?.PcName ?? ""),
                 new("phone", "Phone", current?.Phone ?? ""),
                 new("mobile", "Mobile phone", current?.MobilePhone ?? ""),
                 new("type", "Contact type", current?.ContactType ?? ""),
@@ -1136,10 +1163,10 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             values["location"],
             StringComparison.OrdinalIgnoreCase));
         ExecuteSave(
-            "person",
+            "user",
             () =>
             {
-                _repository.SaveClientInfoPerson((current ?? new ClientInfoPerson
+                var saved = _repository.SaveClientInfoPerson((current ?? new ClientInfoPerson
                 {
                     ClientId = ClientId
                 }) with
@@ -1148,7 +1175,13 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                     LocationId = location?.LocationId,
                     LocationName = location?.Name ?? "",
                     RoleDepartment = values["role"],
+                    AdUsername = values["adusername"],
                     Email = values["email"],
+                    HasMicrosoft365 = IsYes(values["has365"]),
+                    Microsoft365License = IsYes(values["has365"])
+                        ? values["license"]
+                        : "",
+                    PcName = values["pcname"],
                     Phone = values["phone"],
                     MobilePhone = values["mobile"],
                     ContactType = values["type"],
@@ -1156,9 +1189,81 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                     IsActive = IsYes(values["active"]),
                     ReviewStatus = values["review"]
                 });
+                SaveUserAdCredential(
+                    saved,
+                    currentAdCredential,
+                    values["adpassword"]);
                 Refresh();
             });
     }
+
+    private void SaveUserAdCredential(
+        ClientInfoPerson user,
+        ClientInfoCredential? currentCredential,
+        string password)
+    {
+        if (currentCredential is null
+            && string.IsNullOrWhiteSpace(user.AdUsername)
+            && string.IsNullOrWhiteSpace(password))
+        {
+            return;
+        }
+
+        var savedCredential = _repository.SaveClientInfoCredential(
+            (currentCredential ?? new ClientInfoCredential
+            {
+                ClientId = ClientId,
+                LocalKey = $"user-ad-{user.PersonId}"
+            }) with
+            {
+                PersonId = user.PersonId,
+                ResourceId = null,
+                Name = $"{user.DisplayName} AD account",
+                Category = UserAdCredentialCategory,
+                Username = user.AdUsername,
+                LoginUrl = "",
+                Notes = "Active Directory sign-in for this client user.",
+                IsActive = user.IsActive,
+                ReviewStatus = user.ReviewStatus
+            });
+
+        if (!string.IsNullOrWhiteSpace(password))
+        {
+            _repository.SetClientInfoSecret(
+                FindCurrentPassword(currentCredential) ?? new ClientInfoSecretSummary
+                {
+                    CredentialId = savedCredential.CredentialId,
+                    SecretType = "Password",
+                    SecretLabel = "AD password"
+                },
+                password,
+                user.ReviewStatus.Equals(
+                    "Verified",
+                    StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    private static ClientInfoCredential? FindUserAdCredential(
+        ClientInfoPerson user,
+        IEnumerable<ClientInfoCredential> credentials) =>
+        credentials.FirstOrDefault(credential =>
+            credential.PersonId == user.PersonId
+            && credential.Category.Equals(
+                UserAdCredentialCategory,
+                StringComparison.OrdinalIgnoreCase))
+        ?? credentials.FirstOrDefault(credential =>
+            credential.PersonId == user.PersonId
+            && credential.Category.Contains(
+                "Active Directory",
+                StringComparison.OrdinalIgnoreCase));
+
+    private static ClientInfoSecretSummary? FindCurrentPassword(
+        ClientInfoCredential? credential) => credential?.Secrets
+        .FirstOrDefault(secret => secret.IsCurrent
+            && secret.SecretType.Equals(
+                "Password",
+                StringComparison.OrdinalIgnoreCase))
+        ?? credential?.Secrets.FirstOrDefault(secret => secret.IsCurrent);
 
     private void EditResource(
         ClientInfoResource? current,
@@ -1432,7 +1537,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 new("category", "Category", current?.Category ?? ""),
                 new("resource", "System / service", currentResource,
                     Options: resourceOptions),
-                new("person", "Person", currentPerson, Options: personOptions),
+                new("person", "User", currentPerson, Options: personOptions),
                 new("username", "Username", current?.Username ?? ""),
                 new("url", "Login URL", current?.LoginUrl ?? ""),
                 new("notes", "Notes", current?.Notes ?? "", IsMultiline: true),

@@ -70,6 +70,12 @@ BEGIN
     THROW 52502,N'One or more Client Info beta objects are missing.',1;
 END;
 
+IF COL_LENGTH(N'tb_client.People', N'AdUsername') IS NULL
+   OR COL_LENGTH(N'tb_client.People', N'HasMicrosoft365') IS NULL
+   OR COL_LENGTH(N'tb_client.People', N'Microsoft365License') IS NULL
+   OR COL_LENGTH(N'tb_client.People', N'PcName') IS NULL
+    THROW 52508,N'One or more Client Info user identity columns are missing.',1;
+
 IF CERT_ID(N'tb_ClientSecretCertificate') IS NULL
     THROW 52503,N'The canonical client-secret certificate is missing.',1;
 

@@ -519,7 +519,9 @@ BEGIN
     SELECT
         person.[PersonId], person.[ClientId], person.[LocationId],
         location.[Name] AS [LocationName], person.[LocalKey],
-        person.[DisplayName], person.[RoleDepartment], person.[Email],
+        person.[DisplayName], person.[RoleDepartment], person.[AdUsername],
+        person.[Email], person.[HasMicrosoft365],
+        person.[Microsoft365License], person.[PcName],
         person.[Phone], person.[MobilePhone], person.[ContactType],
         person.[IsPrimary], person.[ReviewStatus], person.[IsActive],
         person.[LastVerifiedAtUtc], person.[UpdatedAtUtc], person.[RowVersion]
@@ -891,7 +893,11 @@ CREATE PROCEDURE [tb_app].[SaveClientInfoPerson]
     @LocalKey nvarchar(120) = NULL,
     @DisplayName nvarchar(240),
     @RoleDepartment nvarchar(240) = NULL,
+    @AdUsername nvarchar(256) = NULL,
     @Email nvarchar(320) = NULL,
+    @HasMicrosoft365 bit = 0,
+    @Microsoft365License nvarchar(240) = NULL,
+    @PcName nvarchar(240) = NULL,
     @Phone nvarchar(80) = NULL,
     @MobilePhone nvarchar(80) = NULL,
     @ContactType nvarchar(80) = NULL,
@@ -942,7 +948,8 @@ BEGIN
             INSERT INTO [tb_client].[People]
             (
                 [ClientId], [LocationId], [LocalKey], [DisplayName],
-                [RoleDepartment], [Email], [Phone], [MobilePhone],
+                [RoleDepartment], [AdUsername], [Email], [HasMicrosoft365],
+                [Microsoft365License], [PcName], [Phone], [MobilePhone],
                 [ContactType], [IsPrimary], [ReviewStatus], [IsActive],
                 [LastVerifiedAtUtc], [CreatedByWindowsSid], [UpdatedByWindowsSid],
                 [CreatedAtUtc], [UpdatedAtUtc]
@@ -950,7 +957,9 @@ BEGIN
             VALUES
             (
                 @ClientId, @LocationId, @LocalKey, @DisplayName,
-                NULLIF(@RoleDepartment,N''), NULLIF(@Email,N''),
+                NULLIF(@RoleDepartment,N''), NULLIF(@AdUsername,N''),
+                NULLIF(@Email,N''), @HasMicrosoft365,
+                NULLIF(@Microsoft365License,N''), NULLIF(@PcName,N''),
                 NULLIF(@Phone,N''), NULLIF(@MobilePhone,N''),
                 NULLIF(@ContactType,N''), @IsPrimary, @ReviewStatus, @IsActive,
                 CASE WHEN @ReviewStatus=N'Verified' THEN @NowUtc END,
@@ -967,7 +976,12 @@ BEGIN
             SET [LocationId]=@LocationId, [LocalKey]=@LocalKey,
                 [DisplayName]=@DisplayName,
                 [RoleDepartment]=NULLIF(@RoleDepartment,N''),
-                [Email]=NULLIF(@Email,N''), [Phone]=NULLIF(@Phone,N''),
+                [AdUsername]=NULLIF(@AdUsername,N''),
+                [Email]=NULLIF(@Email,N''),
+                [HasMicrosoft365]=@HasMicrosoft365,
+                [Microsoft365License]=NULLIF(@Microsoft365License,N''),
+                [PcName]=NULLIF(@PcName,N''),
+                [Phone]=NULLIF(@Phone,N''),
                 [MobilePhone]=NULLIF(@MobilePhone,N''),
                 [ContactType]=NULLIF(@ContactType,N''),
                 [IsPrimary]=@IsPrimary, [ReviewStatus]=@ReviewStatus,
