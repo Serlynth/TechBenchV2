@@ -34,6 +34,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly string _clientVersion;
     private readonly PostingExecutionCoordinator _postingCoordinator = new();
     private readonly DispatcherTimer _sharedDataRefreshTimer = new();
+    private readonly DispatcherTimer _editorClientSearchTimer = new()
+    {
+        Interval = TimeSpan.FromMilliseconds(150)
+    };
     private readonly HashSet<string> _knownWhdTicketKeys = new(StringComparer.OrdinalIgnoreCase);
     private string _currentSection = "Today";
     private string _techBenchSection = "Today";
@@ -233,6 +237,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         Editor.PropertyChanged += HandleEditorPropertyChanged;
         _sharedDataRefreshTimer.Tick += HandleSharedDataRefreshTimerTick;
+        _editorClientSearchTimer.Tick += HandleEditorClientSearchTimerTick;
 
         LoadSettings();
         RefreshAll();
@@ -667,7 +672,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _clientSearchText, value))
             {
-                RefreshClients();
+                RefreshManagedClientOptions();
             }
         }
     }
@@ -729,7 +734,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 if (!_isSyncingEditorClientFilterText)
                 {
-                    RefreshEditorClientOptions();
+                    ScheduleEditorClientOptionsRefresh();
                 }
             }
         }
@@ -1395,7 +1400,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         try
         {
             sharedClients = _clientProvider
-                .SearchClientsAsync(ClientSearchText)
+                .SearchClientsAsync(searchTerm: null)
                 .GetAwaiter()
                 .GetResult();
         }
@@ -1432,24 +1437,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             Clients.Add(client);
         }
 
-        var allManagedClients = sharedClients;
-        ManagedClients.Clear();
-        foreach (var client in string.IsNullOrWhiteSpace(ClientSearchText)
-                     ? allManagedClients
-                     : sharedClients)
-        {
-            ManagedClients.Add(client);
-        }
-
-        _matchedClientCount = allManagedClients.Count(client =>
-            client.Source.Equals("Both", StringComparison.OrdinalIgnoreCase));
-        _unmatchedWhdClientCount = allManagedClients.Count(client =>
-            client.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase));
-        _unmatchedSageClientCount = allManagedClients.Count(client =>
-            client.Source.Equals("Sage", StringComparison.OrdinalIgnoreCase));
-        OnPropertyChanged(nameof(MatchedClientCountLabel));
-        OnPropertyChanged(nameof(UnmatchedWhdClientCountLabel));
-        OnPropertyChanged(nameof(UnmatchedSageClientCountLabel));
+        RefreshManagedClientOptions(selectedManagedClientId);
 
         if (!Editor.IsDirty)
         {
@@ -1468,11 +1456,33 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         TicketClientFilter = ticketFilterId.HasValue ? Clients.FirstOrDefault(client => client.Id == ticketFilterId.Value) : TicketClientFilter;
         SearchClient = searchClientId.HasValue ? Clients.FirstOrDefault(client => client.Id == searchClientId.Value) : SearchClient;
-        SelectedManagedClient = selectedManagedClientId.HasValue
-            ? ManagedClients.FirstOrDefault(client => client.Id == selectedManagedClientId.Value)
-            : SelectedManagedClient;
-        RefreshClientMatchOptions();
         RefreshEditorClientOptions();
+    }
+
+    private void RefreshManagedClientOptions(int? preferredClientId = null)
+    {
+        preferredClientId ??= SelectedManagedClient?.Id;
+        ManagedClients.Clear();
+        foreach (var client in Clients.Where(client =>
+                     ClientSearchMatcher.Matches(client, ClientSearchText)))
+        {
+            ManagedClients.Add(client);
+        }
+
+        _matchedClientCount = Clients.Count(client =>
+            client.Source.Equals("Both", StringComparison.OrdinalIgnoreCase));
+        _unmatchedWhdClientCount = Clients.Count(client =>
+            client.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase));
+        _unmatchedSageClientCount = Clients.Count(client =>
+            client.Source.Equals("Sage", StringComparison.OrdinalIgnoreCase));
+        OnPropertyChanged(nameof(MatchedClientCountLabel));
+        OnPropertyChanged(nameof(UnmatchedWhdClientCountLabel));
+        OnPropertyChanged(nameof(UnmatchedSageClientCountLabel));
+
+        SelectedManagedClient = preferredClientId.HasValue
+            ? ManagedClients.FirstOrDefault(client => client.Id == preferredClientId.Value)
+            : null;
+        RefreshClientMatchOptions();
     }
 
     private void RefreshClientMatchOptions()
@@ -1527,8 +1537,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void RefreshEditorClientOptions()
     {
+        _editorClientSearchTimer.Stop();
         var selectedClient = Editor.SelectedClient;
-        var clients = _clientProvider.SearchClientsAsync(EditorClientFilterText).GetAwaiter().GetResult().ToList();
+        var clients = Clients
+            .Where(client => ClientSearchMatcher.Matches(
+                client,
+                EditorClientFilterText))
+            .Take(1000)
+            .ToList();
         if (selectedClient is not null)
         {
             clients.RemoveAll(client => client.Id == selectedClient.Id);
@@ -1576,6 +1592,18 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             _isSynchronizingEditorReferences = wasSynchronizing;
         }
+    }
+
+    private void ScheduleEditorClientOptionsRefresh()
+    {
+        _editorClientSearchTimer.Stop();
+        _editorClientSearchTimer.Start();
+    }
+
+    private void HandleEditorClientSearchTimerTick(object? sender, EventArgs e)
+    {
+        _editorClientSearchTimer.Stop();
+        RefreshEditorClientOptions();
     }
 
     private void RefreshEditorTickets(int? preferredTicketId = null)
@@ -4060,6 +4088,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         DisposeAdminCenter();
         DisposeNoteFeatures();
         Updates.Dispose();
+        _editorClientSearchTimer.Stop();
+        _editorClientSearchTimer.Tick -= HandleEditorClientSearchTimerTick;
         _sharedDataRefreshTimer.Stop();
         _sharedDataRefreshTimer.Tick -= HandleSharedDataRefreshTimerTick;
     }

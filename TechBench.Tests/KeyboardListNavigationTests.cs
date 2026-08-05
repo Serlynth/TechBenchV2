@@ -10,6 +10,8 @@ public sealed class KeyboardListNavigationTests
         var xaml = ReadRepositoryFile("MainWindow.xaml");
         var codeBehind = ReadRepositoryFile("MainWindow.xaml.cs");
         var comboBoxCode = ReadRepositoryFile("Controls/EditorClientComboBox.cs");
+        var viewModel = ReadRepositoryFile(
+            "ViewModels/MainWindowViewModel.cs");
 
         Assert.Contains(
             "<controls:EditorClientComboBox",
@@ -34,6 +36,18 @@ public sealed class KeyboardListNavigationTests
         Assert.Contains(
             "viewModel.SelectEditorClientCommand.Execute(client)",
             codeBehind,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "_editorClientSearchTimer.Start()",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ClientSearchMatcher.Matches(",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "SearchClientsAsync(EditorClientFilterText)",
+            viewModel,
             StringComparison.Ordinal);
     }
 
