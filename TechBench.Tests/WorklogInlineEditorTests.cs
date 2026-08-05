@@ -82,6 +82,38 @@ public sealed class WorklogInlineEditorTests
         Assert.Contains("UploadTechNoteImagesAsync", viewModel, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void WhdImagePickerBelongsToTheMainNoteInsteadOfThePersonalNote()
+    {
+        var xaml = ReadRepositoryFile("MainWindow.xaml");
+        const string personalNoteMarker = "<Expander Header=\"{Binding Editor.InternalNoteHeader}\"";
+        const string mainNoteMarker = "Text=\"{Binding Editor.Note, UpdateSourceTrigger=PropertyChanged}\"";
+        const string imagePickerMarker = "ContentTemplate=\"{StaticResource WhdImageAttachmentPickerTemplate}\"";
+        var personalNoteCount = 0;
+        var cursor = 0;
+
+        while (xaml.IndexOf(personalNoteMarker, cursor, StringComparison.Ordinal) is var personalStart
+               && personalStart >= 0)
+        {
+            var personalEnd = xaml.IndexOf("</Expander>", personalStart, StringComparison.Ordinal);
+            Assert.True(personalEnd > personalStart, "The Personal Note expander is incomplete.");
+            var personalNote = xaml[personalStart..personalEnd];
+            Assert.DoesNotContain(imagePickerMarker, personalNote, StringComparison.Ordinal);
+
+            var mainNoteStart = xaml.LastIndexOf(mainNoteMarker, personalStart, StringComparison.Ordinal);
+            var imagePickerStart = xaml.LastIndexOf(imagePickerMarker, personalStart, StringComparison.Ordinal);
+            Assert.True(mainNoteStart >= 0, "The main Sage/WHD Note field was not found.");
+            Assert.True(
+                imagePickerStart > mainNoteStart,
+                "The WHD image picker must follow the main Sage/WHD Note field.");
+
+            personalNoteCount++;
+            cursor = personalEnd + "</Expander>".Length;
+        }
+
+        Assert.Equal(2, personalNoteCount);
+    }
+
     private static string ReadRepositoryFile(params string[] parts)
     {
         var current = AppContext.BaseDirectory;
