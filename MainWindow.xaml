@@ -1121,26 +1121,26 @@
 
                                             <StackPanel Grid.Column="0">
                                                 <TextBlock Text="Client" Style="{StaticResource FieldLabelStyle}" />
-                                                <ComboBox x:Name="EditorClientComboBox"
-                                                          ItemsSource="{Binding EditorClients}"
-                                                          SelectedItem="{Binding Editor.SelectedClient}"
-                                                          Text="{Binding EditorClientFilterText, UpdateSourceTrigger=PropertyChanged}"
-                                                          PreviewKeyDown="EditorClientComboBox_PreviewKeyDown"
-                                                          TextSearch.TextPath="DisplayName"
-                                                          IsDropDownOpen="{Binding IsEditorClientDropDownOpen}"
-                                                          ItemTemplate="{StaticResource EditorClientOptionTemplate}"
-                                                          ItemContainerStyle="{StaticResource EditorClientComboBoxItemStyle}"
-                                                          MaxDropDownHeight="260">
-                                                    <ComboBox.Style>
-                                                        <Style TargetType="{x:Type ComboBox}" BasedOn="{StaticResource SearchableComboBoxStyle}">
+                                                <controls:EditorClientComboBox x:Name="EditorClientComboBox"
+                                                                               ItemsSource="{Binding EditorClients}"
+                                                                               SelectedItem="{Binding Editor.SelectedClient}"
+                                                                               Text="{Binding EditorClientFilterText, UpdateSourceTrigger=PropertyChanged}"
+                                                                               TextSearch.TextPath="DisplayName"
+                                                                               IsDropDownOpen="{Binding IsEditorClientDropDownOpen, Mode=TwoWay}"
+                                                                               KeyboardClientCommitted="EditorClientComboBox_KeyboardClientCommitted"
+                                                                               ItemTemplate="{StaticResource EditorClientOptionTemplate}"
+                                                                               ItemContainerStyle="{StaticResource EditorClientComboBoxItemStyle}"
+                                                                               MaxDropDownHeight="260">
+                                                    <controls:EditorClientComboBox.Style>
+                                                        <Style TargetType="{x:Type controls:EditorClientComboBox}" BasedOn="{StaticResource SearchableComboBoxStyle}">
                                                             <Style.Triggers>
                                                                 <DataTrigger Binding="{Binding Editor.UseManualClient}" Value="True">
                                                                     <Setter Property="IsEnabled" Value="False" />
                                                                 </DataTrigger>
                                                             </Style.Triggers>
                                                         </Style>
-                                                    </ComboBox.Style>
-                                                </ComboBox>
+                                                    </controls:EditorClientComboBox.Style>
+                                                </controls:EditorClientComboBox>
                                                 <CheckBox Content="Use custom client"
                                                           IsChecked="{Binding Editor.UseManualClient}"
                                                           Margin="1,7,0,0" />
