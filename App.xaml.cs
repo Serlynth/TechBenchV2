@@ -2,10 +2,12 @@ using System.IO;
 using System.Text.Json;
 using System.Threading;
 using System.Windows;
+using System.Windows.Input;
 using TechBench.Data;
 using TechBench.Models;
 using TechBench.Services;
 using Velopack;
+using WpfTextBox = System.Windows.Controls.TextBox;
 
 namespace TechBench;
 
@@ -64,6 +66,12 @@ public partial class App : System.Windows.Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        EventManager.RegisterClassHandler(
+            typeof(WpfTextBox),
+            CommandManager.PreviewExecutedEvent,
+            new ExecutedRoutedEventHandler(HandleTextBoxClipboardCommand),
+            handledEventsToo: true);
+
         UpdateCompletionVersion = ReadArgumentValue(e.Args, "--updated-to");
         var isEquipmentDemo = e.Args.Any(argument =>
             argument.Equals("--equipment-demo", StringComparison.OrdinalIgnoreCase));
@@ -167,6 +175,24 @@ public partial class App : System.Windows.Application
             WindowActivationService.BringToForeground(MainWindow);
         }
         ShutdownMode = ShutdownMode.OnMainWindowClose;
+    }
+
+    private static async void HandleTextBoxClipboardCommand(
+        object sender,
+        ExecutedRoutedEventArgs e)
+    {
+        if (sender is not WpfTextBox textBox
+            || !TextBoxClipboardCommandService.Handles(e.Command))
+        {
+            return;
+        }
+
+        // WPF's built-in TextBox clipboard command writes from the UI thread.
+        // Route Copy and Cut through TechBench's retrying STA clipboard worker so
+        // keyboard shortcuts and the standard context menu remain reliable over
+        // RDP and while clipboard managers are synchronizing data.
+        e.Handled = true;
+        await TextBoxClipboardCommandService.TryExecuteAsync(textBox, e.Command);
     }
 
     protected override void OnExit(ExitEventArgs e)
