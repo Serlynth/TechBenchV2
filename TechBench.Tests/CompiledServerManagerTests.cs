@@ -56,6 +56,11 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("TechBench_Users", directory, StringComparison.Ordinal);
         Assert.Contains("TechBench_Admins", directory, StringComparison.Ordinal);
         Assert.Contains("GetMembers(recursive: true)", directory, StringComparison.Ordinal);
+        Assert.Contains("user.EmailAddress", directory, StringComparison.Ordinal);
+        Assert.Contains("user.UserPrincipalName", directory, StringComparison.Ordinal);
+        Assert.Contains("Refresh from Active Directory", form, StringComparison.Ordinal);
+        Assert.Contains("AD email / AuthPoint identity", form, StringComparison.Ordinal);
+        Assert.DoesNotContain("Save AuthPoint mappings", form, StringComparison.Ordinal);
         Assert.Contains("SaveMappings", sql, StringComparison.Ordinal);
         Assert.Contains("ReconcileAuthorizedUsers", sql, StringComparison.Ordinal);
         Assert.Contains("AdminReconcileWhdAuthorizedUsers", sql, StringComparison.Ordinal);
@@ -64,6 +69,12 @@ public sealed class CompiledServerManagerTests
         Assert.Contains("windowsSid = user.WindowsSidHex", sql, StringComparison.Ordinal);
         Assert.Contains("ToSqlSidHex(user.Sid)", directory, StringComparison.Ordinal);
         Assert.Contains("MinimumSupportedSchemaVersion = 13", sql, StringComparison.Ordinal);
+        Assert.Contains("isPrerelease != parsed.IsPrerelease || isPrerelease", updater, StringComparison.Ordinal);
+        Assert.Contains("MaximumReleasePages", updater, StringComparison.Ordinal);
+        Assert.Contains("page={page}", updater, StringComparison.Ordinal);
+        Assert.Contains("NormalizeServerReleaseTag", updater, StringComparison.Ordinal);
+        Assert.Contains("server-v", updater, StringComparison.Ordinal);
+        Assert.DoesNotContain("!current.IsPrerelease", updater, StringComparison.Ordinal);
         Assert.Contains("MaximumSupportedSchemaVersion = 15", sql, StringComparison.Ordinal);
         Assert.Contains("supports database schemas", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("requires database schema 8", sql, StringComparison.Ordinal);
@@ -85,13 +96,79 @@ public sealed class CompiledServerManagerTests
         Assert.DoesNotContain("powershell", installer, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData("server-v0.6.6", "0.6.6")]
+    [InlineData("v0.6.5", "0.6.5")]
+    [InlineData("0.6.5", null)]
+    public void ServerReleaseTagsAreIndependentFromClientChannels(string tag, string? expected)
+    {
+        Assert.Equal(expected, ReleaseUpdater.NormalizeServerReleaseTag(tag));
+    }
+
+    [Fact]
+    public async Task ServerUpdaterPaginatesPastOlderClientReleases()
+    {
+        var firstPage = Enumerable.Range(0, 100)
+            .Select(index => new
+            {
+                draft = true,
+                tag_name = $"v0.5.{index}",
+                prerelease = false,
+                assets = Array.Empty<object>()
+            })
+            .ToArray();
+        var secondPage = new object[]
+        {
+            new
+            {
+                draft = false,
+                tag_name = "server-v0.6.8",
+                prerelease = false,
+                assets = new[]
+                {
+                    new
+                    {
+                        name = "TechBenchSyncService-0.6.8-win-x64.zip",
+                        browser_download_url = "https://github.com/Serlynth/TechBenchV2-Releases/releases/download/server-v0.6.8/TechBenchSyncService-0.6.8-win-x64.zip",
+                        size = 140_000_000L
+                    },
+                    new
+                    {
+                        name = "TechBenchSyncService-0.6.8-win-x64.zip.sha256",
+                        browser_download_url = "https://github.com/Serlynth/TechBenchV2-Releases/releases/download/server-v0.6.8/TechBenchSyncService-0.6.8-win-x64.zip.sha256",
+                        size = 106L
+                    }
+                }
+            }
+        };
+        using var http = new HttpClient(new PagedReleaseHandler(
+            System.Text.Json.JsonSerializer.Serialize(firstPage),
+            System.Text.Json.JsonSerializer.Serialize(secondPage)));
+        var updater = new ReleaseUpdater(
+            TestPaths(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"))),
+            http);
+
+        var package = await updater.FindUpdateAsync(CancellationToken.None);
+
+        Assert.NotNull(package);
+        Assert.Equal("0.6.8", package.Version);
+    }
+
     [Fact]
     public void DirectoryUsersMergeWithSavedMappingsWithoutDuplicateRows()
     {
         var directoryUsers = new[]
         {
-            new DirectoryUser("CSRI\\alice", "Alice Admin", true),
-            new DirectoryUser("CSRI\\bob", "Bob User", false)
+            new DirectoryUser(
+                "CSRI\\alice",
+                "Alice Admin",
+                true,
+                AuthPointLogin: "alice@csri-qt.com"),
+            new DirectoryUser(
+                "CSRI\\bob",
+                "Bob User",
+                false,
+                AuthPointLogin: "bob@csri-qt.com")
         };
         var savedMappings = new[]
         {
@@ -109,12 +186,96 @@ public sealed class CompiledServerManagerTests
                 Assert.Equal("Alice Admin", alice.DisplayName);
                 Assert.True(alice.IsAdmin);
                 Assert.Equal("WHD-TECH-1", alice.TechnicianExternalId);
+                Assert.Equal("alice@csri-qt.com", alice.AuthPointLogin);
+                Assert.True(alice.AuthPointEnabled);
             },
             bob =>
             {
                 Assert.Equal("CSRI\\bob", bob.LoginName);
                 Assert.False(bob.IsAdmin);
                 Assert.Empty(bob.TechnicianExternalId);
+                Assert.Equal("bob@csri-qt.com", bob.AuthPointLogin);
+                Assert.True(bob.AuthPointEnabled);
+            });
+    }
+
+    [Fact]
+    public void DirectoryEmailDrivesAuthPointIdentityAndUpnIsTheFallback()
+    {
+        Assert.Equal(
+            "alice@csri-qt.com",
+            ActiveDirectoryUserProvider.ResolveAuthPointLogin(
+                " alice@csri-qt.com ",
+                "alice@CSRI.local"));
+        Assert.Equal(
+            "bob@CSRI.local",
+            ActiveDirectoryUserProvider.ResolveAuthPointLogin(
+                null,
+                " bob@CSRI.local "));
+        Assert.Empty(ActiveDirectoryUserProvider.ResolveAuthPointLogin(null, null));
+    }
+
+    [Fact]
+    public void DirectoryAuthPointSyncWritesOnlyChangedIdentities()
+    {
+        var rowVersion = new byte[] { 0, 0, 0, 0, 0, 0, 0, 7 };
+        var directoryUsers = new[]
+        {
+            new DirectoryUser(
+                "CSRI\\alice",
+                "Alice",
+                false,
+                AuthPointLogin: "alice@csri-qt.com"),
+            new DirectoryUser(
+                "CSRI\\bob",
+                "Bob",
+                false,
+                AuthPointLogin: "new-bob@csri-qt.com"),
+            new DirectoryUser(
+                "CSRI\\carol",
+                "Carol",
+                false,
+                AuthPointLogin: "carol@csri-qt.com")
+        };
+        var savedMappings = new[]
+        {
+            new UserMapping(
+                "CSRI\\alice",
+                "Alice",
+                false,
+                string.Empty,
+                "alice@csri-qt.com",
+                true,
+                rowVersion),
+            new UserMapping(
+                "CSRI\\bob",
+                "Bob",
+                false,
+                string.Empty,
+                "old-bob@csri-qt.com",
+                true,
+                rowVersion)
+        };
+
+        var assignments = ActiveDirectoryUserProvider.BuildAuthPointSyncAssignments(
+            directoryUsers,
+            savedMappings);
+
+        Assert.Collection(
+            assignments,
+            bob =>
+            {
+                Assert.Equal("CSRI\\bob", bob.LoginName);
+                Assert.Equal("new-bob@csri-qt.com", bob.AuthPointLogin);
+                Assert.True(bob.IsEnabled);
+                Assert.Equal(rowVersion, bob.ExpectedRowVersion);
+            },
+            carol =>
+            {
+                Assert.Equal("CSRI\\carol", carol.LoginName);
+                Assert.Equal("carol@csri-qt.com", carol.AuthPointLogin);
+                Assert.True(carol.IsEnabled);
+                Assert.Null(carol.ExpectedRowVersion);
             });
     }
 
@@ -327,5 +488,24 @@ public sealed class CompiledServerManagerTests
         for (var index = 0; (index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0; index += value.Length)
             count++;
         return count;
+    }
+
+    private sealed class PagedReleaseHandler(string firstPage, string secondPage)
+        : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var page = request.RequestUri?.Query.Contains(
+                "page=2",
+                StringComparison.Ordinal) == true
+                ? secondPage
+                : firstPage;
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(page, Encoding.UTF8, "application/json")
+            });
+        }
     }
 }

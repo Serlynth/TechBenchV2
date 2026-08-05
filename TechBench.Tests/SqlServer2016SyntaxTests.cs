@@ -960,6 +960,14 @@ public sealed partial class SqlServer2016SyntaxTests
             "N'IS_ROLEMEMBER(N''tb_role_admin'')'",
             verifySource,
             StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "N'@SourceStage NOT IN (N''Assigned'', N''Deployment'', N''Deployed'')'",
+            verifySource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            "N'@SourceStage NOT IN (N''Assigned'', N''Deployment'')'",
+            verifySource,
+            StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(
             "N'ISROLEMEMBER(N''tb_role_admin'')'",
             verifySource,

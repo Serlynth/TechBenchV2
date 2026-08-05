@@ -146,9 +146,9 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         _isBannerDismissed = false;
         _lastNotifiedVersion = null;
         StatusText = releaseChannel.Equals(
-                V2AppUpdateService.InventoryBetaReleaseChannel,
+                V2AppUpdateService.ClientInfoBetaReleaseChannel,
                 StringComparison.OrdinalIgnoreCase)
-            ? "Inventory Beta selected. Select Check for Updates to look for beta builds."
+            ? "Client Info Beta selected. Select Check for Updates to look for beta builds."
             : "Stable selected. Select Check for Updates to return to stable releases.";
         RaiseDisplayProperties();
     }
@@ -386,8 +386,8 @@ public sealed class AppUpdateViewModel : ObservableObject, IDisposable
         updateService is IAppUpdateChannelService
         {
             SelectedReleaseChannel:
-                V2AppUpdateService.InventoryBetaReleaseChannel
+                V2AppUpdateService.ClientInfoBetaReleaseChannel
         }
-            ? "TechBench checks for Inventory Beta updates automatically."
+            ? "TechBench checks for Client Info Beta updates automatically."
             : "TechBench checks for stable updates automatically.";
 }

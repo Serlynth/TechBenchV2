@@ -279,6 +279,22 @@
                         </StackPanel>
                         </Expander>
 
+                        <Expander Header="CLIENTS"
+                                  Style="{StaticResource WorkspaceGroupStyle}">
+                            <StackPanel>
+                                <Button Content="Client Information"
+                                        Command="{Binding NavigateCommand}"
+                                        CommandParameter="Client Database"
+                                        Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Client Database}"
+                                        Style="{StaticResource WorkspaceNavItemStyle}" />
+                                <Button Content="Workbook Imports"
+                                        Command="{Binding NavigateCommand}"
+                                        CommandParameter="Workbook Imports"
+                                        Tag="{Binding CurrentSection, Converter={StaticResource SectionActiveConverter}, ConverterParameter=Workbook Imports}"
+                                        Style="{StaticResource WorkspaceNavItemStyle}" />
+                            </StackPanel>
+                        </Expander>
+
                         <Expander Header="FIREDRILL"
                               Style="{StaticResource WorkspaceGroupStyle}">
                         <StackPanel>

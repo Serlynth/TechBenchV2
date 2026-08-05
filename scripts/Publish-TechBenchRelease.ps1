@@ -10,12 +10,14 @@ param(
 
     [string]$RepositoryUrl = 'https://github.com/Serlynth/TechBenchV2-Releases',
 
-    [ValidateSet('v2', 'inventory-beta')]
+    [ValidateSet('v2', 'inventory-beta', 'client-info-beta')]
     [string]$Channel = 'v2',
 
     [switch]$Publish,
 
-    [switch]$AllowDirty
+    [switch]$AllowDirty,
+
+    [switch]$SkipTests
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,11 +33,14 @@ $splashPath = Join-Path $repoRoot 'Assets\csri-techbench-logo.png'
 $numericVersion = ($Version -split '-', 2)[0]
 $isPrerelease = $Version.Contains('-')
 $releaseChannel = $Channel
-$installerFileName = if ($releaseChannel -eq 'inventory-beta') {
-    'TechBenchInventoryBetaSetup.exe'
-} else {
-    'TechBenchV2Setup.exe'
+$isBetaChannel = $releaseChannel -in @('inventory-beta', 'client-info-beta')
+$installerFileName = switch ($releaseChannel) {
+    'inventory-beta' { 'TechBenchInventoryBetaSetup.exe' }
+    'client-info-beta' { 'TechBenchClientInfoBetaSetup.exe' }
+    default { 'TechBenchV2Setup.exe' }
 }
+$packId = 'CSRI.TechBenchV2'
+$packTitle = 'TechBench V2'
 
 if ([string]::IsNullOrWhiteSpace($ReleaseNotesPath)) {
     $ReleaseNotesPath = Join-Path $repoRoot "release-notes\$Version.md"
@@ -62,6 +67,63 @@ function Invoke-Checked {
     & $FilePath @Arguments
     if ($LASTEXITCODE -ne 0) {
         throw "Command failed with exit code $($LASTEXITCODE): $FilePath $($Arguments -join ' ')"
+    }
+}
+
+function New-AnnotatedClientReleaseTag {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositorySlug,
+        [Parameter(Mandatory = $true)][string]$Tag,
+        [Parameter(Mandatory = $true)][string]$ReleaseVersion
+    )
+
+    # matching-refs returns HTTP 200 with an empty array when the tag is absent.
+    # A direct ref lookup returns 404, which Windows PowerShell promotes to a
+    # terminating native-command error under ErrorActionPreference=Stop.
+    $existingObjectTypes = @(& gh api `
+        "repos/$RepositorySlug/git/matching-refs/tags/$Tag" `
+        --jq '.[].object.type')
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not inspect the release tag $Tag."
+    }
+
+    if ($existingObjectTypes.Count -gt 0) {
+        if ($existingObjectTypes.Count -eq 1 `
+            -and ($existingObjectTypes[0] -join '').Trim() -eq 'tag') {
+            return
+        }
+
+        throw "Release tag $Tag already exists but is not an annotated tag."
+    }
+
+    $commitSha = & gh api "repos/$RepositorySlug/git/ref/heads/main" --jq '.object.sha'
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($commitSha)) {
+        throw "Could not resolve the release repository main branch for $Tag."
+    }
+
+    # GitHub orders releases by the tagged object's creation time. A lightweight
+    # tag on the release repository's old main commit can make a newly published
+    # client invisible to Velopack behind older releases.
+    $tagDate = [DateTime]::UtcNow.ToString('o')
+    $tagObjectSha = & gh api --method POST "repos/$RepositorySlug/git/tags" `
+        --raw-field "tag=$Tag" `
+        --raw-field "message=TechBench Client $ReleaseVersion" `
+        --raw-field "object=$($commitSha.Trim())" `
+        --raw-field 'type=commit' `
+        --raw-field 'tagger[name]=TechBench Release Publisher' `
+        --raw-field 'tagger[email]=noreply@csri-qt.com' `
+        --raw-field "tagger[date]=$tagDate" `
+        --jq '.sha'
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tagObjectSha)) {
+        throw "Could not create the annotated Git tag object for $Tag."
+    }
+
+    & gh api --method POST "repos/$RepositorySlug/git/refs" `
+        --raw-field "ref=refs/tags/$Tag" `
+        --raw-field "sha=$($tagObjectSha.Trim())" `
+        --silent
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not publish the annotated Git tag for $Tag."
     }
 }
 
@@ -176,13 +238,15 @@ try {
     }
 
     Invoke-Checked $dotnet @('tool', 'restore')
-    Invoke-Checked $dotnet @(
-        'test', $testProjectPath,
-        '-c', 'Release',
-        '-m:1',
-        '-p:TechBenchTestBuild=true',
-        '-p:PlatformTarget=x64'
-    )
+    if (-not $SkipTests) {
+        Invoke-Checked $dotnet @(
+            'test', $testProjectPath,
+            '-c', 'Release',
+            '-m:1',
+            '-p:TechBenchTestBuild=true',
+            '-p:PlatformTarget=x64'
+        )
+    }
 
     Reset-WorkspaceDirectory $publishDirectory
     Reset-WorkspaceDirectory $releaseDirectory
@@ -214,7 +278,7 @@ try {
     }
 
     $hasExistingChannelRelease = @($existingReleases | Where-Object {
-        if ($releaseChannel -eq 'inventory-beta') {
+        if ($isBetaChannel) {
             $_.tagName -match '^v\d+\.\d+\.\d+-beta\.'
         } else {
             $_.tagName -match '^v0\.' -and $_.tagName -notmatch '-beta\.'
@@ -231,7 +295,7 @@ try {
             '--outputDir', $releaseDirectory,
             '--channel', $releaseChannel,
             '--repoUrl', $RepositoryUrl,
-            '--pre', ($releaseChannel -eq 'inventory-beta').ToString().ToLowerInvariant()
+            '--pre', $isBetaChannel.ToString().ToLowerInvariant()
         )
     }
 
@@ -259,11 +323,11 @@ try {
         '--outputDir', $releaseDirectory,
         '--channel', $releaseChannel,
         '--runtime', 'win-x86',
-        '--packId', 'CSRI.TechBenchV2',
+        '--packId', $packId,
         '--packVersion', $Version,
         '--packDir', $publishDirectory,
         '--packAuthors', 'CSRI',
-        '--packTitle', 'TechBench V2',
+        '--packTitle', $packTitle,
         '--releaseNotes', $ReleaseNotesPath,
         '--icon', $iconPath,
         '--mainExe', 'TechBenchV2.exe',
@@ -298,6 +362,11 @@ try {
         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
             throw 'GitHub CLI is not authenticated.'
         }
+
+        New-AnnotatedClientReleaseTag `
+            -RepositorySlug $repositorySlug `
+            -Tag "v$Version" `
+            -ReleaseVersion $Version
 
         Invoke-Checked $dotnet @(
             'tool', 'run', 'vpk', '--',

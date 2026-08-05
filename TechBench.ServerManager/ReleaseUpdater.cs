@@ -6,45 +6,109 @@ using System.Text.RegularExpressions;
 
 namespace TechBench.ServerManager;
 
-internal sealed class ReleaseUpdater(AppPaths paths)
+internal sealed class ReleaseUpdater
 {
-    private const string ReleasesApi = "https://api.github.com/repos/Serlynth/TechBenchV2-Releases/releases?per_page=100";
+    private const string ReleasesApi = "https://api.github.com/repos/Serlynth/TechBenchV2-Releases/releases";
+    private const int ReleasesPerPage = 100;
+    private const int MaximumReleasePages = 10;
     private const long MaximumPackageBytes = 512L * 1024 * 1024;
     private const long MaximumExpandedBytes = 1024L * 1024 * 1024;
-    private readonly HttpClient _http = CreateHttpClient();
+    private readonly AppPaths _paths;
+    private readonly HttpClient _http;
+
+    public ReleaseUpdater(AppPaths paths)
+        : this(paths, CreateHttpClient())
+    {
+    }
+
+    internal ReleaseUpdater(AppPaths paths, HttpClient http)
+    {
+        _paths = paths;
+        _http = http;
+    }
 
     public async Task<ReleasePackage?> FindUpdateAsync(CancellationToken cancellationToken)
     {
-        await using var stream = await _http.GetStreamAsync(ReleasesApi, cancellationToken);
-        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
         ReleasePackage? best = null;
-        foreach (var release in document.RootElement.EnumerateArray())
+        for (var page = 1; page <= MaximumReleasePages; page++)
         {
-            if (release.GetProperty("draft").GetBoolean()) continue;
-            var tag = release.GetProperty("tag_name").GetString() ?? string.Empty;
-            var version = tag.StartsWith('v') ? tag[1..] : tag;
-            if (!SemanticVersion.TryParse(version, out var parsed)) continue;
-            var isPrerelease = release.GetProperty("prerelease").GetBoolean();
-            if (isPrerelease != parsed.IsPrerelease) continue;
-            if (SemanticVersion.TryParse(paths.CurrentVersion, out var current) && !current.IsPrerelease && parsed.IsPrerelease) continue;
-
-            var zipName = $"TechBenchSyncService-{version}-win-x64.zip";
-            var checksumName = zipName + ".sha256";
-            JsonElement? zip = null;
-            JsonElement? checksum = null;
-            foreach (var asset in release.GetProperty("assets").EnumerateArray())
+            var uri = $"{ReleasesApi}?per_page={ReleasesPerPage}&page={page}";
+            using var response = await _http.GetAsync(
+                uri,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+            response.EnsureSuccessStatusCode();
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var document = await JsonDocument.ParseAsync(
+                stream,
+                cancellationToken: cancellationToken);
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
             {
-                var name = asset.GetProperty("name").GetString();
-                if (name == zipName) zip = asset;
-                else if (name == checksumName) checksum = asset;
+                throw new InvalidDataException(
+                    "GitHub returned an invalid server release list.");
             }
-            if (zip is null || checksum is null) continue;
-            var candidate = new ReleasePackage(
-                version, zipName, ApprovedAssetUri(zip.Value), zip.Value.GetProperty("size").GetInt64(),
-                checksumName, ApprovedAssetUri(checksum.Value), checksum.Value.GetProperty("size").GetInt64());
-            if (best is null || SemanticVersion.CompareForUpdate(candidate.Version, best.Version) > 0) best = candidate;
+
+            var releaseCount = 0;
+            foreach (var release in document.RootElement.EnumerateArray())
+            {
+                releaseCount++;
+                var candidate = ParseRelease(release);
+                if (candidate is not null
+                    && (best is null
+                        || SemanticVersion.CompareForUpdate(
+                            candidate.Version,
+                            best.Version) > 0))
+                {
+                    best = candidate;
+                }
+            }
+
+            if (releaseCount < ReleasesPerPage)
+            {
+                break;
+            }
         }
         return best;
+    }
+
+    private static ReleasePackage? ParseRelease(JsonElement release)
+    {
+        if (release.GetProperty("draft").GetBoolean()) return null;
+        var tag = release.GetProperty("tag_name").GetString() ?? string.Empty;
+        var version = NormalizeServerReleaseTag(tag);
+        if (version is null) return null;
+        if (!SemanticVersion.TryParse(version, out var parsed)) return null;
+        var isPrerelease = release.GetProperty("prerelease").GetBoolean();
+        if (isPrerelease != parsed.IsPrerelease || isPrerelease) return null;
+
+        var zipName = $"TechBenchSyncService-{version}-win-x64.zip";
+        var checksumName = zipName + ".sha256";
+        JsonElement? zip = null;
+        JsonElement? checksum = null;
+        foreach (var asset in release.GetProperty("assets").EnumerateArray())
+        {
+            var name = asset.GetProperty("name").GetString();
+            if (name == zipName) zip = asset;
+            else if (name == checksumName) checksum = asset;
+        }
+        if (zip is null || checksum is null) return null;
+        return new ReleasePackage(
+            version,
+            zipName,
+            ApprovedAssetUri(zip.Value),
+            zip.Value.GetProperty("size").GetInt64(),
+            checksumName,
+            ApprovedAssetUri(checksum.Value),
+            checksum.Value.GetProperty("size").GetInt64());
+    }
+
+    internal static string? NormalizeServerReleaseTag(string tag)
+    {
+        if (tag.StartsWith("server-v", StringComparison.OrdinalIgnoreCase))
+            return tag[8..];
+        if (tag.StartsWith('v'))
+            return tag[1..];
+        return null;
     }
 
     public async Task<string> DownloadAndPrepareAsync(ReleasePackage package, IProgress<string> progress, CancellationToken cancellationToken)
@@ -52,8 +116,8 @@ internal sealed class ReleaseUpdater(AppPaths paths)
         if (package.ZipSize is < 1 or > MaximumPackageBytes || package.ChecksumSize is < 1 or > 16384)
             throw new InvalidDataException("GitHub reported an invalid service package size.");
 
-        SecureDirectory.EnsureAdministratorsOnly(paths.ManagerDataDirectory);
-        var operationRoot = Path.Combine(paths.ManagerDataDirectory, "updates", Guid.NewGuid().ToString("N"));
+        SecureDirectory.EnsureAdministratorsOnly(_paths.ManagerDataDirectory);
+        var operationRoot = Path.Combine(_paths.ManagerDataDirectory, "updates", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(operationRoot);
         try
         {
@@ -68,8 +132,8 @@ internal sealed class ReleaseUpdater(AppPaths paths)
             progress.Report("Verifying package contents...");
             ExtractSafe(zipPath, packageDirectory);
             var manifest = PackageManifest.LoadAndVerify(packageDirectory, package.Version);
-            if (!PackageInstaller.InstalledPackageDeclaresRequiredSchema(paths, manifest.RequiredDatabaseSchemaVersion))
-                new SqlAdminRepository(paths).VerifyRequiredSchema(manifest.RequiredDatabaseSchemaVersion);
+            if (!PackageInstaller.InstalledPackageDeclaresRequiredSchema(_paths, manifest.RequiredDatabaseSchemaVersion))
+                new SqlAdminRepository(_paths).VerifyRequiredSchema(manifest.RequiredDatabaseSchemaVersion);
 
             var helper = Path.Combine(packageDirectory, "server-manager", "TechBench.ServerManager.exe");
             if (!File.Exists(helper)) throw new InvalidDataException("The package does not contain the compiled Server Manager.");
@@ -77,7 +141,7 @@ internal sealed class ReleaseUpdater(AppPaths paths)
         }
         catch
         {
-            UpdateCacheCleanup.CleanupFailedOperation(paths, operationRoot);
+            UpdateCacheCleanup.CleanupFailedOperation(_paths, operationRoot);
             throw;
         }
     }

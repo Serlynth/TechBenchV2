@@ -3,7 +3,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
+    [ValidatePattern('^\d+\.\d+\.\d+$')]
     [string]$Version,
 
     [ValidateNotNullOrEmpty()]
@@ -44,6 +44,8 @@ $sqlChecksumPath = "$sqlAssetPath.sha256"
 $setupPath = Join-Path $distDirectory 'TechBenchServerSetup.exe'
 $setupChecksumPath = "$setupPath.sha256"
 $numericVersion = ($Version -split '-', 2)[0]
+$serverReleaseTag = "server-v$Version"
+$releaseNotesPath = Join-Path $repoRoot "release-notes\$Version.md"
 
 $userDotNet = Join-Path $env:USERPROFILE '.dotnet\dotnet.exe'
 $dotnet = if (Test-Path -LiteralPath $userDotNet) {
@@ -89,6 +91,43 @@ function Resolve-GitHubRepositorySlug {
     return $slug
 }
 
+function New-AnnotatedServerReleaseTag {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositorySlug,
+        [Parameter(Mandatory = $true)][string]$Tag,
+        [Parameter(Mandatory = $true)][string]$ReleaseVersion
+    )
+
+    $commitSha = & gh api "repos/$RepositorySlug/git/ref/heads/main" --jq '.object.sha'
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($commitSha)) {
+        throw "Could not resolve the release repository main branch for $Tag."
+    }
+
+    # Use gh's field arguments instead of piping JSON through Windows PowerShell.
+    # The latter can add an encoding marker that GitHub rejects as malformed JSON.
+    $tagDate = [DateTime]::UtcNow.ToString('o')
+    $tagObjectSha = & gh api --method POST "repos/$RepositorySlug/git/tags" `
+        --raw-field "tag=$Tag" `
+        --raw-field "message=TechBench Server $ReleaseVersion" `
+        --raw-field "object=$($commitSha.Trim())" `
+        --raw-field 'type=commit' `
+        --raw-field 'tagger[name]=TechBench Release Publisher' `
+        --raw-field 'tagger[email]=noreply@csri-qt.com' `
+        --raw-field "tagger[date]=$tagDate" `
+        --jq '.sha'
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tagObjectSha)) {
+        throw "Could not create the annotated Git tag object for $Tag."
+    }
+
+    & gh api --method POST "repos/$RepositorySlug/git/refs" `
+        --raw-field "ref=refs/tags/$Tag" `
+        --raw-field "sha=$($tagObjectSha.Trim())" `
+        --silent
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not publish the annotated Git tag for $Tag."
+    }
+}
+
 function Reset-RepositoryDirectory {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -128,6 +167,7 @@ function Assert-SafeServicePayload {
         'sage-odbc-worker\TechBench.SageOdbcWorker.runtimeconfig.json',
         'sage-odbc-worker\TechBench.SageOdbcWorker.deps.json',
         'README-WHD-SYNC-SERVICE.md',
+        'README-AUTHPOINT-MFA.md',
         'database\Deploy-CSRI-Standalone.sql',
         'database\README-Deploy.md'
     )) {
@@ -331,7 +371,9 @@ try {
 
     Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\WHD-SYNC-SERVICE.md') `
         -Destination (Join-Path $publishDirectory 'README-WHD-SYNC-SERVICE.md') -Force
-    Copy-Item -LiteralPath (Join-Path $repoRoot "release-notes\$Version.md") `
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\AUTHPOINT-MFA-BETA.md') `
+        -Destination (Join-Path $publishDirectory 'README-AUTHPOINT-MFA.md') -Force
+    Copy-Item -LiteralPath $releaseNotesPath `
         -Destination (Join-Path $publishDirectory 'RELEASE-NOTES.md') -Force
 
     $databaseDirectory = Join-Path $publishDirectory 'database'
@@ -415,21 +457,38 @@ try {
         Set-Content -LiteralPath $setupChecksumPath -Encoding ASCII
 
     if ($Publish) {
-        $releaseJson = & gh release view "v$Version" `
+        $releaseJson = & gh release view $serverReleaseTag `
             --repo $repositorySlug `
             --json tagName,isDraft,assets
         if ($LASTEXITCODE -ne 0) {
-            throw "GitHub release v$Version could not be read from $RepositoryUrl. Confirm gh authentication and publish the matching client release first with Publish-TechBenchRelease.ps1 -Publish."
+            New-AnnotatedServerReleaseTag `
+                -RepositorySlug $repositorySlug `
+                -Tag $serverReleaseTag `
+                -ReleaseVersion $Version
+            Invoke-Checked 'gh' @(
+                'release', 'create', $serverReleaseTag,
+                '--repo', $repositorySlug,
+                '--title', "TechBench Server $Version",
+                '--notes-file', $releaseNotesPath,
+                '--verify-tag',
+                '--latest=false'
+            )
+            $releaseJson = & gh release view $serverReleaseTag `
+                --repo $repositorySlug `
+                --json tagName,isDraft,assets
+            if ($LASTEXITCODE -ne 0) {
+                throw "GitHub server release $serverReleaseTag was created but could not be read back from $RepositoryUrl."
+            }
         }
 
         try {
             $release = (($releaseJson -join '') | ConvertFrom-Json)
         } catch {
-            throw "GitHub returned an invalid response for release v${Version}: $($_.Exception.Message)"
+            throw "GitHub returned an invalid response for release ${serverReleaseTag}: $($_.Exception.Message)"
         }
 
-        if ($release.tagName -ne "v$Version" -or $release.isDraft) {
-            throw "GitHub release v$Version must be the already-published, non-draft client release before server assets can be attached."
+        if ($release.tagName -ne $serverReleaseTag -or $release.isDraft) {
+            throw "GitHub server release $serverReleaseTag must be non-draft before server assets can be attached."
         }
 
         $assetPaths = @(
@@ -444,15 +503,15 @@ try {
         $existingNames = @($release.assets | ForEach-Object { $_.name })
         $conflicts = @($assetNames | Where-Object { $existingNames -contains $_ })
         if ($conflicts.Count -gt 0) {
-            throw "Release v$Version already contains immutable server asset(s): $($conflicts -join ', '). Choose a new version instead of overwriting a published asset."
+            throw "Release $serverReleaseTag already contains immutable server asset(s): $($conflicts -join ', '). Choose a new version instead of overwriting a published asset."
         }
 
         Invoke-Checked 'gh' (@(
-            'release', 'upload', "v$Version"
+            'release', 'upload', $serverReleaseTag
         ) + $assetPaths + @(
             '--repo', $repositorySlug
         ))
-        Write-Host "Published server and SQL assets to $RepositoryUrl/releases/tag/v$Version"
+        Write-Host "Published server and SQL assets to $RepositoryUrl/releases/tag/$serverReleaseTag"
     }
 
     Write-Host "Created service package: $packagePath"

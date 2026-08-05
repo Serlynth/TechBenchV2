@@ -32,6 +32,10 @@ public partial class MainWindow : Window
     private bool _equipmentLaneDragStarted;
     private GridLength _expandedEquipmentDeploymentHeight =
         new(230, GridUnitType.Pixel);
+    private readonly Dictionary<int, ClientInfoBetaWindow>
+        _clientInfoBetaWindows = [];
+    private readonly Dictionary<int, ClientInfoImportWindow>
+        _clientInfoImportWindows = [];
     private bool _isCommittingEditorClientSuggestion;
 
     private void HideEquipmentLane_Click(
@@ -539,6 +543,175 @@ public partial class MainWindow : Window
         profileWindow.Show();
         profileWindow.Activate();
         e.Handled = true;
+    }
+
+    private void ClientInfoClientListBox_MouseDoubleClick(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.ListBox listBox
+            || e.OriginalSource is not DependencyObject source
+            || ItemsControl.ContainerFromElement(listBox, source)
+                is not System.Windows.Controls.ListBoxItem
+                {
+                    DataContext: ClientInfoClientSummary summary
+                })
+        {
+            return;
+        }
+
+        OpenClientInfoBetaWindow(summary);
+        e.Handled = true;
+    }
+
+    private void OpenClientInfoBeta_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement
+            {
+                DataContext: ClientInfoClientSummary summary
+            })
+        {
+            OpenClientInfoBetaWindow(summary);
+            e.Handled = true;
+        }
+    }
+
+    private void OpenClientInfoBetaWindow(
+        ClientInfoClientSummary summary)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        ClientInfoBetaViewModel canonicalViewModel;
+        try
+        {
+            canonicalViewModel =
+                viewModel.CreateCanonicalClientInfoProfile(summary);
+        }
+        catch (Exception exception)
+        {
+            AppDialogWindow.Error(
+                "Client Info could not be opened",
+                exception.Message,
+                this);
+            return;
+        }
+
+        if (_clientInfoBetaWindows.TryGetValue(
+                canonicalViewModel.ClientId,
+                out var existing))
+        {
+            if (existing.WindowState == WindowState.Minimized)
+            {
+                existing.WindowState = WindowState.Normal;
+            }
+
+            existing.Activate();
+            return;
+        }
+
+        var canonicalWindow = new ClientInfoBetaWindow(_localPreferences)
+        {
+            Owner = this,
+            DataContext = canonicalViewModel
+        };
+        _clientInfoBetaWindows[canonicalViewModel.ClientId] =
+            canonicalWindow;
+        canonicalWindow.Closed += (_, _) =>
+        {
+            _clientInfoBetaWindows.Remove(canonicalViewModel.ClientId);
+            viewModel.RefreshClientInfoWorkspace();
+        };
+        canonicalWindow.Show();
+        canonicalWindow.Activate();
+    }
+
+    private void ClientInfoImportClientListBox_MouseDoubleClick(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.ListBox listBox
+            || e.OriginalSource is not DependencyObject source
+            || ItemsControl.ContainerFromElement(listBox, source)
+                is not System.Windows.Controls.ListBoxItem
+                {
+                    DataContext: ClientInfoClientSummary summary
+                })
+        {
+            return;
+        }
+
+        OpenClientInfoImportWindow(summary);
+        e.Handled = true;
+    }
+
+    private void OpenClientInfoImport_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement
+            {
+                DataContext: ClientInfoClientSummary summary
+            })
+        {
+            OpenClientInfoImportWindow(summary);
+            e.Handled = true;
+        }
+    }
+
+    private void OpenClientInfoImportWindow(
+        ClientInfoClientSummary summary)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        ClientInfoBetaViewModel importViewModel;
+        try
+        {
+            importViewModel =
+                viewModel.CreateCanonicalClientInfoProfile(summary);
+        }
+        catch (Exception exception)
+        {
+            AppDialogWindow.Error(
+                "Workbook Import could not be opened",
+                exception.Message,
+                this);
+            return;
+        }
+
+        if (_clientInfoImportWindows.TryGetValue(
+                importViewModel.ClientId,
+                out var existing))
+        {
+            if (existing.WindowState == WindowState.Minimized)
+            {
+                existing.WindowState = WindowState.Normal;
+            }
+
+            existing.Activate();
+            return;
+        }
+
+        var importWindow = new ClientInfoImportWindow
+        {
+            Owner = this,
+            DataContext = importViewModel
+        };
+        _clientInfoImportWindows[importViewModel.ClientId] = importWindow;
+        importWindow.Closed += (_, _) =>
+        {
+            _clientInfoImportWindows.Remove(importViewModel.ClientId);
+            viewModel.RefreshClientInfoWorkspace();
+        };
+        importWindow.Show();
+        importWindow.Activate();
     }
 
     private async void OpenEquipmentFromInventory_Click(

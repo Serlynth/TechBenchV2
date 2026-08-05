@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Data;
@@ -67,6 +69,7 @@ public sealed partial class MainWindowViewModel
     public ObservableCollection<InventoryClientUser> InventoryClientUserOptions { get; } = new();
     public ObservableCollection<EquipmentAssignmentHistoryEntry>
         EquipmentAssignmentHistory { get; } = new();
+    public ObservableCollection<ClientInfoAttachment> EquipmentAttachments { get; } = new();
     public ObservableCollection<string> EquipmentTypeOptions { get; } =
     [
         "Desktop",
@@ -92,6 +95,8 @@ public sealed partial class MainWindowViewModel
     public RelayCommand ClearInventoryEquipmentFiltersCommand { get; private set; } = null!;
     public RelayCommand CopyEquipmentDetailsCommand { get; private set; } = null!;
     public RelayCommand LaunchAnyDeskCommand { get; private set; } = null!;
+    public RelayCommand OpenEquipmentAttachmentCommand { get; private set; } = null!;
+    public RelayCommand CopyEquipmentAttachmentCommand { get; private set; } = null!;
 
     public EquipmentItem? SelectedEquipment
     {
@@ -109,6 +114,7 @@ public sealed partial class MainWindowViewModel
             {
                 LoadEquipmentEditor(value);
             }
+            RefreshEquipmentAttachments(value);
         }
     }
 
@@ -518,6 +524,106 @@ public sealed partial class MainWindowViewModel
         LaunchAnyDeskCommand = new RelayCommand(
             LaunchAnyDesk,
             CanLaunchAnyDesk);
+        OpenEquipmentAttachmentCommand = new RelayCommand(
+            OpenEquipmentAttachment,
+            parameter => parameter is ClientInfoAttachment);
+        CopyEquipmentAttachmentCommand = new RelayCommand(
+            CopyEquipmentAttachment,
+            parameter => parameter is ClientInfoAttachment);
+    }
+
+    private void RefreshEquipmentAttachments(EquipmentItem? equipment)
+    {
+        EquipmentAttachments.Clear();
+        if (equipment is not { EquipmentId: > 0, ClientId: > 0 })
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var attachment in _repository
+                         .GetClientInfoAttachments(equipment.ClientId.Value)
+                         .Where(attachment =>
+                             attachment.EquipmentId == equipment.EquipmentId))
+            {
+                EquipmentAttachments.Add(attachment);
+            }
+        }
+        catch (SqlException exception) when (exception.Number == 2812)
+        {
+            // Older schema-15 deployments simply omit the optional linked files.
+        }
+        catch (Exception exception) when (
+            exception is SqlException
+                or InvalidOperationException
+                or IOException)
+        {
+            EquipmentBoardStatus =
+                "Linked equipment attachments are temporarily unavailable: "
+                + exception.Message;
+        }
+    }
+
+    private void OpenEquipmentAttachment(object? parameter)
+    {
+        if (parameter is not ClientInfoAttachment attachment)
+        {
+            return;
+        }
+
+        try
+        {
+            var path = new ClientAttachmentStorageService(_repository)
+                .ResolvePath(attachment);
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException(
+                    "The linked attachment is missing from the configured file share.",
+                    path);
+            }
+
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception exception)
+        {
+            _dialogService.Error(
+                "Equipment attachment could not be opened",
+                exception.Message);
+        }
+    }
+
+    private void CopyEquipmentAttachment(object? parameter)
+    {
+        if (parameter is not ClientInfoAttachment attachment)
+        {
+            return;
+        }
+
+        try
+        {
+            var path = new ClientAttachmentStorageService(_repository)
+                .ResolvePath(attachment);
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException(
+                    "The linked attachment is missing from the configured file share.",
+                    path);
+            }
+
+            System.Windows.Clipboard.SetFileDropList(new StringCollection
+            {
+                path
+            });
+            EquipmentBoardStatus =
+                $"Copied {attachment.OriginalFileName} to the clipboard.";
+        }
+        catch (Exception exception)
+        {
+            _dialogService.Error(
+                "Equipment attachment could not be copied",
+                exception.Message);
+        }
     }
 
     private async Task RefreshEquipmentBoardAsync(long? selectEquipmentId = null)

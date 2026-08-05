@@ -18,9 +18,15 @@ var hasSageSecretCommand = args.Any(static value =>
     value.Equals("--set-sage-secret", StringComparison.OrdinalIgnoreCase)
     || value.Equals("--delete-sage-secret", StringComparison.OrdinalIgnoreCase)
     || value.Equals("--check-sage-secret", StringComparison.OrdinalIgnoreCase));
-if (hasWhdSecretCommand || hasSageSecretCommand)
+var hasAuthPointSecretCommand = args.Any(static value =>
+    value.Equals("--set-authpoint-secret", StringComparison.OrdinalIgnoreCase)
+    || value.Equals("--delete-authpoint-secret", StringComparison.OrdinalIgnoreCase)
+    || value.Equals("--check-authpoint-secret", StringComparison.OrdinalIgnoreCase));
+if (hasWhdSecretCommand || hasSageSecretCommand || hasAuthPointSecretCommand)
 {
-    if (hasWhdSecretCommand && hasSageSecretCommand)
+    if ((hasWhdSecretCommand ? 1 : 0)
+        + (hasSageSecretCommand ? 1 : 0)
+        + (hasAuthPointSecretCommand ? 1 : 0) > 1)
     {
         throw new InvalidOperationException("Run one credential-management command at a time.");
     }
@@ -55,7 +61,7 @@ if (hasWhdSecretCommand || hasSageSecretCommand)
                 : $"No protected WHD credential exists at {store.Path}.");
         }
     }
-    else
+    else if (hasSageSecretCommand)
     {
         var store = new SageSecretStore(options);
         if (args.Any(static value => value.Equals("--set-sage-secret", StringComparison.OrdinalIgnoreCase)))
@@ -83,6 +89,34 @@ if (hasWhdSecretCommand || hasSageSecretCommand)
                 : $"No protected Sage ODBC credential exists at {store.Path}.");
         }
     }
+    else
+    {
+        var store = new AuthPointSecretStore(options);
+        if (args.Any(static value => value.Equals("--set-authpoint-secret", StringComparison.OrdinalIgnoreCase)))
+        {
+            var secret = ReadSecret("WatchGuard API access password and API key (JSON): ");
+            try
+            {
+                store.Write(secret);
+                Console.WriteLine($"Protected WatchGuard AuthPoint API credentials saved at {store.Path}.");
+            }
+            finally
+            {
+                secret = string.Empty;
+            }
+        }
+        else if (args.Any(static value => value.Equals("--delete-authpoint-secret", StringComparison.OrdinalIgnoreCase)))
+        {
+            store.Delete();
+            Console.WriteLine("Protected WatchGuard AuthPoint API credentials removed.");
+        }
+        else
+        {
+            Console.WriteLine(store.Exists
+                ? $"Protected WatchGuard AuthPoint API credentials exist at {store.Path}."
+                : $"No protected WatchGuard AuthPoint API credentials exist at {store.Path}.");
+        }
+    }
 
     return;
 }
@@ -94,6 +128,7 @@ builder.Services.AddWindowsService(options =>
 builder.Services.AddSingleton<WhdSecretStore>();
 builder.Services.AddSingleton<SageSecretStore>();
 builder.Services.AddSingleton<FireDrillSecretStore>();
+builder.Services.AddSingleton<AuthPointSecretStore>();
 builder.Services.AddSingleton<SyncSqlRepository>();
 builder.Services.AddSingleton<ISageOdbcWorkerProcessClient, SageOdbcWorkerProcessClient>();
 builder.Services.AddSingleton(serviceProvider =>
@@ -104,9 +139,20 @@ builder.Services.AddSingleton(serviceProvider =>
 builder.Services.AddSingleton<WhdSyncEngine>();
 builder.Services.AddSingleton<SageCustomerSyncEngine>();
 builder.Services.AddSingleton<FireDrillSyncEngine>();
+builder.Services.AddSingleton(new HttpClient(new HttpClientHandler
+{
+    AllowAutoRedirect = false,
+    AutomaticDecompression = System.Net.DecompressionMethods.GZip
+        | System.Net.DecompressionMethods.Deflate
+})
+{
+    Timeout = TimeSpan.FromSeconds(80)
+});
+builder.Services.AddSingleton<AuthPointApiClient>();
 builder.Services.AddHostedService<WhdSyncWorker>();
 builder.Services.AddHostedService<SageCustomerSyncWorker>();
 builder.Services.AddHostedService<FireDrillSyncWorker>();
+builder.Services.AddHostedService<AuthPointMfaWorker>();
 
 await builder.Build().RunAsync();
 

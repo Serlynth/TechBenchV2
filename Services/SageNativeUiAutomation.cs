@@ -73,7 +73,7 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
                 "Ticket Date",
                 sage.ProcessId,
                 cancellationToken);
-            EnterTextField(timeTickets, dateField, dateText, sage.ProcessId, cancellationToken);
+            EnterKeyboardTextField(timeTickets, dateField, dateText, sage.ProcessId, cancellationToken);
             RequireDate(dateField, request.TicketDate);
 
             var durationText = $"{request.DurationMinutes / 60}:{request.DurationMinutes % 60:00}";
@@ -83,7 +83,7 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
                 "Duration",
                 sage.ProcessId,
                 cancellationToken);
-            EnterTextField(timeTickets, durationField, durationText, sage.ProcessId, cancellationToken);
+            EnterKeyboardTextField(timeTickets, durationField, durationText, sage.ProcessId, cancellationToken);
             RequireDuration(durationField, request.DurationMinutes);
 
             var billing = ResolveBillingControls(timeTickets, sage.ProcessId);
@@ -561,7 +561,7 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
         }
     }
 
-    private static void EnterTextField(
+    private static void EnterKeyboardTextField(
         IntPtr root,
         IntPtr field,
         string value,
@@ -584,6 +584,38 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
         });
     }
 
+    private static void EnterAtomicTextField(
+        IntPtr root,
+        IntPtr field,
+        string fieldName,
+        string value,
+        int processId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateWindow(field, processId, root, "WindowsForms10.EDIT");
+        WithFocusedControl(root, field, processId, () =>
+        {
+            // Sage validates lookup identifiers as text changes. Delivering a
+            // multi-digit ID as individual keystrokes can commit a valid prefix
+            // (for example 195) before the rest of the ID (19555) arrives.
+            // WM_SETTEXT makes the complete identifier visible in one change.
+            NativeMethods.SetWindowText(field, value);
+            var entered = NativeMethods.ReadWindowText(field).Trim();
+            if (!entered.Equals(value.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                var returnedText = string.IsNullOrWhiteSpace(entered)
+                    ? "blank"
+                    : $"'{entered}'";
+                throw new SageAutomationException(
+                    $"Sage did not receive the complete {fieldName} '{value.Trim()}'; the field contained {returnedText} before validation. No ticket was saved.");
+            }
+
+            NativeMethods.SendVirtualKey(NativeMethods.VkTab);
+            Thread.Sleep(120);
+        });
+    }
+
     private static IntPtr EnterValidatedTextField(
         IntPtr root,
         string automationId,
@@ -598,7 +630,13 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
             fieldName,
             processId,
             cancellationToken);
-        EnterTextField(root, field, value, processId, cancellationToken);
+        EnterAtomicTextField(
+            root,
+            field,
+            fieldName,
+            value,
+            processId,
+            cancellationToken);
         return WaitForStableTextFieldValue(
             root,
             automationId,
@@ -1774,7 +1812,7 @@ public sealed class SageNativeUiAutomation : ISageTimeTicketAutomation
                     MessageTimeoutMilliseconds,
                     out _) == IntPtr.Zero)
             {
-                throw new SageAutomationException("Sage did not respond while TechBench wrote the verified Note editor.");
+                throw new SageAutomationException("Sage did not respond while TechBench wrote a verified text field.");
             }
         }
 

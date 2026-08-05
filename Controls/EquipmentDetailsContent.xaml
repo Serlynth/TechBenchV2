@@ -323,6 +323,64 @@
                        TextWrapping="Wrap" />
         </Border>
 
+        <StackPanel Margin="0,0,0,10">
+            <StackPanel.Style>
+                <Style TargetType="{x:Type StackPanel}">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding HasItems, ElementName=LinkedAttachmentList}"
+                                     Value="True">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </StackPanel.Style>
+            <TextBlock Text="LINKED PHOTOS &amp; DOCUMENTS"
+                       Style="{StaticResource EquipmentDetailsSectionStyle}" />
+            <ItemsControl x:Name="LinkedAttachmentList"
+                          ItemsSource="{Binding Attachments, RelativeSource={RelativeSource AncestorType={x:Type local:EquipmentDetailsContent}}}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Background="{DynamicResource ControlBackgroundBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="7"
+                                Padding="9"
+                                Margin="0,0,0,6">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding OriginalFileName}"
+                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                               FontWeight="SemiBold"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding Caption}"
+                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                               FontSize="10"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Content="Open"
+                                        Command="{Binding OpenAttachmentCommand, RelativeSource={RelativeSource AncestorType={x:Type local:EquipmentDetailsContent}}}"
+                                        CommandParameter="{Binding}"
+                                        Padding="9,4"
+                                        Margin="8,0,5,0" />
+                                <Button Grid.Column="2"
+                                        Content="Copy"
+                                        Command="{Binding CopyAttachmentCommand, RelativeSource={RelativeSource AncestorType={x:Type local:EquipmentDetailsContent}}}"
+                                        CommandParameter="{Binding}"
+                                        Padding="9,4" />
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+
         <TextBlock Text="ASSIGNMENT HISTORY"
                    Style="{StaticResource EquipmentDetailsSectionStyle}" />
         <ItemsControl x:Name="AssignmentHistoryList"
