@@ -13,8 +13,9 @@ namespace TechBench.Services;
 
 public sealed class ClientInfoWorkbookService
 {
-    public const string TemplateVersion = "TB-CI-6";
-    public const string PreviousTemplateVersion = "TB-CI-5";
+    public const string TemplateVersion = "TB-CI-7";
+    public const string PreviousTemplateVersion = "TB-CI-6";
+    public const string WifiTemplateVersion = "TB-CI-5";
     public const string ConnectionTemplateVersion = "TB-CI-4";
     public const string CategorizedTemplateVersion = "TB-CI-3";
     public const string FriendlyTemplateVersion = "TB-CI-2";
@@ -57,7 +58,8 @@ public sealed class ClientInfoWorkbookService
                 ["Client Name", clientName],
                 ["Summary", ""],
                 ["Review Status", "Verified"],
-                ["Important", "Do not change the internal client ID or reuse this workbook for another client."]
+                ["Important", "Do not change the internal client ID or reuse this workbook for another client."],
+                ["User passwords", "For an AD password, enter the user's exact Users-tab name in the Passwords tab's Related User column."]
             ],
             headerRow: 0,
             columnWidths: [28, 78],
@@ -77,12 +79,14 @@ public sealed class ClientInfoWorkbookService
             workbookPart,
             sheets,
             ref sheetId,
-            "People",
+            "Users",
             [
-                ["Name", "Role/Department", "Email", "Phone", "Mobile Phone",
-                 "Location", "Contact Type", "Is Primary", "Review Status"]
+                ["Name", "Role/Department", "AD Username", "Email",
+                 "Has Microsoft 365", "Microsoft 365 License", "PC Name",
+                 "Phone", "Mobile Phone", "Location", "Contact Type",
+                 "Is Primary", "Review Status"]
             ],
-            columnWidths: [26, 24, 32, 18, 18, 22, 20, 12, 22]);
+            columnWidths: [26, 24, 24, 32, 18, 26, 20, 18, 18, 22, 20, 12, 22]);
         AddSheet(
             workbookPart,
             sheets,
@@ -162,10 +166,10 @@ public sealed class ClientInfoWorkbookService
             "Passwords",
             [
                 ["Name", "Category", "Username", "Password / Secret", "Login URL",
-                 "Related System", "Notes", "Secret Type", "Secret Label",
+                 "Related System", "Related User", "Notes", "Secret Type", "Secret Label",
                  "Review Status"]
             ],
-            columnWidths: [26, 20, 26, 30, 34, 26, 40, 18, 20, 22]);
+            columnWidths: [26, 20, 26, 30, 34, 26, 26, 40, 18, 20, 22]);
         AddSheet(
             workbookPart,
             sheets,
@@ -196,6 +200,10 @@ public sealed class ClientInfoWorkbookService
                 StringComparison.OrdinalIgnoreCase)
             && !string.Equals(
                 version,
+                WifiTemplateVersion,
+                StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(
+                version,
                 ConnectionTemplateVersion,
                 StringComparison.OrdinalIgnoreCase)
             && !string.Equals(
@@ -212,7 +220,7 @@ public sealed class ClientInfoWorkbookService
                 StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException(
-                $"Template version '{version}' is not supported. Expected {TemplateVersion}, {PreviousTemplateVersion}, {ConnectionTemplateVersion}, {CategorizedTemplateVersion}, {FriendlyTemplateVersion}, or {LegacyTemplateVersion}.");
+                $"Template version '{version}' is not supported. Expected {TemplateVersion}, {PreviousTemplateVersion}, {WifiTemplateVersion}, {ConnectionTemplateVersion}, {CategorizedTemplateVersion}, {FriendlyTemplateVersion}, or {LegacyTemplateVersion}.");
         }
 
         if (!Guid.TryParse(GetRequired(info, "Workbook ID"), out var workbookId))
@@ -256,6 +264,10 @@ public sealed class ClientInfoWorkbookService
                 StringComparison.OrdinalIgnoreCase)
             || string.Equals(
                 version,
+                WifiTemplateVersion,
+                StringComparison.OrdinalIgnoreCase)
+            || string.Equals(
+                version,
                 ConnectionTemplateVersion,
                 StringComparison.OrdinalIgnoreCase)
             || string.Equals(
@@ -270,6 +282,10 @@ public sealed class ClientInfoWorkbookService
                 || string.Equals(
                     version,
                     PreviousTemplateVersion,
+                    StringComparison.OrdinalIgnoreCase)
+                || string.Equals(
+                    version,
+                    WifiTemplateVersion,
                     StringComparison.OrdinalIgnoreCase);
             var connectionSheetName = string.Equals(
                 version,
@@ -280,8 +296,8 @@ public sealed class ClientInfoWorkbookService
             var locationKeys = ParseSimpleLocations(
                 GetSheet(tables, "Locations"),
                 records);
-            ParseSimplePeople(
-                GetSheet(tables, "People"),
+            var userKeys = ParseSimplePeople(
+                GetUsersSheet(tables),
                 records,
                 locationKeys);
             var resourceKeys = new Dictionary<string, string?>(
@@ -350,7 +366,8 @@ public sealed class ClientInfoWorkbookService
                 GetSheet(tables, "Passwords"),
                 records,
                 secrets,
-                resourceKeys);
+                resourceKeys,
+                userKeys);
             ParseSimpleFacts(GetSheet(tables, "Other Info"), records);
         }
         else if (string.Equals(
@@ -361,8 +378,8 @@ public sealed class ClientInfoWorkbookService
             var locationKeys = ParseSimpleLocations(
                 GetSheet(tables, "Locations"),
                 records);
-            ParseSimplePeople(
-                GetSheet(tables, "People"),
+            var userKeys = ParseSimplePeople(
+                GetUsersSheet(tables),
                 records,
                 locationKeys);
             var resourceKeys = ParseSimpleResources(
@@ -374,7 +391,8 @@ public sealed class ClientInfoWorkbookService
                 GetSheet(tables, "Passwords"),
                 records,
                 secrets,
-                resourceKeys);
+                resourceKeys,
+                userKeys);
             ParseSimpleFacts(GetSheet(tables, "Other Info"), records);
         }
         else
@@ -478,11 +496,13 @@ public sealed class ClientInfoWorkbookService
         return keys;
     }
 
-    private static void ParseSimplePeople(
+    private static IReadOnlyDictionary<string, string?> ParseSimplePeople(
         IReadOnlyList<string[]> rows,
         ICollection<ClientInfoImportRecord> records,
         IReadOnlyDictionary<string, string?> locationKeys)
     {
+        var keys = new Dictionary<string, string?>(
+            StringComparer.OrdinalIgnoreCase);
         foreach (var row in DataRows(rows))
         {
             var name = Value(row.Values, row.Headers, "Name");
@@ -491,31 +511,52 @@ public sealed class ClientInfoWorkbookService
                 continue;
             }
 
+            var localKey = LocalKey(string.Empty, "person", row.RowNumber);
+            AddFriendlyLookup(keys, name, localKey);
             var locationName = Value(row.Values, row.Headers, "Location");
             records.Add(new ClientInfoImportRecord(
                 "Person",
-                LocalKey(string.Empty, "person", row.RowNumber),
+                localKey,
                 ResolveFriendlyLookup(
                     locationKeys,
                     locationName,
                     "location",
-                    "People",
+                    "Users",
                     row.RowNumber),
                 JsonSerializer.Serialize(new
                 {
                     displayName = name,
                     roleDepartment = Value(row.Values, row.Headers, "Role/Department"),
+                    adUsername = Value(row.Values, row.Headers, "AD Username"),
                     email = Value(row.Values, row.Headers, "Email"),
+                    hasMicrosoft365 = ParseBoolean(Value(
+                        row.Values,
+                        row.Headers,
+                        "Has Microsoft 365")),
+                    microsoft365License = Value(
+                        row.Values,
+                        row.Headers,
+                        "Microsoft 365 License"),
+                    pcName = Value(row.Values, row.Headers, "PC Name"),
                     phone = Value(row.Values, row.Headers, "Phone"),
                     mobilePhone = Value(row.Values, row.Headers, "Mobile Phone"),
                     contactType = Value(row.Values, row.Headers, "Contact Type"),
                     isPrimary = ParseBoolean(Value(row.Values, row.Headers, "Is Primary")),
                     isActive = true
                 }),
-                "People",
+                "Users",
                 row.RowNumber,
                 NormalizeReviewStatus(Value(row.Values, row.Headers, "Review Status"))));
         }
+
+        return keys;
+    }
+
+    private static IReadOnlyList<string[]> GetUsersSheet(
+        IReadOnlyDictionary<string, List<string[]>> tables)
+    {
+        var users = GetSheet(tables, "Users");
+        return users.Count > 0 ? users : GetSheet(tables, "People");
     }
 
     private static IReadOnlyDictionary<string, string?> ParseSimpleResources(
@@ -758,7 +799,8 @@ public sealed class ClientInfoWorkbookService
         IReadOnlyList<string[]> rows,
         ICollection<ClientInfoImportRecord> records,
         ICollection<ClientInfoImportSecret> secrets,
-        IReadOnlyDictionary<string, string?> resourceKeys)
+        IReadOnlyDictionary<string, string?> resourceKeys,
+        IReadOnlyDictionary<string, string?> userKeys)
     {
         foreach (var row in DataRows(rows))
         {
@@ -770,6 +812,7 @@ public sealed class ClientInfoWorkbookService
 
             var localKey = LocalKey(string.Empty, "credential", row.RowNumber);
             var relatedSystem = Value(row.Values, row.Headers, "Related System");
+            var relatedUser = Value(row.Values, row.Headers, "Related User");
             records.Add(new ClientInfoImportRecord(
                 "Credential",
                 localKey,
@@ -782,7 +825,12 @@ public sealed class ClientInfoWorkbookService
                         "system or service",
                         "Passwords",
                         row.RowNumber),
-                    personKey = string.Empty,
+                    personKey = ResolveFriendlyLookup(
+                        userKeys,
+                        relatedUser,
+                        "user",
+                        "Passwords",
+                        row.RowNumber),
                     name,
                     category = Value(row.Values, row.Headers, "Category"),
                     username = Value(row.Values, row.Headers, "Username"),

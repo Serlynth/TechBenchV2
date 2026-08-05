@@ -22,9 +22,9 @@ public sealed class ClientInfoBetaTests
         Assert.Equal(2, demo.Snapshot.Locations.Count);
         Assert.Equal(3, demo.Snapshot.People.Count);
         Assert.Equal(14, demo.Snapshot.Resources.Count);
-        Assert.Equal(18, demo.Snapshot.Credentials.Count);
-        Assert.Equal(18, demo.Summary.CredentialCount);
-        Assert.Equal(18, demo.SecretValues.Count);
+        Assert.Equal(21, demo.Snapshot.Credentials.Count);
+        Assert.Equal(21, demo.Summary.CredentialCount);
+        Assert.Equal(21, demo.SecretValues.Count);
         Assert.Equal(3, demo.Equipment.Count);
         Assert.Equal(
             ClientInfoResourceCategories.All,
@@ -55,6 +55,17 @@ public sealed class ClientInfoBetaTests
         var viewModel = Read("ViewModels", "ClientInfoBetaViewModel.cs");
         var resourceGrid = Read("Controls", "ClientInfoResourceDataGrid.cs");
         Assert.Contains("Text=\"Overview\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"CLIENT DESCRIPTION\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"SERVER LINKS\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"CLIENT FOLDER\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"LEGACY CLIENT INFO SHEET\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"Read-only reference after migration\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding ClientFolderPath", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding LegacyClientInfoSheetPath", xaml, StringComparison.Ordinal);
+        Assert.Contains("Command=\"{Binding OpenClientFolderCommand}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Command=\"{Binding OpenLegacyClientInfoSheetCommand}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Height=\"72\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("OpenServerLink", viewModel, StringComparison.Ordinal);
         Assert.Contains("Text=\"Full list\"", xaml, StringComparison.Ordinal);
         Assert.Contains("ResizeDirection=\"Rows\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Content=\"At-a-glance\"", xaml, StringComparison.Ordinal);
@@ -82,7 +93,7 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("ItemsSource=\"{Binding QuickReferenceSections}\"", xaml, StringComparison.Ordinal);
         var quickReferenceMarkup = xaml[
             xaml.IndexOf("ItemsSource=\"{Binding QuickReferenceSections}\"", StringComparison.Ordinal)..
-            xaml.IndexOf("<TabItem Header=\"People &amp; Locations\">", StringComparison.Ordinal)];
+            xaml.IndexOf("<TabItem Header=\"Locations\">", StringComparison.Ordinal)];
         Assert.DoesNotContain("Text=\"{Binding Description}\"", quickReferenceMarkup, StringComparison.Ordinal);
         Assert.Contains("x:Key=\"OverviewFieldTemplate\"", xaml, StringComparison.Ordinal);
         Assert.Contains("DataContext.RevealSecretCommand", xaml, StringComparison.Ordinal);
@@ -90,9 +101,13 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("InlineDisplayValue", xaml, StringComparison.Ordinal);
         Assert.Contains("InlineRevealLabel", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("new ClientInfoSecretRevealWindow", viewModel, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"LocationsPaneColumn\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"PeoplePaneColumn\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("PeopleLocationsSplitter_DragCompleted", xaml, StringComparison.Ordinal);
+        Assert.Contains("<TabItem Header=\"Locations\">", xaml, StringComparison.Ordinal);
+        Assert.Contains("<TabItem Header=\"Users\">", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"AD Username\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"AD Password\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Microsoft 365\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"365 License\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"PC Name\"", xaml, StringComparison.Ordinal);
         Assert.Contains("PART_RightHeaderGripper", xaml, StringComparison.Ordinal);
         Assert.Contains("ScrollViewer.HorizontalScrollBarVisibility\" Value=\"Auto", xaml, StringComparison.Ordinal);
         Assert.Contains("ApplyColumnWidths", Read("ClientInfoBetaWindow.xaml.cs"), StringComparison.Ordinal);
@@ -884,7 +899,7 @@ public sealed class ClientInfoBetaTests
                 [
                     "Start Here",
                     "Locations",
-                    "People",
+                    "Users",
                     "Servers & Infrastructure",
                     "Connection & Internet",
                     "Wi-Fi",
@@ -938,10 +953,10 @@ public sealed class ClientInfoBetaTests
                 "Yes", "Verified");
             AppendRow(
                 path,
-                "People",
-                "Jamie Rivera", "Office Manager", "jamie@example.test",
-                "610-555-0101", "", "Main Office", "Primary", "Yes",
-                "Verified");
+                "Users",
+                "Jamie Rivera", "Office Manager", "ACME\\jrivera",
+                "jamie@example.test", "Yes", "Business Premium", "ACME-PC-01",
+                "610-555-0101", "", "Main Office", "Primary", "Yes", "Verified");
             AppendRow(
                 path,
                 "Connection & Internet",
@@ -957,7 +972,7 @@ public sealed class ClientInfoBetaTests
                 path,
                 "Passwords",
                 "Firewall Admin", "Firewall", "admin", "P@ss word",
-                "https://firewall.test", "WatchGuard", "Emergency admin",
+                "https://firewall.test", "WatchGuard", "Jamie Rivera", "Emergency admin",
                 "Password", "Admin password", "Verified");
             AppendRow(
                 path,
@@ -989,6 +1004,9 @@ public sealed class ClientInfoBetaTests
                 record => record.RecordType == "Fact");
             Assert.Equal("AcceptedUnverified", fact.ReviewStatus);
             Assert.Equal(location.LocalKey, person.ParentLocalKey);
+            Assert.Contains("ACME\\\\jrivera", person.PayloadJson, StringComparison.Ordinal);
+            Assert.Contains("Business Premium", person.PayloadJson, StringComparison.Ordinal);
+            Assert.Contains("ACME-PC-01", person.PayloadJson, StringComparison.Ordinal);
             Assert.Contains(location.LocalKey, resource.PayloadJson, StringComparison.Ordinal);
             using var resourcePayload =
                 System.Text.Json.JsonDocument.Parse(resource.PayloadJson);
@@ -998,6 +1016,7 @@ public sealed class ClientInfoBetaTests
                     .GetProperty("resourceType")
                     .GetString());
             Assert.Contains(resource.LocalKey, credential.PayloadJson, StringComparison.Ordinal);
+            Assert.Contains(person.LocalKey, credential.PayloadJson, StringComparison.Ordinal);
             var secret = Assert.Single(package.Secrets);
             Assert.Equal(credential.LocalKey, secret.CredentialLocalKey);
             Assert.Equal("P@ss word", secret.SecretValue);
@@ -1286,7 +1305,7 @@ public sealed class ClientInfoBetaTests
             var package = service.Read(path);
 
             Assert.Equal(
-                ClientInfoWorkbookService.PreviousTemplateVersion,
+                ClientInfoWorkbookService.WifiTemplateVersion,
                 package.TemplateVersion);
             var resource = Assert.Single(
                 package.Records,
@@ -1332,6 +1351,33 @@ public sealed class ClientInfoBetaTests
             "N'SqlServer2016.ClientInfoBeta.0015', 15",
             schema,
             StringComparison.Ordinal);
+        foreach (var userColumn in new[]
+                 {
+                     "AdUsername",
+                     "HasMicrosoft365",
+                     "Microsoft365License",
+                     "PcName"
+                 })
+        {
+            Assert.Contains(userColumn, schema, StringComparison.Ordinal);
+            Assert.Contains(userColumn, procedures, StringComparison.Ordinal);
+            Assert.Contains(userColumn, imports, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(userColumn, verifier, StringComparison.Ordinal);
+        }
+        foreach (var serverLinkColumn in new[]
+                 {
+                     "ClientFolderPath",
+                     "LegacyClientInfoSheetPath"
+                 })
+        {
+            Assert.Contains(serverLinkColumn, schema, StringComparison.Ordinal);
+            Assert.Contains(serverLinkColumn, procedures, StringComparison.Ordinal);
+            Assert.Contains(serverLinkColumn, verifier, StringComparison.Ordinal);
+        }
+        Assert.DoesNotContain(
+            "AdPassword",
+            schema,
+            StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
             "CONVERT(int, 15) AS [SchemaVersion]",
             procedures,
@@ -1421,7 +1467,8 @@ public sealed class ClientInfoBetaTests
         foreach (var tab in new[]
                  {
                      "Overview",
-                     "People &amp; Locations",
+                     "Locations",
+                     "Users",
                      "Equipment",
                      "Servers &amp; Infrastructure",
                      "Connection &amp; Internet",
@@ -1809,7 +1856,16 @@ public sealed class ClientInfoBetaTests
         SetTemplateVersion(
             workbookPart,
             sheets,
-            ClientInfoWorkbookService.PreviousTemplateVersion);
+            ClientInfoWorkbookService.WifiTemplateVersion);
+        var usersSheet = sheets.SingleOrDefault(sheet =>
+            string.Equals(
+                sheet.Name?.Value,
+                "Users",
+                StringComparison.OrdinalIgnoreCase));
+        if (usersSheet is not null)
+        {
+            usersSheet.Name = "People";
+        }
         SetLegacyResourceHeaders(
             workbookPart,
             sheets.Where(sheet => sheet.Name?.Value is

@@ -61,13 +61,8 @@ public partial class ClientInfoBetaWindow : Window
     private void Locations_DoubleClick(object sender, MouseButtonEventArgs e) =>
         ExecuteEdit(sender, e, viewModel => viewModel.EditLocationCommand);
 
-    private void People_DoubleClick(object sender, MouseButtonEventArgs e) =>
+    private void Users_DoubleClick(object sender, MouseButtonEventArgs e) =>
         ExecuteEdit(sender, e, viewModel => viewModel.EditPersonCommand);
-
-    private void PeopleLocationsSplitter_DragCompleted(
-        object sender,
-        DragCompletedEventArgs e) =>
-        SavePeopleLocationsSplitRatio();
 
     private void ApplyLayoutPreferences()
     {
@@ -83,9 +78,6 @@ public partial class ClientInfoBetaWindow : Window
             Height = height;
         }
 
-        var ratio = _localPreferences.PeopleLocationsSplitRatio;
-        LocationsPaneColumn.Width = new GridLength(ratio, GridUnitType.Star);
-        PeoplePaneColumn.Width = new GridLength(1 - ratio, GridUnitType.Star);
         ApplyColumnWidths(
             LocationsDataGrid,
             _localPreferences.LocationGridColumnWidths);
@@ -124,7 +116,6 @@ public partial class ClientInfoBetaWindow : Window
             PeopleDataGrid,
             _localPreferences.PeopleGridColumnWidths,
             widths => _localPreferences.PeopleGridColumnWidths = widths);
-        SavePeopleLocationsSplitRatio(saveToDisk: false);
         TrySaveLocalPreferences();
     }
 
@@ -162,24 +153,6 @@ public partial class ClientInfoBetaWindow : Window
         }
 
         save(widths);
-    }
-
-    private void SavePeopleLocationsSplitRatio(bool saveToDisk = true)
-    {
-        var totalWidth = LocationsPaneColumn.ActualWidth
-            + PeoplePaneColumn.ActualWidth;
-        if (totalWidth > 0 && double.IsFinite(totalWidth))
-        {
-            _localPreferences.PeopleLocationsSplitRatio = Math.Clamp(
-                LocationsPaneColumn.ActualWidth / totalWidth,
-                0.2,
-                0.8);
-        }
-
-        if (saveToDisk)
-        {
-            TrySaveLocalPreferences();
-        }
     }
 
     private void TrySaveLocalPreferences()

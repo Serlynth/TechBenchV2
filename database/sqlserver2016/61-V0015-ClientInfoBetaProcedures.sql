@@ -90,6 +90,12 @@ BEGIN
                 [Summary] = COALESCE(
                     NULLIF(target_profile.[Summary], N''),
                     source_profile.[Summary]),
+                [ClientFolderPath] = COALESCE(
+                    NULLIF(target_profile.[ClientFolderPath], N''),
+                    source_profile.[ClientFolderPath]),
+                [LegacyClientInfoSheetPath] = COALESCE(
+                    NULLIF(target_profile.[LegacyClientInfoSheetPath], N''),
+                    source_profile.[LegacyClientInfoSheetPath]),
                 [ReviewStatus] =
                     CASE
                         WHEN target_profile.[ReviewStatus] = N'Verified'
@@ -493,6 +499,8 @@ BEGIN
         client.[WhdPhone],
         client.[WhdAddress],
         profile.[Summary],
+        profile.[ClientFolderPath],
+        profile.[LegacyClientInfoSheetPath],
         COALESCE(profile.[ReviewStatus], N'Unverified') AS [ReviewStatus],
         COALESCE(profile.[IsLive], CONVERT(bit, 0)) AS [IsLive],
         profile.[LastVerifiedAtUtc],
@@ -519,7 +527,9 @@ BEGIN
     SELECT
         person.[PersonId], person.[ClientId], person.[LocationId],
         location.[Name] AS [LocationName], person.[LocalKey],
-        person.[DisplayName], person.[RoleDepartment], person.[Email],
+        person.[DisplayName], person.[RoleDepartment], person.[AdUsername],
+        person.[Email], person.[HasMicrosoft365],
+        person.[Microsoft365License], person.[PcName],
         person.[Phone], person.[MobilePhone], person.[ContactType],
         person.[IsPrimary], person.[ReviewStatus], person.[IsActive],
         person.[LastVerifiedAtUtc], person.[UpdatedAtUtc], person.[RowVersion]
@@ -639,6 +649,8 @@ GO
 CREATE PROCEDURE [tb_app].[SaveClientInfoProfile]
     @ClientId int,
     @Summary nvarchar(2000) = NULL,
+    @ClientFolderPath nvarchar(2048) = NULL,
+    @LegacyClientInfoSheetPath nvarchar(2048) = NULL,
     @ReviewStatus nvarchar(24) = N'Unverified',
     @ExpectedRowVersion binary(8) = NULL,
     @RequestId uniqueidentifier = NULL
@@ -659,6 +671,9 @@ BEGIN
         THROW 52320, N'Client Info editor permission is required.', 1;
 
     SET @Summary = NULLIF(LTRIM(RTRIM(@Summary)), N'');
+    SET @ClientFolderPath = NULLIF(LTRIM(RTRIM(@ClientFolderPath)), N'');
+    SET @LegacyClientInfoSheetPath =
+        NULLIF(LTRIM(RTRIM(@LegacyClientInfoSheetPath)), N'');
     SET @ReviewStatus = COALESCE(NULLIF(LTRIM(RTRIM(@ReviewStatus)), N''), N'Unverified');
     IF @ReviewStatus NOT IN
         (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview')
@@ -689,6 +704,8 @@ BEGIN
             UPDATE [tb_client].[ClientProfiles]
             SET
                 [Summary] = @Summary,
+                [ClientFolderPath] = @ClientFolderPath,
+                [LegacyClientInfoSheetPath] = @LegacyClientInfoSheetPath,
                 [ReviewStatus] = @ReviewStatus,
                 [LastVerifiedAtUtc] =
                     CASE WHEN @ReviewStatus = N'Verified'
@@ -712,14 +729,16 @@ BEGIN
 
             INSERT INTO [tb_client].[ClientProfiles]
             (
-                [ClientId], [Summary], [ReviewStatus],
+                [ClientId], [Summary], [ClientFolderPath],
+                [LegacyClientInfoSheetPath], [ReviewStatus],
                 [LastVerifiedAtUtc], [LastVerifiedByWindowsSid],
                 [CreatedByWindowsSid], [UpdatedByWindowsSid],
                 [CreatedAtUtc], [UpdatedAtUtc]
             )
             VALUES
             (
-                @ClientId, @Summary, @ReviewStatus,
+                @ClientId, @Summary, @ClientFolderPath,
+                @LegacyClientInfoSheetPath, @ReviewStatus,
                 CASE WHEN @ReviewStatus = N'Verified' THEN @NowUtc END,
                 CASE WHEN @ReviewStatus = N'Verified' THEN @ActorSid END,
                 @ActorSid, @ActorSid, @NowUtc, @NowUtc
@@ -743,7 +762,8 @@ BEGIN
     END CATCH;
 
     SELECT
-        [ClientId], [Summary], [ReviewStatus], [IsLive],
+        [ClientId], [Summary], [ClientFolderPath],
+        [LegacyClientInfoSheetPath], [ReviewStatus], [IsLive],
         [LastVerifiedAtUtc], [UpdatedAtUtc], [RowVersion]
     FROM [tb_client].[ClientProfiles]
     WHERE [ClientId] = @ClientId;
@@ -891,7 +911,11 @@ CREATE PROCEDURE [tb_app].[SaveClientInfoPerson]
     @LocalKey nvarchar(120) = NULL,
     @DisplayName nvarchar(240),
     @RoleDepartment nvarchar(240) = NULL,
+    @AdUsername nvarchar(256) = NULL,
     @Email nvarchar(320) = NULL,
+    @HasMicrosoft365 bit = 0,
+    @Microsoft365License nvarchar(240) = NULL,
+    @PcName nvarchar(240) = NULL,
     @Phone nvarchar(80) = NULL,
     @MobilePhone nvarchar(80) = NULL,
     @ContactType nvarchar(80) = NULL,
@@ -942,7 +966,8 @@ BEGIN
             INSERT INTO [tb_client].[People]
             (
                 [ClientId], [LocationId], [LocalKey], [DisplayName],
-                [RoleDepartment], [Email], [Phone], [MobilePhone],
+                [RoleDepartment], [AdUsername], [Email], [HasMicrosoft365],
+                [Microsoft365License], [PcName], [Phone], [MobilePhone],
                 [ContactType], [IsPrimary], [ReviewStatus], [IsActive],
                 [LastVerifiedAtUtc], [CreatedByWindowsSid], [UpdatedByWindowsSid],
                 [CreatedAtUtc], [UpdatedAtUtc]
@@ -950,7 +975,9 @@ BEGIN
             VALUES
             (
                 @ClientId, @LocationId, @LocalKey, @DisplayName,
-                NULLIF(@RoleDepartment,N''), NULLIF(@Email,N''),
+                NULLIF(@RoleDepartment,N''), NULLIF(@AdUsername,N''),
+                NULLIF(@Email,N''), @HasMicrosoft365,
+                NULLIF(@Microsoft365License,N''), NULLIF(@PcName,N''),
                 NULLIF(@Phone,N''), NULLIF(@MobilePhone,N''),
                 NULLIF(@ContactType,N''), @IsPrimary, @ReviewStatus, @IsActive,
                 CASE WHEN @ReviewStatus=N'Verified' THEN @NowUtc END,
@@ -967,7 +994,12 @@ BEGIN
             SET [LocationId]=@LocationId, [LocalKey]=@LocalKey,
                 [DisplayName]=@DisplayName,
                 [RoleDepartment]=NULLIF(@RoleDepartment,N''),
-                [Email]=NULLIF(@Email,N''), [Phone]=NULLIF(@Phone,N''),
+                [AdUsername]=NULLIF(@AdUsername,N''),
+                [Email]=NULLIF(@Email,N''),
+                [HasMicrosoft365]=@HasMicrosoft365,
+                [Microsoft365License]=NULLIF(@Microsoft365License,N''),
+                [PcName]=NULLIF(@PcName,N''),
+                [Phone]=NULLIF(@Phone,N''),
                 [MobilePhone]=NULLIF(@MobilePhone,N''),
                 [ContactType]=NULLIF(@ContactType,N''),
                 [IsPrimary]=@IsPrimary, [ReviewStatus]=@ReviewStatus,

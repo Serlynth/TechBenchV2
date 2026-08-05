@@ -21,7 +21,7 @@ public static class ClientInfoDemoData
         LocationCount = 2,
         PersonCount = 3,
         ResourceCount = 14,
-        CredentialCount = 18,
+        CredentialCount = 21,
         IsDemo = true
     };
 
@@ -53,6 +53,8 @@ public static class ClientInfoDemoData
             {
                 PersonId = -1, ClientId = ClientId, LocationId = -1, LocationName = "Main Office",
                 LocalKey = "demo-alex", DisplayName = "Alex Morgan", RoleDepartment = "Office Manager",
+                AdUsername = "DEMOCLIENT\\amorgan", HasMicrosoft365 = true,
+                Microsoft365License = "Microsoft 365 Business Premium", PcName = "DEMO-LT-1001",
                 Email = "alex.morgan@example.test", Phone = "215-555-0100 x101",
                 MobilePhone = "215-555-0191", ContactType = "Primary Contact", IsPrimary = true,
                 IsActive = true, ReviewStatus = "Verified", UpdatedAtUtc = updated
@@ -61,6 +63,8 @@ public static class ClientInfoDemoData
             {
                 PersonId = -2, ClientId = ClientId, LocationId = -1, LocationName = "Main Office",
                 LocalKey = "demo-jordan", DisplayName = "Jordan Lee", RoleDepartment = "Accounting",
+                AdUsername = "DEMOCLIENT\\jlee", HasMicrosoft365 = true,
+                Microsoft365License = "Microsoft 365 Business Standard", PcName = "DEMO-PC-1002",
                 Email = "jordan.lee@example.test", Phone = "215-555-0100 x114",
                 MobilePhone = "215-555-0184", ContactType = "End User", IsActive = true,
                 ReviewStatus = "Verified", UpdatedAtUtc = updated
@@ -69,6 +73,8 @@ public static class ClientInfoDemoData
             {
                 PersonId = -3, ClientId = ClientId, LocationId = -2, LocationName = "Warehouse",
                 LocalKey = "demo-taylor", DisplayName = "Taylor Rivera", RoleDepartment = "Operations",
+                AdUsername = "DEMOCLIENT\\trivera", HasMicrosoft365 = false,
+                PcName = "DEMO-WH-1003",
                 Email = "taylor.rivera@example.test", Phone = "610-555-0142 x202",
                 MobilePhone = "610-555-0177", ContactType = "Site Contact", IsActive = true,
                 ReviewStatus = "Verified", UpdatedAtUtc = updated
@@ -147,7 +153,10 @@ public static class ClientInfoDemoData
             DemoCredential(-207, -113, "ESET Protect Admin", "ESET", "security-admin@example.test", "https://eset.example.test", "Demo-ESET!2026"),
             DemoCredential(-208, -114, "Barracuda Admin", "Barracuda", "mail-admin@example.test", "https://login.barracudanetworks.com", "Demo-Barracuda!2026"),
             DemoCredential(-209, -111, "ScreenConnect Admin", "Remote Access", "remote-admin@example.test", "https://remote.example.test", "Demo-Remote!2026"),
-            DemoCredential(-210, -110, "UPS Network Card", "UPS", "apc-admin", "https://10.20.0.18", "Demo-UPS!2026")
+            DemoCredential(-210, -110, "UPS Network Card", "UPS", "apc-admin", "https://10.20.0.18", "Demo-UPS!2026"),
+            DemoCredential(-219, -112, "Alex Morgan AD account", "Active Directory User", "DEMOCLIENT\\amorgan", "", "Demo-Alex-AD!2026") with { ResourceId = null, PersonId = -1 },
+            DemoCredential(-220, -112, "Jordan Lee AD account", "Active Directory User", "DEMOCLIENT\\jlee", "", "Demo-Jordan-AD!2026") with { ResourceId = null, PersonId = -2 },
+            DemoCredential(-221, -112, "Taylor Rivera AD account", "Active Directory User", "DEMOCLIENT\\trivera", "", "Demo-Taylor-AD!2026") with { ResourceId = null, PersonId = -3 }
         };
         var facts = new ClientInfoFact[]
         {

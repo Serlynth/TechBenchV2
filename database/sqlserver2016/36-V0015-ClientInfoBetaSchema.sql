@@ -87,6 +87,8 @@ BEGIN TRY
         (
             [ClientId] int NOT NULL,
             [Summary] nvarchar(2000) NULL,
+            [ClientFolderPath] nvarchar(2048) NULL,
+            [LegacyClientInfoSheetPath] nvarchar(2048) NULL,
             [ReviewStatus] nvarchar(24) NOT NULL
                 CONSTRAINT [DF_ClientProfiles_ReviewStatus] DEFAULT (N'Unverified'),
             [IsLive] bit NOT NULL
@@ -117,6 +119,14 @@ BEGIN TRY
                     (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview'))
         );
     END;
+
+    IF COL_LENGTH(N'tb_client.ClientProfiles', N'ClientFolderPath') IS NULL
+        ALTER TABLE [tb_client].[ClientProfiles]
+            ADD [ClientFolderPath] nvarchar(2048) NULL;
+
+    IF COL_LENGTH(N'tb_client.ClientProfiles', N'LegacyClientInfoSheetPath') IS NULL
+        ALTER TABLE [tb_client].[ClientProfiles]
+            ADD [LegacyClientInfoSheetPath] nvarchar(2048) NULL;
 
     IF OBJECT_ID(N'tb_client.Locations', N'U') IS NULL
     BEGIN
@@ -183,7 +193,12 @@ BEGIN TRY
             [LocalKey] nvarchar(120) NULL,
             [DisplayName] nvarchar(240) NOT NULL,
             [RoleDepartment] nvarchar(240) NULL,
+            [AdUsername] nvarchar(256) NULL,
             [Email] nvarchar(320) NULL,
+            [HasMicrosoft365] bit NOT NULL
+                CONSTRAINT [DF_ClientPeople_HasMicrosoft365] DEFAULT (0),
+            [Microsoft365License] nvarchar(240) NULL,
+            [PcName] nvarchar(240) NULL,
             [Phone] nvarchar(80) NULL,
             [MobilePhone] nvarchar(80) NULL,
             [ContactType] nvarchar(80) NULL,
@@ -227,6 +242,23 @@ BEGIN TRY
             ON [tb_client].[People]([ClientId], [LocalKey])
             WHERE [LocalKey] IS NOT NULL;
     END;
+
+    IF COL_LENGTH(N'tb_client.People', N'AdUsername') IS NULL
+        ALTER TABLE [tb_client].[People]
+            ADD [AdUsername] nvarchar(256) NULL;
+
+    IF COL_LENGTH(N'tb_client.People', N'HasMicrosoft365') IS NULL
+        ALTER TABLE [tb_client].[People]
+            ADD [HasMicrosoft365] bit NOT NULL
+                CONSTRAINT [DF_ClientPeople_HasMicrosoft365] DEFAULT (0);
+
+    IF COL_LENGTH(N'tb_client.People', N'Microsoft365License') IS NULL
+        ALTER TABLE [tb_client].[People]
+            ADD [Microsoft365License] nvarchar(240) NULL;
+
+    IF COL_LENGTH(N'tb_client.People', N'PcName') IS NULL
+        ALTER TABLE [tb_client].[People]
+            ADD [PcName] nvarchar(240) NULL;
 
     IF OBJECT_ID(N'tb_client.Resources', N'U') IS NULL
     BEGIN

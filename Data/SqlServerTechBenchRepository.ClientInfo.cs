@@ -204,6 +204,16 @@ public sealed partial class SqlServerTechBenchRepository
             {
                 AddInt(command, "@ClientId", profile.ClientId);
                 AddText(command, "@Summary", 2000, profile.Summary);
+                AddText(
+                    command,
+                    "@ClientFolderPath",
+                    2048,
+                    profile.ClientFolderPath);
+                AddText(
+                    command,
+                    "@LegacyClientInfoSheetPath",
+                    2048,
+                    profile.LegacyClientInfoSheetPath);
                 AddRequiredText(
                     command,
                     "@ReviewStatus",
@@ -300,7 +310,15 @@ public sealed partial class SqlServerTechBenchRepository
                     "@RoleDepartment",
                     240,
                     person.RoleDepartment);
+                AddText(command, "@AdUsername", 256, person.AdUsername);
                 AddText(command, "@Email", 320, person.Email);
+                AddBit(command, "@HasMicrosoft365", person.HasMicrosoft365);
+                AddText(
+                    command,
+                    "@Microsoft365License",
+                    240,
+                    person.Microsoft365License);
+                AddText(command, "@PcName", 240, person.PcName);
                 AddText(command, "@Phone", 80, person.Phone);
                 AddText(command, "@MobilePhone", 80, person.MobilePhone);
                 AddText(command, "@ContactType", 80, person.ContactType);
@@ -948,6 +966,10 @@ public sealed partial class SqlServerTechBenchRepository
         WhdPhone = GetString(reader, "WhdPhone"),
         WhdAddress = GetString(reader, "WhdAddress"),
         Summary = GetString(reader, "Summary"),
+        ClientFolderPath = GetString(reader, "ClientFolderPath"),
+        LegacyClientInfoSheetPath = GetString(
+            reader,
+            "LegacyClientInfoSheetPath"),
         ReviewStatus = GetString(reader, "ReviewStatus", "Unverified"),
         IsLive = GetBoolean(reader, "IsLive"),
         LastVerifiedAtUtc = GetNullableDateTime(
@@ -1020,7 +1042,11 @@ public sealed partial class SqlServerTechBenchRepository
         LocalKey = GetString(reader, "LocalKey"),
         DisplayName = GetString(reader, "DisplayName"),
         RoleDepartment = GetString(reader, "RoleDepartment"),
+        AdUsername = GetString(reader, "AdUsername"),
         Email = GetString(reader, "Email"),
+        HasMicrosoft365 = GetBoolean(reader, "HasMicrosoft365"),
+        Microsoft365License = GetString(reader, "Microsoft365License"),
+        PcName = GetString(reader, "PcName"),
         Phone = GetString(reader, "Phone"),
         MobilePhone = GetString(reader, "MobilePhone"),
         ContactType = GetString(reader, "ContactType"),

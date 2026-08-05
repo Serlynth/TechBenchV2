@@ -22,7 +22,7 @@ public sealed record ClientInfoClientSummary
 
     public string InternalIdLabel => IsDemo ? "DEMO" : $"ID {ClientId}";
     public string CountLabel =>
-        $"{LocationCount} locations · {PersonCount} people · {ResourceCount} systems · {CredentialCount} credentials";
+        $"{LocationCount} locations · {PersonCount} users · {ResourceCount} systems · {CredentialCount} credentials";
 }
 
 public sealed record ClientInfoProfile
@@ -35,6 +35,8 @@ public sealed record ClientInfoProfile
     public string WhdPhone { get; init; } = string.Empty;
     public string WhdAddress { get; init; } = string.Empty;
     public string Summary { get; init; } = string.Empty;
+    public string ClientFolderPath { get; init; } = string.Empty;
+    public string LegacyClientInfoSheetPath { get; init; } = string.Empty;
     public string ReviewStatus { get; init; } = "Unverified";
     public bool IsLive { get; init; }
     public DateTime? LastVerifiedAtUtc { get; init; }
@@ -143,7 +145,11 @@ public sealed record ClientInfoPerson
     public string LocalKey { get; init; } = string.Empty;
     public string DisplayName { get; init; } = string.Empty;
     public string RoleDepartment { get; init; } = string.Empty;
+    public string AdUsername { get; init; } = string.Empty;
     public string Email { get; init; } = string.Empty;
+    public bool HasMicrosoft365 { get; init; }
+    public string Microsoft365License { get; init; } = string.Empty;
+    public string PcName { get; init; } = string.Empty;
     public string Phone { get; init; } = string.Empty;
     public string MobilePhone { get; init; } = string.Empty;
     public string ContactType { get; init; } = string.Empty;
@@ -153,6 +159,17 @@ public sealed record ClientInfoPerson
     public DateTime? LastVerifiedAtUtc { get; init; }
     public DateTime? UpdatedAtUtc { get; init; }
     public byte[]? RowVersion { get; init; }
+    [JsonIgnore]
+    public ClientInfoCredential? AdCredential { get; init; }
+    [JsonIgnore]
+    public string AdUsernameDisplay => !string.IsNullOrWhiteSpace(AdUsername)
+        ? AdUsername
+        : AdCredential?.Username ?? string.Empty;
+    [JsonIgnore]
+    public ClientInfoSecretSummary? AdPassword => AdCredential?.Secrets
+        .FirstOrDefault(secret => secret.IsCurrent
+            && secret.SecretType.Equals("Password", StringComparison.OrdinalIgnoreCase))
+        ?? AdCredential?.Secrets.FirstOrDefault(secret => secret.IsCurrent);
 }
 
 public sealed record ClientInfoResource

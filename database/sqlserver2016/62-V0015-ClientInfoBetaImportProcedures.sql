@@ -941,7 +941,8 @@ BEGIN
                     INSERT INTO [tb_client].[People]
                     (
                         [ClientId],[LocationId],[LocalKey],[DisplayName],
-                        [RoleDepartment],[Email],[Phone],[MobilePhone],[ContactType],
+                        [RoleDepartment],[AdUsername],[Email],[HasMicrosoft365],
+                        [Microsoft365License],[PcName],[Phone],[MobilePhone],[ContactType],
                         [IsPrimary],[ReviewStatus],[CreatedByWindowsSid],
                         [UpdatedByWindowsSid],[CreatedAtUtc],[UpdatedAtUtc]
                     )
@@ -950,7 +951,11 @@ BEGIN
                         @ClientId,@LocationId,@LocalKey,
                         JSON_VALUE(@PayloadJson,N'$.displayName'),
                         NULLIF(JSON_VALUE(@PayloadJson,N'$.roleDepartment'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.adUsername'),N''),
                         NULLIF(JSON_VALUE(@PayloadJson,N'$.email'),N''),
+                        COALESCE(TRY_CONVERT(bit,JSON_VALUE(@PayloadJson,N'$.hasMicrosoft365')),0),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.microsoft365License'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.pcName'),N''),
                         NULLIF(JSON_VALUE(@PayloadJson,N'$.phone'),N''),
                         NULLIF(JSON_VALUE(@PayloadJson,N'$.mobilePhone'),N''),
                         NULLIF(JSON_VALUE(@PayloadJson,N'$.contactType'),N''),
@@ -965,7 +970,14 @@ BEGIN
                         [LocationId]=@LocationId,
                         [DisplayName]=JSON_VALUE(@PayloadJson,N'$.displayName'),
                         [RoleDepartment]=NULLIF(JSON_VALUE(@PayloadJson,N'$.roleDepartment'),N''),
+                        [AdUsername]=NULLIF(JSON_VALUE(@PayloadJson,N'$.adUsername'),N''),
                         [Email]=NULLIF(JSON_VALUE(@PayloadJson,N'$.email'),N''),
+                        [HasMicrosoft365]=COALESCE(
+                            TRY_CONVERT(bit,JSON_VALUE(@PayloadJson,N'$.hasMicrosoft365')),
+                            0),
+                        [Microsoft365License]=NULLIF(
+                            JSON_VALUE(@PayloadJson,N'$.microsoft365License'),N''),
+                        [PcName]=NULLIF(JSON_VALUE(@PayloadJson,N'$.pcName'),N''),
                         [Phone]=NULLIF(JSON_VALUE(@PayloadJson,N'$.phone'),N''),
                         [MobilePhone]=NULLIF(JSON_VALUE(@PayloadJson,N'$.mobilePhone'),N''),
                         [ContactType]=NULLIF(JSON_VALUE(@PayloadJson,N'$.contactType'),N''),
