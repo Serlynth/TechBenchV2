@@ -45,6 +45,33 @@ public sealed class KeyboardListNavigationTests
             "ClientSearchMatcher.Matches(",
             viewModel,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "BeginEditorTicketSelectionLoad();",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "await _ticketProvider.SearchTicketsAsync(",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CancelEditorTicketSelectionLoad();",
+            viewModel,
+            StringComparison.Ordinal);
+
+        var selectMethodStart = viewModel.IndexOf(
+            "private void SelectEditorClient(object? parameter)",
+            StringComparison.Ordinal);
+        var selectMethodEnd = viewModel.IndexOf(
+            "private void OpenWhdTicket(object? parameter)",
+            selectMethodStart,
+            StringComparison.Ordinal);
+        Assert.True(selectMethodStart >= 0);
+        Assert.True(selectMethodEnd > selectMethodStart);
+        var selectMethod = viewModel[selectMethodStart..selectMethodEnd];
+        Assert.DoesNotContain(
+            "RefreshEditorTickets();",
+            selectMethod,
+            StringComparison.Ordinal);
         Assert.DoesNotContain(
             "SearchClientsAsync(EditorClientFilterText)",
             viewModel,
