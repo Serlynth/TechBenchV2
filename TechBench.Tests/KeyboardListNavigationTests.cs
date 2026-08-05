@@ -15,15 +15,19 @@ public sealed class KeyboardListNavigationTests
             xaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Event=\"PreviewKeyDown\" Handler=\"EditorClientComboBox_PreviewKeyDown\"",
-            xaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
             "KeyboardListNavigation.GetNextIndex",
             codeBehind,
             StringComparison.Ordinal);
         Assert.Contains(
-            "TryGetFocusedEditorClientOption(comboBox)",
+            "HighlightEditorClientOption(comboBox, nextIndex)",
+            codeBehind,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "SetCurrentValue(WpfComboBox.IsDropDownOpenProperty, true)",
+            codeBehind,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Keyboard.Focus(container)",
             codeBehind,
             StringComparison.Ordinal);
         Assert.Contains(
