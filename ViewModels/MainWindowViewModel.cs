@@ -38,6 +38,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         Interval = TimeSpan.FromMilliseconds(150)
     };
+    private CancellationTokenSource? _editorTicketSelectionLoadCancellation;
+    private int _editorTicketSelectionLoadVersion;
     private readonly HashSet<string> _knownWhdTicketKeys = new(StringComparer.OrdinalIgnoreCase);
     private string _currentSection = "Today";
     private string _techBenchSection = "Today";
@@ -1608,6 +1610,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void RefreshEditorTickets(int? preferredTicketId = null)
     {
+        CancelEditorTicketSelectionLoad();
         var selectedTicketId = preferredTicketId ?? (Editor.SelectedTicket is { Id: > 0 } ? Editor.SelectedTicket.Id : null);
         var selectedClient = Editor.SelectedClient;
         var wasSynchronizing = _isSynchronizingEditorReferences;
@@ -1666,6 +1669,141 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             TryAutoMatchSageCustomerForTicket(Editor.SelectedTicket);
             ChangeTicketStatusCommand.RaiseCanExecuteChanged();
         }
+    }
+
+    private void BeginEditorTicketSelectionLoad()
+    {
+        CancelEditorTicketSelectionLoad();
+        if (Editor.SelectedClient is not { } selectedClient)
+        {
+            RefreshEditorTickets();
+            return;
+        }
+
+        var requestVersion = ++_editorTicketSelectionLoadVersion;
+        var cancellation = new CancellationTokenSource();
+        _editorTicketSelectionLoadCancellation = cancellation;
+        ApplyEditorTicketSelectionResults(
+            selectedClient.Id,
+            [],
+            markLoaded: false);
+        _ = LoadEditorTicketSelectionAsync(
+            selectedClient.Id,
+            requestVersion,
+            cancellation);
+    }
+
+    private async Task LoadEditorTicketSelectionAsync(
+        int clientId,
+        int requestVersion,
+        CancellationTokenSource cancellation)
+    {
+        try
+        {
+            var tickets = await _ticketProvider.SearchTicketsAsync(
+                clientId,
+                null,
+                cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            if (_isDisposed
+                || requestVersion != _editorTicketSelectionLoadVersion
+                || Editor.SelectedClient?.Id != clientId)
+            {
+                return;
+            }
+
+            ApplyEditorTicketSelectionResults(
+                clientId,
+                tickets,
+                markLoaded: true);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // A newer client selection owns the ticket list now.
+        }
+        catch (OperationCanceledException)
+        {
+            if (!_isDisposed
+                && requestVersion == _editorTicketSelectionLoadVersion
+                && Editor.SelectedClient?.Id == clientId)
+            {
+                StatusMessage =
+                    "The client was selected, but its ticket list timed out while loading.";
+            }
+        }
+        catch (Exception ex) when (
+            ex is SqlException
+                or InvalidOperationException
+                or TimeoutException)
+        {
+            if (!_isDisposed
+                && requestVersion == _editorTicketSelectionLoadVersion
+                && Editor.SelectedClient?.Id == clientId)
+            {
+                StatusMessage =
+                    $"The client was selected, but its ticket list could not be loaded: {ex.Message}";
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(
+                    _editorTicketSelectionLoadCancellation,
+                    cancellation))
+            {
+                _editorTicketSelectionLoadCancellation = null;
+            }
+
+            cancellation.Dispose();
+        }
+    }
+
+    private void ApplyEditorTicketSelectionResults(
+        int clientId,
+        IReadOnlyList<Ticket> tickets,
+        bool markLoaded)
+    {
+        if (Editor.SelectedClient?.Id != clientId)
+        {
+            return;
+        }
+
+        var wasSynchronizing = _isSynchronizingEditorReferences;
+        _isSynchronizingEditorReferences = true;
+        try
+        {
+            Editor.RunWithoutDirtyTracking(() =>
+            {
+                var noTicket = CreateNoTicketOption(clientId);
+                TicketsForEditor.Clear();
+                TicketsForEditor.Add(noTicket);
+                foreach (var ticket in tickets)
+                {
+                    TicketsForEditor.Add(ticket);
+                }
+
+                _editorTicketOptionsClientId = markLoaded ? clientId : null;
+                Editor.SelectedTicket = noTicket;
+            });
+        }
+        finally
+        {
+            _isSynchronizingEditorReferences = wasSynchronizing;
+        }
+
+        if (!wasSynchronizing)
+        {
+            SelectedTicketStatus = ResolveTicketStatusOption(
+                Editor.SelectedTicket);
+            TryAutoMatchSageCustomerForTicket(Editor.SelectedTicket);
+            ChangeTicketStatusCommand.RaiseCanExecuteChanged();
+        }
+    }
+
+    private void CancelEditorTicketSelectionLoad()
+    {
+        _editorTicketSelectionLoadVersion++;
+        _editorTicketSelectionLoadCancellation?.Cancel();
+        _editorTicketSelectionLoadCancellation = null;
     }
 
     private void RefreshTicketList()
@@ -3152,7 +3290,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         Editor.SelectedClient = client;
         SyncEditorClientFilterText(client.DisplayName);
         IsEditorClientDropDownOpen = false;
-        RefreshEditorTickets();
         SaveEntryCommand.RaiseCanExecuteChanged();
     }
 
@@ -3646,7 +3783,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             && e.PropertyName == nameof(WorkEntryEditorViewModel.SelectedClient))
         {
             SyncEditorClientFilterText(Editor.SelectedClient?.DisplayName ?? string.Empty);
-            RefreshEditorTickets();
+            BeginEditorTicketSelectionLoad();
         }
 
         if (!_isSynchronizingEditorReferences
@@ -4088,6 +4225,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         DisposeAdminCenter();
         DisposeNoteFeatures();
         Updates.Dispose();
+        CancelEditorTicketSelectionLoad();
         _editorClientSearchTimer.Stop();
         _editorClientSearchTimer.Tick -= HandleEditorClientSearchTimerTick;
         _sharedDataRefreshTimer.Stop();
