@@ -11,7 +11,15 @@ public sealed class KeyboardListNavigationTests
         var codeBehind = ReadRepositoryFile("MainWindow.xaml.cs");
 
         Assert.Contains(
-            "PreviewKeyDown=\"EditorClientComboBox_PreviewKeyDown\"",
+            "x:Name=\"EditorClientSearchTextBox\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "x:Name=\"EditorClientSuggestionsPopup\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "x:Name=\"EditorClientSuggestionsListBox\"",
             xaml,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -19,20 +27,16 @@ public sealed class KeyboardListNavigationTests
             codeBehind,
             StringComparison.Ordinal);
         Assert.Contains(
-            "HighlightEditorClientOption(comboBox, nextIndex)",
-            codeBehind,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "SetCurrentValue(WpfComboBox.IsDropDownOpenProperty, true)",
-            codeBehind,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "Keyboard.Focus(container)",
+            "EditorClientSuggestionsListBox.SelectedIndex = nextIndex",
             codeBehind,
             StringComparison.Ordinal);
         Assert.Contains(
             "viewModel.SelectEditorClientCommand.Execute(client)",
             codeBehind,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "EditorClientComboBox",
+            xaml + codeBehind,
             StringComparison.Ordinal);
     }
 
