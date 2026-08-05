@@ -50,6 +50,7 @@
     <Compile Remove="TechBench.SyncService.Tests\**\*.cs" />
     <Compile Remove="TechBench.WHD\**\*.cs" />
     <Compile Remove="Models\WhdConnectionSettings.cs" />
+    <Compile Remove="Models\WhdImageAttachmentPolicy.cs" />
     <Compile Remove="Models\WhdSyncResult.cs" />
     <Compile Remove="Providers\PostingResult.cs" />
     <Compile Remove="Providers\WhdRestClient.cs" />

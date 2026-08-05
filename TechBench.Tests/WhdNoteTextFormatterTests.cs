@@ -6,7 +6,7 @@ namespace TechBench.Tests;
 public sealed class WhdNoteTextFormatterTests
 {
     [Fact]
-    public void BuildsWhdNoteFromSageWhdAndIncludedPersonalMarkdown()
+    public void BuildsWhdNoteWithPlainPersonalNoteHeading()
     {
         var entry = new WorkEntry
         {
@@ -18,7 +18,7 @@ public sealed class WhdNoteTextFormatterTests
         var whdNote = WhdNoteTextFormatter.BuildWhdNoteText(entry);
 
         Assert.Equal(
-            "Installed updates.\r\n\r\nPersonal note (Markdown):\r\n- Rebooted\n- Verified VPN",
+            "Installed updates.\r\n\r\nPersonal note:\r\n- Rebooted\n- Verified VPN",
             whdNote);
     }
 
@@ -38,10 +38,21 @@ public sealed class WhdNoteTextFormatterTests
     public void SplitsWhdNoteBackIntoSageWhdAndPersonalNotes()
     {
         var split = WhdNoteTextFormatter.SplitWhdNoteText(
-            "Installed updates.\n\nPersonal note (Markdown):\n- Rebooted\n- Verified VPN");
+            "Installed updates.\n\nPersonal note:\n- Rebooted\n- Verified VPN");
 
         Assert.Equal("Installed updates.", split.SageWhdNote);
         Assert.Equal("- Rebooted\n- Verified VPN", split.PersonalNote);
+        Assert.True(split.IncludesPersonalNote);
+    }
+
+    [Fact]
+    public void SplitsPreviouslyPostedMarkdownPersonalNoteMarker()
+    {
+        var split = WhdNoteTextFormatter.SplitWhdNoteText(
+            "Installed updates.\n\nPersonal note (Markdown):\nLegacy personal note");
+
+        Assert.Equal("Installed updates.", split.SageWhdNote);
+        Assert.Equal("Legacy personal note", split.PersonalNote);
         Assert.True(split.IncludesPersonalNote);
     }
 

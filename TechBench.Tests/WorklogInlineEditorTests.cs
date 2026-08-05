@@ -68,6 +68,20 @@ public sealed class WorklogInlineEditorTests
         }
     }
 
+    [Fact]
+    public void PersonalNotesOfferTransientWhdImagesWithoutMarkdownLabels()
+    {
+        var xaml = ReadRepositoryFile("MainWindow.xaml");
+        var viewModel = ReadRepositoryFile("ViewModels", "MainWindowViewModel.cs");
+
+        Assert.Contains("x:Key=\"WhdImageAttachmentPickerTemplate\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("UploadWhdImagesCommand", xaml, StringComparison.Ordinal);
+        Assert.Contains("not stored in TechBench or SQL", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Personal Note (Markdown)", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Personal Note Markdown", xaml, StringComparison.Ordinal);
+        Assert.Contains("UploadTechNoteImagesAsync", viewModel, StringComparison.Ordinal);
+    }
+
     private static string ReadRepositoryFile(params string[] parts)
     {
         var current = AppContext.BaseDirectory;

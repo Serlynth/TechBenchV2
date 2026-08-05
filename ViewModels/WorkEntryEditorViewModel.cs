@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
+using System.IO;
 using TechBench.Models;
 
 namespace TechBench.ViewModels;
@@ -62,15 +63,23 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
     private bool _isDirty;
     private int _dirtyTrackingSuppression;
     private readonly ObservableCollection<TimeOption> _timeOptions;
+    private readonly ObservableCollection<PendingWhdImage> _pendingWhdImages = [];
 
     public WorkEntryEditorViewModel()
     {
         _timeOptions = BuildTimeOptions();
         TimeOptions = new ReadOnlyObservableCollection<TimeOption>(_timeOptions);
+        PendingWhdImages = new ReadOnlyObservableCollection<PendingWhdImage>(_pendingWhdImages);
+        _pendingWhdImages.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(HasPendingWhdImages));
+            OnPropertyChanged(nameof(PendingWhdImageSummary));
+        };
         PropertyChanged += HandleOwnPropertyChanged;
     }
 
     public ReadOnlyObservableCollection<TimeOption> TimeOptions { get; }
+    public ReadOnlyObservableCollection<PendingWhdImage> PendingWhdImages { get; }
 
     public int Id
     {
@@ -344,8 +353,15 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
     public string NoteCountLabel => $"{NoteWordCount} words | {NoteCharacterCount} characters";
     public bool HasOpenFollowUp => FollowUpState is FollowUpState.FollowUp or FollowUpState.Waiting;
     public string InternalNoteHeader => string.IsNullOrWhiteSpace(InternalNote)
-        ? "Personal Note (Markdown)"
-        : "Personal Note (Markdown, contains text)";
+        ? "Personal Note"
+        : "Personal Note (contains text)";
+    public bool HasPendingWhdImages => _pendingWhdImages.Count > 0;
+    public string PendingWhdImageSummary => _pendingWhdImages.Count switch
+    {
+        0 => "No images selected.",
+        1 => "1 image selected for WHD.",
+        _ => $"{_pendingWhdImages.Count} images selected for WHD."
+    };
 
     public bool WhdPosted
     {
@@ -464,6 +480,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
 
     public void LoadNew(DateTime workDate)
     {
+        ClearPendingWhdImages();
         RunWithoutDirtyTracking(() =>
         {
             Id = 0;
@@ -498,6 +515,11 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
 
     public void LoadFrom(WorkEntry entry, IReadOnlyList<Client> clients, IReadOnlyList<Ticket> tickets)
     {
+        if (Id != entry.Id)
+        {
+            ClearPendingWhdImages();
+        }
+
         RunWithoutDirtyTracking(() =>
         {
             Id = entry.Id;
@@ -564,6 +586,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
 
     public void LoadDraft(EditorDraft draft, IReadOnlyList<Client> clients, IReadOnlyList<Ticket> tickets)
     {
+        ClearPendingWhdImages();
         RunWithoutDirtyTracking(() =>
         {
             Id = draft.WorkEntryId;
@@ -591,6 +614,42 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
         });
         IsDirty = true;
     }
+
+    public int AddPendingWhdImages(IEnumerable<string> filePaths)
+    {
+        var added = 0;
+        foreach (var filePath in filePaths)
+        {
+            var fullPath = Path.GetFullPath(filePath);
+            if (_pendingWhdImages.Any(image =>
+                    image.FilePath.Equals(fullPath, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            _pendingWhdImages.Add(new PendingWhdImage(fullPath));
+            added++;
+        }
+
+        return added;
+    }
+
+    public void RemovePendingWhdImage(PendingWhdImage image) =>
+        _pendingWhdImages.Remove(image);
+
+    public void RemovePendingWhdImages(IEnumerable<string> filePaths)
+    {
+        var paths = new HashSet<string>(filePaths, StringComparer.OrdinalIgnoreCase);
+        for (var index = _pendingWhdImages.Count - 1; index >= 0; index--)
+        {
+            if (paths.Contains(_pendingWhdImages[index].FilePath))
+            {
+                _pendingWhdImages.RemoveAt(index);
+            }
+        }
+    }
+
+    public void ClearPendingWhdImages() => _pendingWhdImages.Clear();
 
     public void RunWithoutDirtyTracking(Action action)
     {

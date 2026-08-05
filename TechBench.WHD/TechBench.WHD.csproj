@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <Compile Include="..\Models\WhdConnectionSettings.cs" Link="Models\WhdConnectionSettings.cs" />
+    <Compile Include="..\Models\WhdImageAttachmentPolicy.cs" Link="Models\WhdImageAttachmentPolicy.cs" />
     <Compile Include="..\Models\WhdSyncResult.cs" Link="Models\WhdSyncResult.cs" />
     <Compile Include="..\Providers\PostingResult.cs" Link="Providers\PostingResult.cs" />
     <Compile Include="..\Providers\WhdRestClient.cs" Link="Providers\WhdRestClient.cs" />
