@@ -171,12 +171,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         AddWhdImagesCommand = new RelayCommand(_ => AddWhdImages(), _ => CanAddWhdImages());
         RemoveWhdImageCommand = new RelayCommand(RemoveWhdImage, parameter => parameter is PendingWhdImage && CanAddWhdImages());
         ClearWhdImagesCommand = new RelayCommand(_ => Editor.ClearPendingWhdImages(), _ => CanAddWhdImages() && Editor.HasPendingWhdImages);
-        UploadWhdImagesCommand = new AsyncRelayCommand(UploadWhdImagesAsync, _ => CanUploadWhdImages());
-        SyncWhdNoteCommand = new AsyncRelayCommand(SyncWhdNoteAsync, CanSyncWhdNote);
         PostSageCommand = new AsyncRelayCommand(PostSageAsync, CanPostSageEntry);
         LinkSageTicketCommand = new AsyncRelayCommand(LinkSageTicketAsync, CanLinkSageTicket);
         BatchPostWhdCommand = new AsyncRelayCommand(BatchPostWhdAsync, _ => CanWrite && !IsEntryOperationRunning);
-        MarkWhdPostedCommand = new RelayCommand(parameter => MarkPosted(parameter, "WHD"), CanMarkWhdPosted);
         OpenWhdTicketCommand = new RelayCommand(OpenWhdTicket, CanOpenWhdTicket);
         SelectCloseoutIssueCommand = new RelayCommand(SelectCloseoutIssue, parameter => parameter is CloseoutItem { HasIssue: true });
         SelectAllPostingQueueCommand = new RelayCommand(_ => SetPostingQueueSelection(true));
@@ -300,12 +297,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public RelayCommand AddWhdImagesCommand { get; }
     public RelayCommand RemoveWhdImageCommand { get; }
     public RelayCommand ClearWhdImagesCommand { get; }
-    public AsyncRelayCommand UploadWhdImagesCommand { get; }
-    public AsyncRelayCommand SyncWhdNoteCommand { get; }
     public AsyncRelayCommand PostSageCommand { get; }
     public AsyncRelayCommand LinkSageTicketCommand { get; }
     public AsyncRelayCommand BatchPostWhdCommand { get; }
-    public RelayCommand MarkWhdPostedCommand { get; }
     public RelayCommand OpenWhdTicketCommand { get; }
     public RelayCommand SelectCloseoutIssueCommand { get; }
     public RelayCommand SelectAllPostingQueueCommand { get; }
@@ -345,11 +339,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public bool IsEditorLocked => Editor.SagePosted;
     public bool IsEditorEditable => CanWrite && !IsEditorLocked && !IsEntryOperationRunning;
     public bool IsEditorReadOnly => !IsEditorEditable;
-    public string WhdPostActionLabel => Editor.WhdPosted ? "Update WHD Note" : "Post to WHD";
+    public string WhdPostActionLabel => Editor switch
+    {
+        { WhdPosted: true, HasPendingWhdImages: true } => "Update WHD Note + Images",
+        { WhdPosted: true } => "Update WHD Note",
+        { HasPendingWhdImages: true } => "Post Note + Images to WHD",
+        _ => "Post to WHD"
+    };
     public string DeleteEntryActionLabel => Editor.WhdPosted
         ? "Delete Entry and WHD Note..."
         : "Delete Entry...";
-    public bool ShowSendWhdImagesAction => Editor.WhdPosted && Editor.HasPendingWhdImages;
     public bool ShowOpenWhdAction => Editor.SelectedTicket is { Id: > 0 }
         || (Editor.UseOtherWhdTicket && IsValidWhdTicketNumber(Editor.ManualTicketNumber));
     public bool HasTodayEntries => Entries.Count > 0;
@@ -2366,37 +2365,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             : $"Editing {savedEntry.ClientDisplay} from worklog history.";
     }
 
-    private async Task SaveEntryAsync(object? parameter)
+    private Task SaveEntryAsync(object? parameter)
     {
         var savedEntry = SaveEditor();
         if (savedEntry is null)
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        if (savedEntry is { WhdPosted: true, SagePosted: false })
-        {
-            IsEntryOperationRunning = true;
-            EntryOperationText = "Synchronizing the Sage/WHD Note with WHD...";
-            try
-            {
-                var synchronized = await SynchronizeWhdEntryAsync(
-                    savedEntry,
-                    WhdSyncIntent.PushLocal,
-                    allowConflictPrompt: true);
-                if (!synchronized)
-                {
-                    return;
-                }
-            }
-            finally
-            {
-                EntryOperationText = string.Empty;
-                IsEntryOperationRunning = false;
-            }
-        }
-
-        StatusMessage = $"{StatusMessage} The saved entry remains open for posting or further edits.";
+        StatusMessage = $"{StatusMessage} This save is local to TechBench; use Post to create or update the WHD note.";
+        return Task.CompletedTask;
     }
 
     private WorkEntry? SaveEditor()
@@ -2592,7 +2570,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 StatusMessage = $"WHD deletion did not complete safely: {ex.Message}";
                 _dialogService.Error(
                     "Delete entry",
-                    $"{StatusMessage}\n\nThe TechBench entry was kept. If WHD removed the note before this error, use Sync WHD Note to verify it before deleting locally.");
+                    $"{StatusMessage}\n\nThe TechBench entry was kept. If WHD removed the note before this error, use Post > Update WHD Note to verify it before deleting locally.");
                 return;
             }
             finally
@@ -2819,44 +2797,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     private bool CanAddWhdImages() =>
-        CanWrite && !IsEntryOperationRunning;
-
-    private bool CanUploadWhdImages() =>
-        CanAddWhdImages()
-        && Editor is { Id: > 0, WhdPosted: true, HasPendingWhdImages: true };
-
-    private async Task UploadWhdImagesAsync(object? parameter)
-    {
-        var entry = _repository.GetWorkEntry(Editor.Id);
-        if (entry is null || !entry.WhdPosted)
-        {
-            StatusMessage = "Post and verify the WHD note before sending images separately.";
-            return;
-        }
-
-        if (!TryGetTrackedWhdNote(entry.Id, out _, out var techNoteId, out _, out var trackingError))
-        {
-            StatusMessage = trackingError;
-            _dialogService.Error("Attach images to WHD", trackingError);
-            return;
-        }
-
-        IsEntryOperationRunning = true;
-        EntryOperationText = $"Attaching {Editor.PendingWhdImages.Count} image(s) to the WHD note...";
-        try
-        {
-            var result = await _whdRestClient.UploadTechNoteImagesAsync(
-                BuildWhdConnectionSettings(),
-                techNoteId,
-                Editor.PendingWhdImages.Select(static image => image.FilePath).ToArray());
-            HandleWhdImageUploadResult(result);
-        }
-        finally
-        {
-            EntryOperationText = string.Empty;
-            IsEntryOperationRunning = false;
-        }
-    }
+        CanWrite && !Editor.SagePosted && !IsEntryOperationRunning;
 
     private void HandleWhdImageUploadResult(WhdAttachmentUploadResult result)
     {
@@ -2868,6 +2809,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 "Attach images to WHD",
                 $"{result.Message}\n\nFailed images remain selected so you can retry or attach them manually in WHD.");
         }
+    }
+
+    private async Task<WhdAttachmentUploadResult> UploadWhdImagesToTechNoteAsync(
+        int techNoteId,
+        IReadOnlyCollection<string> imagePaths)
+    {
+        EntryOperationText = $"Attaching {imagePaths.Count} image(s) to the WHD note...";
+        return await _whdRestClient.UploadTechNoteImagesAsync(
+            BuildWhdConnectionSettings(),
+            techNoteId,
+            imagePaths);
     }
 
     private async Task PostWhdAsync(object? parameter)
@@ -3096,11 +3048,36 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         entry = _repository.GetWorkEntry(entry.Id) ?? entry;
         if (destination == "WHD" && entry.WhdPosted)
         {
-            return await SynchronizeWhdEntryCoreAsync(
+            var synchronized = await SynchronizeWhdEntryCoreAsync(
                 entry,
                 WhdSyncIntent.PushLocal,
                 allowConflictPrompt: confirmAlreadyPosted,
-                refreshAfter: refreshAfter);
+                refreshAfter: false);
+            var finalMessage = StatusMessage;
+
+            if (synchronized && whdImagePaths is { Count: > 0 })
+            {
+                WhdAttachmentUploadResult uploadResult;
+                if (TryGetTrackedWhdNote(entry.Id, out _, out var techNoteId, out _, out var trackingError))
+                {
+                    uploadResult = await UploadWhdImagesToTechNoteAsync(techNoteId, whdImagePaths);
+                }
+                else
+                {
+                    uploadResult = WhdAttachmentUploadResult.Failed(trackingError, whdImagePaths);
+                }
+
+                HandleWhdImageUploadResult(uploadResult);
+                finalMessage = $"{finalMessage} {uploadResult.Message}".Trim();
+            }
+
+            if (refreshAfter)
+            {
+                RefreshAfterWhdSync(entry.Id, refreshAfter: true);
+            }
+
+            StatusMessage = finalMessage;
+            return synchronized;
         }
 
         var client = entry.ClientId.HasValue ? _repository.GetClient(entry.ClientId.Value) : null;
@@ -3230,11 +3207,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             WhdAttachmentUploadResult uploadResult;
             if (TryParseWhdTechNoteId(result.ExternalReference, out var techNoteId))
             {
-                EntryOperationText = $"Attaching {whdImagePaths.Count} image(s) to the WHD note...";
-                uploadResult = await _whdRestClient.UploadTechNoteImagesAsync(
-                    BuildWhdConnectionSettings(),
-                    techNoteId,
-                    whdImagePaths);
+                uploadResult = await UploadWhdImagesToTechNoteAsync(techNoteId, whdImagePaths);
             }
             else
             {
@@ -3309,43 +3282,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         return result.Success;
     }
 
-    private void MarkPosted(object? parameter, string destination)
-    {
-        var entry = ResolveEntry(parameter);
-        if (entry is null)
-        {
-            _dialogService.Error($"Mark {destination} posted", "Save the work entry before marking it posted.");
-            return;
-        }
-
-        if (entry.SagePosted)
-        {
-            StatusMessage = "Entries posted to Sage are permanently locked.";
-            return;
-        }
-
-        try
-        {
-            _repository.MarkWorkEntryPosted(
-                entry.Id,
-                destination,
-                $"Marked {destination} posted manually after external verification.");
-        }
-        catch (Exception ex) when (
-            ex is SqlException
-                or InvalidOperationException
-                or ArgumentException)
-        {
-            StatusMessage = $"Could not mark {destination} posted: {ex.Message}";
-            _dialogService.Error($"Mark {destination} posted", StatusMessage);
-            return;
-        }
-
-        RefreshAll();
-        SelectedEntry = Entries.FirstOrDefault(saved => saved.Id == entry.Id) ?? _repository.GetWorkEntry(entry.Id);
-        StatusMessage = $"Marked {destination} posted";
-    }
-
     private bool CanPostWhdEntry(object? parameter)
     {
         if (!CanWrite || IsEntryOperationRunning)
@@ -3375,13 +3311,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     private bool CanSaveEditor() => CanWrite && Editor.HasClientReference && IsEditorEditable;
-
-    private bool CanMarkWhdPosted(object? parameter)
-    {
-        return CanWrite && !IsEntryOperationRunning && (parameter is WorkEntry entry
-            ? entry is { Id: > 0, WhdPosted: false, SagePosted: false }
-            : Editor is { Id: > 0, WhdPosted: false, SagePosted: false });
-    }
 
     private bool CanDeleteEditorEntry() => CanWrite
         && Editor.Id > 0
@@ -4117,7 +4046,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             or nameof(WorkEntryEditorViewModel.SagePosted)
             or nameof(WorkEntryEditorViewModel.HasPendingWhdImages))
         {
-            OnPropertyChanged(nameof(ShowSendWhdImagesAction));
             RaiseEditorStateProperties();
         }
         else
@@ -4132,11 +4060,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         AddWhdImagesCommand.RaiseCanExecuteChanged();
         RemoveWhdImageCommand.RaiseCanExecuteChanged();
         ClearWhdImagesCommand.RaiseCanExecuteChanged();
-        UploadWhdImagesCommand.RaiseCanExecuteChanged();
-        SyncWhdNoteCommand.RaiseCanExecuteChanged();
         PostSageCommand.RaiseCanExecuteChanged();
         BatchPostWhdCommand.RaiseCanExecuteChanged();
-        MarkWhdPostedCommand.RaiseCanExecuteChanged();
         LinkSageTicketCommand.RaiseCanExecuteChanged();
         OpenWhdTicketCommand.RaiseCanExecuteChanged();
         RaiseEditorWorkflowCommandStates();
@@ -4150,7 +4075,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         AddWhdImagesCommand.RaiseCanExecuteChanged();
         RemoveWhdImageCommand.RaiseCanExecuteChanged();
         ClearWhdImagesCommand.RaiseCanExecuteChanged();
-        UploadWhdImagesCommand.RaiseCanExecuteChanged();
         InsertRecentNoteCommand.RaiseCanExecuteChanged();
         RaiseNoteLinkProperties();
     }
@@ -4164,7 +4088,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsEditorReadOnly));
         OnPropertyChanged(nameof(WhdPostActionLabel));
         OnPropertyChanged(nameof(DeleteEntryActionLabel));
-        OnPropertyChanged(nameof(ShowSendWhdImagesAction));
         OnPropertyChanged(nameof(ShowOpenWhdAction));
         OnPropertyChanged(nameof(WorkspaceStateLabel));
         RaiseEditorWorkflowCommandStates();

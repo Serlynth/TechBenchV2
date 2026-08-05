@@ -68,12 +68,6 @@
                                     Padding="9,5"
                                     Margin="6,0,0,0"
                                     Visibility="{Binding Editor.HasPendingWhdImages, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                            <Button Content="Send to WHD"
-                                    Command="{Binding UploadWhdImagesCommand}"
-                                    Style="{StaticResource PrimaryButtonStyle}"
-                                    Padding="9,5"
-                                    Margin="6,0,0,0"
-                                    Visibility="{Binding ShowSendWhdImagesAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         </StackPanel>
                     </Grid>
                     <ItemsControl ItemsSource="{Binding Editor.PendingWhdImages}"
@@ -104,7 +98,7 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <TextBlock Text="Temporary selection: images go directly to WHD and are not stored in TechBench or SQL."
+                    <TextBlock Text="Selected images are included with the next Post/Update WHD action and are not stored in TechBench or SQL."
                                Foreground="{DynamicResource MutedTextBrush}"
                                FontSize="10"
                                TextWrapping="Wrap"
@@ -703,7 +697,7 @@
                                     Style="{StaticResource PrimaryButtonStyle}"
                                     Padding="12,5"
                                     Margin="0,0,6,0"
-                                    ToolTip="Save and keep this entry open (Ctrl+S)" />
+                                    ToolTip="Save in TechBench and keep this entry open (Ctrl+S)" />
                             <Button Content="Post"
                                     Click="PostActionsButton_Click"
                                     Padding="12,5">
@@ -1743,7 +1737,7 @@
                                         <Button Content="Save"
                                                 Command="{Binding SaveEntryCommand}"
                                                 Style="{StaticResource EditorActionButtonStyle}"
-                                                ToolTip="Save and keep this entry open (Ctrl+S)" />
+                                                ToolTip="Save in TechBench and keep this entry open (Ctrl+S)" />
                                         <Button Content="Post"
                                                 Click="PostActionsButton_Click"
                                                 Style="{StaticResource EditorActionButtonStyle}"
@@ -1772,12 +1766,6 @@
                                                              DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                                     <MenuItem Header="Link Existing Sage Ticket..."
                                                               Command="{Binding LinkSageTicketCommand}"
-                                                              Style="{StaticResource EditorContextMenuItemStyle}" />
-                                                    <MenuItem Header="Sync WHD Note"
-                                                              Command="{Binding SyncWhdNoteCommand}"
-                                                              Style="{StaticResource EditorContextMenuItemStyle}" />
-                                                    <MenuItem Header="Mark WHD Posted (Manual)"
-                                                              Command="{Binding MarkWhdPostedCommand}"
                                                               Style="{StaticResource EditorContextMenuItemStyle}" />
                                                     <Separator />
                                                     <MenuItem Header="Duplicate Entry"

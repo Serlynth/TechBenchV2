@@ -26,7 +26,7 @@ public sealed class WorklogInlineEditorTests
         var xaml = ReadRepositoryFile("MainWindow.xaml");
         var viewModel = ReadRepositoryFile("ViewModels", "MainWindowViewModel.cs");
         var saveStart = viewModel.IndexOf(
-            "private async Task SaveEntryAsync",
+            "private Task SaveEntryAsync",
             StringComparison.Ordinal);
         var saveEnd = viewModel.IndexOf(
             "private WorkEntry? SaveEditor",
@@ -35,9 +35,10 @@ public sealed class WorklogInlineEditorTests
         var saveMethod = viewModel[saveStart..saveEnd];
 
         Assert.DoesNotContain("NewEntry();", saveMethod, StringComparison.Ordinal);
-        Assert.Contains("remains open for posting or further edits", saveMethod, StringComparison.Ordinal);
+        Assert.DoesNotContain("SynchronizeWhdEntryAsync", saveMethod, StringComparison.Ordinal);
+        Assert.Contains("This save is local to TechBench", saveMethod, StringComparison.Ordinal);
         Assert.Contains("The saved ticket stays selected for posting", xaml, StringComparison.Ordinal);
-        Assert.Contains("Save and keep this entry open (Ctrl+S)", xaml, StringComparison.Ordinal);
+        Assert.Contains("Save in TechBench and keep this entry open (Ctrl+S)", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -69,17 +70,43 @@ public sealed class WorklogInlineEditorTests
     }
 
     [Fact]
-    public void PersonalNotesOfferTransientWhdImagesWithoutMarkdownLabels()
+    public void WhdImagesUseTheSinglePostOrUpdateActionWithoutMarkdownLabels()
     {
         var xaml = ReadRepositoryFile("MainWindow.xaml");
         var viewModel = ReadRepositoryFile("ViewModels", "MainWindowViewModel.cs");
 
         Assert.Contains("x:Key=\"WhdImageAttachmentPickerTemplate\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("UploadWhdImagesCommand", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("UploadWhdImagesCommand", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Send to WHD", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Sync WHD Note", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Mark WHD Posted (Manual)", xaml, StringComparison.Ordinal);
+        Assert.Contains("next Post/Update WHD action", xaml, StringComparison.Ordinal);
         Assert.Contains("not stored in TechBench or SQL", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Personal Note (Markdown)", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Personal Note Markdown", xaml, StringComparison.Ordinal);
-        Assert.Contains("UploadTechNoteImagesAsync", viewModel, StringComparison.Ordinal);
+        Assert.Contains("UploadWhdImagesToTechNoteAsync", viewModel, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExistingWhdNoteUpdatesAlsoAttachSelectedImages()
+    {
+        var viewModel = ReadRepositoryFile("ViewModels", "MainWindowViewModel.cs");
+        var postedBranchStart = viewModel.IndexOf(
+            "if (destination == \"WHD\" && entry.WhdPosted)",
+            StringComparison.Ordinal);
+        var newPostBranchStart = viewModel.IndexOf(
+            "var client = entry.ClientId.HasValue",
+            postedBranchStart,
+            StringComparison.Ordinal);
+
+        Assert.True(postedBranchStart >= 0, "The existing WHD note branch was not found.");
+        Assert.True(newPostBranchStart > postedBranchStart, "The existing WHD note branch is incomplete.");
+
+        var postedBranch = viewModel[postedBranchStart..newPostBranchStart];
+        Assert.Contains("SynchronizeWhdEntryCoreAsync", postedBranch, StringComparison.Ordinal);
+        Assert.Contains("UploadWhdImagesToTechNoteAsync", postedBranch, StringComparison.Ordinal);
+        Assert.Contains("HandleWhdImageUploadResult", postedBranch, StringComparison.Ordinal);
+        Assert.Contains("RefreshAfterWhdSync", postedBranch, StringComparison.Ordinal);
     }
 
     [Fact]

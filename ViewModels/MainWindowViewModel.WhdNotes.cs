@@ -23,48 +23,6 @@ public sealed partial class MainWindowViewModel
         PullRemote
     }
 
-    private async Task SyncWhdNoteAsync(object? parameter)
-    {
-        var entry = ResolveEntry(parameter);
-        if (entry is null)
-        {
-            StatusMessage = "Save the entry before synchronizing its WHD note.";
-            return;
-        }
-
-        var ownsOperationState = !IsEntryOperationRunning;
-        if (ownsOperationState)
-        {
-            IsEntryOperationRunning = true;
-        }
-
-        EntryOperationText = "Reading the exact Sage/WHD Note from WHD...";
-        try
-        {
-            await SynchronizeWhdEntryAsync(entry, WhdSyncIntent.PullRemote, allowConflictPrompt: true);
-        }
-        finally
-        {
-            if (ownsOperationState)
-            {
-                EntryOperationText = string.Empty;
-                IsEntryOperationRunning = false;
-            }
-        }
-    }
-
-    private bool CanSyncWhdNote(object? parameter)
-    {
-        if (!CanWrite || IsEntryOperationRunning)
-        {
-            return false;
-        }
-
-        return parameter is WorkEntry entry
-            ? entry is { Id: > 0, HasTicket: true, WhdPosted: true, SagePosted: false }
-            : Editor is { Id: > 0, WhdPosted: true, SagePosted: false } && !Editor.HasNoTicket;
-    }
-
     private async Task<bool> SynchronizeWhdEntryAsync(
         WorkEntry entry,
         WhdSyncIntent intent,
