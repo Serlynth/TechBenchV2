@@ -1972,6 +1972,12 @@ BEGIN
             [UpdatedAtUtc] = SYSUTCDATETIME()
         WHERE [ClientId] = @SageClientId;
 
+        IF OBJECT_ID(N'tb_client.ReparentClientGraph', N'P') IS NOT NULL
+            EXEC [tb_client].[ReparentClientGraph]
+                @SourceClientId = @SageClientId,
+                @TargetClientId = @WhdClientId,
+                @ActorWindowsSid = @ActorSid;
+
         DELETE FROM [tb_data].[Clients]
         WHERE [Id] = @SageClientId
           AND [RowVersion] = @ExpectedSageRowVersion;
@@ -2168,6 +2174,12 @@ BEGIN
             [UpdatedByWindowsSid] = @ActorSid,
             [UpdatedAtUtc] = SYSUTCDATETIME()
         WHERE [ClientId] = @SourceWhdClientId;
+
+        IF OBJECT_ID(N'tb_client.ReparentClientGraph', N'P') IS NOT NULL
+            EXEC [tb_client].[ReparentClientGraph]
+                @SourceClientId = @SourceWhdClientId,
+                @TargetClientId = @TargetClientId,
+                @ActorWindowsSid = @ActorSid;
 
         DELETE FROM [tb_data].[Clients]
         WHERE [Id] = @SourceWhdClientId

@@ -156,6 +156,18 @@ public sealed class LocalPreferences
 
     public string WindowState { get; set; } = "Normal";
 
+    public double? ProfileWindowWidth { get; set; }
+
+    public double? ProfileWindowHeight { get; set; }
+
+    public string ProfileWindowState { get; set; } = "Normal";
+
+    public double PeopleLocationsSplitRatio { get; set; } = 0.46;
+
+    public List<double> LocationGridColumnWidths { get; set; } = [];
+
+    public List<double> PeopleGridColumnWidths { get; set; } = [];
+
     public string LastBenchModule { get; set; } = "TechBench";
 
     public string TechBenchWorkspace { get; set; } = "Today";
@@ -196,6 +208,19 @@ public sealed class LocalPreferences
             StringComparison.OrdinalIgnoreCase)
             ? "Maximized"
             : "Normal";
+        ProfileWindowState = ProfileWindowState.Equals(
+            "Maximized",
+            StringComparison.OrdinalIgnoreCase)
+            ? "Maximized"
+            : "Normal";
+        PeopleLocationsSplitRatio =
+            double.IsFinite(PeopleLocationsSplitRatio)
+            ? Math.Clamp(PeopleLocationsSplitRatio, 0.2, 0.8)
+            : 0.46;
+        LocationGridColumnWidths = NormalizeColumnWidths(
+            LocationGridColumnWidths);
+        PeopleGridColumnWidths = NormalizeColumnWidths(
+            PeopleGridColumnWidths);
         LastBenchModule = NormalizeBenchModule(LastBenchModule);
         TechBenchWorkspace = NormalizeWorkspace(TechBenchWorkspace, "Today");
         AdminBenchWorkspace = NormalizeWorkspace(
@@ -213,6 +238,10 @@ public sealed class LocalPreferences
                 V2AppUpdateService.InventoryBetaAvailable
                     ? V2AppUpdateService.InventoryBetaReleaseChannel
                     : V2AppUpdateService.StableReleaseChannel,
+            V2AppUpdateService.ClientInfoBetaReleaseChannel =>
+                V2AppUpdateService.ClientInfoBetaAvailable
+                    ? V2AppUpdateService.ClientInfoBetaReleaseChannel
+                    : V2AppUpdateService.StableReleaseChannel,
             _ => string.Empty
         };
         EquipmentTechnicianOrder = (EquipmentTechnicianOrder ?? [])
@@ -229,6 +258,13 @@ public sealed class LocalPreferences
             EquipmentTechnicianPriorityLoginName?.Trim() ?? string.Empty;
         return this;
     }
+
+    private static List<double> NormalizeColumnWidths(
+        IEnumerable<double>? widths) =>
+        (widths ?? [])
+            .Where(static width => double.IsFinite(width) && width is >= 40 and <= 1600)
+            .Take(40)
+            .ToList();
 
     private static string NormalizeBenchModule(string? value)
     {

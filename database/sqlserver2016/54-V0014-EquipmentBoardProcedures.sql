@@ -505,6 +505,11 @@ BEGIN
         END;
 
         IF ISNULL(@PreviousClientId, -1) <> ISNULL(@ClientId, -1)
+            UPDATE [tb_client].[ClientAttachments]
+            SET [EquipmentId]=NULL
+            WHERE [EquipmentId]=@EquipmentId;
+
+        IF ISNULL(@PreviousClientId, -1) <> ISNULL(@ClientId, -1)
            OR ISNULL(@PreviousClientUserId, -1) <> ISNULL(@ClientUserId, -1)
            OR ISNULL(@PreviousLocationName, N'') <> ISNULL(@LocationName, N'')
         BEGIN
@@ -939,6 +944,10 @@ BEGIN
 
     IF @@ROWCOUNT = 0
         THROW 52210, N'The equipment record changed or no longer exists. Refresh and try again.', 1;
+
+    UPDATE [tb_client].[ClientAttachments]
+    SET [EquipmentId]=NULL
+    WHERE [EquipmentId]=@EquipmentId;
 END;
 GO
 

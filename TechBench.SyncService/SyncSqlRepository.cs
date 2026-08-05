@@ -517,6 +517,14 @@ public sealed partial class SyncSqlRepository
             : Convert.ToInt32(reader.GetValue(ordinal), CultureInfo.InvariantCulture);
     }
 
+    private static long GetInt64(SqlDataReader reader, string name, long fallback = 0)
+    {
+        var ordinal = FindOrdinal(reader, name);
+        return ordinal < 0 || reader.IsDBNull(ordinal)
+            ? fallback
+            : Convert.ToInt64(reader.GetValue(ordinal), CultureInfo.InvariantCulture);
+    }
+
     private static Guid GetGuid(SqlDataReader reader, string name)
     {
         var ordinal = FindOrdinal(reader, name);

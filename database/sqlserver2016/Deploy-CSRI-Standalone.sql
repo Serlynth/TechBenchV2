@@ -3777,6 +3777,1198 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 36-V0015-ClientInfoBetaSchema.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+/*
+    Client Info beta is deliberately an additive schema-15 extension.
+    Stable 0.6.1 clients reject schema versions above 15, so this migration
+    records its own ID while leaving the database's maximum schema version at
+    15. Stable clients ignore these objects and continue to use FireDrill.
+*/
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.EquipmentAnyDesk.0015'
+      AND [SchemaVersion] = 15
+)
+BEGIN
+    RAISERROR(N'Schema version 15 must be installed before the Client Info beta extension.', 16, 1);
+    RETURN;
+END;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF SCHEMA_ID(N'tb_client') IS NULL
+        EXEC(N'CREATE SCHEMA [tb_client] AUTHORIZATION [dbo];');
+
+    IF SCHEMA_ID(N'tb_import') IS NULL
+        EXEC(N'CREATE SCHEMA [tb_import] AUTHORIZATION [dbo];');
+
+    IF DATABASE_PRINCIPAL_ID(N'tb_role_client_info_editor') IS NULL
+        CREATE ROLE [tb_role_client_info_editor] AUTHORIZATION [dbo];
+
+    IF DATABASE_PRINCIPAL_ID(N'tb_role_client_secret_reader') IS NULL
+        CREATE ROLE [tb_role_client_secret_reader] AUTHORIZATION [dbo];
+
+    IF DATABASE_PRINCIPAL_ID(N'tb_role_client_secret_editor') IS NULL
+        CREATE ROLE [tb_role_client_secret_editor] AUTHORIZATION [dbo];
+
+    IF DATABASE_PRINCIPAL_ID(N'tb_role_client_migration_operator') IS NULL
+        CREATE ROLE [tb_role_client_migration_operator] AUTHORIZATION [dbo];
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.certificates
+        WHERE [name] = N'tb_ClientSecretCertificate'
+    )
+        CREATE CERTIFICATE [tb_ClientSecretCertificate]
+            WITH SUBJECT = N'TechBench canonical client secret encryption';
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.symmetric_keys
+        WHERE [name] = N'tb_ClientSecretKey'
+    )
+        CREATE SYMMETRIC KEY [tb_ClientSecretKey]
+            WITH ALGORITHM = AES_256
+            ENCRYPTION BY CERTIFICATE [tb_ClientSecretCertificate];
+
+    IF COL_LENGTH(N'tb_inventory.Equipment', N'ClientInfoLocalKey') IS NULL
+        EXEC sys.sp_executesql N'
+            ALTER TABLE [tb_inventory].[Equipment]
+            ADD [ClientInfoLocalKey] nvarchar(120) NULL;';
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.indexes
+        WHERE [object_id]=OBJECT_ID(N'tb_inventory.Equipment')
+          AND [name]=N'UX_Equipment_ClientInfoLocalKey'
+    )
+        EXEC sys.sp_executesql N'
+            CREATE UNIQUE INDEX [UX_Equipment_ClientInfoLocalKey]
+            ON [tb_inventory].[Equipment]([ClientId],[ClientInfoLocalKey])
+            WHERE [ClientId] IS NOT NULL
+              AND [ClientInfoLocalKey] IS NOT NULL;';
+
+    IF OBJECT_ID(N'tb_client.ClientProfiles', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_client].[ClientProfiles]
+        (
+            [ClientId] int NOT NULL,
+            [Summary] nvarchar(2000) NULL,
+            [ReviewStatus] nvarchar(24) NOT NULL
+                CONSTRAINT [DF_ClientProfiles_ReviewStatus] DEFAULT (N'Unverified'),
+            [IsLive] bit NOT NULL
+                CONSTRAINT [DF_ClientProfiles_IsLive] DEFAULT (0),
+            [LastVerifiedAtUtc] datetime2(3) NULL,
+            [LastVerifiedByWindowsSid] varbinary(85) NULL,
+            [CreatedByWindowsSid] varbinary(85) NOT NULL,
+            [UpdatedByWindowsSid] varbinary(85) NOT NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientProfiles_CreatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientProfiles_UpdatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_ClientProfiles] PRIMARY KEY CLUSTERED ([ClientId]),
+            CONSTRAINT [FK_ClientProfiles_Client]
+                FOREIGN KEY ([ClientId]) REFERENCES [tb_data].[Clients]([Id]),
+            CONSTRAINT [FK_ClientProfiles_VerifiedBy]
+                FOREIGN KEY ([LastVerifiedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_ClientProfiles_CreatedBy]
+                FOREIGN KEY ([CreatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_ClientProfiles_UpdatedBy]
+                FOREIGN KEY ([UpdatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [CK_ClientProfiles_ReviewStatus]
+                CHECK ([ReviewStatus] IN
+                    (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview'))
+        );
+    END;
+
+    IF OBJECT_ID(N'tb_client.Locations', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_client].[Locations]
+        (
+            [LocationId] bigint IDENTITY(1,1) NOT NULL,
+            [ClientId] int NOT NULL,
+            [LocalKey] nvarchar(120) NULL,
+            [Name] nvarchar(240) NOT NULL,
+            [LocationType] nvarchar(80) NULL,
+            [Address1] nvarchar(240) NULL,
+            [Address2] nvarchar(240) NULL,
+            [City] nvarchar(120) NULL,
+            [StateProvince] nvarchar(80) NULL,
+            [PostalCode] nvarchar(40) NULL,
+            [MainPhone] nvarchar(80) NULL,
+            [TimeZoneId] nvarchar(120) NULL,
+            [IsPrimary] bit NOT NULL
+                CONSTRAINT [DF_ClientLocations_IsPrimary] DEFAULT (0),
+            [ReviewStatus] nvarchar(24) NOT NULL
+                CONSTRAINT [DF_ClientLocations_ReviewStatus] DEFAULT (N'Unverified'),
+            [IsActive] bit NOT NULL
+                CONSTRAINT [DF_ClientLocations_IsActive] DEFAULT (1),
+            [LastVerifiedAtUtc] datetime2(3) NULL,
+            [CreatedByWindowsSid] varbinary(85) NOT NULL,
+            [UpdatedByWindowsSid] varbinary(85) NOT NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientLocations_CreatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientLocations_UpdatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_ClientLocations] PRIMARY KEY CLUSTERED ([LocationId]),
+            CONSTRAINT [FK_ClientLocations_Client]
+                FOREIGN KEY ([ClientId]) REFERENCES [tb_data].[Clients]([Id]),
+            CONSTRAINT [FK_ClientLocations_CreatedBy]
+                FOREIGN KEY ([CreatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_ClientLocations_UpdatedBy]
+                FOREIGN KEY ([UpdatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [CK_ClientLocations_Name]
+                CHECK (LEN(LTRIM(RTRIM([Name]))) > 0),
+            CONSTRAINT [CK_ClientLocations_ReviewStatus]
+                CHECK ([ReviewStatus] IN
+                    (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview'))
+        );
+
+        CREATE INDEX [IX_ClientLocations_Client]
+            ON [tb_client].[Locations]
+                ([ClientId], [IsActive], [IsPrimary] DESC, [Name], [LocationId]);
+
+        CREATE UNIQUE INDEX [UX_ClientLocations_LocalKey]
+            ON [tb_client].[Locations]([ClientId], [LocalKey])
+            WHERE [LocalKey] IS NOT NULL;
+    END;
+
+    IF OBJECT_ID(N'tb_client.People', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_client].[People]
+        (
+            [PersonId] bigint IDENTITY(1,1) NOT NULL,
+            [ClientId] int NOT NULL,
+            [LocationId] bigint NULL,
+            [LocalKey] nvarchar(120) NULL,
+            [DisplayName] nvarchar(240) NOT NULL,
+            [RoleDepartment] nvarchar(240) NULL,
+            [Email] nvarchar(320) NULL,
+            [Phone] nvarchar(80) NULL,
+            [MobilePhone] nvarchar(80) NULL,
+            [ContactType] nvarchar(80) NULL,
+            [IsPrimary] bit NOT NULL
+                CONSTRAINT [DF_ClientPeople_IsPrimary] DEFAULT (0),
+            [ReviewStatus] nvarchar(24) NOT NULL
+                CONSTRAINT [DF_ClientPeople_ReviewStatus] DEFAULT (N'Unverified'),
+            [IsActive] bit NOT NULL
+                CONSTRAINT [DF_ClientPeople_IsActive] DEFAULT (1),
+            [LastVerifiedAtUtc] datetime2(3) NULL,
+            [CreatedByWindowsSid] varbinary(85) NOT NULL,
+            [UpdatedByWindowsSid] varbinary(85) NOT NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientPeople_CreatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientPeople_UpdatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_ClientPeople] PRIMARY KEY CLUSTERED ([PersonId]),
+            CONSTRAINT [FK_ClientPeople_Client]
+                FOREIGN KEY ([ClientId]) REFERENCES [tb_data].[Clients]([Id]),
+            CONSTRAINT [FK_ClientPeople_Location]
+                FOREIGN KEY ([LocationId]) REFERENCES [tb_client].[Locations]([LocationId]),
+            CONSTRAINT [FK_ClientPeople_CreatedBy]
+                FOREIGN KEY ([CreatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_ClientPeople_UpdatedBy]
+                FOREIGN KEY ([UpdatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [CK_ClientPeople_Name]
+                CHECK (LEN(LTRIM(RTRIM([DisplayName]))) > 0),
+            CONSTRAINT [CK_ClientPeople_ReviewStatus]
+                CHECK ([ReviewStatus] IN
+                    (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview'))
+        );
+
+        CREATE INDEX [IX_ClientPeople_Client]
+            ON [tb_client].[People]
+                ([ClientId], [IsActive], [IsPrimary] DESC, [DisplayName], [PersonId]);
+
+        CREATE UNIQUE INDEX [UX_ClientPeople_LocalKey]
+            ON [tb_client].[People]([ClientId], [LocalKey])
+            WHERE [LocalKey] IS NOT NULL;
+    END;
+
+    IF OBJECT_ID(N'tb_client.Resources', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_client].[Resources]
+        (
+            [ResourceId] bigint IDENTITY(1,1) NOT NULL,
+            [ClientId] int NOT NULL,
+            [LocationId] bigint NULL,
+            [ParentResourceId] bigint NULL,
+            [EquipmentId] bigint NULL,
+            [LocalKey] nvarchar(120) NULL,
+            [ResourceType] nvarchar(80) NOT NULL,
+            [Name] nvarchar(240) NOT NULL,
+            [Provider] nvarchar(160) NULL,
+            [AddressOrUrl] nvarchar(1000) NULL,
+            [Status] nvarchar(80) NULL,
+            [Notes] nvarchar(max) NULL,
+            [ReviewStatus] nvarchar(24) NOT NULL
+                CONSTRAINT [DF_ClientResources_ReviewStatus] DEFAULT (N'Unverified'),
+            [IsActive] bit NOT NULL
+                CONSTRAINT [DF_ClientResources_IsActive] DEFAULT (1),
+            [LastVerifiedAtUtc] datetime2(3) NULL,
+            [CreatedByWindowsSid] varbinary(85) NOT NULL,
+            [UpdatedByWindowsSid] varbinary(85) NOT NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientResources_CreatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientResources_UpdatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_ClientResources] PRIMARY KEY CLUSTERED ([ResourceId]),
+            CONSTRAINT [FK_ClientResources_Client]
+                FOREIGN KEY ([ClientId]) REFERENCES [tb_data].[Clients]([Id]),
+            CONSTRAINT [FK_ClientResources_Location]
+                FOREIGN KEY ([LocationId]) REFERENCES [tb_client].[Locations]([LocationId]),
+            CONSTRAINT [FK_ClientResources_Parent]
+                FOREIGN KEY ([ParentResourceId]) REFERENCES [tb_client].[Resources]([ResourceId]),
+            CONSTRAINT [FK_ClientResources_Equipment]
+                FOREIGN KEY ([EquipmentId]) REFERENCES [tb_inventory].[Equipment]([EquipmentId]),
+            CONSTRAINT [FK_ClientResources_CreatedBy]
+                FOREIGN KEY ([CreatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_ClientResources_UpdatedBy]
+                FOREIGN KEY ([UpdatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [CK_ClientResources_Type]
+                CHECK (LEN(LTRIM(RTRIM([ResourceType]))) > 0),
+            CONSTRAINT [CK_ClientResources_Name]
+                CHECK (LEN(LTRIM(RTRIM([Name]))) > 0),
+            CONSTRAINT [CK_ClientResources_ReviewStatus]
+                CHECK ([ReviewStatus] IN
+                    (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview'))
+        );
+
+        CREATE INDEX [IX_ClientResources_Client]
+            ON [tb_client].[Resources]
+                ([ClientId], [IsActive], [ResourceType], [Name], [ResourceId]);
+
+        CREATE UNIQUE INDEX [UX_ClientResources_LocalKey]
+            ON [tb_client].[Resources]([ClientId], [LocalKey])
+            WHERE [LocalKey] IS NOT NULL;
+    END;
+
+    IF OBJECT_ID(N'tb_client.ResourceFields', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_client].[ResourceFields]
+        (
+            [ResourceFieldId] bigint IDENTITY(1,1) NOT NULL,
+            [ResourceId] bigint NOT NULL,
+            [FieldKey] nvarchar(120) NOT NULL,
+            [FieldLabel] nvarchar(200) NOT NULL,
+            [ValueText] nvarchar(max) NULL,
+            [ValueType] nvarchar(24) NOT NULL
+                CONSTRAINT [DF_ClientResourceFields_ValueType] DEFAULT (N'Text'),
+            [SortOrder] int NOT NULL
+                CONSTRAINT [DF_ClientResourceFields_SortOrder] DEFAULT (0),
+            [UpdatedByWindowsSid] varbinary(85) NOT NULL,
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientResourceFields_UpdatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_ClientResourceFields] PRIMARY KEY CLUSTERED ([ResourceFieldId]),
+            CONSTRAINT [FK_ClientResourceFields_Resource]
+                FOREIGN KEY ([ResourceId])
+                REFERENCES [tb_client].[Resources]([ResourceId]) ON DELETE CASCADE,
+            CONSTRAINT [FK_ClientResourceFields_UpdatedBy]
+                FOREIGN KEY ([UpdatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [UX_ClientResourceFields_Key]
+                UNIQUE ([ResourceId], [FieldKey]),
+            CONSTRAINT [CK_ClientResourceFields_Key]
+                CHECK (LEN(LTRIM(RTRIM([FieldKey]))) > 0),
+            CONSTRAINT [CK_ClientResourceFields_Label]
+                CHECK (LEN(LTRIM(RTRIM([FieldLabel]))) > 0),
+            CONSTRAINT [CK_ClientResourceFields_Type]
+                CHECK ([ValueType] IN
+                    (N'Text', N'Number', N'Boolean', N'Date', N'Url', N'IpAddress'))
+        );
+    END;
+
+    IF OBJECT_ID(N'tb_client.Credentials', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_client].[Credentials]
+        (
+            [CredentialId] bigint IDENTITY(1,1) NOT NULL,
+            [ClientId] int NOT NULL,
+            [ResourceId] bigint NULL,
+            [PersonId] bigint NULL,
+            [LocalKey] nvarchar(120) NULL,
+            [Name] nvarchar(240) NOT NULL,
+            [Category] nvarchar(120) NULL,
+            [Username] nvarchar(500) NULL,
+            [LoginUrl] nvarchar(1000) NULL,
+            [Notes] nvarchar(1000) NULL,
+            [ReviewStatus] nvarchar(24) NOT NULL
+                CONSTRAINT [DF_ClientCredentials_ReviewStatus] DEFAULT (N'Unverified'),
+            [IsActive] bit NOT NULL
+                CONSTRAINT [DF_ClientCredentials_IsActive] DEFAULT (1),
+            [LastVerifiedAtUtc] datetime2(3) NULL,
+            [CreatedByWindowsSid] varbinary(85) NOT NULL,
+            [UpdatedByWindowsSid] varbinary(85) NOT NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientCredentials_CreatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientCredentials_UpdatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_ClientCredentials] PRIMARY KEY CLUSTERED ([CredentialId]),
+            CONSTRAINT [FK_ClientCredentials_Client]
+                FOREIGN KEY ([ClientId]) REFERENCES [tb_data].[Clients]([Id]),
+            CONSTRAINT [FK_ClientCredentials_Resource]
+                FOREIGN KEY ([ResourceId]) REFERENCES [tb_client].[Resources]([ResourceId]),
+            CONSTRAINT [FK_ClientCredentials_Person]
+                FOREIGN KEY ([PersonId]) REFERENCES [tb_client].[People]([PersonId]),
+            CONSTRAINT [FK_ClientCredentials_CreatedBy]
+                FOREIGN KEY ([CreatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_ClientCredentials_UpdatedBy]
+                FOREIGN KEY ([UpdatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [CK_ClientCredentials_Name]
+                CHECK (LEN(LTRIM(RTRIM([Name]))) > 0),
+            CONSTRAINT [CK_ClientCredentials_ReviewStatus]
+                CHECK ([ReviewStatus] IN
+                    (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview'))
+        );
+
+        CREATE INDEX [IX_ClientCredentials_Client]
+            ON [tb_client].[Credentials]
+                ([ClientId], [IsActive], [Category], [Name], [CredentialId]);
+
+        CREATE UNIQUE INDEX [UX_ClientCredentials_LocalKey]
+            ON [tb_client].[Credentials]([ClientId], [LocalKey])
+            WHERE [LocalKey] IS NOT NULL;
+    END;
+
+    IF OBJECT_ID(N'tb_client.CredentialSecrets', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_client].[CredentialSecrets]
+        (
+            [SecretId] bigint IDENTITY(1,1) NOT NULL,
+            [CredentialId] bigint NOT NULL,
+            [SecretType] nvarchar(80) NOT NULL,
+            [SecretLabel] nvarchar(200) NOT NULL,
+            [ValueEncrypted] varbinary(max) NOT NULL,
+            [IsCurrent] bit NOT NULL
+                CONSTRAINT [DF_ClientCredentialSecrets_IsCurrent] DEFAULT (1),
+            [LastVerifiedAtUtc] datetime2(3) NULL,
+            [CreatedByWindowsSid] varbinary(85) NOT NULL,
+            [UpdatedByWindowsSid] varbinary(85) NOT NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientCredentialSecrets_CreatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientCredentialSecrets_UpdatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_ClientCredentialSecrets] PRIMARY KEY CLUSTERED ([SecretId]),
+            CONSTRAINT [FK_ClientCredentialSecrets_Credential]
+                FOREIGN KEY ([CredentialId])
+                REFERENCES [tb_client].[Credentials]([CredentialId]) ON DELETE CASCADE,
+            CONSTRAINT [FK_ClientCredentialSecrets_CreatedBy]
+                FOREIGN KEY ([CreatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_ClientCredentialSecrets_UpdatedBy]
+                FOREIGN KEY ([UpdatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [UX_ClientCredentialSecrets_Type]
+                UNIQUE ([CredentialId], [SecretType], [SecretLabel]),
+            CONSTRAINT [CK_ClientCredentialSecrets_Type]
+                CHECK (LEN(LTRIM(RTRIM([SecretType]))) > 0),
+            CONSTRAINT [CK_ClientCredentialSecrets_Label]
+                CHECK (LEN(LTRIM(RTRIM([SecretLabel]))) > 0)
+        );
+    END;
+
+    IF OBJECT_ID(N'tb_client.ClientFacts', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_client].[ClientFacts]
+        (
+            [FactId] bigint IDENTITY(1,1) NOT NULL,
+            [ClientId] int NOT NULL,
+            [LocalKey] nvarchar(120) NULL,
+            [SectionName] nvarchar(120) NOT NULL,
+            [FieldLabel] nvarchar(200) NOT NULL,
+            [ValueText] nvarchar(max) NULL,
+            [ValueType] nvarchar(24) NOT NULL
+                CONSTRAINT [DF_ClientFacts_ValueType] DEFAULT (N'Text'),
+            [ReviewStatus] nvarchar(24) NOT NULL
+                CONSTRAINT [DF_ClientFacts_ReviewStatus] DEFAULT (N'Unverified'),
+            [SortOrder] int NOT NULL
+                CONSTRAINT [DF_ClientFacts_SortOrder] DEFAULT (0),
+            [IsActive] bit NOT NULL
+                CONSTRAINT [DF_ClientFacts_IsActive] DEFAULT (1),
+            [LastVerifiedAtUtc] datetime2(3) NULL,
+            [CreatedByWindowsSid] varbinary(85) NOT NULL,
+            [UpdatedByWindowsSid] varbinary(85) NOT NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientFacts_CreatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientFacts_UpdatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_ClientFacts] PRIMARY KEY CLUSTERED ([FactId]),
+            CONSTRAINT [FK_ClientFacts_Client]
+                FOREIGN KEY ([ClientId]) REFERENCES [tb_data].[Clients]([Id]),
+            CONSTRAINT [FK_ClientFacts_CreatedBy]
+                FOREIGN KEY ([CreatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_ClientFacts_UpdatedBy]
+                FOREIGN KEY ([UpdatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [CK_ClientFacts_Section]
+                CHECK (LEN(LTRIM(RTRIM([SectionName]))) > 0),
+            CONSTRAINT [CK_ClientFacts_Label]
+                CHECK (LEN(LTRIM(RTRIM([FieldLabel]))) > 0),
+            CONSTRAINT [CK_ClientFacts_Type]
+                CHECK ([ValueType] IN
+                    (N'Text', N'Number', N'Boolean', N'Date', N'Url', N'IpAddress')),
+            CONSTRAINT [CK_ClientFacts_ReviewStatus]
+                CHECK ([ReviewStatus] IN
+                    (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview'))
+        );
+
+        CREATE INDEX [IX_ClientFacts_Client]
+            ON [tb_client].[ClientFacts]
+                ([ClientId], [IsActive], [SectionName], [SortOrder], [FactId]);
+
+        CREATE UNIQUE INDEX [UX_ClientFacts_LocalKey]
+            ON [tb_client].[ClientFacts]([ClientId], [LocalKey])
+            WHERE [LocalKey] IS NOT NULL;
+    END;
+
+    IF OBJECT_ID(N'tb_client.SourceDocuments', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_client].[SourceDocuments]
+        (
+            [SourceDocumentId] bigint IDENTITY(1,1) NOT NULL,
+            [ClientId] int NOT NULL,
+            [SourceKind] nvarchar(40) NOT NULL,
+            [DisplayName] nvarchar(260) NOT NULL,
+            [ContentSha256] binary(32) NOT NULL,
+            [SourceModifiedAtUtc] datetime2(3) NULL,
+            [ObservedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientSourceDocuments_ObservedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [CreatedByWindowsSid] varbinary(85) NOT NULL,
+            CONSTRAINT [PK_ClientSourceDocuments] PRIMARY KEY CLUSTERED ([SourceDocumentId]),
+            CONSTRAINT [FK_ClientSourceDocuments_Client]
+                FOREIGN KEY ([ClientId]) REFERENCES [tb_data].[Clients]([Id]),
+            CONSTRAINT [FK_ClientSourceDocuments_CreatedBy]
+                FOREIGN KEY ([CreatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [UX_ClientSourceDocuments_Hash]
+                UNIQUE ([ClientId], [SourceKind], [ContentSha256]),
+            CONSTRAINT [CK_ClientSourceDocuments_Kind]
+                CHECK ([SourceKind] IN
+                    (N'Workbook', N'FireDrill', N'Manual', N'WHD', N'Sage', N'LegacySql'))
+        );
+    END;
+
+    IF OBJECT_ID(N'tb_client.RecordProvenance', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_client].[RecordProvenance]
+        (
+            [RecordProvenanceId] bigint IDENTITY(1,1) NOT NULL,
+            [ClientId] int NOT NULL,
+            [EntityType] nvarchar(80) NOT NULL,
+            [EntityId] bigint NOT NULL,
+            [FieldKey] nvarchar(120) NULL,
+            [SourceDocumentId] bigint NULL,
+            [SourceSheet] nvarchar(128) NULL,
+            [SourceAddress] nvarchar(40) NULL,
+            [ReviewStatus] nvarchar(24) NOT NULL,
+            [RecordedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientRecordProvenance_RecordedAtUtc]
+                DEFAULT (SYSUTCDATETIME()),
+            [RecordedByWindowsSid] varbinary(85) NOT NULL,
+            CONSTRAINT [PK_ClientRecordProvenance]
+                PRIMARY KEY CLUSTERED ([RecordProvenanceId]),
+            CONSTRAINT [FK_ClientRecordProvenance_Client]
+                FOREIGN KEY ([ClientId]) REFERENCES [tb_data].[Clients]([Id]),
+            CONSTRAINT [FK_ClientRecordProvenance_Document]
+                FOREIGN KEY ([SourceDocumentId])
+                REFERENCES [tb_client].[SourceDocuments]([SourceDocumentId]),
+            CONSTRAINT [FK_ClientRecordProvenance_RecordedBy]
+                FOREIGN KEY ([RecordedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [CK_ClientRecordProvenance_ReviewStatus]
+                CHECK ([ReviewStatus] IN
+                    (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview', N'Rejected'))
+        );
+
+        CREATE INDEX [IX_ClientRecordProvenance_Entity]
+            ON [tb_client].[RecordProvenance]
+                ([ClientId], [EntityType], [EntityId], [RecordProvenanceId]);
+    END;
+
+    IF OBJECT_ID(N'tb_import.ClientInfoBatches', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_import].[ClientInfoBatches]
+        (
+            [BatchId] uniqueidentifier NOT NULL,
+            [ClientId] int NOT NULL,
+            [SourceDocumentId] bigint NULL,
+            [TemplateVersion] nvarchar(40) NOT NULL,
+            [WorkbookId] uniqueidentifier NOT NULL,
+            [ContentSha256] binary(32) NOT NULL,
+            [State] nvarchar(24) NOT NULL,
+            [Message] nvarchar(2000) NULL,
+            [CreatedByWindowsSid] varbinary(85) NOT NULL,
+            [ApprovedByWindowsSid] varbinary(85) NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientInfoBatches_CreatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientInfoBatches_UpdatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [ApprovedAtUtc] datetime2(3) NULL,
+            [PromotedAtUtc] datetime2(3) NULL,
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_ClientInfoBatches] PRIMARY KEY CLUSTERED ([BatchId]),
+            CONSTRAINT [FK_ClientInfoBatches_Client]
+                FOREIGN KEY ([ClientId]) REFERENCES [tb_data].[Clients]([Id]),
+            CONSTRAINT [FK_ClientInfoBatches_Document]
+                FOREIGN KEY ([SourceDocumentId])
+                REFERENCES [tb_client].[SourceDocuments]([SourceDocumentId]),
+            CONSTRAINT [FK_ClientInfoBatches_CreatedBy]
+                FOREIGN KEY ([CreatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_ClientInfoBatches_ApprovedBy]
+                FOREIGN KEY ([ApprovedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [UX_ClientInfoBatches_Idempotency]
+                UNIQUE ([ClientId], [WorkbookId], [ContentSha256]),
+            CONSTRAINT [CK_ClientInfoBatches_State]
+                CHECK ([State] IN
+                    (N'Draft', N'Parsed', N'Validated', N'InReview', N'Approved',
+                     N'Promoted', N'ValidationFailed', N'Rejected', N'Superseded', N'Failed'))
+        );
+    END;
+
+    IF OBJECT_ID(N'tb_import.ClientInfoRecords', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_import].[ClientInfoRecords]
+        (
+            [ImportRecordId] bigint IDENTITY(1,1) NOT NULL,
+            [BatchId] uniqueidentifier NOT NULL,
+            [RecordType] nvarchar(40) NOT NULL,
+            [LocalKey] nvarchar(120) NOT NULL,
+            [ParentLocalKey] nvarchar(120) NULL,
+            [PayloadJson] nvarchar(max) NOT NULL,
+            [SourceSheet] nvarchar(128) NULL,
+            [SourceRow] int NULL,
+            [ReviewStatus] nvarchar(24) NOT NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientInfoRecords_CreatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            CONSTRAINT [PK_ClientInfoRecords] PRIMARY KEY CLUSTERED ([ImportRecordId]),
+            CONSTRAINT [FK_ClientInfoRecords_Batch]
+                FOREIGN KEY ([BatchId])
+                REFERENCES [tb_import].[ClientInfoBatches]([BatchId]) ON DELETE CASCADE,
+            CONSTRAINT [UX_ClientInfoRecords_Key]
+                UNIQUE ([BatchId], [RecordType], [LocalKey]),
+            CONSTRAINT [CK_ClientInfoRecords_Type]
+                CHECK ([RecordType] IN
+                    (N'Profile', N'Location', N'Person', N'Resource', N'Credential', N'Fact', N'Equipment')),
+            CONSTRAINT [CK_ClientInfoRecords_Payload]
+                CHECK (ISJSON([PayloadJson]) = 1),
+            CONSTRAINT [CK_ClientInfoRecords_ReviewStatus]
+                CHECK ([ReviewStatus] IN
+                    (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview', N'Rejected'))
+        );
+    END;
+
+    IF OBJECT_ID(N'tb_import.ClientInfoSecrets', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_import].[ClientInfoSecrets]
+        (
+            [ImportSecretId] bigint IDENTITY(1,1) NOT NULL,
+            [BatchId] uniqueidentifier NOT NULL,
+            [CredentialLocalKey] nvarchar(120) NOT NULL,
+            [SecretType] nvarchar(80) NOT NULL,
+            [SecretLabel] nvarchar(200) NOT NULL,
+            [ValueEncrypted] varbinary(max) NOT NULL,
+            [ComparisonStatus] nvarchar(24) NOT NULL
+                CONSTRAINT [DF_ClientInfoSecrets_ComparisonStatus] DEFAULT (N'NotCompared'),
+            [Resolution] nvarchar(24) NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientInfoSecrets_CreatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_ClientInfoSecrets] PRIMARY KEY CLUSTERED ([ImportSecretId]),
+            CONSTRAINT [FK_ClientInfoSecrets_Batch]
+                FOREIGN KEY ([BatchId])
+                REFERENCES [tb_import].[ClientInfoBatches]([BatchId]) ON DELETE CASCADE,
+            CONSTRAINT [UX_ClientInfoSecrets_Key]
+                UNIQUE ([BatchId], [CredentialLocalKey], [SecretType], [SecretLabel]),
+            CONSTRAINT [CK_ClientInfoSecrets_Comparison]
+                CHECK ([ComparisonStatus] IN
+                    (N'NotCompared', N'Match', N'Mismatch', N'WorkbookOnly', N'FireDrillOnly', N'NotComparable')),
+            CONSTRAINT [CK_ClientInfoSecrets_Resolution]
+                CHECK ([Resolution] IS NULL OR [Resolution] IN
+                    (N'UseWorkbook', N'UseFireDrill', N'VerifiedValue', N'Rejected'))
+        );
+    END;
+
+    IF OBJECT_ID(N'tb_import.ClientInfoIssues', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_import].[ClientInfoIssues]
+        (
+            [IssueId] bigint IDENTITY(1,1) NOT NULL,
+            [BatchId] uniqueidentifier NOT NULL,
+            [ImportRecordId] bigint NULL,
+            [Severity] nvarchar(12) NOT NULL,
+            [IssueCode] nvarchar(80) NOT NULL,
+            [Message] nvarchar(1000) NOT NULL,
+            [IsResolved] bit NOT NULL
+                CONSTRAINT [DF_ClientInfoIssues_IsResolved] DEFAULT (0),
+            [ResolutionNote] nvarchar(1000) NULL,
+            [ResolvedByWindowsSid] varbinary(85) NULL,
+            [ResolvedAtUtc] datetime2(3) NULL,
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_ClientInfoIssues] PRIMARY KEY CLUSTERED ([IssueId]),
+            CONSTRAINT [FK_ClientInfoIssues_Batch]
+                FOREIGN KEY ([BatchId])
+                REFERENCES [tb_import].[ClientInfoBatches]([BatchId]) ON DELETE CASCADE,
+            CONSTRAINT [FK_ClientInfoIssues_Record]
+                FOREIGN KEY ([ImportRecordId])
+                REFERENCES [tb_import].[ClientInfoRecords]([ImportRecordId]),
+            CONSTRAINT [FK_ClientInfoIssues_ResolvedBy]
+                FOREIGN KEY ([ResolvedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [CK_ClientInfoIssues_Severity]
+                CHECK ([Severity] IN (N'Error', N'Warning', N'Info'))
+        );
+    END;
+
+    IF OBJECT_ID(N'tb_import.ClientInfoPromotionMap', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_import].[ClientInfoPromotionMap]
+        (
+            [ImportRecordId] bigint NOT NULL,
+            [EntityType] nvarchar(80) NOT NULL,
+            [EntityId] bigint NOT NULL,
+            [PromotedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientInfoPromotionMap_PromotedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            CONSTRAINT [PK_ClientInfoPromotionMap] PRIMARY KEY CLUSTERED ([ImportRecordId]),
+            CONSTRAINT [FK_ClientInfoPromotionMap_Record]
+                FOREIGN KEY ([ImportRecordId])
+                REFERENCES [tb_import].[ClientInfoRecords]([ImportRecordId])
+        );
+    END;
+
+    IF OBJECT_ID(N'tb_ops.ClientInfoCutovers', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_ops].[ClientInfoCutovers]
+        (
+            [ClientId] int NOT NULL,
+            [ActiveBatchId] uniqueidentifier NULL,
+            [State] nvarchar(24) NOT NULL
+                CONSTRAINT [DF_ClientInfoCutovers_State] DEFAULT (N'NotStarted'),
+            [LegacyFrozenAtUtc] datetime2(3) NULL,
+            [LiveAtUtc] datetime2(3) NULL,
+            [HypercareEndsAtUtc] datetime2(3) NULL,
+            [CompletedAtUtc] datetime2(3) NULL,
+            [UpdatedByWindowsSid] varbinary(85) NOT NULL,
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientInfoCutovers_UpdatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_ClientInfoCutovers] PRIMARY KEY CLUSTERED ([ClientId]),
+            CONSTRAINT [FK_ClientInfoCutovers_Client]
+                FOREIGN KEY ([ClientId]) REFERENCES [tb_data].[Clients]([Id]),
+            CONSTRAINT [FK_ClientInfoCutovers_Batch]
+                FOREIGN KEY ([ActiveBatchId])
+                REFERENCES [tb_import].[ClientInfoBatches]([BatchId]),
+            CONSTRAINT [FK_ClientInfoCutovers_UpdatedBy]
+                FOREIGN KEY ([UpdatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [CK_ClientInfoCutovers_State]
+                CHECK ([State] IN
+                    (N'NotStarted', N'Staging', N'Ready', N'Frozen', N'Live',
+                     N'Hypercare', N'Complete', N'RolledBack'))
+        );
+    END;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_deploy].[SchemaMigrations]
+        WHERE [MigrationId] = N'SqlServer2016.ClientInfoBeta.0015'
+    )
+        INSERT INTO [tb_deploy].[SchemaMigrations]
+            ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+        VALUES
+            (N'SqlServer2016.ClientInfoBeta.0015', 15, N'0.6.2-beta.1', NULL);
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+PRINT N'Schema-15-compatible Client Info beta extension installed.';
+GO
+
+-- ============================================================================
+-- END 36-V0015-ClientInfoBetaSchema.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 37-V0015-AuthPointMfaSchema.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+GO
+
+/*
+    Additive schema-15 extension for server-enforced WatchGuard AuthPoint MFA.
+    No provider credential is stored in SQL. The API password and API key stay
+    in a LocalMachine-DPAPI protected file on the Sync Service host.
+*/
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF DATABASE_PRINCIPAL_ID(N'tb_role_mfa_break_glass') IS NULL
+        CREATE ROLE [tb_role_mfa_break_glass] AUTHORIZATION [dbo];
+
+    IF OBJECT_ID(N'tb_security.AuthPointUserMappings', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_security].[AuthPointUserMappings]
+        (
+            [WindowsSid] varbinary(85) NOT NULL,
+            [AuthPointLogin] nvarchar(256) NOT NULL,
+            [IsEnabled] bit NOT NULL
+                CONSTRAINT [DF_AuthPointUserMappings_IsEnabled] DEFAULT (1),
+            [RequireAtLogin] bit NOT NULL
+                CONSTRAINT [DF_AuthPointUserMappings_RequireAtLogin] DEFAULT (1),
+            [UpdatedByWindowsSid] varbinary(85) NOT NULL,
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_AuthPointUserMappings_UpdatedAtUtc]
+                DEFAULT (SYSUTCDATETIME()),
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_AuthPointUserMappings]
+                PRIMARY KEY CLUSTERED ([WindowsSid]),
+            CONSTRAINT [FK_AuthPointUserMappings_User]
+                FOREIGN KEY ([WindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_AuthPointUserMappings_UpdatedBy]
+                FOREIGN KEY ([UpdatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [CK_AuthPointUserMappings_Login]
+                CHECK (LEN(LTRIM(RTRIM([AuthPointLogin]))) > 0)
+        );
+
+        CREATE UNIQUE INDEX [UX_AuthPointUserMappings_Login]
+            ON [tb_security].[AuthPointUserMappings]([AuthPointLogin]);
+    END;
+
+    IF COL_LENGTH(N'tb_security.AuthPointUserMappings', N'RequireAtLogin') IS NULL
+        ALTER TABLE [tb_security].[AuthPointUserMappings]
+            ADD [RequireAtLogin] bit NOT NULL
+                CONSTRAINT [DF_AuthPointUserMappings_RequireAtLogin] DEFAULT (1);
+
+    IF OBJECT_ID(N'tb_security.MfaChallenges', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_security].[MfaChallenges]
+        (
+            [ChallengeId] uniqueidentifier NOT NULL,
+            [RequestId] uniqueidentifier NOT NULL,
+            [ActorWindowsSid] varbinary(85) NOT NULL,
+            [ActorLoginName] nvarchar(256) NOT NULL,
+            [ProviderLogin] nvarchar(256) NOT NULL,
+            [ActionScope] nvarchar(16) NOT NULL,
+            [SecretId] bigint NULL,
+            [ClientInstanceId] uniqueidentifier NULL,
+            [ClientMachine] nvarchar(128) NULL,
+            [ChallengeNonceHash] binary(32) NOT NULL,
+            [Status] nvarchar(24) NOT NULL,
+            [AttemptCount] int NOT NULL
+                CONSTRAINT [DF_MfaChallenges_AttemptCount] DEFAULT (0),
+            [WorkerId] uniqueidentifier NULL,
+            [LeaseId] uniqueidentifier NULL,
+            [LeaseExpiresAtUtc] datetime2(3) NULL,
+            [ProviderTransactionId] nvarchar(120) NULL,
+            [OutcomeCode] nvarchar(80) NULL,
+            [OutcomeMessage] nvarchar(500) NULL,
+            [AuthorizationTokenHash] binary(64) NULL,
+            [AuthorizationTokenEncrypted] varbinary(8000) NULL,
+            [AuthorizationExpiresAtUtc] datetime2(3) NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_MfaChallenges_CreatedAtUtc]
+                DEFAULT (SYSUTCDATETIME()),
+            [ExpiresAtUtc] datetime2(3) NOT NULL,
+            [CompletedAtUtc] datetime2(3) NULL,
+            [ConsumedAtUtc] datetime2(3) NULL,
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_MfaChallenges]
+                PRIMARY KEY CLUSTERED ([ChallengeId]),
+            CONSTRAINT [UX_MfaChallenges_RequestId] UNIQUE ([RequestId]),
+            CONSTRAINT [FK_MfaChallenges_User]
+                FOREIGN KEY ([ActorWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_MfaChallenges_Secret]
+                FOREIGN KEY ([SecretId])
+                REFERENCES [tb_client].[CredentialSecrets]([SecretId]),
+            CONSTRAINT [CK_MfaChallenges_Action]
+                CHECK ([ActionScope] IN (N'Login', N'Reveal', N'Copy')),
+            CONSTRAINT [CK_MfaChallenges_Status]
+                CHECK ([Status] IN
+                    (N'Queued', N'Processing', N'Approved', N'Denied',
+                     N'Error', N'Cancelled', N'Expired', N'Consumed')),
+            CONSTRAINT [CK_MfaChallenges_Attempts]
+                CHECK ([AttemptCount] BETWEEN 0 AND 3)
+        );
+
+        CREATE INDEX [IX_MfaChallenges_WorkQueue]
+            ON [tb_security].[MfaChallenges]
+                ([Status], [ExpiresAtUtc], [LeaseExpiresAtUtc], [CreatedAtUtc])
+            INCLUDE ([AttemptCount], [WorkerId], [LeaseId]);
+
+        CREATE INDEX [IX_MfaChallenges_ActorRate]
+            ON [tb_security].[MfaChallenges]
+                ([ActorWindowsSid], [CreatedAtUtc] DESC)
+            INCLUDE ([Status], [ActionScope], [SecretId]);
+
+        CREATE INDEX [IX_MfaChallenges_Secret]
+            ON [tb_security].[MfaChallenges]
+                ([SecretId], [CreatedAtUtc] DESC);
+    END;
+
+    IF COL_LENGTH(N'tb_security.MfaChallenges', N'ClientInstanceId') IS NULL
+        ALTER TABLE [tb_security].[MfaChallenges]
+            ADD [ClientInstanceId] uniqueidentifier NULL;
+
+    IF EXISTS
+    (
+        SELECT 1 FROM sys.columns
+        WHERE [object_id]=OBJECT_ID(N'tb_security.MfaChallenges')
+          AND [name]=N'SecretId' AND [is_nullable]=0
+    )
+        ALTER TABLE [tb_security].[MfaChallenges]
+            ALTER COLUMN [SecretId] bigint NULL;
+
+    IF OBJECT_ID(N'tb_security.CK_MfaChallenges_Action', N'C') IS NOT NULL
+        ALTER TABLE [tb_security].[MfaChallenges]
+            DROP CONSTRAINT [CK_MfaChallenges_Action];
+    ALTER TABLE [tb_security].[MfaChallenges] WITH CHECK
+        ADD CONSTRAINT [CK_MfaChallenges_Action]
+        CHECK ([ActionScope] IN (N'Login', N'Reveal', N'Copy'));
+    ALTER TABLE [tb_security].[MfaChallenges]
+        CHECK CONSTRAINT [CK_MfaChallenges_Action];
+
+    IF OBJECT_ID(N'tb_security.MfaLoginSessions', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_security].[MfaLoginSessions]
+        (
+            [SessionId] uniqueidentifier NOT NULL,
+            [ClientInstanceId] uniqueidentifier NOT NULL,
+            [ActorWindowsSid] varbinary(85) NOT NULL,
+            [ActorLoginName] nvarchar(256) NOT NULL,
+            [ClientMachine] nvarchar(128) NULL,
+            [SessionTokenHash] binary(64) NOT NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_MfaLoginSessions_CreatedAtUtc]
+                DEFAULT (SYSUTCDATETIME()),
+            [ExpiresAtUtc] datetime2(3) NOT NULL,
+            [LastUsedAtUtc] datetime2(3) NULL,
+            [EndedAtUtc] datetime2(3) NULL,
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_MfaLoginSessions]
+                PRIMARY KEY CLUSTERED ([SessionId]),
+            CONSTRAINT [UX_MfaLoginSessions_Client]
+                UNIQUE ([ActorWindowsSid], [ClientInstanceId]),
+            CONSTRAINT [FK_MfaLoginSessions_User]
+                FOREIGN KEY ([ActorWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid])
+        );
+
+        CREATE INDEX [IX_MfaLoginSessions_Active]
+            ON [tb_security].[MfaLoginSessions]
+                ([ActorWindowsSid], [ExpiresAtUtc])
+            INCLUDE ([EndedAtUtc], [LastUsedAtUtc]);
+    END;
+
+    IF OBJECT_ID(N'tb_security.MfaBreakGlassGrants', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_security].[MfaBreakGlassGrants]
+        (
+            [GrantId] uniqueidentifier NOT NULL,
+            [TargetWindowsSid] varbinary(85) NOT NULL,
+            [ActionScope] nvarchar(16) NOT NULL,
+            [SecretId] bigint NOT NULL,
+            [Reason] nvarchar(500) NOT NULL,
+            [ApprovedByWindowsSid] varbinary(85) NOT NULL,
+            [ApprovedByLoginName] nvarchar(256) NOT NULL,
+            [CreatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_MfaBreakGlassGrants_CreatedAtUtc]
+                DEFAULT (SYSUTCDATETIME()),
+            [ExpiresAtUtc] datetime2(3) NOT NULL,
+            [RemainingUses] tinyint NOT NULL
+                CONSTRAINT [DF_MfaBreakGlassGrants_RemainingUses] DEFAULT (1),
+            [ConsumedAtUtc] datetime2(3) NULL,
+            [RevokedAtUtc] datetime2(3) NULL,
+            [RevokedByWindowsSid] varbinary(85) NULL,
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_MfaBreakGlassGrants]
+                PRIMARY KEY CLUSTERED ([GrantId]),
+            CONSTRAINT [FK_MfaBreakGlassGrants_Target]
+                FOREIGN KEY ([TargetWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_MfaBreakGlassGrants_Approver]
+                FOREIGN KEY ([ApprovedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_MfaBreakGlassGrants_Revoker]
+                FOREIGN KEY ([RevokedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_MfaBreakGlassGrants_Secret]
+                FOREIGN KEY ([SecretId])
+                REFERENCES [tb_client].[CredentialSecrets]([SecretId]),
+            CONSTRAINT [CK_MfaBreakGlassGrants_Action]
+                CHECK ([ActionScope] IN (N'Reveal', N'Copy')),
+            CONSTRAINT [CK_MfaBreakGlassGrants_Reason]
+                CHECK (LEN(LTRIM(RTRIM([Reason]))) >= 12),
+            CONSTRAINT [CK_MfaBreakGlassGrants_Uses]
+                CHECK ([RemainingUses] BETWEEN 0 AND 1),
+            CONSTRAINT [CK_MfaBreakGlassGrants_TwoPerson]
+                CHECK ([TargetWindowsSid] <> [ApprovedByWindowsSid])
+        );
+
+        CREATE INDEX [IX_MfaBreakGlassGrants_Consume]
+            ON [tb_security].[MfaBreakGlassGrants]
+                ([TargetWindowsSid], [SecretId], [ActionScope], [ExpiresAtUtc])
+            INCLUDE ([RemainingUses], [RevokedAtUtc]);
+    END;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_deploy].[SchemaMigrations]
+        WHERE [MigrationId] = N'SqlServer2016.AuthPointMfa.0015'
+    )
+        INSERT INTO [tb_deploy].[SchemaMigrations]
+            ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+        VALUES
+            (N'SqlServer2016.AuthPointMfa.0015', 15, N'0.6.6-beta.1', NULL);
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_deploy].[SchemaMigrations]
+        WHERE [MigrationId] = N'SqlServer2016.AuthPointLoginMfa.0015'
+    )
+        INSERT INTO [tb_deploy].[SchemaMigrations]
+            ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+        VALUES
+            (N'SqlServer2016.AuthPointLoginMfa.0015', 15, N'0.6.6-beta.2', NULL);
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+PRINT N'Schema-15-compatible WatchGuard AuthPoint MFA extension installed.';
+GO
+
+-- ============================================================================
+-- END 37-V0015-AuthPointMfaSchema.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 38-V0015-ClientAttachmentsSchema.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+/* Additive schema-15 extension. Existing stable clients remain compatible and
+   simply ignore the attachment metadata and storage configuration. */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.ClientInfoBeta.0015'
+      AND [SchemaVersion] = 15
+)
+BEGIN
+    RAISERROR(N'The Client Info schema-15 extension must be installed before client attachments.', 16, 1);
+    RETURN;
+END;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF OBJECT_ID(N'tb_client.ClientAttachments', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_client].[ClientAttachments]
+        (
+            [AttachmentId] uniqueidentifier NOT NULL,
+            [ClientId] int NOT NULL,
+            [RelativePath] nvarchar(400) NOT NULL,
+            [OriginalFileName] nvarchar(260) NOT NULL,
+            [ContentType] nvarchar(160) NOT NULL,
+            [Category] nvarchar(80) NOT NULL,
+            [Caption] nvarchar(500) NULL,
+            [FileSizeBytes] bigint NOT NULL,
+            [ContentSha256] binary(32) NOT NULL,
+            [UploadedByWindowsSid] varbinary(85) NOT NULL,
+            [UploadedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_ClientAttachments_UploadedAtUtc]
+                DEFAULT (SYSUTCDATETIME()),
+            [IsArchived] bit NOT NULL
+                CONSTRAINT [DF_ClientAttachments_IsArchived] DEFAULT (0),
+            [ArchivedByWindowsSid] varbinary(85) NULL,
+            [ArchivedAtUtc] datetime2(3) NULL,
+            [RowVersion] rowversion NOT NULL,
+            CONSTRAINT [PK_ClientAttachments]
+                PRIMARY KEY CLUSTERED ([AttachmentId]),
+            CONSTRAINT [FK_ClientAttachments_Client]
+                FOREIGN KEY ([ClientId])
+                REFERENCES [tb_data].[Clients]([Id]),
+            CONSTRAINT [FK_ClientAttachments_UploadedBy]
+                FOREIGN KEY ([UploadedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [FK_ClientAttachments_ArchivedBy]
+                FOREIGN KEY ([ArchivedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid]),
+            CONSTRAINT [UQ_ClientAttachments_RelativePath]
+                UNIQUE ([RelativePath]),
+            CONSTRAINT [CK_ClientAttachments_FileName]
+                CHECK
+                (
+                    LEN(LTRIM(RTRIM([OriginalFileName]))) > 0
+                    AND CHARINDEX(N'\', [OriginalFileName]) = 0
+                    AND CHARINDEX(N'/', [OriginalFileName]) = 0
+                ),
+            CONSTRAINT [CK_ClientAttachments_RelativePath]
+                CHECK
+                (
+                    LEN(LTRIM(RTRIM([RelativePath]))) > 0
+                    AND [RelativePath] NOT LIKE N'%..%'
+                    AND [RelativePath] NOT LIKE N':%'
+                    AND LEFT([RelativePath], 1) <> N'\'
+                    AND LEFT([RelativePath], 1) <> N'/'
+                ),
+            CONSTRAINT [CK_ClientAttachments_Category]
+                CHECK (LEN(LTRIM(RTRIM([Category]))) > 0),
+            CONSTRAINT [CK_ClientAttachments_FileSize]
+                CHECK ([FileSizeBytes] >= 0),
+            CONSTRAINT [CK_ClientAttachments_ArchiveState]
+                CHECK
+                (
+                    ([IsArchived] = 0
+                     AND [ArchivedByWindowsSid] IS NULL
+                     AND [ArchivedAtUtc] IS NULL)
+                    OR
+                    ([IsArchived] = 1
+                     AND [ArchivedByWindowsSid] IS NOT NULL
+                     AND [ArchivedAtUtc] IS NOT NULL)
+                )
+        );
+
+        CREATE INDEX [IX_ClientAttachments_ClientStatusDate]
+            ON [tb_client].[ClientAttachments]
+                ([ClientId], [IsArchived], [UploadedAtUtc] DESC)
+            INCLUDE
+                ([OriginalFileName], [Category], [FileSizeBytes], [ContentType]);
+    END;
+
+    IF COL_LENGTH(N'tb_client.ClientAttachments', N'EquipmentId') IS NULL
+        ALTER TABLE [tb_client].[ClientAttachments]
+            ADD [EquipmentId] bigint NULL;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.foreign_keys
+        WHERE [name] = N'FK_ClientAttachments_Equipment'
+          AND [parent_object_id] = OBJECT_ID(N'tb_client.ClientAttachments')
+    )
+        ALTER TABLE [tb_client].[ClientAttachments] WITH CHECK
+            ADD CONSTRAINT [FK_ClientAttachments_Equipment]
+                FOREIGN KEY ([EquipmentId])
+                REFERENCES [tb_inventory].[Equipment]([EquipmentId]);
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.indexes
+        WHERE [name] = N'IX_ClientAttachments_EquipmentStatusDate'
+          AND [object_id] = OBJECT_ID(N'tb_client.ClientAttachments')
+    )
+        CREATE INDEX [IX_ClientAttachments_EquipmentStatusDate]
+            ON [tb_client].[ClientAttachments]
+                ([EquipmentId], [IsArchived], [UploadedAtUtc] DESC)
+            INCLUDE ([OriginalFileName], [Category], [ContentType])
+            WHERE [EquipmentId] IS NOT NULL;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_deploy].[SchemaMigrations]
+        WHERE [MigrationId] = N'SqlServer2016.ClientAttachments.0015'
+    )
+        INSERT INTO [tb_deploy].[SchemaMigrations]
+            ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+        VALUES
+            (N'SqlServer2016.ClientAttachments.0015', 15, N'0.6.6-beta.4', NULL);
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_deploy].[SchemaMigrations]
+        WHERE [MigrationId] = N'SqlServer2016.ClientAttachmentEquipmentLinks.0015'
+    )
+        INSERT INTO [tb_deploy].[SchemaMigrations]
+            ([MigrationId], [SchemaVersion], [ReleaseVersion], [ScriptChecksum])
+        VALUES
+            (N'SqlServer2016.ClientAttachmentEquipmentLinks.0015', 15,
+             N'0.6.6-beta.26', NULL);
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+PRINT N'Schema-15-compatible Client Attachments and equipment links installed.';
+GO
+
+-- ============================================================================
+-- END 38-V0015-ClientAttachmentsSchema.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 30-Security.sql
 -- ============================================================================
 
@@ -8427,6 +9619,12 @@ BEGIN
             [UpdatedByWindowsSid] = @UserSid,
             [UpdatedAtUtc] = SYSUTCDATETIME()
         WHERE [ClientId] = @SageClientId;
+
+        IF OBJECT_ID(N'tb_client.ReparentClientGraph', N'P') IS NOT NULL
+            EXEC [tb_client].[ReparentClientGraph]
+                @SourceClientId = @SageClientId,
+                @TargetClientId = @WhdClientId,
+                @ActorWindowsSid = @UserSid;
 
         DELETE FROM [tb_data].[Clients]
         WHERE [Id] = @SageClientId
@@ -20107,6 +21305,12 @@ BEGIN
             [UpdatedAtUtc] = SYSUTCDATETIME()
         WHERE [ClientId] = @SageClientId;
 
+        IF OBJECT_ID(N'tb_client.ReparentClientGraph', N'P') IS NOT NULL
+            EXEC [tb_client].[ReparentClientGraph]
+                @SourceClientId = @SageClientId,
+                @TargetClientId = @WhdClientId,
+                @ActorWindowsSid = @ActorSid;
+
         DELETE FROM [tb_data].[Clients]
         WHERE [Id] = @SageClientId
           AND [RowVersion] = @ExpectedSageRowVersion;
@@ -20303,6 +21507,12 @@ BEGIN
             [UpdatedByWindowsSid] = @ActorSid,
             [UpdatedAtUtc] = SYSUTCDATETIME()
         WHERE [ClientId] = @SourceWhdClientId;
+
+        IF OBJECT_ID(N'tb_client.ReparentClientGraph', N'P') IS NOT NULL
+            EXEC [tb_client].[ReparentClientGraph]
+                @SourceClientId = @SourceWhdClientId,
+                @TargetClientId = @TargetClientId,
+                @ActorWindowsSid = @ActorSid;
 
         DELETE FROM [tb_data].[Clients]
         WHERE [Id] = @SourceWhdClientId
@@ -22102,6 +23312,11 @@ BEGIN
         END;
 
         IF ISNULL(@PreviousClientId, -1) <> ISNULL(@ClientId, -1)
+            UPDATE [tb_client].[ClientAttachments]
+            SET [EquipmentId]=NULL
+            WHERE [EquipmentId]=@EquipmentId;
+
+        IF ISNULL(@PreviousClientId, -1) <> ISNULL(@ClientId, -1)
            OR ISNULL(@PreviousClientUserId, -1) <> ISNULL(@ClientUserId, -1)
            OR ISNULL(@PreviousLocationName, N'') <> ISNULL(@LocationName, N'')
         BEGIN
@@ -22536,6 +23751,10 @@ BEGIN
 
     IF @@ROWCOUNT = 0
         THROW 52210, N'The equipment record changed or no longer exists. Refresh and try again.', 1;
+
+    UPDATE [tb_client].[ClientAttachments]
+    SET [EquipmentId]=NULL
+    WHERE [EquipmentId]=@EquipmentId;
 END;
 GO
 
@@ -23174,6 +24393,4614 @@ GO
 
 -- ============================================================================
 -- END 54-V0014-EquipmentBoardProcedures.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 61-V0015-ClientInfoBetaProcedures.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+GO
+
+ALTER PROCEDURE [tb_app].[GetRepositoryCapabilities]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@UserSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    SELECT
+        CONVERT(int, 15) AS [SchemaVersion],
+        CONVERT(bit, 0) AS [FullTextSearchAvailable],
+        CONVERT(bit, 1) AS [SupportsTickets],
+        CONVERT(bit, 1) AS [SupportsWorkEntries],
+        CONVERT(bit, 1) AS [SupportsPrivateNotes],
+        CONVERT(bit, 1) AS [SupportsPostingLeases],
+        CONVERT(bit, 1) AS [SupportsSyncLeases],
+        CONVERT(bit, 1) AS [SupportsImports],
+        CONVERT(bit, 1) AS [SupportsTechBenchV1Import],
+        CONVERT(bit, 1) AS [SupportsServerSageSync],
+        CONVERT(bit, 1) AS [SupportsAdminUserPreview],
+        CONVERT(bit, 1) AS [SupportsFireDrillCredentials],
+        CONVERT(bit, 1) AS [EquipmentBoardAvailable],
+        CONVERT(bit, 1) AS [ClientInfoBetaAvailable];
+END;
+GO
+
+IF OBJECT_ID(N'tb_client.ReparentClientGraph', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_client].[ReparentClientGraph];
+GO
+
+CREATE PROCEDURE [tb_client].[ReparentClientGraph]
+    @SourceClientId int,
+    @TargetClientId int,
+    @ActorWindowsSid varbinary(85)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF @SourceClientId IS NULL OR @TargetClientId IS NULL
+       OR @SourceClientId = @TargetClientId
+        THROW 52300, N'A distinct source and target client are required.', 1;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_data].[Clients] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [Id] = @SourceClientId
+    )
+        THROW 52301, N'The source client no longer exists.', 1;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_data].[Clients] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [Id] = @TargetClientId
+    )
+        THROW 52302, N'The target client no longer exists.', 1;
+
+    DECLARE @NowUtc datetime2(3) = SYSUTCDATETIME();
+
+    IF EXISTS
+    (
+        SELECT 1 FROM [tb_client].[ClientProfiles]
+        WHERE [ClientId] = @SourceClientId
+    )
+    BEGIN
+        IF EXISTS
+        (
+            SELECT 1 FROM [tb_client].[ClientProfiles]
+            WHERE [ClientId] = @TargetClientId
+        )
+        BEGIN
+            UPDATE target_profile
+            SET
+                [Summary] = COALESCE(
+                    NULLIF(target_profile.[Summary], N''),
+                    source_profile.[Summary]),
+                [ReviewStatus] =
+                    CASE
+                        WHEN target_profile.[ReviewStatus] = N'Verified'
+                            THEN target_profile.[ReviewStatus]
+                        ELSE source_profile.[ReviewStatus]
+                    END,
+                [IsLive] =
+                    CONVERT(bit, CASE
+                        WHEN target_profile.[IsLive] = 1 OR source_profile.[IsLive] = 1
+                            THEN 1 ELSE 0 END),
+                [LastVerifiedAtUtc] = COALESCE(
+                    target_profile.[LastVerifiedAtUtc],
+                    source_profile.[LastVerifiedAtUtc]),
+                [LastVerifiedByWindowsSid] = COALESCE(
+                    target_profile.[LastVerifiedByWindowsSid],
+                    source_profile.[LastVerifiedByWindowsSid]),
+                [UpdatedByWindowsSid] = @ActorWindowsSid,
+                [UpdatedAtUtc] = @NowUtc
+            FROM [tb_client].[ClientProfiles] AS target_profile
+            CROSS JOIN [tb_client].[ClientProfiles] AS source_profile
+            WHERE target_profile.[ClientId] = @TargetClientId
+              AND source_profile.[ClientId] = @SourceClientId;
+
+            DELETE FROM [tb_client].[ClientProfiles]
+            WHERE [ClientId] = @SourceClientId;
+        END
+        ELSE
+        BEGIN
+            UPDATE [tb_client].[ClientProfiles]
+            SET
+                [ClientId] = @TargetClientId,
+                [UpdatedByWindowsSid] = @ActorWindowsSid,
+                [UpdatedAtUtc] = @NowUtc
+            WHERE [ClientId] = @SourceClientId;
+        END;
+    END;
+
+    UPDATE [tb_inventory].[ClientUsers]
+    SET
+        [ClientId] = @TargetClientId,
+        [UpdatedByWindowsSid] = @ActorWindowsSid,
+        [UpdatedAtUtc] = @NowUtc
+    WHERE [ClientId] = @SourceClientId;
+
+    UPDATE source_equipment
+    SET
+        [ClientId] = @TargetClientId,
+        [UpdatedByWindowsSid] = @ActorWindowsSid,
+        [UpdatedAtUtc] = @NowUtc,
+        [ClientInfoLocalKey] =
+            CASE
+                WHEN source_equipment.[ClientInfoLocalKey] IS NOT NULL
+                 AND EXISTS
+                    (
+                        SELECT 1
+                        FROM [tb_inventory].[Equipment] target_equipment
+                        WHERE target_equipment.[ClientId]=@TargetClientId
+                          AND target_equipment.[ClientInfoLocalKey]=
+                              source_equipment.[ClientInfoLocalKey]
+                    )
+                    THEN LEFT(
+                        source_equipment.[ClientInfoLocalKey]
+                        +N'-merged-'
+                        +CONVERT(
+                            nvarchar(20),
+                            source_equipment.[EquipmentId]),
+                        120)
+                ELSE source_equipment.[ClientInfoLocalKey]
+            END
+    FROM [tb_inventory].[Equipment] source_equipment
+    WHERE source_equipment.[ClientId] = @SourceClientId;
+
+    UPDATE [tb_inventory].[EquipmentAssignmentHistory]
+    SET [ClientId] = @TargetClientId
+    WHERE [ClientId] = @SourceClientId;
+
+    UPDATE [tb_client].[Locations]
+    SET
+        [ClientId] = @TargetClientId,
+        [UpdatedByWindowsSid] = @ActorWindowsSid,
+        [UpdatedAtUtc] = @NowUtc,
+        [LocalKey] =
+            CASE
+                WHEN [LocalKey] IS NOT NULL
+                 AND EXISTS
+                    (
+                        SELECT 1
+                        FROM [tb_client].[Locations] AS target_record
+                        WHERE target_record.[ClientId] = @TargetClientId
+                          AND target_record.[LocalKey] = [tb_client].[Locations].[LocalKey]
+                    )
+                    THEN LEFT(
+                        [LocalKey] + N'-merged-' + CONVERT(nvarchar(20), [LocationId]),
+                        120)
+                ELSE [LocalKey]
+            END
+    WHERE [ClientId] = @SourceClientId;
+
+    UPDATE [tb_client].[People]
+    SET
+        [ClientId] = @TargetClientId,
+        [UpdatedByWindowsSid] = @ActorWindowsSid,
+        [UpdatedAtUtc] = @NowUtc,
+        [LocalKey] =
+            CASE
+                WHEN [LocalKey] IS NOT NULL
+                 AND EXISTS
+                    (
+                        SELECT 1
+                        FROM [tb_client].[People] AS target_record
+                        WHERE target_record.[ClientId] = @TargetClientId
+                          AND target_record.[LocalKey] = [tb_client].[People].[LocalKey]
+                    )
+                    THEN LEFT(
+                        [LocalKey] + N'-merged-' + CONVERT(nvarchar(20), [PersonId]),
+                        120)
+                ELSE [LocalKey]
+            END
+    WHERE [ClientId] = @SourceClientId;
+
+    UPDATE [tb_client].[Resources]
+    SET
+        [ClientId] = @TargetClientId,
+        [UpdatedByWindowsSid] = @ActorWindowsSid,
+        [UpdatedAtUtc] = @NowUtc,
+        [LocalKey] =
+            CASE
+                WHEN [LocalKey] IS NOT NULL
+                 AND EXISTS
+                    (
+                        SELECT 1
+                        FROM [tb_client].[Resources] AS target_record
+                        WHERE target_record.[ClientId] = @TargetClientId
+                          AND target_record.[LocalKey] = [tb_client].[Resources].[LocalKey]
+                    )
+                    THEN LEFT(
+                        [LocalKey] + N'-merged-' + CONVERT(nvarchar(20), [ResourceId]),
+                        120)
+                ELSE [LocalKey]
+            END
+    WHERE [ClientId] = @SourceClientId;
+
+    UPDATE [tb_client].[Credentials]
+    SET
+        [ClientId] = @TargetClientId,
+        [UpdatedByWindowsSid] = @ActorWindowsSid,
+        [UpdatedAtUtc] = @NowUtc,
+        [LocalKey] =
+            CASE
+                WHEN [LocalKey] IS NOT NULL
+                 AND EXISTS
+                    (
+                        SELECT 1
+                        FROM [tb_client].[Credentials] AS target_record
+                        WHERE target_record.[ClientId] = @TargetClientId
+                          AND target_record.[LocalKey] = [tb_client].[Credentials].[LocalKey]
+                    )
+                    THEN LEFT(
+                        [LocalKey] + N'-merged-' + CONVERT(nvarchar(20), [CredentialId]),
+                        120)
+                ELSE [LocalKey]
+            END
+    WHERE [ClientId] = @SourceClientId;
+
+    UPDATE [tb_client].[ClientFacts]
+    SET
+        [ClientId] = @TargetClientId,
+        [UpdatedByWindowsSid] = @ActorWindowsSid,
+        [UpdatedAtUtc] = @NowUtc,
+        [LocalKey] =
+            CASE
+                WHEN [LocalKey] IS NOT NULL
+                 AND EXISTS
+                    (
+                        SELECT 1
+                        FROM [tb_client].[ClientFacts] AS target_record
+                        WHERE target_record.[ClientId] = @TargetClientId
+                          AND target_record.[LocalKey] = [tb_client].[ClientFacts].[LocalKey]
+                    )
+                    THEN LEFT(
+                        [LocalKey] + N'-merged-' + CONVERT(nvarchar(20), [FactId]),
+                        120)
+                ELSE [LocalKey]
+            END
+    WHERE [ClientId] = @SourceClientId;
+
+    /* Attachment metadata follows a merged client. Relative file paths stay
+       unchanged so the files never need to be moved during a SQL transaction. */
+    IF OBJECT_ID(N'tb_client.ClientAttachments', N'U') IS NOT NULL
+        EXEC sys.sp_executesql
+            N'UPDATE [tb_client].[ClientAttachments]
+              SET [ClientId]=@TargetClientId
+              WHERE [ClientId]=@SourceClientId;',
+            N'@SourceClientId int,@TargetClientId int',
+            @SourceClientId=@SourceClientId,
+            @TargetClientId=@TargetClientId;
+
+    UPDATE provenance
+    SET [SourceDocumentId] = target_document.[SourceDocumentId]
+    FROM [tb_client].[RecordProvenance] AS provenance
+    INNER JOIN [tb_client].[SourceDocuments] AS source_document
+        ON source_document.[SourceDocumentId] = provenance.[SourceDocumentId]
+       AND source_document.[ClientId] = @SourceClientId
+    INNER JOIN [tb_client].[SourceDocuments] AS target_document
+        ON target_document.[ClientId] = @TargetClientId
+       AND target_document.[SourceKind] = source_document.[SourceKind]
+       AND target_document.[ContentSha256] = source_document.[ContentSha256];
+
+    UPDATE batch
+    SET [SourceDocumentId] = target_document.[SourceDocumentId]
+    FROM [tb_import].[ClientInfoBatches] AS batch
+    INNER JOIN [tb_client].[SourceDocuments] AS source_document
+        ON source_document.[SourceDocumentId] = batch.[SourceDocumentId]
+       AND source_document.[ClientId] = @SourceClientId
+    INNER JOIN [tb_client].[SourceDocuments] AS target_document
+        ON target_document.[ClientId] = @TargetClientId
+       AND target_document.[SourceKind] = source_document.[SourceKind]
+       AND target_document.[ContentSha256] = source_document.[ContentSha256];
+
+    DELETE source_document
+    FROM [tb_client].[SourceDocuments] AS source_document
+    WHERE source_document.[ClientId] = @SourceClientId
+      AND EXISTS
+      (
+          SELECT 1
+          FROM [tb_client].[SourceDocuments] AS target_document
+          WHERE target_document.[ClientId] = @TargetClientId
+            AND target_document.[SourceKind] = source_document.[SourceKind]
+            AND target_document.[ContentSha256] = source_document.[ContentSha256]
+      );
+
+    UPDATE [tb_client].[SourceDocuments]
+    SET [ClientId] = @TargetClientId
+    WHERE [ClientId] = @SourceClientId;
+
+    UPDATE [tb_client].[RecordProvenance]
+    SET [ClientId] = @TargetClientId
+    WHERE [ClientId] = @SourceClientId;
+
+    UPDATE source_batch
+    SET
+        [WorkbookId] = NEWID(),
+        [Message] = LEFT(
+            COALESCE(NULLIF(source_batch.[Message], N'') + N' ', N'')
+            + N'Workbook identity changed while merging duplicate client records.',
+            2000),
+        [UpdatedAtUtc] = @NowUtc
+    FROM [tb_import].[ClientInfoBatches] AS source_batch
+    WHERE source_batch.[ClientId] = @SourceClientId
+      AND EXISTS
+      (
+          SELECT 1
+          FROM [tb_import].[ClientInfoBatches] AS target_batch
+          WHERE target_batch.[ClientId] = @TargetClientId
+            AND target_batch.[WorkbookId] = source_batch.[WorkbookId]
+            AND target_batch.[ContentSha256] = source_batch.[ContentSha256]
+      );
+
+    UPDATE [tb_import].[ClientInfoBatches]
+    SET
+        [ClientId] = @TargetClientId,
+        [UpdatedAtUtc] = @NowUtc
+    WHERE [ClientId] = @SourceClientId;
+
+    IF EXISTS
+    (
+        SELECT 1 FROM [tb_ops].[ClientInfoCutovers]
+        WHERE [ClientId] = @SourceClientId
+    )
+    BEGIN
+        IF EXISTS
+        (
+            SELECT 1 FROM [tb_ops].[ClientInfoCutovers]
+            WHERE [ClientId] = @TargetClientId
+        )
+            DELETE FROM [tb_ops].[ClientInfoCutovers]
+            WHERE [ClientId] = @SourceClientId;
+        ELSE
+            UPDATE [tb_ops].[ClientInfoCutovers]
+            SET
+                [ClientId] = @TargetClientId,
+                [UpdatedByWindowsSid] = @ActorWindowsSid,
+                [UpdatedAtUtc] = @NowUtc
+            WHERE [ClientId] = @SourceClientId;
+    END;
+
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SearchClientInfoClients', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SearchClientInfoClients];
+GO
+
+CREATE PROCEDURE [tb_app].[SearchClientInfoClients]
+    @Search nvarchar(240) = NULL,
+    @IncludeInactive bit = 0,
+    @Limit int = 500
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@UserSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    SET @Search = NULLIF(LTRIM(RTRIM(@Search)), N'');
+    SET @Limit = CASE
+        WHEN @Limit IS NULL OR @Limit < 1 THEN 1
+        WHEN @Limit > 2000 THEN 2000
+        ELSE @Limit END;
+
+    DECLARE @Pattern nvarchar(500) =
+        CASE WHEN @Search IS NULL THEN NULL ELSE N'%' + @Search + N'%' END;
+
+    SELECT TOP (@Limit)
+        client.[Id] AS [ClientId],
+        client.[Name] AS [ClientName],
+        client.[IsActive],
+        COALESCE(profile.[ReviewStatus], N'Unverified') AS [ReviewStatus],
+        COALESCE(cutover.[State], N'NotStarted') AS [CutoverState],
+        COALESCE(profile.[IsLive], CONVERT(bit, 0)) AS [IsLive],
+        profile.[UpdatedAtUtc],
+        profile.[RowVersion],
+        (
+            SELECT COUNT_BIG(*)
+            FROM [tb_client].[Locations] AS location
+            WHERE location.[ClientId] = client.[Id]
+              AND location.[IsActive] = 1
+        ) AS [LocationCount],
+        (
+            SELECT COUNT_BIG(*)
+            FROM [tb_client].[People] AS person
+            WHERE person.[ClientId] = client.[Id]
+              AND person.[IsActive] = 1
+        ) AS [PersonCount],
+        (
+            SELECT COUNT_BIG(*)
+            FROM [tb_client].[Resources] AS resource
+            WHERE resource.[ClientId] = client.[Id]
+              AND resource.[IsActive] = 1
+        ) AS [ResourceCount],
+        (
+            SELECT COUNT_BIG(*)
+            FROM [tb_client].[Credentials] AS credential
+            WHERE credential.[ClientId] = client.[Id]
+              AND credential.[IsActive] = 1
+        ) AS [CredentialCount]
+    FROM [tb_data].[Clients] AS client
+    LEFT JOIN [tb_client].[ClientProfiles] AS profile
+        ON profile.[ClientId] = client.[Id]
+    LEFT JOIN [tb_ops].[ClientInfoCutovers] AS cutover
+        ON cutover.[ClientId] = client.[Id]
+    WHERE (@IncludeInactive = 1 OR client.[IsActive] = 1)
+      AND
+      (
+          @Pattern IS NULL
+          OR client.[Name] LIKE @Pattern
+          OR CONVERT(nvarchar(20), client.[Id]) = @Search
+          OR client.[WhdLocationName] LIKE @Pattern
+          OR client.[SageCustomerName] LIKE @Pattern
+      )
+    ORDER BY client.[IsActive] DESC, client.[Name], client.[Id];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.GetClientInfoSnapshot', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[GetClientInfoSnapshot];
+GO
+
+CREATE PROCEDURE [tb_app].[GetClientInfoSnapshot]
+    @ClientId int
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@UserSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM [tb_data].[Clients]
+        WHERE [Id] = @ClientId
+    )
+        THROW 52310, N'The selected client no longer exists.', 1;
+
+    SELECT
+        client.[Id] AS [ClientId],
+        client.[Name] AS [ClientName],
+        client.[IsActive],
+        client.[WhdContactName],
+        client.[WhdContactEmail],
+        client.[WhdPhone],
+        client.[WhdAddress],
+        profile.[Summary],
+        COALESCE(profile.[ReviewStatus], N'Unverified') AS [ReviewStatus],
+        COALESCE(profile.[IsLive], CONVERT(bit, 0)) AS [IsLive],
+        profile.[LastVerifiedAtUtc],
+        profile.[UpdatedAtUtc],
+        profile.[RowVersion],
+        COALESCE(cutover.[State], N'NotStarted') AS [CutoverState],
+        cutover.[RowVersion] AS [CutoverRowVersion]
+    FROM [tb_data].[Clients] AS client
+    LEFT JOIN [tb_client].[ClientProfiles] AS profile
+        ON profile.[ClientId] = client.[Id]
+    LEFT JOIN [tb_ops].[ClientInfoCutovers] AS cutover
+        ON cutover.[ClientId] = client.[Id]
+    WHERE client.[Id] = @ClientId;
+
+    SELECT
+        [LocationId], [ClientId], [LocalKey], [Name], [LocationType],
+        [Address1], [Address2], [City], [StateProvince], [PostalCode],
+        [MainPhone], [TimeZoneId], [IsPrimary], [ReviewStatus], [IsActive],
+        [LastVerifiedAtUtc], [UpdatedAtUtc], [RowVersion]
+    FROM [tb_client].[Locations]
+    WHERE [ClientId] = @ClientId
+    ORDER BY [IsActive] DESC, [IsPrimary] DESC, [Name], [LocationId];
+
+    SELECT
+        person.[PersonId], person.[ClientId], person.[LocationId],
+        location.[Name] AS [LocationName], person.[LocalKey],
+        person.[DisplayName], person.[RoleDepartment], person.[Email],
+        person.[Phone], person.[MobilePhone], person.[ContactType],
+        person.[IsPrimary], person.[ReviewStatus], person.[IsActive],
+        person.[LastVerifiedAtUtc], person.[UpdatedAtUtc], person.[RowVersion]
+    FROM [tb_client].[People] AS person
+    LEFT JOIN [tb_client].[Locations] AS location
+        ON location.[LocationId] = person.[LocationId]
+    WHERE person.[ClientId] = @ClientId
+    ORDER BY person.[IsActive] DESC, person.[IsPrimary] DESC,
+        person.[DisplayName], person.[PersonId];
+
+    SELECT
+        resource.[ResourceId], resource.[ClientId], resource.[LocationId],
+        location.[Name] AS [LocationName], resource.[ParentResourceId],
+        resource.[EquipmentId], resource.[LocalKey], resource.[ResourceType],
+        resource.[Name], resource.[Provider], resource.[AddressOrUrl],
+        resource.[Status], resource.[Notes], resource.[ReviewStatus],
+        resource.[IsActive], resource.[LastVerifiedAtUtc],
+        resource.[UpdatedAtUtc], resource.[RowVersion]
+    FROM [tb_client].[Resources] AS resource
+    LEFT JOIN [tb_client].[Locations] AS location
+        ON location.[LocationId] = resource.[LocationId]
+    WHERE resource.[ClientId] = @ClientId
+    ORDER BY resource.[IsActive] DESC, resource.[ResourceType],
+        resource.[Name], resource.[ResourceId];
+
+    SELECT
+        field.[ResourceFieldId], field.[ResourceId], field.[FieldKey],
+        field.[FieldLabel], field.[ValueText], field.[ValueType],
+        field.[SortOrder], field.[UpdatedAtUtc], field.[RowVersion]
+    FROM [tb_client].[ResourceFields] AS field
+    INNER JOIN [tb_client].[Resources] AS resource
+        ON resource.[ResourceId] = field.[ResourceId]
+    WHERE resource.[ClientId] = @ClientId
+    ORDER BY field.[ResourceId], field.[SortOrder],
+        field.[FieldLabel], field.[ResourceFieldId];
+
+    SELECT
+        credential.[CredentialId], credential.[ClientId],
+        credential.[ResourceId], credential.[PersonId], credential.[LocalKey],
+        credential.[Name], credential.[Category], credential.[Username],
+        credential.[LoginUrl], credential.[Notes], credential.[ReviewStatus],
+        credential.[IsActive], credential.[LastVerifiedAtUtc],
+        credential.[UpdatedAtUtc], credential.[RowVersion],
+        COUNT(secret.[SecretId]) AS [SecretCount]
+    FROM [tb_client].[Credentials] AS credential
+    LEFT JOIN [tb_client].[CredentialSecrets] AS secret
+        ON secret.[CredentialId] = credential.[CredentialId]
+       AND secret.[IsCurrent] = 1
+    WHERE credential.[ClientId] = @ClientId
+    GROUP BY
+        credential.[CredentialId], credential.[ClientId],
+        credential.[ResourceId], credential.[PersonId], credential.[LocalKey],
+        credential.[Name], credential.[Category], credential.[Username],
+        credential.[LoginUrl], credential.[Notes], credential.[ReviewStatus],
+        credential.[IsActive], credential.[LastVerifiedAtUtc],
+        credential.[UpdatedAtUtc], credential.[RowVersion]
+    ORDER BY credential.[IsActive] DESC, credential.[Category],
+        credential.[Name], credential.[CredentialId];
+
+    SELECT
+        secret.[SecretId], secret.[CredentialId], secret.[SecretType],
+        secret.[SecretLabel], secret.[IsCurrent], secret.[LastVerifiedAtUtc],
+        secret.[UpdatedAtUtc], secret.[RowVersion]
+    FROM [tb_client].[CredentialSecrets] AS secret
+    INNER JOIN [tb_client].[Credentials] AS credential
+        ON credential.[CredentialId] = secret.[CredentialId]
+    WHERE credential.[ClientId] = @ClientId
+      AND secret.[IsCurrent] = 1
+    ORDER BY secret.[CredentialId], secret.[SecretType],
+        secret.[SecretLabel], secret.[SecretId];
+
+    SELECT
+        [FactId], [ClientId], [LocalKey], [SectionName], [FieldLabel],
+        [ValueText], [ValueType], [ReviewStatus], [SortOrder], [IsActive],
+        [LastVerifiedAtUtc], [UpdatedAtUtc], [RowVersion]
+    FROM [tb_client].[ClientFacts]
+    WHERE [ClientId] = @ClientId
+    ORDER BY [IsActive] DESC, [SectionName], [SortOrder],
+        [FieldLabel], [FactId];
+
+    SELECT TOP (50)
+        batch.[BatchId], batch.[ClientId], client.[Name] AS [ClientName],
+        batch.[TemplateVersion], batch.[WorkbookId], batch.[State],
+        batch.[Message], batch.[CreatedAtUtc], batch.[UpdatedAtUtc],
+        batch.[ApprovedAtUtc], batch.[PromotedAtUtc], batch.[RowVersion],
+        (SELECT COUNT(*) FROM [tb_import].[ClientInfoRecords] record
+         WHERE record.[BatchId]=batch.[BatchId]) AS [RecordCount],
+        (SELECT COUNT(*) FROM [tb_import].[ClientInfoSecrets] secret
+         WHERE secret.[BatchId]=batch.[BatchId]) AS [SecretCount],
+        (SELECT COUNT(*) FROM [tb_import].[ClientInfoSecrets] secret
+         WHERE secret.[BatchId]=batch.[BatchId]
+           AND secret.[ComparisonStatus]=N'Match') AS [SecretMatchCount],
+        (SELECT COUNT(*) FROM [tb_import].[ClientInfoSecrets] secret
+         WHERE secret.[BatchId]=batch.[BatchId]
+           AND secret.[ComparisonStatus]=N'Mismatch') AS [SecretMismatchCount],
+        (SELECT COUNT(*) FROM [tb_import].[ClientInfoSecrets] secret
+         WHERE secret.[BatchId]=batch.[BatchId]
+           AND secret.[ComparisonStatus]=N'WorkbookOnly') AS [SecretWorkbookOnlyCount],
+        (SELECT COUNT(*) FROM [tb_import].[ClientInfoIssues] issue
+         WHERE issue.[BatchId]=batch.[BatchId] AND issue.[Severity]=N'Error'
+           AND issue.[IsResolved]=0) AS [BlockingIssueCount],
+        (SELECT COUNT(*) FROM [tb_import].[ClientInfoIssues] issue
+         WHERE issue.[BatchId]=batch.[BatchId] AND issue.[Severity]=N'Warning'
+           AND issue.[IsResolved]=0) AS [WarningCount]
+    FROM [tb_import].[ClientInfoBatches] batch
+    INNER JOIN [tb_data].[Clients] client
+        ON client.[Id]=batch.[ClientId]
+    WHERE batch.[ClientId] = @ClientId
+    ORDER BY batch.[CreatedAtUtc] DESC, batch.[BatchId];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SaveClientInfoProfile', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SaveClientInfoProfile];
+GO
+
+CREATE PROCEDURE [tb_app].[SaveClientInfoProfile]
+    @ClientId int,
+    @Summary nvarchar(2000) = NULL,
+    @ReviewStatus nvarchar(24) = N'Unverified',
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1
+       AND IS_ROLEMEMBER(N'tb_role_client_info_editor') <> 1
+        THROW 52320, N'Client Info editor permission is required.', 1;
+
+    SET @Summary = NULLIF(LTRIM(RTRIM(@Summary)), N'');
+    SET @ReviewStatus = COALESCE(NULLIF(LTRIM(RTRIM(@ReviewStatus)), N''), N'Unverified');
+    IF @ReviewStatus NOT IN
+        (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview')
+        THROW 52321, N'The Client Info review status is invalid.', 1;
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM [tb_data].[Clients]
+        WHERE [Id] = @ClientId
+    )
+        THROW 52322, N'The selected client no longer exists.', 1;
+
+    DECLARE @NowUtc datetime2(3) = SYSUTCDATETIME();
+    DECLARE @Action nvarchar(120);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF EXISTS
+        (
+            SELECT 1 FROM [tb_client].[ClientProfiles]
+            WHERE [ClientId] = @ClientId
+        )
+        BEGIN
+            IF @ExpectedRowVersion IS NULL
+                THROW 52323, N'ExpectedRowVersion is required when updating Client Info.', 1;
+
+            UPDATE [tb_client].[ClientProfiles]
+            SET
+                [Summary] = @Summary,
+                [ReviewStatus] = @ReviewStatus,
+                [LastVerifiedAtUtc] =
+                    CASE WHEN @ReviewStatus = N'Verified'
+                        THEN @NowUtc ELSE [LastVerifiedAtUtc] END,
+                [LastVerifiedByWindowsSid] =
+                    CASE WHEN @ReviewStatus = N'Verified'
+                        THEN @ActorSid ELSE [LastVerifiedByWindowsSid] END,
+                [UpdatedByWindowsSid] = @ActorSid,
+                [UpdatedAtUtc] = @NowUtc
+            WHERE [ClientId] = @ClientId
+              AND [RowVersion] = @ExpectedRowVersion;
+
+            IF @@ROWCOUNT <> 1
+                THROW 52324, N'Client Info changed on another workstation. Refresh and resolve the conflict.', 1;
+            SET @Action = N'ClientInfoProfileUpdated';
+        END
+        ELSE
+        BEGIN
+            IF @ExpectedRowVersion IS NOT NULL
+                THROW 52324, N'Client Info changed on another workstation. Refresh and resolve the conflict.', 1;
+
+            INSERT INTO [tb_client].[ClientProfiles]
+            (
+                [ClientId], [Summary], [ReviewStatus],
+                [LastVerifiedAtUtc], [LastVerifiedByWindowsSid],
+                [CreatedByWindowsSid], [UpdatedByWindowsSid],
+                [CreatedAtUtc], [UpdatedAtUtc]
+            )
+            VALUES
+            (
+                @ClientId, @Summary, @ReviewStatus,
+                CASE WHEN @ReviewStatus = N'Verified' THEN @NowUtc END,
+                CASE WHEN @ReviewStatus = N'Verified' THEN @ActorSid END,
+                @ActorSid, @ActorSid, @NowUtc, @NowUtc
+            );
+            SET @Action = N'ClientInfoProfileCreated';
+        END;
+
+        DECLARE @AuditEntityId nvarchar(120) =
+            CONVERT(nvarchar(120), @ClientId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=@Action,
+            @EntityType=N'ClientInfoProfile',
+            @EntityId=@AuditEntityId,
+            @RequestId=@RequestId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        [ClientId], [Summary], [ReviewStatus], [IsLive],
+        [LastVerifiedAtUtc], [UpdatedAtUtc], [RowVersion]
+    FROM [tb_client].[ClientProfiles]
+    WHERE [ClientId] = @ClientId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SaveClientInfoLocation', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SaveClientInfoLocation];
+GO
+
+CREATE PROCEDURE [tb_app].[SaveClientInfoLocation]
+    @LocationId bigint = NULL,
+    @ClientId int,
+    @LocalKey nvarchar(120) = NULL,
+    @Name nvarchar(240),
+    @LocationType nvarchar(80) = NULL,
+    @Address1 nvarchar(240) = NULL,
+    @Address2 nvarchar(240) = NULL,
+    @City nvarchar(120) = NULL,
+    @StateProvince nvarchar(80) = NULL,
+    @PostalCode nvarchar(40) = NULL,
+    @MainPhone nvarchar(80) = NULL,
+    @TimeZoneId nvarchar(120) = NULL,
+    @IsPrimary bit = 0,
+    @ReviewStatus nvarchar(24) = N'Unverified',
+    @IsActive bit = 1,
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin <> 1
+       AND IS_ROLEMEMBER(N'tb_role_client_info_editor') <> 1
+        THROW 52320, N'Client Info editor permission is required.', 1;
+
+    SET @Name = NULLIF(LTRIM(RTRIM(@Name)), N'');
+    SET @LocalKey = NULLIF(LTRIM(RTRIM(@LocalKey)), N'');
+    IF @Name IS NULL
+        THROW 52330, N'Location name is required.', 1;
+    IF @ReviewStatus NOT IN
+        (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview')
+        THROW 52321, N'The Client Info review status is invalid.', 1;
+
+    DECLARE @NowUtc datetime2(3) = SYSUTCDATETIME();
+    DECLARE @Action nvarchar(120);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF @IsPrimary = 1
+            UPDATE [tb_client].[Locations]
+            SET
+                [IsPrimary] = 0,
+                [UpdatedByWindowsSid] = @ActorSid,
+                [UpdatedAtUtc] = @NowUtc
+            WHERE [ClientId] = @ClientId
+              AND [IsPrimary] = 1
+              AND (@LocationId IS NULL OR [LocationId] <> @LocationId);
+
+        IF @LocationId IS NULL
+        BEGIN
+            INSERT INTO [tb_client].[Locations]
+            (
+                [ClientId], [LocalKey], [Name], [LocationType], [Address1],
+                [Address2], [City], [StateProvince], [PostalCode], [MainPhone],
+                [TimeZoneId], [IsPrimary], [ReviewStatus], [IsActive],
+                [LastVerifiedAtUtc], [CreatedByWindowsSid], [UpdatedByWindowsSid],
+                [CreatedAtUtc], [UpdatedAtUtc]
+            )
+            VALUES
+            (
+                @ClientId, @LocalKey, @Name, NULLIF(@LocationType, N''),
+                NULLIF(@Address1, N''), NULLIF(@Address2, N''), NULLIF(@City, N''),
+                NULLIF(@StateProvince, N''), NULLIF(@PostalCode, N''),
+                NULLIF(@MainPhone, N''), NULLIF(@TimeZoneId, N''), @IsPrimary,
+                @ReviewStatus, @IsActive,
+                CASE WHEN @ReviewStatus = N'Verified' THEN @NowUtc END,
+                @ActorSid, @ActorSid, @NowUtc, @NowUtc
+            );
+            SET @LocationId = CONVERT(bigint, SCOPE_IDENTITY());
+            SET @Action = N'ClientInfoLocationCreated';
+        END
+        ELSE
+        BEGIN
+            IF @ExpectedRowVersion IS NULL
+                THROW 52331, N'ExpectedRowVersion is required when updating a location.', 1;
+
+            UPDATE [tb_client].[Locations]
+            SET
+                [LocalKey]=@LocalKey, [Name]=@Name,
+                [LocationType]=NULLIF(@LocationType, N''),
+                [Address1]=NULLIF(@Address1, N''),
+                [Address2]=NULLIF(@Address2, N''),
+                [City]=NULLIF(@City, N''),
+                [StateProvince]=NULLIF(@StateProvince, N''),
+                [PostalCode]=NULLIF(@PostalCode, N''),
+                [MainPhone]=NULLIF(@MainPhone, N''),
+                [TimeZoneId]=NULLIF(@TimeZoneId, N''),
+                [IsPrimary]=@IsPrimary, [ReviewStatus]=@ReviewStatus,
+                [IsActive]=@IsActive,
+                [LastVerifiedAtUtc]=CASE WHEN @ReviewStatus=N'Verified'
+                    THEN @NowUtc ELSE [LastVerifiedAtUtc] END,
+                [UpdatedByWindowsSid]=@ActorSid, [UpdatedAtUtc]=@NowUtc
+            WHERE [LocationId]=@LocationId
+              AND [ClientId]=@ClientId
+              AND [RowVersion]=@ExpectedRowVersion;
+            IF @@ROWCOUNT <> 1
+                THROW 52332, N'The location changed on another workstation. Refresh and resolve the conflict.', 1;
+            SET @Action = N'ClientInfoLocationUpdated';
+        END;
+
+        DECLARE @AuditEntityId nvarchar(120) =
+            CONVERT(nvarchar(120), @LocationId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=@Action, @EntityType=N'ClientInfoLocation',
+            @EntityId=@AuditEntityId, @RequestId=@RequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT * FROM [tb_client].[Locations]
+    WHERE [LocationId] = @LocationId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SaveClientInfoPerson', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SaveClientInfoPerson];
+GO
+
+CREATE PROCEDURE [tb_app].[SaveClientInfoPerson]
+    @PersonId bigint = NULL,
+    @ClientId int,
+    @LocationId bigint = NULL,
+    @LocalKey nvarchar(120) = NULL,
+    @DisplayName nvarchar(240),
+    @RoleDepartment nvarchar(240) = NULL,
+    @Email nvarchar(320) = NULL,
+    @Phone nvarchar(80) = NULL,
+    @MobilePhone nvarchar(80) = NULL,
+    @ContactType nvarchar(80) = NULL,
+    @IsPrimary bit = 0,
+    @ReviewStatus nvarchar(24) = N'Unverified',
+    @IsActive bit = 1,
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin <> 1
+       AND IS_ROLEMEMBER(N'tb_role_client_info_editor') <> 1
+        THROW 52320, N'Client Info editor permission is required.', 1;
+
+    SET @DisplayName = NULLIF(LTRIM(RTRIM(@DisplayName)), N'');
+    SET @LocalKey = NULLIF(LTRIM(RTRIM(@LocalKey)), N'');
+    IF @DisplayName IS NULL
+        THROW 52340, N'Person name is required.', 1;
+    IF @LocationId IS NOT NULL AND NOT EXISTS
+    (
+        SELECT 1 FROM [tb_client].[Locations]
+        WHERE [LocationId]=@LocationId AND [ClientId]=@ClientId
+    )
+        THROW 52341, N'The selected location does not belong to this client.', 1;
+    IF @ReviewStatus NOT IN
+        (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview')
+        THROW 52321, N'The Client Info review status is invalid.', 1;
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME();
+    DECLARE @Action nvarchar(120);
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        IF @IsPrimary=1
+            UPDATE [tb_client].[People]
+            SET [IsPrimary]=0, [UpdatedByWindowsSid]=@ActorSid, [UpdatedAtUtc]=@NowUtc
+            WHERE [ClientId]=@ClientId AND [IsPrimary]=1
+              AND (@PersonId IS NULL OR [PersonId]<>@PersonId);
+
+        IF @PersonId IS NULL
+        BEGIN
+            INSERT INTO [tb_client].[People]
+            (
+                [ClientId], [LocationId], [LocalKey], [DisplayName],
+                [RoleDepartment], [Email], [Phone], [MobilePhone],
+                [ContactType], [IsPrimary], [ReviewStatus], [IsActive],
+                [LastVerifiedAtUtc], [CreatedByWindowsSid], [UpdatedByWindowsSid],
+                [CreatedAtUtc], [UpdatedAtUtc]
+            )
+            VALUES
+            (
+                @ClientId, @LocationId, @LocalKey, @DisplayName,
+                NULLIF(@RoleDepartment,N''), NULLIF(@Email,N''),
+                NULLIF(@Phone,N''), NULLIF(@MobilePhone,N''),
+                NULLIF(@ContactType,N''), @IsPrimary, @ReviewStatus, @IsActive,
+                CASE WHEN @ReviewStatus=N'Verified' THEN @NowUtc END,
+                @ActorSid, @ActorSid, @NowUtc, @NowUtc
+            );
+            SET @PersonId=CONVERT(bigint,SCOPE_IDENTITY());
+            SET @Action=N'ClientInfoPersonCreated';
+        END
+        ELSE
+        BEGIN
+            IF @ExpectedRowVersion IS NULL
+                THROW 52342, N'ExpectedRowVersion is required when updating a person.', 1;
+            UPDATE [tb_client].[People]
+            SET [LocationId]=@LocationId, [LocalKey]=@LocalKey,
+                [DisplayName]=@DisplayName,
+                [RoleDepartment]=NULLIF(@RoleDepartment,N''),
+                [Email]=NULLIF(@Email,N''), [Phone]=NULLIF(@Phone,N''),
+                [MobilePhone]=NULLIF(@MobilePhone,N''),
+                [ContactType]=NULLIF(@ContactType,N''),
+                [IsPrimary]=@IsPrimary, [ReviewStatus]=@ReviewStatus,
+                [IsActive]=@IsActive,
+                [LastVerifiedAtUtc]=CASE WHEN @ReviewStatus=N'Verified'
+                    THEN @NowUtc ELSE [LastVerifiedAtUtc] END,
+                [UpdatedByWindowsSid]=@ActorSid, [UpdatedAtUtc]=@NowUtc
+            WHERE [PersonId]=@PersonId AND [ClientId]=@ClientId
+              AND [RowVersion]=@ExpectedRowVersion;
+            IF @@ROWCOUNT<>1
+                THROW 52343, N'The person changed on another workstation. Refresh and resolve the conflict.', 1;
+            SET @Action=N'ClientInfoPersonUpdated';
+        END;
+        DECLARE @AuditEntityId nvarchar(120) =
+            CONVERT(nvarchar(120), @PersonId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=@Action, @EntityType=N'ClientInfoPerson',
+            @EntityId=@AuditEntityId, @RequestId=@RequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+    SELECT * FROM [tb_client].[People] WHERE [PersonId]=@PersonId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SaveClientInfoResource', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SaveClientInfoResource];
+GO
+
+CREATE PROCEDURE [tb_app].[SaveClientInfoResource]
+    @ResourceId bigint = NULL,
+    @ClientId int,
+    @LocationId bigint = NULL,
+    @ParentResourceId bigint = NULL,
+    @EquipmentId bigint = NULL,
+    @LocalKey nvarchar(120) = NULL,
+    @ResourceType nvarchar(80),
+    @Name nvarchar(240),
+    @Provider nvarchar(160) = NULL,
+    @AddressOrUrl nvarchar(1000) = NULL,
+    @Status nvarchar(80) = NULL,
+    @Notes nvarchar(max) = NULL,
+    @ReviewStatus nvarchar(24) = N'Unverified',
+    @IsActive bit = 1,
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_info_editor')<>1
+        THROW 52320, N'Client Info editor permission is required.', 1;
+
+    SET @ResourceType=NULLIF(LTRIM(RTRIM(@ResourceType)),N'');
+    SET @Name=NULLIF(LTRIM(RTRIM(@Name)),N'');
+    SET @LocalKey=NULLIF(LTRIM(RTRIM(@LocalKey)),N'');
+    IF @ResourceType IS NULL OR @Name IS NULL
+        THROW 52350, N'Resource type and name are required.', 1;
+    IF @ReviewStatus NOT IN
+        (N'Unverified',N'Verified',N'AcceptedUnverified',N'NeedsReview')
+        THROW 52321, N'The Client Info review status is invalid.', 1;
+    IF @LocationId IS NOT NULL AND NOT EXISTS
+        (SELECT 1 FROM [tb_client].[Locations]
+         WHERE [LocationId]=@LocationId AND [ClientId]=@ClientId)
+        THROW 52351, N'The selected location does not belong to this client.', 1;
+    IF @ParentResourceId IS NOT NULL AND NOT EXISTS
+        (SELECT 1 FROM [tb_client].[Resources]
+         WHERE [ResourceId]=@ParentResourceId AND [ClientId]=@ClientId)
+        THROW 52352, N'The parent resource does not belong to this client.', 1;
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME();
+    DECLARE @Action nvarchar(120);
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        IF @ResourceId IS NULL
+        BEGIN
+            INSERT INTO [tb_client].[Resources]
+            (
+                [ClientId],[LocationId],[ParentResourceId],[EquipmentId],
+                [LocalKey],[ResourceType],[Name],[Provider],[AddressOrUrl],
+                [Status],[Notes],[ReviewStatus],[IsActive],[LastVerifiedAtUtc],
+                [CreatedByWindowsSid],[UpdatedByWindowsSid],[CreatedAtUtc],[UpdatedAtUtc]
+            )
+            VALUES
+            (
+                @ClientId,@LocationId,@ParentResourceId,@EquipmentId,@LocalKey,
+                @ResourceType,@Name,NULLIF(@Provider,N''),NULLIF(@AddressOrUrl,N''),
+                NULLIF(@Status,N''),NULLIF(@Notes,N''),@ReviewStatus,@IsActive,
+                CASE WHEN @ReviewStatus=N'Verified' THEN @NowUtc END,
+                @ActorSid,@ActorSid,@NowUtc,@NowUtc
+            );
+            SET @ResourceId=CONVERT(bigint,SCOPE_IDENTITY());
+            SET @Action=N'ClientInfoResourceCreated';
+        END
+        ELSE
+        BEGIN
+            IF @ExpectedRowVersion IS NULL
+                THROW 52353, N'ExpectedRowVersion is required when updating a resource.',1;
+            UPDATE [tb_client].[Resources]
+            SET [LocationId]=@LocationId,[ParentResourceId]=@ParentResourceId,
+                [EquipmentId]=@EquipmentId,[LocalKey]=@LocalKey,
+                [ResourceType]=@ResourceType,[Name]=@Name,
+                [Provider]=NULLIF(@Provider,N''),
+                [AddressOrUrl]=NULLIF(@AddressOrUrl,N''),
+                [Status]=NULLIF(@Status,N''),[Notes]=NULLIF(@Notes,N''),
+                [ReviewStatus]=@ReviewStatus,[IsActive]=@IsActive,
+                [LastVerifiedAtUtc]=CASE WHEN @ReviewStatus=N'Verified'
+                    THEN @NowUtc ELSE [LastVerifiedAtUtc] END,
+                [UpdatedByWindowsSid]=@ActorSid,[UpdatedAtUtc]=@NowUtc
+            WHERE [ResourceId]=@ResourceId AND [ClientId]=@ClientId
+              AND [RowVersion]=@ExpectedRowVersion;
+            IF @@ROWCOUNT<>1
+                THROW 52354,N'The resource changed on another workstation. Refresh and resolve the conflict.',1;
+            SET @Action=N'ClientInfoResourceUpdated';
+        END;
+        DECLARE @AuditEntityId nvarchar(120) =
+            CONVERT(nvarchar(120), @ResourceId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=@Action,@EntityType=N'ClientInfoResource',
+            @EntityId=@AuditEntityId,@RequestId=@RequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+    SELECT * FROM [tb_client].[Resources] WHERE [ResourceId]=@ResourceId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SaveClientInfoResourceField', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SaveClientInfoResourceField];
+GO
+
+CREATE PROCEDURE [tb_app].[SaveClientInfoResourceField]
+    @ResourceFieldId bigint = NULL,
+    @ResourceId bigint,
+    @FieldKey nvarchar(120),
+    @FieldLabel nvarchar(200),
+    @ValueText nvarchar(max) = NULL,
+    @ValueType nvarchar(24) = N'Text',
+    @SortOrder int = 0,
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_info_editor')<>1
+        THROW 52320, N'Client Info editor permission is required.', 1;
+
+    SET @FieldKey=NULLIF(LTRIM(RTRIM(@FieldKey)),N'');
+    SET @FieldLabel=NULLIF(LTRIM(RTRIM(@FieldLabel)),N'');
+    IF @FieldKey IS NULL OR @FieldLabel IS NULL
+        THROW 52355,N'Resource field key and label are required.',1;
+    IF @ValueType NOT IN (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress')
+        THROW 52355,N'The resource field value type is invalid.',1;
+    IF NOT EXISTS (SELECT 1 FROM [tb_client].[Resources] WHERE [ResourceId]=@ResourceId)
+        THROW 52356,N'The resource for this field no longer exists.',1;
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(), @Action nvarchar(120);
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        IF @ResourceFieldId IS NULL
+        BEGIN
+            INSERT INTO [tb_client].[ResourceFields]
+            (
+                [ResourceId],[FieldKey],[FieldLabel],[ValueText],[ValueType],
+                [SortOrder],[UpdatedByWindowsSid],[UpdatedAtUtc]
+            )
+            VALUES
+            (
+                @ResourceId,@FieldKey,@FieldLabel,NULLIF(@ValueText,N''),
+                @ValueType,@SortOrder,@ActorSid,@NowUtc
+            );
+            SET @ResourceFieldId=CONVERT(bigint,SCOPE_IDENTITY());
+            SET @Action=N'ClientInfoResourceFieldCreated';
+        END
+        ELSE
+        BEGIN
+            IF @ExpectedRowVersion IS NULL
+                THROW 52357,N'ExpectedRowVersion is required when updating a resource field.',1;
+            UPDATE [tb_client].[ResourceFields]
+            SET [FieldKey]=@FieldKey,[FieldLabel]=@FieldLabel,
+                [ValueText]=NULLIF(@ValueText,N''),[ValueType]=@ValueType,
+                [SortOrder]=@SortOrder,[UpdatedByWindowsSid]=@ActorSid,
+                [UpdatedAtUtc]=@NowUtc
+            WHERE [ResourceFieldId]=@ResourceFieldId
+              AND [ResourceId]=@ResourceId
+              AND [RowVersion]=@ExpectedRowVersion;
+            IF @@ROWCOUNT<>1
+                THROW 52358,N'The resource field changed on another workstation. Refresh and resolve the conflict.',1;
+            SET @Action=N'ClientInfoResourceFieldUpdated';
+        END;
+
+        DECLARE @AuditEntityId nvarchar(120)=
+            CONVERT(nvarchar(120),@ResourceFieldId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=@Action,@EntityType=N'ClientInfoResourceField',
+            @EntityId=@AuditEntityId,@RequestId=@RequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT * FROM [tb_client].[ResourceFields]
+    WHERE [ResourceFieldId]=@ResourceFieldId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.DeleteClientInfoResourceField', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[DeleteClientInfoResourceField];
+GO
+
+CREATE PROCEDURE [tb_app].[DeleteClientInfoResourceField]
+    @ResourceFieldId bigint,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT, @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_info_editor')<>1
+        THROW 52320, N'Client Info editor permission is required.', 1;
+    IF @ExpectedRowVersion IS NULL
+        THROW 52357,N'ExpectedRowVersion is required when deleting a resource field.',1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        DELETE FROM [tb_client].[ResourceFields]
+        WHERE [ResourceFieldId]=@ResourceFieldId
+          AND [RowVersion]=@ExpectedRowVersion;
+        IF @@ROWCOUNT<>1
+            THROW 52359,N'The resource field changed on another workstation. Refresh and resolve the conflict.',1;
+
+        DECLARE @AuditEntityId nvarchar(120)=
+            CONVERT(nvarchar(120),@ResourceFieldId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'ClientInfoResourceFieldDeleted',
+            @EntityType=N'ClientInfoResourceField',
+            @EntityId=@AuditEntityId,@RequestId=@RequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SaveClientInfoFact', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SaveClientInfoFact];
+GO
+
+CREATE PROCEDURE [tb_app].[SaveClientInfoFact]
+    @FactId bigint = NULL,
+    @ClientId int,
+    @LocalKey nvarchar(120) = NULL,
+    @SectionName nvarchar(120),
+    @FieldLabel nvarchar(200),
+    @ValueText nvarchar(max) = NULL,
+    @ValueType nvarchar(24) = N'Text',
+    @ReviewStatus nvarchar(24) = N'Unverified',
+    @SortOrder int = 0,
+    @IsActive bit = 1,
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,@IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_info_editor')<>1
+        THROW 52320,N'Client Info editor permission is required.',1;
+
+    SET @SectionName=NULLIF(LTRIM(RTRIM(@SectionName)),N'');
+    SET @FieldLabel=NULLIF(LTRIM(RTRIM(@FieldLabel)),N'');
+    SET @LocalKey=NULLIF(LTRIM(RTRIM(@LocalKey)),N'');
+    IF @SectionName IS NULL OR @FieldLabel IS NULL
+        THROW 52360,N'Fact section and label are required.',1;
+    IF @ValueType NOT IN (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress')
+        THROW 52361,N'The fact value type is invalid.',1;
+    IF @ReviewStatus NOT IN
+        (N'Unverified',N'Verified',N'AcceptedUnverified',N'NeedsReview')
+        THROW 52321,N'The Client Info review status is invalid.',1;
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(),@Action nvarchar(120);
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        IF @FactId IS NULL
+        BEGIN
+            INSERT INTO [tb_client].[ClientFacts]
+            (
+                [ClientId],[LocalKey],[SectionName],[FieldLabel],[ValueText],
+                [ValueType],[ReviewStatus],[SortOrder],[IsActive],[LastVerifiedAtUtc],
+                [CreatedByWindowsSid],[UpdatedByWindowsSid],[CreatedAtUtc],[UpdatedAtUtc]
+            )
+            VALUES
+            (
+                @ClientId,@LocalKey,@SectionName,@FieldLabel,NULLIF(@ValueText,N''),
+                @ValueType,@ReviewStatus,@SortOrder,@IsActive,
+                CASE WHEN @ReviewStatus=N'Verified' THEN @NowUtc END,
+                @ActorSid,@ActorSid,@NowUtc,@NowUtc
+            );
+            SET @FactId=CONVERT(bigint,SCOPE_IDENTITY());
+            SET @Action=N'ClientInfoFactCreated';
+        END
+        ELSE
+        BEGIN
+            IF @ExpectedRowVersion IS NULL
+                THROW 52362,N'ExpectedRowVersion is required when updating a fact.',1;
+            UPDATE [tb_client].[ClientFacts]
+            SET [LocalKey]=@LocalKey,[SectionName]=@SectionName,
+                [FieldLabel]=@FieldLabel,[ValueText]=NULLIF(@ValueText,N''),
+                [ValueType]=@ValueType,[ReviewStatus]=@ReviewStatus,
+                [SortOrder]=@SortOrder,[IsActive]=@IsActive,
+                [LastVerifiedAtUtc]=CASE WHEN @ReviewStatus=N'Verified'
+                    THEN @NowUtc ELSE [LastVerifiedAtUtc] END,
+                [UpdatedByWindowsSid]=@ActorSid,[UpdatedAtUtc]=@NowUtc
+            WHERE [FactId]=@FactId AND [ClientId]=@ClientId
+              AND [RowVersion]=@ExpectedRowVersion;
+            IF @@ROWCOUNT<>1
+                THROW 52363,N'The fact changed on another workstation. Refresh and resolve the conflict.',1;
+            SET @Action=N'ClientInfoFactUpdated';
+        END;
+        DECLARE @AuditEntityId nvarchar(120) =
+            CONVERT(nvarchar(120), @FactId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=@Action,@EntityType=N'ClientInfoFact',
+            @EntityId=@AuditEntityId,@RequestId=@RequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+    SELECT * FROM [tb_client].[ClientFacts] WHERE [FactId]=@FactId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SaveClientCredential', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SaveClientCredential];
+GO
+
+CREATE PROCEDURE [tb_app].[SaveClientCredential]
+    @CredentialId bigint = NULL,
+    @ClientId int,
+    @ResourceId bigint = NULL,
+    @PersonId bigint = NULL,
+    @LocalKey nvarchar(120) = NULL,
+    @Name nvarchar(240),
+    @Category nvarchar(120) = NULL,
+    @Username nvarchar(500) = NULL,
+    @LoginUrl nvarchar(1000) = NULL,
+    @Notes nvarchar(1000) = NULL,
+    @ReviewStatus nvarchar(24) = N'Unverified',
+    @IsActive bit = 1,
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85),@IsManager bit,@IsAdmin bit,@IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,@IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1
+       AND IS_ROLEMEMBER(N'tb_role_client_secret_editor')<>1
+       AND IS_ROLEMEMBER(N'tb_role_client_info_editor')<>1
+        THROW 52370,N'Client credential editor permission is required.',1;
+
+    SET @Name=NULLIF(LTRIM(RTRIM(@Name)),N'');
+    SET @LocalKey=NULLIF(LTRIM(RTRIM(@LocalKey)),N'');
+    IF @Name IS NULL THROW 52371,N'Credential name is required.',1;
+    IF @ReviewStatus NOT IN
+        (N'Unverified',N'Verified',N'AcceptedUnverified',N'NeedsReview')
+        THROW 52321,N'The Client Info review status is invalid.',1;
+    IF @ResourceId IS NOT NULL AND NOT EXISTS
+        (SELECT 1 FROM [tb_client].[Resources]
+         WHERE [ResourceId]=@ResourceId AND [ClientId]=@ClientId)
+        THROW 52372,N'The linked resource does not belong to this client.',1;
+    IF @PersonId IS NOT NULL AND NOT EXISTS
+        (SELECT 1 FROM [tb_client].[People]
+         WHERE [PersonId]=@PersonId AND [ClientId]=@ClientId)
+        THROW 52373,N'The linked person does not belong to this client.',1;
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(),@Action nvarchar(120);
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        IF @CredentialId IS NULL
+        BEGIN
+            INSERT INTO [tb_client].[Credentials]
+            (
+                [ClientId],[ResourceId],[PersonId],[LocalKey],[Name],[Category],
+                [Username],[LoginUrl],[Notes],[ReviewStatus],[IsActive],
+                [LastVerifiedAtUtc],[CreatedByWindowsSid],[UpdatedByWindowsSid],
+                [CreatedAtUtc],[UpdatedAtUtc]
+            )
+            VALUES
+            (
+                @ClientId,@ResourceId,@PersonId,@LocalKey,@Name,
+                NULLIF(@Category,N''),NULLIF(@Username,N''),
+                NULLIF(@LoginUrl,N''),NULLIF(@Notes,N''),@ReviewStatus,@IsActive,
+                CASE WHEN @ReviewStatus=N'Verified' THEN @NowUtc END,
+                @ActorSid,@ActorSid,@NowUtc,@NowUtc
+            );
+            SET @CredentialId=CONVERT(bigint,SCOPE_IDENTITY());
+            SET @Action=N'ClientCredentialCreated';
+        END
+        ELSE
+        BEGIN
+            IF @ExpectedRowVersion IS NULL
+                THROW 52374,N'ExpectedRowVersion is required when updating a credential.',1;
+            UPDATE [tb_client].[Credentials]
+            SET [ResourceId]=@ResourceId,[PersonId]=@PersonId,[LocalKey]=@LocalKey,
+                [Name]=@Name,[Category]=NULLIF(@Category,N''),
+                [Username]=NULLIF(@Username,N''),[LoginUrl]=NULLIF(@LoginUrl,N''),
+                [Notes]=NULLIF(@Notes,N''),[ReviewStatus]=@ReviewStatus,
+                [IsActive]=@IsActive,
+                [LastVerifiedAtUtc]=CASE WHEN @ReviewStatus=N'Verified'
+                    THEN @NowUtc ELSE [LastVerifiedAtUtc] END,
+                [UpdatedByWindowsSid]=@ActorSid,[UpdatedAtUtc]=@NowUtc
+            WHERE [CredentialId]=@CredentialId AND [ClientId]=@ClientId
+              AND [RowVersion]=@ExpectedRowVersion;
+            IF @@ROWCOUNT<>1
+                THROW 52375,N'The credential changed on another workstation. Refresh and resolve the conflict.',1;
+            SET @Action=N'ClientCredentialUpdated';
+        END;
+        DECLARE @AuditEntityId nvarchar(120) =
+            CONVERT(nvarchar(120), @CredentialId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=@Action,@EntityType=N'ClientCredential',
+            @EntityId=@AuditEntityId,@RequestId=@RequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+    SELECT * FROM [tb_client].[Credentials] WHERE [CredentialId]=@CredentialId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SetClientCredentialSecret', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SetClientCredentialSecret];
+GO
+
+CREATE PROCEDURE [tb_app].[SetClientCredentialSecret]
+    @SecretId bigint = NULL,
+    @CredentialId bigint,
+    @SecretType nvarchar(80),
+    @SecretLabel nvarchar(200),
+    @SecretValue nvarchar(max),
+    @IsVerified bit = 0,
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85),@IsManager bit,@IsAdmin bit,@IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,@IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_secret_editor')<>1
+        THROW 52380,N'Client secret editor permission is required.',1;
+
+    SET @SecretType=NULLIF(LTRIM(RTRIM(@SecretType)),N'');
+    SET @SecretLabel=NULLIF(LTRIM(RTRIM(@SecretLabel)),N'');
+    IF @SecretType IS NULL OR @SecretLabel IS NULL
+       OR NULLIF(@SecretValue,N'') IS NULL
+        THROW 52381,N'Secret type, label, and value are required.',1;
+    IF NOT EXISTS
+        (SELECT 1 FROM [tb_client].[Credentials]
+         WHERE [CredentialId]=@CredentialId AND [IsActive]=1)
+        THROW 52382,N'The credential no longer exists.',1;
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(),@Action nvarchar(120);
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        IF @SecretId IS NULL
+        BEGIN
+            INSERT INTO [tb_client].[CredentialSecrets]
+            (
+                [CredentialId],[SecretType],[SecretLabel],[ValueEncrypted],
+                [LastVerifiedAtUtc],[CreatedByWindowsSid],[UpdatedByWindowsSid],
+                [CreatedAtUtc],[UpdatedAtUtc]
+            )
+            VALUES
+            (
+                @CredentialId,@SecretType,@SecretLabel,0x,
+                CASE WHEN @IsVerified=1 THEN @NowUtc END,
+                @ActorSid,@ActorSid,@NowUtc,@NowUtc
+            );
+            SET @SecretId=CONVERT(bigint,SCOPE_IDENTITY());
+            SET @Action=N'ClientSecretCreated';
+        END
+        ELSE
+        BEGIN
+            IF @ExpectedRowVersion IS NULL
+                THROW 52383,N'ExpectedRowVersion is required when replacing a secret.',1;
+            UPDATE [tb_client].[CredentialSecrets]
+            SET [SecretType]=@SecretType,[SecretLabel]=@SecretLabel,
+                [LastVerifiedAtUtc]=CASE WHEN @IsVerified=1
+                    THEN @NowUtc ELSE [LastVerifiedAtUtc] END,
+                [UpdatedByWindowsSid]=@ActorSid,[UpdatedAtUtc]=@NowUtc
+            WHERE [SecretId]=@SecretId AND [CredentialId]=@CredentialId
+              AND [RowVersion]=@ExpectedRowVersion;
+            IF @@ROWCOUNT<>1
+                THROW 52384,N'The secret changed on another workstation. Refresh before replacing it.',1;
+            SET @Action=N'ClientSecretReplaced';
+        END;
+
+        DECLARE @Authenticator varbinary(32)=HASHBYTES(
+            N'SHA2_256',
+            CONVERT(varbinary(max),
+                N'ClientSecret|' + CONVERT(nvarchar(30),@SecretId)));
+
+        OPEN SYMMETRIC KEY [tb_ClientSecretKey]
+            DECRYPTION BY CERTIFICATE [tb_ClientSecretCertificate];
+        UPDATE [tb_client].[CredentialSecrets]
+        SET [ValueEncrypted]=EncryptByKey(
+                Key_GUID(N'tb_ClientSecretKey'),
+                CONVERT(varbinary(max),@SecretValue),
+                1,
+                @Authenticator),
+            [UpdatedByWindowsSid]=@ActorSid,
+            [UpdatedAtUtc]=@NowUtc
+        WHERE [SecretId]=@SecretId;
+        CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+
+        IF EXISTS
+        (
+            SELECT 1 FROM [tb_client].[CredentialSecrets]
+            WHERE [SecretId]=@SecretId
+              AND ([ValueEncrypted] IS NULL OR DATALENGTH([ValueEncrypted])=0)
+        )
+            THROW 52385,N'The client secret could not be encrypted.',1;
+
+        DECLARE @AuditEntityId nvarchar(120) =
+            CONVERT(nvarchar(120), @SecretId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=@Action,@EntityType=N'ClientCredentialSecret',
+            @EntityId=@AuditEntityId,@RequestId=@RequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF EXISTS
+            (SELECT 1 FROM sys.openkeys WHERE [key_name]=N'tb_ClientSecretKey')
+            CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        [SecretId],[CredentialId],[SecretType],[SecretLabel],[IsCurrent],
+        [LastVerifiedAtUtc],[UpdatedAtUtc],[RowVersion]
+    FROM [tb_client].[CredentialSecrets]
+    WHERE [SecretId]=@SecretId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.RevealClientCredentialSecret', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[RevealClientCredentialSecret];
+GO
+
+CREATE PROCEDURE [tb_app].[RevealClientCredentialSecret]
+    @SecretId bigint,
+    @AccessAction nvarchar(12) = N'Reveal',
+    @RequestId uniqueidentifier = NULL
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF @AccessAction NOT IN (N'Reveal',N'Copy')
+        THROW 52392,N'The secret access action is invalid.',1;
+
+    DECLARE @Authenticator varbinary(32)=HASHBYTES(
+        N'SHA2_256',
+        CONVERT(varbinary(max),
+            N'ClientSecret|' + CONVERT(nvarchar(30),@SecretId)));
+    DECLARE @CredentialId bigint,@ClientId int,
+            @CredentialName nvarchar(240),@SecretType nvarchar(80),
+            @SecretLabel nvarchar(200),@SecretValue nvarchar(max),
+            @SecretRowVersion binary(8);
+
+    OPEN SYMMETRIC KEY [tb_ClientSecretKey]
+        DECRYPTION BY CERTIFICATE [tb_ClientSecretCertificate];
+    SELECT
+        @CredentialId=secret.[CredentialId],
+        @ClientId=credential.[ClientId],
+        @CredentialName=credential.[Name],
+        @SecretType=secret.[SecretType],
+        @SecretLabel=secret.[SecretLabel],
+        @SecretValue=CONVERT(nvarchar(max),DecryptByKey(
+            secret.[ValueEncrypted],1,@Authenticator)),
+        @SecretRowVersion=secret.[RowVersion]
+    FROM [tb_client].[CredentialSecrets] AS secret
+    INNER JOIN [tb_client].[Credentials] AS credential
+        ON credential.[CredentialId]=secret.[CredentialId]
+    WHERE secret.[SecretId]=@SecretId
+      AND secret.[IsCurrent]=1
+      AND credential.[IsActive]=1;
+    IF @@ROWCOUNT<>1
+    BEGIN
+        CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+        THROW 52393,N'The requested client secret was not found.',1;
+    END;
+    CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+
+    DECLARE @AuditAction nvarchar(80) =
+        CASE WHEN @AccessAction=N'Copy'
+            THEN N'ClientSecretCopied' ELSE N'ClientSecretRevealed' END;
+    DECLARE @AuditEntityId nvarchar(120) =
+        CONVERT(nvarchar(120), @SecretId);
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action=@AuditAction,
+        @EntityType=N'ClientCredentialSecret',
+        @EntityId=@AuditEntityId,
+        @RequestId=@RequestId;
+
+    SELECT
+        @SecretId AS [SecretId],@CredentialId AS [CredentialId],
+        @ClientId AS [ClientId],@CredentialName AS [CredentialName],
+        @SecretType AS [SecretType],@SecretLabel AS [SecretLabel],
+        @SecretValue AS [SecretValue],@SecretRowVersion AS [RowVersion];
+END;
+GO
+
+PRINT N'Client Info beta application procedures installed.';
+GO
+
+-- ============================================================================
+-- END 61-V0015-ClientInfoBetaProcedures.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 62-V0015-ClientInfoBetaImportProcedures.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+GO
+
+IF OBJECT_ID(N'tb_app.BeginClientInfoImport', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[BeginClientInfoImport];
+GO
+
+CREATE PROCEDURE [tb_app].[BeginClientInfoImport]
+    @ClientId int,
+    @TemplateVersion nvarchar(40),
+    @WorkbookId uniqueidentifier,
+    @ContentSha256 binary(32),
+    @SourceDisplayName nvarchar(260),
+    @SourceModifiedAtUtc datetime2(3) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85),@IsManager bit,@IsAdmin bit,@IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,@IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_migration_operator')<>1
+        THROW 52400,N'Client migration operator permission is required.',1;
+
+    SET @TemplateVersion=NULLIF(LTRIM(RTRIM(@TemplateVersion)),N'');
+    SET @SourceDisplayName=NULLIF(LTRIM(RTRIM(@SourceDisplayName)),N'');
+    IF @TemplateVersion IS NULL OR @SourceDisplayName IS NULL
+       OR @WorkbookId IS NULL OR @ContentSha256 IS NULL
+        THROW 52401,N'Template version, workbook ID, source name, and content hash are required.',1;
+    IF NOT EXISTS
+        (SELECT 1 FROM [tb_data].[Clients] WHERE [Id]=@ClientId AND [IsActive]=1)
+        THROW 52402,N'The selected client does not exist or is inactive.',1;
+
+    DECLARE @BatchId uniqueidentifier,@SourceDocumentId bigint,
+            @NowUtc datetime2(3)=SYSUTCDATETIME();
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        SELECT @BatchId=[BatchId]
+        FROM [tb_import].[ClientInfoBatches] WITH (UPDLOCK,HOLDLOCK)
+        WHERE [ClientId]=@ClientId AND [WorkbookId]=@WorkbookId
+          AND [ContentSha256]=@ContentSha256;
+
+        IF @BatchId IS NULL
+        BEGIN
+            SELECT @SourceDocumentId=[SourceDocumentId]
+            FROM [tb_client].[SourceDocuments] WITH (UPDLOCK,HOLDLOCK)
+            WHERE [ClientId]=@ClientId AND [SourceKind]=N'Workbook'
+              AND [ContentSha256]=@ContentSha256;
+
+            IF @SourceDocumentId IS NULL
+            BEGIN
+                INSERT INTO [tb_client].[SourceDocuments]
+                (
+                    [ClientId],[SourceKind],[DisplayName],[ContentSha256],
+                    [SourceModifiedAtUtc],[ObservedAtUtc],[CreatedByWindowsSid]
+                )
+                VALUES
+                (
+                    @ClientId,N'Workbook',@SourceDisplayName,@ContentSha256,
+                    @SourceModifiedAtUtc,@NowUtc,@ActorSid
+                );
+                SET @SourceDocumentId=CONVERT(bigint,SCOPE_IDENTITY());
+            END;
+
+            SET @BatchId=NEWID();
+            INSERT INTO [tb_import].[ClientInfoBatches]
+            (
+                [BatchId],[ClientId],[SourceDocumentId],[TemplateVersion],
+                [WorkbookId],[ContentSha256],[State],[Message],
+                [CreatedByWindowsSid],[CreatedAtUtc],[UpdatedAtUtc]
+            )
+            VALUES
+            (
+                @BatchId,@ClientId,@SourceDocumentId,@TemplateVersion,
+                @WorkbookId,@ContentSha256,N'Draft',N'Workbook accepted for staging.',
+                @ActorSid,@NowUtc,@NowUtc
+            );
+
+            IF EXISTS
+                (SELECT 1 FROM [tb_ops].[ClientInfoCutovers] WHERE [ClientId]=@ClientId)
+                UPDATE [tb_ops].[ClientInfoCutovers]
+                SET [ActiveBatchId]=@BatchId,[State]=N'Staging',
+                    [UpdatedByWindowsSid]=@ActorSid,[UpdatedAtUtc]=@NowUtc
+                WHERE [ClientId]=@ClientId;
+            ELSE
+                INSERT INTO [tb_ops].[ClientInfoCutovers]
+                (
+                    [ClientId],[ActiveBatchId],[State],
+                    [UpdatedByWindowsSid],[UpdatedAtUtc]
+                )
+                VALUES (@ClientId,@BatchId,N'Staging',@ActorSid,@NowUtc);
+
+            DECLARE @AuditEntityId nvarchar(120) =
+                CONVERT(nvarchar(120), @BatchId);
+            EXEC [tb_security].[WriteAuditEvent]
+                @Action=N'ClientInfoImportStarted',
+                @EntityType=N'ClientInfoImportBatch',
+                @EntityId=@AuditEntityId,
+                @RequestId=@RequestId;
+        END;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        [BatchId],[ClientId],[TemplateVersion],[WorkbookId],[State],
+        [Message],[CreatedAtUtc],[UpdatedAtUtc],[RowVersion]
+    FROM [tb_import].[ClientInfoBatches]
+    WHERE [BatchId]=@BatchId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.StageClientInfoRecord', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[StageClientInfoRecord];
+GO
+
+CREATE PROCEDURE [tb_app].[StageClientInfoRecord]
+    @BatchId uniqueidentifier,
+    @RecordType nvarchar(40),
+    @LocalKey nvarchar(120),
+    @ParentLocalKey nvarchar(120) = NULL,
+    @PayloadJson nvarchar(max),
+    @SourceSheet nvarchar(128) = NULL,
+    @SourceRow int = NULL,
+    @ReviewStatus nvarchar(24) = N'Unverified'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85),@IsManager bit,@IsAdmin bit,@IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,@IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_migration_operator')<>1
+        THROW 52400,N'Client migration operator permission is required.',1;
+
+    SET @RecordType=NULLIF(LTRIM(RTRIM(@RecordType)),N'');
+    SET @LocalKey=NULLIF(LTRIM(RTRIM(@LocalKey)),N'');
+    SET @ParentLocalKey=NULLIF(LTRIM(RTRIM(@ParentLocalKey)),N'');
+    IF @RecordType NOT IN
+        (N'Profile',N'Location',N'Person',N'Resource',N'ResourceField',
+         N'Credential',N'Fact',N'Equipment')
+       OR @LocalKey IS NULL OR ISJSON(@PayloadJson)<>1
+        THROW 52410,N'The staged Client Info record is invalid.',1;
+    IF @ReviewStatus NOT IN
+        (N'Unverified',N'Verified',N'AcceptedUnverified',N'NeedsReview',N'Rejected')
+        THROW 52411,N'The staged review status is invalid.',1;
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM [tb_import].[ClientInfoBatches]
+        WHERE [BatchId]=@BatchId
+          AND [State] IN (N'Draft',N'Parsed',N'ValidationFailed',N'InReview')
+    )
+        THROW 52412,N'This import batch can no longer be changed.',1;
+
+    MERGE [tb_import].[ClientInfoRecords] WITH (HOLDLOCK) AS target_record
+    USING
+    (
+        SELECT @BatchId AS [BatchId],@RecordType AS [RecordType],
+               @LocalKey AS [LocalKey]
+    ) AS source_record
+    ON target_record.[BatchId]=source_record.[BatchId]
+       AND target_record.[RecordType]=source_record.[RecordType]
+       AND target_record.[LocalKey]=source_record.[LocalKey]
+    WHEN MATCHED THEN UPDATE SET
+        [ParentLocalKey]=@ParentLocalKey,[PayloadJson]=@PayloadJson,
+        [SourceSheet]=NULLIF(@SourceSheet,N''),[SourceRow]=@SourceRow,
+        [ReviewStatus]=@ReviewStatus,[CreatedAtUtc]=SYSUTCDATETIME()
+    WHEN NOT MATCHED THEN INSERT
+    (
+        [BatchId],[RecordType],[LocalKey],[ParentLocalKey],[PayloadJson],
+        [SourceSheet],[SourceRow],[ReviewStatus]
+    )
+    VALUES
+    (
+        @BatchId,@RecordType,@LocalKey,@ParentLocalKey,@PayloadJson,
+        NULLIF(@SourceSheet,N''),@SourceRow,@ReviewStatus
+    );
+
+    UPDATE [tb_import].[ClientInfoBatches]
+    SET [State]=N'Parsed',[Message]=N'Workbook rows staged.',
+        [UpdatedAtUtc]=SYSUTCDATETIME()
+    WHERE [BatchId]=@BatchId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.StageClientInfoSecret', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[StageClientInfoSecret];
+GO
+
+CREATE PROCEDURE [tb_app].[StageClientInfoSecret]
+    @BatchId uniqueidentifier,
+    @CredentialLocalKey nvarchar(120),
+    @SecretType nvarchar(80),
+    @SecretLabel nvarchar(200),
+    @SecretValue nvarchar(max)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85),@IsManager bit,@IsAdmin bit,@IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,@IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1
+       AND IS_ROLEMEMBER(N'tb_role_client_migration_operator')<>1
+       AND IS_ROLEMEMBER(N'tb_role_client_secret_editor')<>1
+        THROW 52400,N'Client migration operator permission is required.',1;
+
+    SET @CredentialLocalKey=NULLIF(LTRIM(RTRIM(@CredentialLocalKey)),N'');
+    SET @SecretType=NULLIF(LTRIM(RTRIM(@SecretType)),N'');
+    SET @SecretLabel=NULLIF(LTRIM(RTRIM(@SecretLabel)),N'');
+    IF @CredentialLocalKey IS NULL OR @SecretType IS NULL
+       OR @SecretLabel IS NULL OR NULLIF(@SecretValue,N'') IS NULL
+        THROW 52420,N'The staged client secret is invalid.',1;
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM [tb_import].[ClientInfoBatches]
+        WHERE [BatchId]=@BatchId
+          AND [State] IN (N'Draft',N'Parsed',N'ValidationFailed',N'InReview')
+    )
+        THROW 52412,N'This import batch can no longer be changed.',1;
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM [tb_import].[ClientInfoRecords]
+        WHERE [BatchId]=@BatchId AND [RecordType]=N'Credential'
+          AND [LocalKey]=@CredentialLocalKey
+    )
+        THROW 52421,N'The staged secret does not reference a credential row.',1;
+
+    DECLARE @ImportSecretId bigint;
+    SELECT @ImportSecretId=[ImportSecretId]
+    FROM [tb_import].[ClientInfoSecrets] WITH (UPDLOCK,HOLDLOCK)
+    WHERE [BatchId]=@BatchId AND [CredentialLocalKey]=@CredentialLocalKey
+      AND [SecretType]=@SecretType AND [SecretLabel]=@SecretLabel;
+
+    IF @ImportSecretId IS NULL
+    BEGIN
+        INSERT INTO [tb_import].[ClientInfoSecrets]
+        (
+            [BatchId],[CredentialLocalKey],[SecretType],[SecretLabel],
+            [ValueEncrypted],[ComparisonStatus]
+        )
+        VALUES
+        (
+            @BatchId,@CredentialLocalKey,@SecretType,@SecretLabel,
+            0x,N'NotCompared'
+        );
+        SET @ImportSecretId=CONVERT(bigint,SCOPE_IDENTITY());
+    END;
+
+    DECLARE @Authenticator varbinary(32)=HASHBYTES(
+        N'SHA2_256',
+        CONVERT(varbinary(max),
+            N'ClientImportSecret|' + CONVERT(nvarchar(30),@ImportSecretId)));
+    OPEN SYMMETRIC KEY [tb_ClientSecretKey]
+        DECRYPTION BY CERTIFICATE [tb_ClientSecretCertificate];
+    UPDATE [tb_import].[ClientInfoSecrets]
+    SET [ValueEncrypted]=EncryptByKey(
+            Key_GUID(N'tb_ClientSecretKey'),
+            CONVERT(varbinary(max),@SecretValue),
+            1,@Authenticator),
+        [ComparisonStatus]=N'NotCompared',
+        [Resolution]=NULL
+    WHERE [ImportSecretId]=@ImportSecretId;
+    CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+
+    IF EXISTS
+        (SELECT 1 FROM [tb_import].[ClientInfoSecrets]
+         WHERE [ImportSecretId]=@ImportSecretId
+           AND ([ValueEncrypted] IS NULL OR DATALENGTH([ValueEncrypted])=0))
+        THROW 52422,N'The staged client secret could not be encrypted.',1;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.ValidateClientInfoImport', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[ValidateClientInfoImport];
+GO
+
+CREATE PROCEDURE [tb_app].[ValidateClientInfoImport]
+    @BatchId uniqueidentifier,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85),@IsManager bit,@IsAdmin bit,@IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,@IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_migration_operator')<>1
+        THROW 52400,N'Client migration operator permission is required.',1;
+
+    IF NOT EXISTS
+        (SELECT 1 FROM [tb_import].[ClientInfoBatches] WHERE [BatchId]=@BatchId)
+        THROW 52430,N'The import batch was not found.',1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        DELETE FROM [tb_import].[ClientInfoIssues]
+        WHERE [BatchId]=@BatchId AND [IsResolved]=0;
+
+        IF NOT EXISTS
+        (
+            SELECT 1 FROM [tb_import].[ClientInfoRecords]
+            WHERE [BatchId]=@BatchId AND [RecordType]=N'Profile'
+              AND [ReviewStatus]<>N'Rejected'
+        )
+            INSERT INTO [tb_import].[ClientInfoIssues]
+                ([BatchId],[Severity],[IssueCode],[Message])
+            VALUES
+                (@BatchId,N'Error',N'PROFILE_REQUIRED',
+                 N'The workbook must include one Client Info profile row.');
+
+        INSERT INTO [tb_import].[ClientInfoIssues]
+            ([BatchId],[ImportRecordId],[Severity],[IssueCode],[Message])
+        SELECT [BatchId],[ImportRecordId],N'Error',N'NAME_REQUIRED',
+            N'This row requires a non-blank Name value.'
+        FROM [tb_import].[ClientInfoRecords]
+        WHERE [BatchId]=@BatchId
+          AND [RecordType] IN (N'Location',N'Resource',N'Credential',N'Equipment')
+          AND NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.name'))),N'') IS NULL;
+
+        INSERT INTO [tb_import].[ClientInfoIssues]
+            ([BatchId],[ImportRecordId],[Severity],[IssueCode],[Message])
+        SELECT [BatchId],[ImportRecordId],N'Error',N'PERSON_NAME_REQUIRED',
+            N'This person row requires a non-blank Display Name value.'
+        FROM [tb_import].[ClientInfoRecords]
+        WHERE [BatchId]=@BatchId AND [RecordType]=N'Person'
+          AND NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.displayName'))),N'') IS NULL;
+
+        INSERT INTO [tb_import].[ClientInfoIssues]
+            ([BatchId],[ImportRecordId],[Severity],[IssueCode],[Message])
+        SELECT [BatchId],[ImportRecordId],N'Error',N'FACT_FIELDS_REQUIRED',
+            N'This Other Info row requires Section and Field Label values.'
+        FROM [tb_import].[ClientInfoRecords]
+        WHERE [BatchId]=@BatchId AND [RecordType]=N'Fact'
+          AND
+          (
+              NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.sectionName'))),N'') IS NULL
+              OR NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.fieldLabel'))),N'') IS NULL
+          );
+
+        INSERT INTO [tb_import].[ClientInfoIssues]
+            ([BatchId],[ImportRecordId],[Severity],[IssueCode],[Message])
+        SELECT [BatchId],[ImportRecordId],N'Error',N'RESOURCE_FIELD_INVALID',
+            N'This resource field requires a parent resource, field key, field label, and valid value type.'
+        FROM [tb_import].[ClientInfoRecords]
+        WHERE [BatchId]=@BatchId AND [RecordType]=N'ResourceField'
+          AND
+          (
+              NULLIF(LTRIM(RTRIM([ParentLocalKey])),N'') IS NULL
+              OR NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.fieldKey'))),N'') IS NULL
+              OR NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.fieldLabel'))),N'') IS NULL
+              OR JSON_VALUE([PayloadJson],N'$.valueType') NOT IN
+                  (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress')
+          );
+
+        INSERT INTO [tb_import].[ClientInfoIssues]
+            ([BatchId],[ImportRecordId],[Severity],[IssueCode],[Message])
+        SELECT field.[BatchId],field.[ImportRecordId],N'Error',
+            N'ORPHAN_RESOURCE_FIELD',
+            N'This custom or standard field does not reference a staged resource.'
+        FROM [tb_import].[ClientInfoRecords] field
+        WHERE field.[BatchId]=@BatchId
+          AND field.[RecordType]=N'ResourceField'
+          AND NOT EXISTS
+          (
+              SELECT 1
+              FROM [tb_import].[ClientInfoRecords] resource
+              WHERE resource.[BatchId]=field.[BatchId]
+                AND resource.[RecordType]=N'Resource'
+                AND resource.[LocalKey]=field.[ParentLocalKey]
+                AND resource.[ReviewStatus]<>N'Rejected'
+          );
+
+        INSERT INTO [tb_import].[ClientInfoIssues]
+            ([BatchId],[Severity],[IssueCode],[Message])
+        SELECT @BatchId,N'Error',N'ORPHAN_SECRET',
+            N'One or more secret rows do not reference a staged credential.'
+        WHERE EXISTS
+        (
+            SELECT 1
+            FROM [tb_import].[ClientInfoSecrets] AS secret
+            WHERE secret.[BatchId]=@BatchId
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_import].[ClientInfoRecords] AS record
+                  WHERE record.[BatchId]=secret.[BatchId]
+                    AND record.[RecordType]=N'Credential'
+                    AND record.[LocalKey]=secret.[CredentialLocalKey]
+              )
+        );
+
+        INSERT INTO [tb_import].[ClientInfoIssues]
+            ([BatchId],[ImportRecordId],[Severity],[IssueCode],[Message])
+        SELECT [BatchId],[ImportRecordId],N'Warning',N'UNVERIFIED_RECORD',
+            N'This row has not been verified. Accept it explicitly or verify it before approval.'
+        FROM [tb_import].[ClientInfoRecords]
+        WHERE [BatchId]=@BatchId AND [ReviewStatus] IN (N'Unverified',N'NeedsReview');
+
+        DECLARE @ErrorCount int=
+            (SELECT COUNT(*) FROM [tb_import].[ClientInfoIssues]
+             WHERE [BatchId]=@BatchId AND [Severity]=N'Error' AND [IsResolved]=0);
+        DECLARE @WarningCount int=
+            (SELECT COUNT(*) FROM [tb_import].[ClientInfoIssues]
+             WHERE [BatchId]=@BatchId AND [Severity]=N'Warning' AND [IsResolved]=0);
+
+        UPDATE [tb_import].[ClientInfoBatches]
+        SET [State]=CASE WHEN @ErrorCount>0 THEN N'ValidationFailed' ELSE N'InReview' END,
+            [Message]=CASE
+                WHEN @ErrorCount>0
+                    THEN CONVERT(nvarchar(20),@ErrorCount)+N' blocking error(s) require attention.'
+                WHEN @WarningCount>0
+                    THEN N'Validation passed with '+CONVERT(nvarchar(20),@WarningCount)+N' warning(s).'
+                ELSE N'Validation passed.' END,
+            [UpdatedAtUtc]=SYSUTCDATETIME()
+        WHERE [BatchId]=@BatchId;
+
+        DECLARE @AuditEntityId nvarchar(120) =
+            CONVERT(nvarchar(120), @BatchId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'ClientInfoImportValidated',
+            @EntityType=N'ClientInfoImportBatch',
+            @EntityId=@AuditEntityId,@RequestId=@RequestId,
+            @DataJson=N'{"containsSecretValues":false}';
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    EXEC [tb_app].[GetClientInfoImportBatch] @BatchId=@BatchId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.GetClientInfoImportBatch', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[GetClientInfoImportBatch];
+GO
+
+CREATE PROCEDURE [tb_app].[GetClientInfoImportBatch]
+    @BatchId uniqueidentifier
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85),@IsManager bit,@IsAdmin bit,@IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,@IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
+    SELECT
+        batch.[BatchId],batch.[ClientId],client.[Name] AS [ClientName],
+        batch.[TemplateVersion],batch.[WorkbookId],batch.[State],batch.[Message],
+        batch.[CreatedAtUtc],batch.[UpdatedAtUtc],batch.[ApprovedAtUtc],
+        batch.[PromotedAtUtc],batch.[RowVersion],
+        (SELECT COUNT(*) FROM [tb_import].[ClientInfoRecords] record
+         WHERE record.[BatchId]=batch.[BatchId]) AS [RecordCount],
+        (SELECT COUNT(*) FROM [tb_import].[ClientInfoSecrets] secret
+         WHERE secret.[BatchId]=batch.[BatchId]) AS [SecretCount],
+        (SELECT COUNT(*) FROM [tb_import].[ClientInfoSecrets] secret
+         WHERE secret.[BatchId]=batch.[BatchId]
+           AND secret.[ComparisonStatus]=N'Match') AS [SecretMatchCount],
+        (SELECT COUNT(*) FROM [tb_import].[ClientInfoSecrets] secret
+         WHERE secret.[BatchId]=batch.[BatchId]
+           AND secret.[ComparisonStatus]=N'Mismatch') AS [SecretMismatchCount],
+        (SELECT COUNT(*) FROM [tb_import].[ClientInfoSecrets] secret
+         WHERE secret.[BatchId]=batch.[BatchId]
+           AND secret.[ComparisonStatus]=N'WorkbookOnly') AS [SecretWorkbookOnlyCount],
+        (SELECT COUNT(*) FROM [tb_import].[ClientInfoIssues] issue
+         WHERE issue.[BatchId]=batch.[BatchId] AND issue.[Severity]=N'Error'
+           AND issue.[IsResolved]=0) AS [BlockingIssueCount],
+        (SELECT COUNT(*) FROM [tb_import].[ClientInfoIssues] issue
+         WHERE issue.[BatchId]=batch.[BatchId] AND issue.[Severity]=N'Warning'
+           AND issue.[IsResolved]=0) AS [WarningCount]
+    FROM [tb_import].[ClientInfoBatches] batch
+    INNER JOIN [tb_data].[Clients] client ON client.[Id]=batch.[ClientId]
+    WHERE batch.[BatchId]=@BatchId;
+
+    SELECT
+        [IssueId],[ImportRecordId],[Severity],[IssueCode],[Message],
+        [IsResolved],[ResolutionNote],[ResolvedAtUtc],[RowVersion]
+    FROM [tb_import].[ClientInfoIssues]
+    WHERE [BatchId]=@BatchId
+    ORDER BY [IsResolved],[Severity],[IssueId];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.CompareClientInfoImportToFireDrill', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[CompareClientInfoImportToFireDrill];
+GO
+
+CREATE PROCEDURE [tb_app].[CompareClientInfoImportToFireDrill]
+    @BatchId uniqueidentifier,
+    @RequestId uniqueidentifier = NULL
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ClientId int,@ClientName nvarchar(240),
+            @WhdLocationName nvarchar(240),@SageCustomerName nvarchar(240);
+    SELECT
+        @ClientId=batch.[ClientId],
+        @ClientName=client.[Name],
+        @WhdLocationName=client.[WhdLocationName],
+        @SageCustomerName=client.[SageCustomerName]
+    FROM [tb_import].[ClientInfoBatches] batch
+    INNER JOIN [tb_data].[Clients] client ON client.[Id]=batch.[ClientId]
+    WHERE batch.[BatchId]=@BatchId
+      AND batch.[State] IN
+          (N'Parsed',N'Validated',N'InReview',N'ValidationFailed');
+    IF @ClientId IS NULL
+        THROW 52430,N'The selected import batch cannot be compared.',1;
+
+    CREATE TABLE #FireDrillHashes
+    (
+        [ValueHash] binary(32) NOT NULL,
+        [FieldLabel] nvarchar(200) NOT NULL
+    );
+
+    BEGIN TRY
+        OPEN SYMMETRIC KEY [tb_FireDrillCredentialKey]
+            DECRYPTION BY CERTIFICATE [tb_FireDrillCredentialCertificate];
+        OPEN SYMMETRIC KEY [tb_ClientSecretKey]
+            DECRYPTION BY CERTIFICATE [tb_ClientSecretCertificate];
+
+        INSERT INTO #FireDrillHashes([ValueHash],[FieldLabel])
+        SELECT
+            HASHBYTES(
+                N'SHA2_256',
+                DecryptByKey(
+                    field.[ValueEncrypted],
+                    1,
+                    CONVERT(
+                        nvarchar(64),
+                        HASHBYTES(N'SHA2_256',credential.[ClientKey]),
+                        2))),
+            field.[FieldLabel]
+        FROM [tb_data].[FireDrillCredentials] credential
+        INNER JOIN [tb_data].[FireDrillCredentialFields] field
+            ON field.[CredentialId]=credential.[CredentialId]
+        WHERE credential.[IsCurrent]=1
+          AND field.[ValueEncrypted] IS NOT NULL
+          AND
+          (
+              LTRIM(RTRIM(credential.[ClientName]))=LTRIM(RTRIM(@ClientName))
+              OR LTRIM(RTRIM(credential.[ClientName]))=LTRIM(RTRIM(COALESCE(@WhdLocationName,N'')))
+              OR LTRIM(RTRIM(credential.[ClientName]))=LTRIM(RTRIM(COALESCE(@SageCustomerName,N'')))
+          );
+
+        INSERT INTO #FireDrillHashes([ValueHash],[FieldLabel])
+        SELECT
+            HASHBYTES(
+                N'SHA2_256',
+                DecryptByKey(
+                    legacy.[ValueEncrypted],
+                    1,
+                    CONVERT(
+                        nvarchar(64),
+                        HASHBYTES(N'SHA2_256',credential.[ClientKey]),
+                        2))),
+            legacy.[FieldLabel]
+        FROM [tb_data].[FireDrillCredentials] credential
+        CROSS APPLY
+        (
+            VALUES
+                (credential.[AdminEncrypted],N'Admin'),
+                (credential.[CsriAdminEncrypted],N'CSRI Admin'),
+                (credential.[FireboxDbCsriEncrypted],N'Firebox DB CSRI'),
+                (credential.[AuthpointUserEncrypted],N'AuthPoint User'),
+                (credential.[SslVpnPasswordEncrypted],N'SSL VPN Password'),
+                (credential.[AdAuthUserEncrypted],N'AD Auth User'),
+                (credential.[AdPasswordEncrypted],N'AD Password'),
+                (credential.[RustPasswordEncrypted],N'Rust Password')
+        ) legacy([ValueEncrypted],[FieldLabel])
+        WHERE credential.[IsCurrent]=1
+          AND legacy.[ValueEncrypted] IS NOT NULL
+          AND
+          (
+              LTRIM(RTRIM(credential.[ClientName]))=LTRIM(RTRIM(@ClientName))
+              OR LTRIM(RTRIM(credential.[ClientName]))=LTRIM(RTRIM(COALESCE(@WhdLocationName,N'')))
+              OR LTRIM(RTRIM(credential.[ClientName]))=LTRIM(RTRIM(COALESCE(@SageCustomerName,N'')))
+          );
+
+        DECLARE @HasFireDrillValues bit =
+            CASE WHEN EXISTS(SELECT 1 FROM #FireDrillHashes)
+                THEN 1 ELSE 0 END;
+        UPDATE secret
+        SET
+            [ComparisonStatus]=
+                CASE
+                    WHEN @HasFireDrillValues=0 THEN N'WorkbookOnly'
+                    WHEN EXISTS
+                    (
+                        SELECT 1
+                        FROM #FireDrillHashes fire_value
+                        WHERE fire_value.[ValueHash]=HASHBYTES(
+                            N'SHA2_256',
+                            DecryptByKey(
+                                secret.[ValueEncrypted],
+                                1,
+                                HASHBYTES(
+                                    N'SHA2_256',
+                                    CONVERT(
+                                        varbinary(max),
+                                        N'ClientImportSecret|'
+                                        +CONVERT(
+                                            nvarchar(30),
+                                            secret.[ImportSecretId])))))
+                    )
+                        THEN N'Match'
+                    ELSE N'Mismatch'
+                END
+        FROM [tb_import].[ClientInfoSecrets] secret
+        WHERE secret.[BatchId]=@BatchId;
+
+        DELETE FROM [tb_import].[ClientInfoIssues]
+        WHERE [BatchId]=@BatchId
+          AND [IssueCode] IN
+              (N'FIREDRILL_MISMATCH',N'WORKBOOK_ONLY_SECRET',N'FIREDRILL_ONLY_SECRET');
+
+        INSERT INTO [tb_import].[ClientInfoIssues]
+            ([BatchId],[Severity],[IssueCode],[Message])
+        SELECT @BatchId,N'Warning',N'FIREDRILL_MISMATCH',
+            CONVERT(nvarchar(20),COUNT(*))
+            +N' workbook secret(s) do not match any value in the current FireDrill client.'
+        FROM [tb_import].[ClientInfoSecrets]
+        WHERE [BatchId]=@BatchId AND [ComparisonStatus]=N'Mismatch'
+        HAVING COUNT(*)>0;
+
+        INSERT INTO [tb_import].[ClientInfoIssues]
+            ([BatchId],[Severity],[IssueCode],[Message])
+        SELECT @BatchId,N'Warning',N'WORKBOOK_ONLY_SECRET',
+            CONVERT(nvarchar(20),COUNT(*))
+            +N' workbook secret(s) could not be compared because no current FireDrill client match was found.'
+        FROM [tb_import].[ClientInfoSecrets]
+        WHERE [BatchId]=@BatchId AND [ComparisonStatus]=N'WorkbookOnly'
+        HAVING COUNT(*)>0;
+
+        INSERT INTO [tb_import].[ClientInfoIssues]
+            ([BatchId],[Severity],[IssueCode],[Message])
+        SELECT @BatchId,N'Warning',N'FIREDRILL_ONLY_SECRET',
+            N'FireDrill contains one or more values not represented in this workbook.'
+        WHERE EXISTS
+        (
+            SELECT 1 FROM #FireDrillHashes fire_value
+            WHERE NOT EXISTS
+            (
+                SELECT 1
+                FROM [tb_import].[ClientInfoSecrets] secret
+                WHERE secret.[BatchId]=@BatchId
+                  AND fire_value.[ValueHash]=HASHBYTES(
+                      N'SHA2_256',
+                      DecryptByKey(
+                          secret.[ValueEncrypted],
+                          1,
+                          HASHBYTES(
+                              N'SHA2_256',
+                              CONVERT(
+                                  varbinary(max),
+                                  N'ClientImportSecret|'
+                                  +CONVERT(
+                                      nvarchar(30),
+                                      secret.[ImportSecretId])))))
+            )
+        );
+
+        CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+        CLOSE SYMMETRIC KEY [tb_FireDrillCredentialKey];
+    END TRY
+    BEGIN CATCH
+        IF EXISTS
+            (SELECT 1 FROM sys.openkeys WHERE [key_name]=N'tb_ClientSecretKey')
+            CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+        IF EXISTS
+            (SELECT 1 FROM sys.openkeys WHERE [key_name]=N'tb_FireDrillCredentialKey')
+            CLOSE SYMMETRIC KEY [tb_FireDrillCredentialKey];
+        THROW;
+    END CATCH;
+
+    DECLARE @AuditEntityId nvarchar(120)=
+        CONVERT(nvarchar(120),@BatchId);
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action=N'ClientInfoImportComparedToFireDrill',
+        @EntityType=N'ClientInfoImportBatch',
+        @EntityId=@AuditEntityId,@RequestId=@RequestId,
+        @DataJson=N'{"containsSecretValues":false}';
+
+    EXEC [tb_app].[GetClientInfoImportBatch] @BatchId=@BatchId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.ResolveClientInfoImportIssue', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[ResolveClientInfoImportIssue];
+GO
+
+CREATE PROCEDURE [tb_app].[ResolveClientInfoImportIssue]
+    @IssueId bigint,
+    @ResolutionNote nvarchar(1000),
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85),@IsManager bit,@IsAdmin bit,@IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,@IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_migration_operator')<>1
+        THROW 52400,N'Client migration operator permission is required.',1;
+    SET @ResolutionNote=NULLIF(LTRIM(RTRIM(@ResolutionNote)),N'');
+    IF @ResolutionNote IS NULL
+        THROW 52440,N'A resolution note is required.',1;
+    UPDATE [tb_import].[ClientInfoIssues]
+    SET [IsResolved]=1,[ResolutionNote]=@ResolutionNote,
+        [ResolvedByWindowsSid]=@ActorSid,[ResolvedAtUtc]=SYSUTCDATETIME()
+    WHERE [IssueId]=@IssueId AND [RowVersion]=@ExpectedRowVersion;
+    IF @@ROWCOUNT<>1
+        THROW 52441,N'The import issue changed on another workstation.',1;
+    DECLARE @AuditEntityId nvarchar(120) =
+        CONVERT(nvarchar(120), @IssueId);
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action=N'ClientInfoImportIssueResolved',
+        @EntityType=N'ClientInfoImportIssue',
+        @EntityId=@AuditEntityId,@RequestId=@RequestId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.ApproveClientInfoImport', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[ApproveClientInfoImport];
+GO
+
+CREATE PROCEDURE [tb_app].[ApproveClientInfoImport]
+    @BatchId uniqueidentifier,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85),@IsManager bit,@IsAdmin bit,@IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,@IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1
+        THROW 52450,N'Only a TechBench Admin may approve a Client Info import.',1;
+    IF EXISTS
+        (SELECT 1 FROM [tb_import].[ClientInfoIssues]
+         WHERE [BatchId]=@BatchId AND [Severity]=N'Error' AND [IsResolved]=0)
+        THROW 52451,N'Blocking import issues must be resolved before approval.',1;
+    IF EXISTS
+        (SELECT 1 FROM [tb_import].[ClientInfoRecords]
+         WHERE [BatchId]=@BatchId AND [ReviewStatus] IN (N'Unverified',N'NeedsReview'))
+        THROW 52452,N'Every unverified row must be verified, accepted, or rejected before approval.',1;
+
+    UPDATE [tb_import].[ClientInfoBatches]
+    SET [State]=N'Approved',[Message]=N'Approved and ready for promotion.',
+        [ApprovedByWindowsSid]=@ActorSid,[ApprovedAtUtc]=SYSUTCDATETIME(),
+        [UpdatedAtUtc]=SYSUTCDATETIME()
+    WHERE [BatchId]=@BatchId AND [State]=N'InReview'
+      AND [RowVersion]=@ExpectedRowVersion;
+    IF @@ROWCOUNT<>1
+        THROW 52453,N'The import batch changed or is not ready for approval.',1;
+
+    DECLARE @AuditEntityId nvarchar(120) =
+        CONVERT(nvarchar(120), @BatchId);
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action=N'ClientInfoImportApproved',
+        @EntityType=N'ClientInfoImportBatch',
+        @EntityId=@AuditEntityId,@RequestId=@RequestId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.PromoteClientInfoImport', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[PromoteClientInfoImport];
+GO
+
+CREATE PROCEDURE [tb_app].[PromoteClientInfoImport]
+    @BatchId uniqueidentifier,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ClientId int,@ActorSid varbinary(85)=SUSER_SID(ORIGINAL_LOGIN()),
+            @NowUtc datetime2(3)=SYSUTCDATETIME();
+    SELECT @ClientId=[ClientId]
+    FROM [tb_import].[ClientInfoBatches] WITH (UPDLOCK,HOLDLOCK)
+    WHERE [BatchId]=@BatchId AND [State]=N'Approved'
+      AND [RowVersion]=@ExpectedRowVersion;
+    IF @ClientId IS NULL
+        THROW 52460,N'The import batch changed or is not approved for promotion.',1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        DECLARE @ProfileSummary nvarchar(2000),@ProfileReview nvarchar(24);
+        SELECT TOP(1)
+            @ProfileSummary=JSON_VALUE([PayloadJson],N'$.summary'),
+            @ProfileReview=[ReviewStatus]
+        FROM [tb_import].[ClientInfoRecords]
+        WHERE [BatchId]=@BatchId AND [RecordType]=N'Profile'
+          AND [ReviewStatus]<>N'Rejected'
+        ORDER BY [ImportRecordId];
+
+        IF EXISTS (SELECT 1 FROM [tb_client].[ClientProfiles] WHERE [ClientId]=@ClientId)
+            UPDATE [tb_client].[ClientProfiles]
+            SET [Summary]=NULLIF(@ProfileSummary,N''),
+                [ReviewStatus]=COALESCE(@ProfileReview,N'AcceptedUnverified'),
+                [UpdatedByWindowsSid]=@ActorSid,[UpdatedAtUtc]=@NowUtc
+            WHERE [ClientId]=@ClientId;
+        ELSE
+            INSERT INTO [tb_client].[ClientProfiles]
+            (
+                [ClientId],[Summary],[ReviewStatus],[CreatedByWindowsSid],
+                [UpdatedByWindowsSid],[CreatedAtUtc],[UpdatedAtUtc]
+            )
+            VALUES
+            (
+                @ClientId,NULLIF(@ProfileSummary,N''),
+                COALESCE(@ProfileReview,N'AcceptedUnverified'),
+                @ActorSid,@ActorSid,@NowUtc,@NowUtc
+            );
+
+        DECLARE @ImportRecordId bigint,@RecordType nvarchar(40),
+                @LocalKey nvarchar(120),@ParentLocalKey nvarchar(120),
+                @PayloadJson nvarchar(max),@ReviewStatus nvarchar(24),
+                @EntityId bigint,@LocationId bigint,@PersonId bigint,
+                @ResourceId bigint;
+        DECLARE record_cursor CURSOR LOCAL FAST_FORWARD FOR
+            SELECT [ImportRecordId],[RecordType],[LocalKey],[ParentLocalKey],
+                   [PayloadJson],[ReviewStatus]
+            FROM [tb_import].[ClientInfoRecords]
+            WHERE [BatchId]=@BatchId AND [RecordType]<>N'Profile'
+              AND [ReviewStatus]<>N'Rejected'
+            ORDER BY CASE [RecordType]
+                WHEN N'Location' THEN 1 WHEN N'Person' THEN 2
+                WHEN N'Resource' THEN 3 WHEN N'ResourceField' THEN 4
+                WHEN N'Credential' THEN 5 WHEN N'Fact' THEN 6
+                WHEN N'Equipment' THEN 7 ELSE 9 END,
+                [ImportRecordId];
+        OPEN record_cursor;
+        FETCH NEXT FROM record_cursor INTO
+            @ImportRecordId,@RecordType,@LocalKey,@ParentLocalKey,@PayloadJson,@ReviewStatus;
+        WHILE @@FETCH_STATUS=0
+        BEGIN
+            SET @EntityId=NULL;
+            IF @RecordType=N'Location'
+            BEGIN
+                SELECT @EntityId=[LocationId]
+                FROM [tb_client].[Locations]
+                WHERE [ClientId]=@ClientId AND [LocalKey]=@LocalKey;
+                IF @EntityId IS NULL
+                BEGIN
+                    INSERT INTO [tb_client].[Locations]
+                    (
+                        [ClientId],[LocalKey],[Name],[LocationType],[Address1],
+                        [Address2],[City],[StateProvince],[PostalCode],[MainPhone],
+                        [TimeZoneId],[IsPrimary],[ReviewStatus],[CreatedByWindowsSid],
+                        [UpdatedByWindowsSid],[CreatedAtUtc],[UpdatedAtUtc]
+                    )
+                    VALUES
+                    (
+                        @ClientId,@LocalKey,JSON_VALUE(@PayloadJson,N'$.name'),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.locationType'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.address1'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.address2'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.city'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.stateProvince'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.postalCode'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.mainPhone'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.timeZoneId'),N''),
+                        COALESCE(TRY_CONVERT(bit,JSON_VALUE(@PayloadJson,N'$.isPrimary')),0),
+                        @ReviewStatus,@ActorSid,@ActorSid,@NowUtc,@NowUtc
+                    );
+                    SET @EntityId=CONVERT(bigint,SCOPE_IDENTITY());
+                END;
+                ELSE
+                    UPDATE [tb_client].[Locations]
+                    SET
+                        [Name]=JSON_VALUE(@PayloadJson,N'$.name'),
+                        [LocationType]=NULLIF(JSON_VALUE(@PayloadJson,N'$.locationType'),N''),
+                        [Address1]=NULLIF(JSON_VALUE(@PayloadJson,N'$.address1'),N''),
+                        [Address2]=NULLIF(JSON_VALUE(@PayloadJson,N'$.address2'),N''),
+                        [City]=NULLIF(JSON_VALUE(@PayloadJson,N'$.city'),N''),
+                        [StateProvince]=NULLIF(JSON_VALUE(@PayloadJson,N'$.stateProvince'),N''),
+                        [PostalCode]=NULLIF(JSON_VALUE(@PayloadJson,N'$.postalCode'),N''),
+                        [MainPhone]=NULLIF(JSON_VALUE(@PayloadJson,N'$.mainPhone'),N''),
+                        [TimeZoneId]=NULLIF(JSON_VALUE(@PayloadJson,N'$.timeZoneId'),N''),
+                        [IsPrimary]=COALESCE(
+                            TRY_CONVERT(bit,JSON_VALUE(@PayloadJson,N'$.isPrimary')),
+                            0),
+                        [ReviewStatus]=@ReviewStatus,
+                        [IsActive]=COALESCE(
+                            TRY_CONVERT(bit,JSON_VALUE(@PayloadJson,N'$.isActive')),
+                            1),
+                        [LastVerifiedAtUtc]=CASE
+                            WHEN @ReviewStatus=N'Verified' THEN @NowUtc
+                            ELSE [LastVerifiedAtUtc] END,
+                        [UpdatedByWindowsSid]=@ActorSid,
+                        [UpdatedAtUtc]=@NowUtc
+                    WHERE [LocationId]=@EntityId;
+            END
+            ELSE IF @RecordType=N'Person'
+            BEGIN
+                SET @LocationId=NULL;
+                IF @ParentLocalKey IS NOT NULL
+                    SELECT @LocationId=[EntityId]
+                    FROM [tb_import].[ClientInfoPromotionMap] map
+                    INNER JOIN [tb_import].[ClientInfoRecords] source_record
+                        ON source_record.[ImportRecordId]=map.[ImportRecordId]
+                    WHERE source_record.[BatchId]=@BatchId
+                      AND source_record.[RecordType]=N'Location'
+                      AND source_record.[LocalKey]=@ParentLocalKey;
+                SELECT @EntityId=[PersonId] FROM [tb_client].[People]
+                WHERE [ClientId]=@ClientId AND [LocalKey]=@LocalKey;
+                IF @EntityId IS NULL
+                BEGIN
+                    INSERT INTO [tb_client].[People]
+                    (
+                        [ClientId],[LocationId],[LocalKey],[DisplayName],
+                        [RoleDepartment],[Email],[Phone],[MobilePhone],[ContactType],
+                        [IsPrimary],[ReviewStatus],[CreatedByWindowsSid],
+                        [UpdatedByWindowsSid],[CreatedAtUtc],[UpdatedAtUtc]
+                    )
+                    VALUES
+                    (
+                        @ClientId,@LocationId,@LocalKey,
+                        JSON_VALUE(@PayloadJson,N'$.displayName'),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.roleDepartment'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.email'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.phone'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.mobilePhone'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.contactType'),N''),
+                        COALESCE(TRY_CONVERT(bit,JSON_VALUE(@PayloadJson,N'$.isPrimary')),0),
+                        @ReviewStatus,@ActorSid,@ActorSid,@NowUtc,@NowUtc
+                    );
+                    SET @EntityId=CONVERT(bigint,SCOPE_IDENTITY());
+                END;
+                ELSE
+                    UPDATE [tb_client].[People]
+                    SET
+                        [LocationId]=@LocationId,
+                        [DisplayName]=JSON_VALUE(@PayloadJson,N'$.displayName'),
+                        [RoleDepartment]=NULLIF(JSON_VALUE(@PayloadJson,N'$.roleDepartment'),N''),
+                        [Email]=NULLIF(JSON_VALUE(@PayloadJson,N'$.email'),N''),
+                        [Phone]=NULLIF(JSON_VALUE(@PayloadJson,N'$.phone'),N''),
+                        [MobilePhone]=NULLIF(JSON_VALUE(@PayloadJson,N'$.mobilePhone'),N''),
+                        [ContactType]=NULLIF(JSON_VALUE(@PayloadJson,N'$.contactType'),N''),
+                        [IsPrimary]=COALESCE(
+                            TRY_CONVERT(bit,JSON_VALUE(@PayloadJson,N'$.isPrimary')),
+                            0),
+                        [ReviewStatus]=@ReviewStatus,
+                        [IsActive]=COALESCE(
+                            TRY_CONVERT(bit,JSON_VALUE(@PayloadJson,N'$.isActive')),
+                            1),
+                        [LastVerifiedAtUtc]=CASE
+                            WHEN @ReviewStatus=N'Verified' THEN @NowUtc
+                            ELSE [LastVerifiedAtUtc] END,
+                        [UpdatedByWindowsSid]=@ActorSid,
+                        [UpdatedAtUtc]=@NowUtc
+                    WHERE [PersonId]=@EntityId;
+            END
+            ELSE IF @RecordType=N'Resource'
+            BEGIN
+                SET @LocationId=NULL; SET @ResourceId=NULL;
+                SELECT @LocationId=[LocationId] FROM [tb_client].[Locations]
+                WHERE [ClientId]=@ClientId
+                  AND [LocalKey]=JSON_VALUE(@PayloadJson,N'$.locationKey');
+                IF @ParentLocalKey IS NOT NULL
+                    SELECT @ResourceId=[ResourceId] FROM [tb_client].[Resources]
+                    WHERE [ClientId]=@ClientId AND [LocalKey]=@ParentLocalKey;
+                SELECT @EntityId=[ResourceId] FROM [tb_client].[Resources]
+                WHERE [ClientId]=@ClientId AND [LocalKey]=@LocalKey;
+                IF @EntityId IS NULL
+                BEGIN
+                    INSERT INTO [tb_client].[Resources]
+                    (
+                        [ClientId],[LocationId],[ParentResourceId],[LocalKey],
+                        [ResourceType],[Name],[Provider],[AddressOrUrl],[Status],
+                        [Notes],[ReviewStatus],[CreatedByWindowsSid],
+                        [UpdatedByWindowsSid],[CreatedAtUtc],[UpdatedAtUtc]
+                    )
+                    VALUES
+                    (
+                        @ClientId,@LocationId,@ResourceId,@LocalKey,
+                        COALESCE(NULLIF(JSON_VALUE(@PayloadJson,N'$.resourceType'),N''),N'Other'),
+                        JSON_VALUE(@PayloadJson,N'$.name'),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.provider'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.addressOrUrl'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.status'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.notes'),N''),
+                        @ReviewStatus,@ActorSid,@ActorSid,@NowUtc,@NowUtc
+                    );
+                    SET @EntityId=CONVERT(bigint,SCOPE_IDENTITY());
+                END;
+                ELSE
+                    UPDATE [tb_client].[Resources]
+                    SET
+                        [LocationId]=@LocationId,
+                        [ParentResourceId]=@ResourceId,
+                        [ResourceType]=COALESCE(
+                            NULLIF(JSON_VALUE(@PayloadJson,N'$.resourceType'),N''),
+                            N'Other'),
+                        [Name]=JSON_VALUE(@PayloadJson,N'$.name'),
+                        [Provider]=NULLIF(JSON_VALUE(@PayloadJson,N'$.provider'),N''),
+                        [AddressOrUrl]=NULLIF(JSON_VALUE(@PayloadJson,N'$.addressOrUrl'),N''),
+                        [Status]=NULLIF(JSON_VALUE(@PayloadJson,N'$.status'),N''),
+                        [Notes]=NULLIF(JSON_VALUE(@PayloadJson,N'$.notes'),N''),
+                        [ReviewStatus]=@ReviewStatus,
+                        [IsActive]=COALESCE(
+                            TRY_CONVERT(bit,JSON_VALUE(@PayloadJson,N'$.isActive')),
+                            1),
+                        [LastVerifiedAtUtc]=CASE
+                            WHEN @ReviewStatus=N'Verified' THEN @NowUtc
+                            ELSE [LastVerifiedAtUtc] END,
+                        [UpdatedByWindowsSid]=@ActorSid,
+                        [UpdatedAtUtc]=@NowUtc
+                    WHERE [ResourceId]=@EntityId;
+            END
+            ELSE IF @RecordType=N'ResourceField'
+            BEGIN
+                SET @ResourceId=NULL;
+                SELECT @ResourceId=[ResourceId]
+                FROM [tb_client].[Resources]
+                WHERE [ClientId]=@ClientId AND [LocalKey]=@ParentLocalKey;
+                IF @ResourceId IS NULL
+                    THROW 52463,N'A staged resource field could not be linked to its resource.',1;
+
+                SELECT @EntityId=[ResourceFieldId]
+                FROM [tb_client].[ResourceFields]
+                WHERE [ResourceId]=@ResourceId
+                  AND [FieldKey]=JSON_VALUE(@PayloadJson,N'$.fieldKey');
+                IF @EntityId IS NULL
+                BEGIN
+                    INSERT INTO [tb_client].[ResourceFields]
+                    (
+                        [ResourceId],[FieldKey],[FieldLabel],[ValueText],
+                        [ValueType],[SortOrder],[UpdatedByWindowsSid],[UpdatedAtUtc]
+                    )
+                    VALUES
+                    (
+                        @ResourceId,
+                        JSON_VALUE(@PayloadJson,N'$.fieldKey'),
+                        JSON_VALUE(@PayloadJson,N'$.fieldLabel'),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.valueText'),N''),
+                        COALESCE(NULLIF(JSON_VALUE(@PayloadJson,N'$.valueType'),N''),N'Text'),
+                        COALESCE(TRY_CONVERT(int,JSON_VALUE(@PayloadJson,N'$.sortOrder')),0),
+                        @ActorSid,@NowUtc
+                    );
+                    SET @EntityId=CONVERT(bigint,SCOPE_IDENTITY());
+                END
+                ELSE
+                    UPDATE [tb_client].[ResourceFields]
+                    SET
+                        [FieldLabel]=JSON_VALUE(@PayloadJson,N'$.fieldLabel'),
+                        [ValueText]=NULLIF(JSON_VALUE(@PayloadJson,N'$.valueText'),N''),
+                        [ValueType]=COALESCE(
+                            NULLIF(JSON_VALUE(@PayloadJson,N'$.valueType'),N''),
+                            N'Text'),
+                        [SortOrder]=COALESCE(
+                            TRY_CONVERT(int,JSON_VALUE(@PayloadJson,N'$.sortOrder')),
+                            0),
+                        [UpdatedByWindowsSid]=@ActorSid,
+                        [UpdatedAtUtc]=@NowUtc
+                    WHERE [ResourceFieldId]=@EntityId;
+            END
+            ELSE IF @RecordType=N'Credential'
+            BEGIN
+                SET @ResourceId=NULL; SET @PersonId=NULL;
+                SELECT @ResourceId=[ResourceId] FROM [tb_client].[Resources]
+                WHERE [ClientId]=@ClientId
+                  AND [LocalKey]=JSON_VALUE(@PayloadJson,N'$.resourceKey');
+                SELECT @PersonId=[PersonId] FROM [tb_client].[People]
+                WHERE [ClientId]=@ClientId
+                  AND [LocalKey]=JSON_VALUE(@PayloadJson,N'$.personKey');
+                SELECT @EntityId=[CredentialId] FROM [tb_client].[Credentials]
+                WHERE [ClientId]=@ClientId AND [LocalKey]=@LocalKey;
+                IF @EntityId IS NULL
+                BEGIN
+                    INSERT INTO [tb_client].[Credentials]
+                    (
+                        [ClientId],[ResourceId],[PersonId],[LocalKey],[Name],
+                        [Category],[Username],[LoginUrl],[Notes],[ReviewStatus],
+                        [CreatedByWindowsSid],[UpdatedByWindowsSid],
+                        [CreatedAtUtc],[UpdatedAtUtc]
+                    )
+                    VALUES
+                    (
+                        @ClientId,@ResourceId,@PersonId,@LocalKey,
+                        JSON_VALUE(@PayloadJson,N'$.name'),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.category'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.username'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.loginUrl'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.notes'),N''),
+                        @ReviewStatus,@ActorSid,@ActorSid,@NowUtc,@NowUtc
+                    );
+                    SET @EntityId=CONVERT(bigint,SCOPE_IDENTITY());
+                END;
+                ELSE
+                    UPDATE [tb_client].[Credentials]
+                    SET
+                        [ResourceId]=@ResourceId,
+                        [PersonId]=@PersonId,
+                        [Name]=JSON_VALUE(@PayloadJson,N'$.name'),
+                        [Category]=NULLIF(JSON_VALUE(@PayloadJson,N'$.category'),N''),
+                        [Username]=NULLIF(JSON_VALUE(@PayloadJson,N'$.username'),N''),
+                        [LoginUrl]=NULLIF(JSON_VALUE(@PayloadJson,N'$.loginUrl'),N''),
+                        [Notes]=NULLIF(JSON_VALUE(@PayloadJson,N'$.notes'),N''),
+                        [ReviewStatus]=@ReviewStatus,
+                        [IsActive]=1,
+                        [LastVerifiedAtUtc]=CASE
+                            WHEN @ReviewStatus=N'Verified' THEN @NowUtc
+                            ELSE [LastVerifiedAtUtc] END,
+                        [UpdatedByWindowsSid]=@ActorSid,
+                        [UpdatedAtUtc]=@NowUtc
+                    WHERE [CredentialId]=@EntityId;
+            END
+            ELSE IF @RecordType=N'Fact'
+            BEGIN
+                SELECT @EntityId=[FactId] FROM [tb_client].[ClientFacts]
+                WHERE [ClientId]=@ClientId AND [LocalKey]=@LocalKey;
+                IF @EntityId IS NULL
+                BEGIN
+                    INSERT INTO [tb_client].[ClientFacts]
+                    (
+                        [ClientId],[LocalKey],[SectionName],[FieldLabel],[ValueText],
+                        [ValueType],[ReviewStatus],[SortOrder],[CreatedByWindowsSid],
+                        [UpdatedByWindowsSid],[CreatedAtUtc],[UpdatedAtUtc]
+                    )
+                    VALUES
+                    (
+                        @ClientId,@LocalKey,
+                        JSON_VALUE(@PayloadJson,N'$.sectionName'),
+                        JSON_VALUE(@PayloadJson,N'$.fieldLabel'),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.valueText'),N''),
+                        COALESCE(NULLIF(JSON_VALUE(@PayloadJson,N'$.valueType'),N''),N'Text'),
+                        @ReviewStatus,
+                        COALESCE(TRY_CONVERT(int,JSON_VALUE(@PayloadJson,N'$.sortOrder')),0),
+                        @ActorSid,@ActorSid,@NowUtc,@NowUtc
+                    );
+                    SET @EntityId=CONVERT(bigint,SCOPE_IDENTITY());
+                END;
+                ELSE
+                    UPDATE [tb_client].[ClientFacts]
+                    SET
+                        [SectionName]=JSON_VALUE(@PayloadJson,N'$.sectionName'),
+                        [FieldLabel]=JSON_VALUE(@PayloadJson,N'$.fieldLabel'),
+                        [ValueText]=NULLIF(JSON_VALUE(@PayloadJson,N'$.valueText'),N''),
+                        [ValueType]=COALESCE(
+                            NULLIF(JSON_VALUE(@PayloadJson,N'$.valueType'),N''),
+                            N'Text'),
+                        [ReviewStatus]=@ReviewStatus,
+                        [SortOrder]=COALESCE(
+                            TRY_CONVERT(int,JSON_VALUE(@PayloadJson,N'$.sortOrder')),
+                            0),
+                        [IsActive]=COALESCE(
+                            TRY_CONVERT(bit,JSON_VALUE(@PayloadJson,N'$.isActive')),
+                            1),
+                        [LastVerifiedAtUtc]=CASE
+                            WHEN @ReviewStatus=N'Verified' THEN @NowUtc
+                            ELSE [LastVerifiedAtUtc] END,
+                        [UpdatedByWindowsSid]=@ActorSid,
+                        [UpdatedAtUtc]=@NowUtc
+                    WHERE [FactId]=@EntityId;
+            END
+            ELSE IF @RecordType=N'Equipment'
+            BEGIN
+                SELECT @EntityId=[EquipmentId]
+                FROM [tb_inventory].[Equipment]
+                WHERE [ClientId]=@ClientId
+                  AND [ClientInfoLocalKey]=@LocalKey;
+                IF @EntityId IS NULL
+                BEGIN
+                    INSERT INTO [tb_inventory].[Equipment]
+                    (
+                        [AssetTag],[DeviceType],[Name],[SerialNumber],[PartNumber],
+                        [IpAddress],[Manufacturer],[Model],[ClientId],[ClientName],
+                        [LocationName],[Notes],[WorkflowStage],[ClientInfoLocalKey],
+                        [CreatedByWindowsSid],[UpdatedByWindowsSid],
+                        [CreatedAtUtc],[UpdatedAtUtc]
+                    )
+                    SELECT
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.assetTag'),N''),
+                        COALESCE(NULLIF(JSON_VALUE(@PayloadJson,N'$.deviceType'),N''),N'Other'),
+                        JSON_VALUE(@PayloadJson,N'$.name'),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.serialNumber'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.partNumber'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.ipAddress'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.manufacturer'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.model'),N''),
+                        @ClientId,client.[Name],
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.locationName'),N''),
+                        NULLIF(JSON_VALUE(@PayloadJson,N'$.notes'),N''),
+                        N'Deployed',@LocalKey,
+                        @ActorSid,@ActorSid,@NowUtc,@NowUtc
+                    FROM [tb_data].[Clients] client
+                    WHERE client.[Id]=@ClientId;
+                    SET @EntityId=CONVERT(bigint,SCOPE_IDENTITY());
+                END;
+                ELSE
+                    UPDATE equipment
+                    SET
+                        [AssetTag]=NULLIF(JSON_VALUE(@PayloadJson,N'$.assetTag'),N''),
+                        [DeviceType]=COALESCE(
+                            NULLIF(JSON_VALUE(@PayloadJson,N'$.deviceType'),N''),
+                            N'Other'),
+                        [Name]=JSON_VALUE(@PayloadJson,N'$.name'),
+                        [SerialNumber]=NULLIF(JSON_VALUE(@PayloadJson,N'$.serialNumber'),N''),
+                        [PartNumber]=NULLIF(JSON_VALUE(@PayloadJson,N'$.partNumber'),N''),
+                        [IpAddress]=NULLIF(JSON_VALUE(@PayloadJson,N'$.ipAddress'),N''),
+                        [Manufacturer]=NULLIF(JSON_VALUE(@PayloadJson,N'$.manufacturer'),N''),
+                        [Model]=NULLIF(JSON_VALUE(@PayloadJson,N'$.model'),N''),
+                        [ClientName]=client.[Name],
+                        [LocationName]=NULLIF(JSON_VALUE(@PayloadJson,N'$.locationName'),N''),
+                        [Notes]=NULLIF(JSON_VALUE(@PayloadJson,N'$.notes'),N''),
+                        [UpdatedByWindowsSid]=@ActorSid,
+                        [UpdatedAtUtc]=@NowUtc
+                    FROM [tb_inventory].[Equipment] equipment
+                    INNER JOIN [tb_data].[Clients] client
+                        ON client.[Id]=equipment.[ClientId]
+                    WHERE equipment.[EquipmentId]=@EntityId;
+            END;
+
+            IF @EntityId IS NOT NULL
+            BEGIN
+                IF NOT EXISTS
+                    (SELECT 1 FROM [tb_import].[ClientInfoPromotionMap]
+                     WHERE [ImportRecordId]=@ImportRecordId)
+                    INSERT INTO [tb_import].[ClientInfoPromotionMap]
+                        ([ImportRecordId],[EntityType],[EntityId])
+                    VALUES (@ImportRecordId,@RecordType,@EntityId);
+
+                INSERT INTO [tb_client].[RecordProvenance]
+                (
+                    [ClientId],[EntityType],[EntityId],[SourceDocumentId],
+                    [SourceSheet],[SourceAddress],[ReviewStatus],
+                    [RecordedAtUtc],[RecordedByWindowsSid]
+                )
+                SELECT @ClientId,@RecordType,@EntityId,batch.[SourceDocumentId],
+                    source_record.[SourceSheet],
+                    CASE WHEN source_record.[SourceRow] IS NULL THEN NULL
+                        ELSE N'Row '+CONVERT(nvarchar(20),source_record.[SourceRow]) END,
+                    @ReviewStatus,@NowUtc,@ActorSid
+                FROM [tb_import].[ClientInfoBatches] batch
+                INNER JOIN [tb_import].[ClientInfoRecords] source_record
+                    ON source_record.[BatchId]=batch.[BatchId]
+                WHERE batch.[BatchId]=@BatchId
+                  AND source_record.[ImportRecordId]=@ImportRecordId;
+            END;
+
+            FETCH NEXT FROM record_cursor INTO
+                @ImportRecordId,@RecordType,@LocalKey,@ParentLocalKey,@PayloadJson,@ReviewStatus;
+        END;
+        CLOSE record_cursor;
+        DEALLOCATE record_cursor;
+
+        DECLARE @ImportSecretId bigint,@CredentialLocalKey nvarchar(120),
+                @SecretType nvarchar(80),@SecretLabel nvarchar(200),
+                @EncryptedValue varbinary(max),@CanonicalCredentialId bigint,
+                @CanonicalSecretId bigint,@ClearValue varbinary(max),
+                @ImportAuthenticator varbinary(32),@CanonicalAuthenticator varbinary(32);
+        OPEN SYMMETRIC KEY [tb_ClientSecretKey]
+            DECRYPTION BY CERTIFICATE [tb_ClientSecretCertificate];
+        DECLARE secret_cursor CURSOR LOCAL FAST_FORWARD FOR
+            SELECT [ImportSecretId],[CredentialLocalKey],[SecretType],
+                   [SecretLabel],[ValueEncrypted]
+            FROM [tb_import].[ClientInfoSecrets]
+            WHERE [BatchId]=@BatchId AND COALESCE([Resolution],N'UseWorkbook')<>N'Rejected';
+        OPEN secret_cursor;
+        FETCH NEXT FROM secret_cursor INTO
+            @ImportSecretId,@CredentialLocalKey,@SecretType,@SecretLabel,@EncryptedValue;
+        WHILE @@FETCH_STATUS=0
+        BEGIN
+            SELECT @CanonicalCredentialId=credential.[CredentialId]
+            FROM [tb_client].[Credentials] credential
+            WHERE credential.[ClientId]=@ClientId
+              AND credential.[LocalKey]=@CredentialLocalKey;
+            IF @CanonicalCredentialId IS NULL
+                THROW 52461,N'A staged secret could not be linked to its promoted credential.',1;
+
+            SET @ImportAuthenticator=HASHBYTES(
+                N'SHA2_256',CONVERT(varbinary(max),
+                    N'ClientImportSecret|'+CONVERT(nvarchar(30),@ImportSecretId)));
+            SET @ClearValue=DecryptByKey(@EncryptedValue,1,@ImportAuthenticator);
+            IF @ClearValue IS NULL
+                THROW 52462,N'A staged secret could not be decrypted for promotion.',1;
+
+            SELECT @CanonicalSecretId=[SecretId]
+            FROM [tb_client].[CredentialSecrets]
+            WHERE [CredentialId]=@CanonicalCredentialId
+              AND [SecretType]=@SecretType AND [SecretLabel]=@SecretLabel;
+            IF @CanonicalSecretId IS NULL
+            BEGIN
+                INSERT INTO [tb_client].[CredentialSecrets]
+                (
+                    [CredentialId],[SecretType],[SecretLabel],[ValueEncrypted],
+                    [CreatedByWindowsSid],[UpdatedByWindowsSid],
+                    [CreatedAtUtc],[UpdatedAtUtc]
+                )
+                VALUES
+                (
+                    @CanonicalCredentialId,@SecretType,@SecretLabel,0x,
+                    @ActorSid,@ActorSid,@NowUtc,@NowUtc
+                );
+                SET @CanonicalSecretId=CONVERT(bigint,SCOPE_IDENTITY());
+            END;
+            SET @CanonicalAuthenticator=HASHBYTES(
+                N'SHA2_256',CONVERT(varbinary(max),
+                    N'ClientSecret|'+CONVERT(nvarchar(30),@CanonicalSecretId)));
+            UPDATE [tb_client].[CredentialSecrets]
+            SET [ValueEncrypted]=EncryptByKey(
+                    Key_GUID(N'tb_ClientSecretKey'),@ClearValue,1,@CanonicalAuthenticator),
+                [UpdatedByWindowsSid]=@ActorSid,[UpdatedAtUtc]=@NowUtc
+            WHERE [SecretId]=@CanonicalSecretId;
+
+            SET @CanonicalCredentialId=NULL; SET @CanonicalSecretId=NULL;
+            FETCH NEXT FROM secret_cursor INTO
+                @ImportSecretId,@CredentialLocalKey,@SecretType,@SecretLabel,@EncryptedValue;
+        END;
+        CLOSE secret_cursor;
+        DEALLOCATE secret_cursor;
+        CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+
+        UPDATE [tb_client].[ClientProfiles]
+        SET [IsLive]=1,[UpdatedByWindowsSid]=@ActorSid,[UpdatedAtUtc]=@NowUtc
+        WHERE [ClientId]=@ClientId;
+        UPDATE [tb_import].[ClientInfoBatches]
+        SET [State]=N'Promoted',[Message]=N'Promoted to canonical Client Info.',
+            [PromotedAtUtc]=@NowUtc,[UpdatedAtUtc]=@NowUtc
+        WHERE [BatchId]=@BatchId;
+        UPDATE [tb_ops].[ClientInfoCutovers]
+        SET [State]=N'Hypercare',[LiveAtUtc]=COALESCE([LiveAtUtc],@NowUtc),
+            [HypercareEndsAtUtc]=DATEADD(day,5,@NowUtc),
+            [UpdatedByWindowsSid]=@ActorSid,[UpdatedAtUtc]=@NowUtc
+        WHERE [ClientId]=@ClientId;
+
+        DECLARE @AuditEntityId nvarchar(120) =
+            CONVERT(nvarchar(120), @BatchId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'ClientInfoImportPromoted',
+            @EntityType=N'ClientInfoImportBatch',
+            @EntityId=@AuditEntityId,@RequestId=@RequestId,
+            @DataJson=N'{"containsSecretValues":false}';
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF EXISTS
+            (SELECT 1 FROM sys.openkeys WHERE [key_name]=N'tb_ClientSecretKey')
+            CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+        IF CURSOR_STATUS(N'local',N'record_cursor')>=-1
+        BEGIN
+            IF CURSOR_STATUS(N'local',N'record_cursor')>0 CLOSE record_cursor;
+            DEALLOCATE record_cursor;
+        END;
+        IF CURSOR_STATUS(N'local',N'secret_cursor')>=-1
+        BEGIN
+            IF CURSOR_STATUS(N'local',N'secret_cursor')>0 CLOSE secret_cursor;
+            DEALLOCATE secret_cursor;
+        END;
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+GO
+
+PRINT N'Client Info beta import procedures installed.';
+GO
+
+-- ============================================================================
+-- END 62-V0015-ClientInfoBetaImportProcedures.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 64-V0015-AuthPointMfaProcedures.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminGetAuthPointUserMappings', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminGetAuthPointUserMappings];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminGetAuthPointUserMappings]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit,
+            @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin <> 1
+        THROW 52400, N'Only a TechBench Admin may manage AuthPoint mappings.', 1;
+
+    SELECT
+        users.[LoginName], users.[DisplayName], users.[WindowsSid],
+        mapping.[AuthPointLogin], COALESCE(mapping.[IsEnabled], 0) AS [IsEnabled],
+        COALESCE(mapping.[RequireAtLogin], 1) AS [RequireAtLogin],
+        mapping.[UpdatedAtUtc], mapping.[RowVersion]
+    FROM [tb_security].[Users] AS users
+    LEFT JOIN [tb_security].[AuthPointUserMappings] AS mapping
+        ON mapping.[WindowsSid]=users.[WindowsSid]
+    WHERE users.[IsTechnician]=1 OR users.[IsManager]=1 OR users.[IsAdmin]=1
+    ORDER BY users.[DisplayName], users.[LoginName];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminSaveAuthPointUserMapping', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminSaveAuthPointUserMapping];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminSaveAuthPointUserMapping]
+    @LoginName nvarchar(256),
+    @AuthPointLogin nvarchar(256),
+    @IsEnabled bit = 1,
+    @RequireAtLogin bit = NULL,
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit,
+            @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin <> 1
+        THROW 52400, N'Only a TechBench Admin may manage AuthPoint mappings.', 1;
+
+    SET @LoginName=NULLIF(LTRIM(RTRIM(@LoginName)),N'');
+    SET @AuthPointLogin=NULLIF(LTRIM(RTRIM(@AuthPointLogin)),N'');
+    IF @LoginName IS NULL OR @AuthPointLogin IS NULL
+        THROW 52401, N'Windows login and AuthPoint login are required.', 1;
+
+    DECLARE @TargetSid varbinary(85)=
+        (SELECT [WindowsSid] FROM [tb_security].[Users]
+         WHERE [LoginName]=@LoginName);
+    IF @TargetSid IS NULL
+        THROW 52402, N'The selected TechBench user no longer exists.', 1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        IF EXISTS
+        (
+            SELECT 1 FROM [tb_security].[AuthPointUserMappings]
+            WHERE [WindowsSid]=@TargetSid
+        )
+        BEGIN
+            IF @ExpectedRowVersion IS NULL
+                THROW 52403, N'The mapping changed after it was loaded. Refresh and try again.', 1;
+            UPDATE [tb_security].[AuthPointUserMappings]
+            SET [AuthPointLogin]=@AuthPointLogin, [IsEnabled]=@IsEnabled,
+                [RequireAtLogin]=COALESCE(@RequireAtLogin,[RequireAtLogin]),
+                [UpdatedByWindowsSid]=@ActorSid,
+                [UpdatedAtUtc]=SYSUTCDATETIME()
+            WHERE [WindowsSid]=@TargetSid
+              AND [RowVersion]=@ExpectedRowVersion;
+            IF @@ROWCOUNT<>1
+                THROW 52403, N'The mapping changed after it was loaded. Refresh and try again.', 1;
+        END
+        ELSE
+        BEGIN
+            INSERT INTO [tb_security].[AuthPointUserMappings]
+                ([WindowsSid],[AuthPointLogin],[IsEnabled],[RequireAtLogin],
+                 [UpdatedByWindowsSid])
+            VALUES
+                (@TargetSid,@AuthPointLogin,@IsEnabled,
+                 COALESCE(@RequireAtLogin,1),@ActorSid);
+        END;
+
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'AuthPointUserMappingSaved',
+            @EntityType=N'AuthPointUserMapping',
+            @EntityId=@LoginName,@RequestId=@RequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        users.[LoginName], users.[DisplayName], users.[WindowsSid],
+        mapping.[AuthPointLogin], mapping.[IsEnabled],
+        mapping.[RequireAtLogin], mapping.[UpdatedAtUtc],
+        mapping.[RowVersion]
+    FROM [tb_security].[AuthPointUserMappings] AS mapping
+    INNER JOIN [tb_security].[Users] AS users
+        ON users.[WindowsSid]=mapping.[WindowsSid]
+    WHERE mapping.[WindowsSid]=@TargetSid;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminSaveAuthPointLoginPolicy', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminSaveAuthPointLoginPolicy];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminSaveAuthPointLoginPolicy]
+    @LoginName nvarchar(256),
+    @RequireAtLogin bit,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit,
+            @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin <> 1
+        THROW 52400, N'Only a TechBench Admin may manage AuthPoint login policy.', 1;
+
+    SET @LoginName=NULLIF(LTRIM(RTRIM(@LoginName)),N'');
+    IF @LoginName IS NULL OR @ExpectedRowVersion IS NULL
+        THROW 52403, N'The AuthPoint user policy changed after it was loaded. Refresh and try again.', 1;
+
+    DECLARE @TargetSid varbinary(85)=
+        (SELECT [WindowsSid] FROM [tb_security].[Users]
+         WHERE [LoginName]=@LoginName);
+    IF @TargetSid IS NULL
+        THROW 52402, N'The selected TechBench user no longer exists.', 1;
+
+    UPDATE [tb_security].[AuthPointUserMappings]
+    SET [RequireAtLogin]=@RequireAtLogin,
+        [UpdatedByWindowsSid]=@ActorSid,
+        [UpdatedAtUtc]=SYSUTCDATETIME()
+    WHERE [WindowsSid]=@TargetSid
+      AND [RowVersion]=@ExpectedRowVersion;
+    IF @@ROWCOUNT<>1
+        THROW 52403, N'The AuthPoint user policy changed after it was loaded. Refresh and try again.', 1;
+
+    DECLARE @AuditAction nvarchar(80)=CASE WHEN @RequireAtLogin=1
+        THEN N'AuthPointLoginRequiredForUser'
+        ELSE N'AuthPointLoginExemptedForUser' END;
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action=@AuditAction,
+        @EntityType=N'AuthPointUserMapping',
+        @EntityId=@LoginName,@RequestId=@RequestId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.GetAuthPointLoginRequirement', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[GetAuthPointLoginRequirement];
+GO
+
+CREATE PROCEDURE [tb_app].[GetAuthPointLoginRequirement]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit,
+            @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    DECLARE @Enabled bit=COALESCE(TRY_CONVERT(bit,
+            (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+             WHERE [SettingKey]=N'AuthPoint.Enabled')),0),
+            @RequireAll bit=COALESCE(TRY_CONVERT(bit,
+            (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+             WHERE [SettingKey]=N'AuthPoint.RequireAllUsers')),1),
+            @ProviderLogin nvarchar(256),@MappingEnabled bit=0,
+            @RequireAtLogin bit=0,@IsRequired bit=0;
+
+    SELECT @ProviderLogin=[AuthPointLogin],@MappingEnabled=[IsEnabled],
+           @RequireAtLogin=[RequireAtLogin]
+    FROM [tb_security].[AuthPointUserMappings]
+    WHERE [WindowsSid]=@ActorSid;
+
+    SET @IsRequired=CASE WHEN @Enabled=1
+        AND (@RequireAll=1 OR @RequireAtLogin=1) THEN 1 ELSE 0 END;
+    IF @IsRequired=1 AND
+       (@MappingEnabled<>1 OR NULLIF(LTRIM(RTRIM(@ProviderLogin)),N'') IS NULL)
+        THROW 52412, N'Your Windows account has no ready AuthPoint identity. Ask a TechBench Admin to refresh Directory Identities or change the per-user login requirement.', 1;
+
+    SELECT @IsRequired AS [IsRequired],
+           COALESCE(@ProviderLogin,N'') AS [ProviderLogin],
+           CONVERT(int,12) AS [SessionHours];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.BeginAuthPointLoginMfaChallenge', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[BeginAuthPointLoginMfaChallenge];
+GO
+
+CREATE PROCEDURE [tb_app].[BeginAuthPointLoginMfaChallenge]
+    @ClientInstanceId uniqueidentifier,
+    @ClientMachine nvarchar(128) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    IF @ClientInstanceId IS NULL
+        THROW 52410,N'The TechBench client instance is invalid.',1;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit,
+            @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    DECLARE @Enabled bit=COALESCE(TRY_CONVERT(bit,
+            (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+             WHERE [SettingKey]=N'AuthPoint.Enabled')),0),
+            @RequireAll bit=COALESCE(TRY_CONVERT(bit,
+            (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+             WHERE [SettingKey]=N'AuthPoint.RequireAllUsers')),1),
+            @ProviderLogin nvarchar(256),@MappingEnabled bit=0,
+            @RequireAtLogin bit=0;
+    SELECT @ProviderLogin=[AuthPointLogin],@MappingEnabled=[IsEnabled],
+           @RequireAtLogin=[RequireAtLogin]
+    FROM [tb_security].[AuthPointUserMappings]
+    WHERE [WindowsSid]=@ActorSid;
+
+    IF @Enabled<>1 OR (@RequireAll<>1 AND @RequireAtLogin<>1)
+    BEGIN
+        SELECT CONVERT(uniqueidentifier,NULL) AS [ChallengeId],
+               CONVERT(varbinary(32),NULL) AS [ChallengeNonce],
+               CONVERT(nvarchar(24),N'NotRequired') AS [Status],
+               SYSUTCDATETIME() AS [ExpiresAtUtc],
+               COALESCE(@ProviderLogin,N'') AS [ProviderLogin];
+        RETURN;
+    END;
+    IF @MappingEnabled<>1 OR NULLIF(LTRIM(RTRIM(@ProviderLogin)),N'') IS NULL
+        THROW 52412, N'Your Windows account is not mapped to a ready AuthPoint identity.', 1;
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(),
+            @ChallengeId uniqueidentifier=NEWID(),
+            @ChallengeNonce varbinary(32)=CRYPT_GEN_RANDOM(32),
+            @EffectiveRequestId uniqueidentifier=COALESCE(@RequestId,NEWID()),
+            @ActorLogin nvarchar(256)=CONVERT(nvarchar(256),ORIGINAL_LOGIN());
+    SET @ClientMachine=LEFT(NULLIF(LTRIM(RTRIM(@ClientMachine)),N''),128);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        IF (SELECT COUNT_BIG(*) FROM [tb_security].[MfaChallenges]
+            WITH (UPDLOCK,HOLDLOCK)
+            WHERE [ActorWindowsSid]=@ActorSid
+              AND [CreatedAtUtc]>=DATEADD(minute,-2,@NowUtc))>=3
+            THROW 52413, N'Too many AuthPoint sign-in requests were started. Wait two minutes and try again.', 1;
+        IF (SELECT COUNT_BIG(*) FROM [tb_security].[MfaChallenges]
+            WITH (UPDLOCK,HOLDLOCK)
+            WHERE [ActorWindowsSid]=@ActorSid
+              AND [CreatedAtUtc]>=DATEADD(minute,-15,@NowUtc))>=10
+            THROW 52413, N'Too many AuthPoint sign-in requests were started. Wait before trying again.', 1;
+        IF EXISTS
+        (
+            SELECT 1 FROM [tb_security].[MfaChallenges] WITH (UPDLOCK,HOLDLOCK)
+            WHERE [ActorWindowsSid]=@ActorSid AND [ActionScope]=N'Login'
+              AND [Status] IN (N'Queued',N'Processing')
+              AND [ExpiresAtUtc]>@NowUtc
+        )
+            THROW 52414, N'An AuthPoint sign-in request is already in progress.', 1;
+
+        UPDATE [tb_security].[MfaChallenges]
+        SET [Status]=N'Expired',[CompletedAtUtc]=@NowUtc,
+            [OutcomeCode]=N'CLIENT_EXPIRED',
+            [OutcomeMessage]=N'The AuthPoint request expired.'
+        WHERE [Status] IN (N'Queued',N'Processing',N'Approved')
+          AND [ExpiresAtUtc]<=@NowUtc;
+
+        INSERT INTO [tb_security].[MfaChallenges]
+        (
+            [ChallengeId],[RequestId],[ActorWindowsSid],[ActorLoginName],
+            [ProviderLogin],[ActionScope],[SecretId],[ClientInstanceId],
+            [ClientMachine],[ChallengeNonceHash],[Status],[ExpiresAtUtc]
+        )
+        VALUES
+        (
+            @ChallengeId,@EffectiveRequestId,@ActorSid,@ActorLogin,
+            @ProviderLogin,N'Login',NULL,@ClientInstanceId,@ClientMachine,
+            HASHBYTES(N'SHA2_256',@ChallengeNonce),N'Queued',
+            DATEADD(minute,2,@NowUtc)
+        );
+
+        DECLARE @ChallengeEntityId nvarchar(120)=
+            CONVERT(nvarchar(36),@ChallengeId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'TechBenchLoginMfaRequested',@EntityType=N'MfaChallenge',
+            @EntityId=@ChallengeEntityId,
+            @RequestId=@EffectiveRequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT @ChallengeId AS [ChallengeId],@ChallengeNonce AS [ChallengeNonce],
+           CONVERT(nvarchar(24),N'Queued') AS [Status],
+           DATEADD(minute,2,@NowUtc) AS [ExpiresAtUtc],
+           @ProviderLogin AS [ProviderLogin];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.BeginClientSecretMfaChallenge', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[BeginClientSecretMfaChallenge];
+GO
+
+CREATE PROCEDURE [tb_app].[BeginClientSecretMfaChallenge]
+    @SecretId bigint,
+    @ActionScope nvarchar(16),
+    @ClientMachine nvarchar(128) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit,
+            @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT, @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    IF @ActionScope NOT IN (N'Reveal',N'Copy')
+        THROW 52410, N'The MFA action is invalid.', 1;
+    IF COALESCE(TRY_CONVERT(bit,
+        (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+         WHERE [SettingKey]=N'AuthPoint.Enabled')),0)<>1
+    BEGIN
+        SELECT CONVERT(uniqueidentifier,NULL) AS [ChallengeId],
+               CONVERT(varbinary(32),NULL) AS [ChallengeNonce],
+               CONVERT(nvarchar(24),N'NotRequired') AS [Status],
+               SYSUTCDATETIME() AS [ExpiresAtUtc],
+               CONVERT(nvarchar(256),N'') AS [ProviderLogin];
+        RETURN;
+    END;
+    IF COALESCE(TRY_CONVERT(bit,
+        (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+         WHERE [SettingKey]=N'AuthPoint.RequireAllUsers')),1)<>1
+       AND COALESCE((SELECT [RequireAtLogin]
+            FROM [tb_security].[AuthPointUserMappings]
+            WHERE [WindowsSid]=@ActorSid),0)<>1
+    BEGIN
+        SELECT CONVERT(uniqueidentifier,NULL) AS [ChallengeId],
+               CONVERT(varbinary(32),NULL) AS [ChallengeNonce],
+               CONVERT(nvarchar(24),N'NotRequired') AS [Status],
+               SYSUTCDATETIME() AS [ExpiresAtUtc],
+               CONVERT(nvarchar(256),N'') AS [ProviderLogin];
+        RETURN;
+    END;
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_client].[CredentialSecrets] AS secret
+        INNER JOIN [tb_client].[Credentials] AS credential
+            ON credential.[CredentialId]=secret.[CredentialId]
+        WHERE secret.[SecretId]=@SecretId AND secret.[IsCurrent]=1
+          AND credential.[IsActive]=1
+    )
+        THROW 52393, N'The requested client secret was not found.', 1;
+
+    DECLARE @ProviderLogin nvarchar(256)=
+        (SELECT [AuthPointLogin]
+         FROM [tb_security].[AuthPointUserMappings]
+         WHERE [WindowsSid]=@ActorSid AND [IsEnabled]=1);
+    IF @ProviderLogin IS NULL
+        THROW 52412, N'Your Windows account is not mapped to an enabled AuthPoint user.', 1;
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(),
+            @ChallengeId uniqueidentifier=NEWID(),
+            @ChallengeNonce varbinary(32)=CRYPT_GEN_RANDOM(32),
+            @EffectiveRequestId uniqueidentifier=COALESCE(@RequestId,NEWID()),
+            @ActorLogin nvarchar(256)=CONVERT(nvarchar(256),ORIGINAL_LOGIN());
+    SET @ClientMachine=LEFT(NULLIF(LTRIM(RTRIM(@ClientMachine)),N''),128);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        /* Key-range locks serialize requests for this SID so simultaneous
+           workstations cannot race past the rate and duplicate guards. */
+        IF (SELECT COUNT_BIG(*) FROM [tb_security].[MfaChallenges]
+            WITH (UPDLOCK,HOLDLOCK)
+            WHERE [ActorWindowsSid]=@ActorSid
+              AND [CreatedAtUtc]>=DATEADD(minute,-2,@NowUtc))>=3
+            THROW 52413, N'Too many AuthPoint requests were started. Wait two minutes and try again.', 1;
+        IF (SELECT COUNT_BIG(*) FROM [tb_security].[MfaChallenges]
+            WITH (UPDLOCK,HOLDLOCK)
+            WHERE [ActorWindowsSid]=@ActorSid
+              AND [CreatedAtUtc]>=DATEADD(minute,-15,@NowUtc))>=10
+            THROW 52413, N'Too many AuthPoint requests were started. Wait before trying again.', 1;
+        IF EXISTS
+        (
+            SELECT 1 FROM [tb_security].[MfaChallenges] WITH (UPDLOCK,HOLDLOCK)
+            WHERE [ActorWindowsSid]=@ActorSid AND [SecretId]=@SecretId
+              AND [ActionScope]=@ActionScope
+              AND [Status] IN (N'Queued',N'Processing')
+              AND [ExpiresAtUtc]>@NowUtc
+        )
+            THROW 52414, N'An AuthPoint request for this action is already in progress.', 1;
+
+        UPDATE [tb_security].[MfaChallenges]
+        SET [Status]=N'Expired',[CompletedAtUtc]=@NowUtc,
+            [OutcomeCode]=N'CLIENT_EXPIRED',
+            [OutcomeMessage]=N'The AuthPoint request expired.'
+        WHERE [Status] IN (N'Queued',N'Processing',N'Approved')
+          AND [ExpiresAtUtc]<=@NowUtc;
+
+        INSERT INTO [tb_security].[MfaChallenges]
+        (
+            [ChallengeId],[RequestId],[ActorWindowsSid],[ActorLoginName],
+            [ProviderLogin],[ActionScope],[SecretId],[ClientMachine],
+            [ChallengeNonceHash],[Status],[ExpiresAtUtc]
+        )
+        VALUES
+        (
+            @ChallengeId,@EffectiveRequestId,@ActorSid,@ActorLogin,
+            @ProviderLogin,@ActionScope,@SecretId,@ClientMachine,
+            HASHBYTES(N'SHA2_256',@ChallengeNonce),N'Queued',
+            DATEADD(minute,2,@NowUtc)
+        );
+
+        DECLARE @EntityId nvarchar(120)=CONVERT(nvarchar(36),@ChallengeId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'ClientSecretMfaRequested',@EntityType=N'MfaChallenge',
+            @EntityId=@EntityId,@RequestId=@EffectiveRequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT @ChallengeId AS [ChallengeId],@ChallengeNonce AS [ChallengeNonce],
+           CONVERT(nvarchar(24),N'Queued') AS [Status],
+           DATEADD(minute,2,@NowUtc) AS [ExpiresAtUtc],
+           @ProviderLogin AS [ProviderLogin];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.GetClientSecretMfaChallenge', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[GetClientSecretMfaChallenge];
+GO
+
+CREATE PROCEDURE [tb_app].[GetClientSecretMfaChallenge]
+    @ChallengeId uniqueidentifier,
+    @ChallengeNonce varbinary(32)
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    /* EXECUTE AS OWNER is required for key access. ORIGINAL_LOGIN preserves
+       the authenticated Windows identity across that execution context. */
+    DECLARE @ActorSid varbinary(85)=SUSER_SID(ORIGINAL_LOGIN());
+    IF @ActorSid IS NULL OR DATALENGTH(@ActorSid) NOT BETWEEN 8 AND 85
+        THROW 51000,N'SQL Server did not provide a valid authenticated Windows identity.',1;
+    IF @ChallengeNonce IS NULL OR DATALENGTH(@ChallengeNonce)<>32
+        THROW 52415, N'The AuthPoint challenge proof is invalid.', 1;
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(),
+            @Status nvarchar(24),@OutcomeCode nvarchar(80),
+            @OutcomeMessage nvarchar(500),@ExpiresAtUtc datetime2(3),
+            @TokenEncrypted varbinary(8000),@AuthorizationToken varbinary(32),
+            @Authenticator varbinary(32)=HASHBYTES(N'SHA2_256',
+                CONVERT(varbinary(max),N'MfaAuthorization|'
+                    +CONVERT(nvarchar(36),@ChallengeId)));
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        IF NOT EXISTS
+        (
+            SELECT 1 FROM [tb_security].[MfaChallenges] WITH (UPDLOCK,HOLDLOCK)
+            WHERE [ChallengeId]=@ChallengeId
+              AND [ActorWindowsSid]=@ActorSid
+              AND [ChallengeNonceHash]=HASHBYTES(N'SHA2_256',@ChallengeNonce)
+        )
+            THROW 52416, N'The AuthPoint challenge is unavailable for this Windows account.', 1;
+
+        UPDATE [tb_security].[MfaChallenges]
+        SET [Status]=N'Expired',[CompletedAtUtc]=@NowUtc,
+            [OutcomeCode]=N'CLIENT_EXPIRED',
+            [OutcomeMessage]=N'The AuthPoint request expired.',
+            [AuthorizationTokenEncrypted]=NULL,
+            [AuthorizationTokenHash]=NULL,
+            [AuthorizationExpiresAtUtc]=NULL
+        WHERE [ChallengeId]=@ChallengeId
+          AND [Status] IN (N'Queued',N'Processing',N'Approved')
+          AND ([ExpiresAtUtc]<=@NowUtc
+               OR ([AuthorizationExpiresAtUtc] IS NOT NULL
+                   AND [AuthorizationExpiresAtUtc]<=@NowUtc));
+
+        SELECT @Status=[Status],@OutcomeCode=[OutcomeCode],
+               @OutcomeMessage=[OutcomeMessage],@ExpiresAtUtc=[ExpiresAtUtc],
+               @TokenEncrypted=[AuthorizationTokenEncrypted]
+        FROM [tb_security].[MfaChallenges]
+        WHERE [ChallengeId]=@ChallengeId;
+
+        IF @Status=N'Approved' AND @TokenEncrypted IS NOT NULL
+        BEGIN
+            OPEN SYMMETRIC KEY [tb_ClientSecretKey]
+                DECRYPTION BY CERTIFICATE [tb_ClientSecretCertificate];
+            SET @AuthorizationToken=CONVERT(varbinary(32),DecryptByKey(
+                @TokenEncrypted,1,@Authenticator));
+            CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+            IF @AuthorizationToken IS NULL OR DATALENGTH(@AuthorizationToken)<>32
+                THROW 52417, N'The AuthPoint authorization could not be recovered.', 1;
+            UPDATE [tb_security].[MfaChallenges]
+            SET [AuthorizationTokenEncrypted]=NULL
+            WHERE [ChallengeId]=@ChallengeId;
+        END;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        BEGIN TRY
+            CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+        END TRY BEGIN CATCH END CATCH;
+        THROW;
+    END CATCH;
+
+    SELECT @ChallengeId AS [ChallengeId],@Status AS [Status],
+           COALESCE(@OutcomeCode,N'') AS [OutcomeCode],
+           COALESCE(@OutcomeMessage,N'') AS [OutcomeMessage],
+           @ExpiresAtUtc AS [ExpiresAtUtc],
+           @AuthorizationToken AS [AuthorizationToken];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.CancelClientSecretMfaChallenge', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[CancelClientSecretMfaChallenge];
+GO
+
+CREATE PROCEDURE [tb_app].[CancelClientSecretMfaChallenge]
+    @ChallengeId uniqueidentifier,
+    @ChallengeNonce varbinary(32),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85),@IsManager bit,@IsAdmin bit,
+            @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,@IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    UPDATE [tb_security].[MfaChallenges]
+    SET [Status]=N'Cancelled',[CompletedAtUtc]=SYSUTCDATETIME(),
+        [OutcomeCode]=N'CLIENT_CANCELLED',
+        [OutcomeMessage]=N'The user cancelled the AuthPoint request.',
+        [AuthorizationTokenEncrypted]=NULL,
+        [AuthorizationTokenHash]=NULL,
+        [AuthorizationExpiresAtUtc]=NULL
+    WHERE [ChallengeId]=@ChallengeId AND [ActorWindowsSid]=@ActorSid
+      AND [ChallengeNonceHash]=HASHBYTES(N'SHA2_256',@ChallengeNonce)
+      AND [Status] IN (N'Queued',N'Processing',N'Approved');
+    IF @@ROWCOUNT=1
+    BEGIN
+        DECLARE @EntityId nvarchar(120)=CONVERT(nvarchar(36),@ChallengeId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'ClientSecretMfaCancelled',@EntityType=N'MfaChallenge',
+            @EntityId=@EntityId,@RequestId=@RequestId;
+    END;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.ActivateAuthPointLoginSession', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[ActivateAuthPointLoginSession];
+GO
+
+CREATE PROCEDURE [tb_app].[ActivateAuthPointLoginSession]
+    @ChallengeId uniqueidentifier,
+    @ChallengeNonce varbinary(32),
+    @AuthorizationToken varbinary(32),
+    @ClientInstanceId uniqueidentifier,
+    @RequestId uniqueidentifier = NULL
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85)=SUSER_SID(ORIGINAL_LOGIN()),
+            @ActorLogin nvarchar(256)=CONVERT(nvarchar(256),ORIGINAL_LOGIN());
+    IF @ActorSid IS NULL OR DATALENGTH(@ActorSid) NOT BETWEEN 8 AND 85
+        THROW 51000,N'SQL Server did not provide a valid authenticated Windows identity.',1;
+    IF @ChallengeNonce IS NULL OR DATALENGTH(@ChallengeNonce)<>32
+       OR @AuthorizationToken IS NULL OR DATALENGTH(@AuthorizationToken)<>32
+       OR @ClientInstanceId IS NULL
+        THROW 52430,N'The AuthPoint login proof is invalid.',1;
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(),
+            @SessionId uniqueidentifier=NEWID(),
+            @ExpiresAtUtc datetime2(3)=DATEADD(hour,12,SYSUTCDATETIME()),
+            @ClientMachine nvarchar(128);
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        SELECT @ClientMachine=[ClientMachine]
+        FROM [tb_security].[MfaChallenges] WITH (UPDLOCK,HOLDLOCK)
+        WHERE [ChallengeId]=@ChallengeId
+          AND [ActorWindowsSid]=@ActorSid
+          AND [ActionScope]=N'Login'
+          AND [ClientInstanceId]=@ClientInstanceId
+          AND [ChallengeNonceHash]=HASHBYTES(N'SHA2_256',@ChallengeNonce)
+          AND [AuthorizationTokenHash]=HASHBYTES(N'SHA2_512',@AuthorizationToken)
+          AND [Status]=N'Approved' AND [ConsumedAtUtc] IS NULL
+          AND [AuthorizationExpiresAtUtc]>@NowUtc;
+        IF @@ROWCOUNT<>1
+            THROW 52431,N'The AuthPoint login approval is unavailable, expired, or belongs to another Windows session.',1;
+
+        INSERT INTO [tb_security].[MfaLoginSessions]
+        (
+            [SessionId],[ClientInstanceId],[ActorWindowsSid],[ActorLoginName],
+            [ClientMachine],[SessionTokenHash],[CreatedAtUtc],[ExpiresAtUtc]
+        )
+        VALUES
+        (
+            @SessionId,@ClientInstanceId,@ActorSid,@ActorLogin,@ClientMachine,
+            HASHBYTES(N'SHA2_512',@AuthorizationToken),@NowUtc,@ExpiresAtUtc
+        );
+
+        UPDATE [tb_security].[MfaChallenges]
+        SET [Status]=N'Consumed',[ConsumedAtUtc]=@NowUtc,
+            [AuthorizationTokenHash]=NULL,
+            [AuthorizationTokenEncrypted]=NULL,
+            [AuthorizationExpiresAtUtc]=NULL
+        WHERE [ChallengeId]=@ChallengeId;
+
+        DECLARE @SessionEntityId nvarchar(120)=CONVERT(nvarchar(36),@SessionId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'TechBenchLoginMfaSessionStarted',
+            @EntityType=N'MfaLoginSession',
+            @EntityId=@SessionEntityId,
+            @RequestId=@RequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT @SessionId AS [SessionId],@ExpiresAtUtc AS [ExpiresAtUtc];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.EndAuthPointLoginSession', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[EndAuthPointLoginSession];
+GO
+
+CREATE PROCEDURE [tb_app].[EndAuthPointLoginSession]
+    @SessionId uniqueidentifier,
+    @SessionToken varbinary(32),
+    @RequestId uniqueidentifier = NULL
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85)=SUSER_SID(ORIGINAL_LOGIN()),
+            @NowUtc datetime2(3)=SYSUTCDATETIME();
+    IF @ActorSid IS NULL OR @SessionToken IS NULL
+       OR DATALENGTH(@SessionToken)<>32
+        RETURN;
+
+    UPDATE [tb_security].[MfaLoginSessions]
+    SET [EndedAtUtc]=@NowUtc
+    WHERE [SessionId]=@SessionId AND [ActorWindowsSid]=@ActorSid
+      AND [SessionTokenHash]=HASHBYTES(N'SHA2_512',@SessionToken)
+      AND [EndedAtUtc] IS NULL;
+    IF @@ROWCOUNT=1
+    BEGIN
+        DECLARE @SessionEntityId nvarchar(120)=CONVERT(nvarchar(36),@SessionId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'TechBenchLoginMfaSessionEnded',
+            @EntityType=N'MfaLoginSession',
+            @EntityId=@SessionEntityId,
+            @RequestId=@RequestId;
+    END;
+END;
+GO
+
+IF OBJECT_ID(N'tb_service.GetAuthPointMfaConfiguration', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_service].[GetAuthPointMfaConfiguration];
+GO
+
+CREATE PROCEDURE [tb_service].[GetAuthPointMfaConfiguration]
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    /* Direct execution is granted only to tb_role_sync_service. EXECUTE AS
+       OWNER supplies table access without granting that role direct reads. */
+    SELECT
+        COALESCE(TRY_CONVERT(bit,(SELECT [SettingValue]
+            FROM [tb_data].[OrganizationSettings]
+            WHERE [SettingKey]=N'AuthPoint.Enabled')),0) AS [Enabled],
+        COALESCE((SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+            WHERE [SettingKey]=N'AuthPoint.BaseApiUrl'),N'') AS [BaseApiUrl],
+        COALESCE((SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+            WHERE [SettingKey]=N'AuthPoint.AccountId'),N'') AS [AccountId],
+        COALESCE((SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+            WHERE [SettingKey]=N'AuthPoint.ResourceId'),N'') AS [ResourceId],
+        COALESCE((SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+            WHERE [SettingKey]=N'AuthPoint.AccessId'),N'') AS [AccessId];
+END;
+GO
+
+IF OBJECT_ID(N'tb_service.ClaimAuthPointMfaChallenge', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_service].[ClaimAuthPointMfaChallenge];
+GO
+
+CREATE PROCEDURE [tb_service].[ClaimAuthPointMfaChallenge]
+    @WorkerId uniqueidentifier,
+    @LeaseSeconds int = 150
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    /* Direct execution is granted only to tb_role_sync_service. */
+    IF @WorkerId IS NULL THROW 52421,N'WorkerId is required.',1;
+    SET @LeaseSeconds=CASE WHEN @LeaseSeconds<90 THEN 90
+        WHEN @LeaseSeconds>240 THEN 240 ELSE @LeaseSeconds END;
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(),
+            @ChallengeId uniqueidentifier,@LeaseId uniqueidentifier=NEWID();
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        UPDATE [tb_security].[MfaChallenges]
+        SET [Status]=N'Expired',[CompletedAtUtc]=@NowUtc,
+            [OutcomeCode]=N'CHALLENGE_EXPIRED',
+            [OutcomeMessage]=N'The AuthPoint request expired.'
+        WHERE [Status] IN (N'Queued',N'Processing') AND [ExpiresAtUtc]<=@NowUtc;
+
+        UPDATE [tb_security].[MfaChallenges]
+        SET [Status]=CASE WHEN [AttemptCount]>=3 THEN N'Error' ELSE N'Queued' END,
+            [OutcomeCode]=CASE WHEN [AttemptCount]>=3 THEN N'LEASE_RETRY_LIMIT' END,
+            [OutcomeMessage]=CASE WHEN [AttemptCount]>=3
+                THEN N'The AuthPoint request could not be completed.' END,
+            [CompletedAtUtc]=CASE WHEN [AttemptCount]>=3 THEN @NowUtc END,
+            [WorkerId]=NULL,[LeaseId]=NULL,[LeaseExpiresAtUtc]=NULL
+        WHERE [Status]=N'Processing' AND [LeaseExpiresAtUtc]<=@NowUtc;
+
+        SELECT TOP (1) @ChallengeId=[ChallengeId]
+        FROM [tb_security].[MfaChallenges] WITH (UPDLOCK,READPAST,ROWLOCK)
+        WHERE [Status]=N'Queued' AND [ExpiresAtUtc]>@NowUtc
+          AND [AttemptCount]<3
+        ORDER BY [CreatedAtUtc],[ChallengeId];
+
+        IF @ChallengeId IS NOT NULL
+        BEGIN
+            UPDATE [tb_security].[MfaChallenges]
+            SET [Status]=N'Processing',[AttemptCount]=[AttemptCount]+1,
+                [WorkerId]=@WorkerId,[LeaseId]=@LeaseId,
+                [LeaseExpiresAtUtc]=DATEADD(second,@LeaseSeconds,@NowUtc)
+            WHERE [ChallengeId]=@ChallengeId AND [Status]=N'Queued';
+            IF @@ROWCOUNT<>1 SET @ChallengeId=NULL;
+        END;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT [ChallengeId],[LeaseId],[ProviderLogin],[ClientMachine],
+           [ActionScope],[SecretId],[ExpiresAtUtc]
+    FROM [tb_security].[MfaChallenges]
+    WHERE [ChallengeId]=@ChallengeId AND [WorkerId]=@WorkerId
+      AND [LeaseId]=@LeaseId AND [Status]=N'Processing';
+END;
+GO
+
+IF OBJECT_ID(N'tb_service.CompleteAuthPointMfaChallenge', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_service].[CompleteAuthPointMfaChallenge];
+GO
+
+CREATE PROCEDURE [tb_service].[CompleteAuthPointMfaChallenge]
+    @ChallengeId uniqueidentifier,
+    @WorkerId uniqueidentifier,
+    @LeaseId uniqueidentifier,
+    @Result nvarchar(16),
+    @OutcomeCode nvarchar(80) = NULL,
+    @OutcomeMessage nvarchar(500) = NULL,
+    @ProviderTransactionId nvarchar(120) = NULL
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    /* Direct execution is granted only to tb_role_sync_service. */
+    IF @Result NOT IN (N'Approved',N'Denied',N'Error')
+        THROW 52422,N'The AuthPoint result is invalid.',1;
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(),
+            @AuthorizationToken varbinary(32),
+            @TokenHash binary(64),@TokenEncrypted varbinary(8000),
+            @ActorSid varbinary(85),@ActorLogin nvarchar(256),
+            @ActionScope nvarchar(16),
+            @Authenticator varbinary(32)=HASHBYTES(N'SHA2_256',
+                CONVERT(varbinary(max),N'MfaAuthorization|'
+                    +CONVERT(nvarchar(36),@ChallengeId)));
+    IF @Result=N'Approved'
+    BEGIN
+        SET @AuthorizationToken=CRYPT_GEN_RANDOM(32);
+        SET @TokenHash=HASHBYTES(N'SHA2_512',@AuthorizationToken);
+        OPEN SYMMETRIC KEY [tb_ClientSecretKey]
+            DECRYPTION BY CERTIFICATE [tb_ClientSecretCertificate];
+        SET @TokenEncrypted=EncryptByKey(
+            Key_GUID(N'tb_ClientSecretKey'),@AuthorizationToken,1,@Authenticator);
+        CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+        IF @TokenEncrypted IS NULL THROW 52423,N'AuthPoint authorization encryption failed.',1;
+    END;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        SELECT @ActorSid=[ActorWindowsSid],@ActorLogin=[ActorLoginName],
+               @ActionScope=[ActionScope]
+        FROM [tb_security].[MfaChallenges] WITH (UPDLOCK,HOLDLOCK)
+        WHERE [ChallengeId]=@ChallengeId AND [Status]=N'Processing'
+          AND [WorkerId]=@WorkerId AND [LeaseId]=@LeaseId
+          AND [LeaseExpiresAtUtc]>@NowUtc AND [ExpiresAtUtc]>@NowUtc;
+        IF @ActorSid IS NULL
+            THROW 52424,N'The AuthPoint challenge lease is no longer valid.',1;
+
+        UPDATE [tb_security].[MfaChallenges]
+        SET [Status]=@Result,[OutcomeCode]=LEFT(NULLIF(@OutcomeCode,N''),80),
+            [OutcomeMessage]=LEFT(NULLIF(@OutcomeMessage,N''),500),
+            [ProviderTransactionId]=LEFT(NULLIF(@ProviderTransactionId,N''),120),
+            [AuthorizationTokenHash]=@TokenHash,
+            [AuthorizationTokenEncrypted]=@TokenEncrypted,
+            [AuthorizationExpiresAtUtc]=CASE WHEN @Result=N'Approved'
+                THEN DATEADD(second,60,@NowUtc) END,
+            [CompletedAtUtc]=@NowUtc,[WorkerId]=NULL,[LeaseId]=NULL,
+            [LeaseExpiresAtUtc]=NULL
+        WHERE [ChallengeId]=@ChallengeId;
+
+        INSERT INTO [tb_audit].[AuditEvents]
+        (
+            [ActorWindowsSid],[ActorLoginName],[Action],[EntityType],
+            [EntityId],[RequestId],[DataJson],[OccurredAtUtc]
+        )
+        SELECT [ActorWindowsSid],[ActorLoginName],
+               CASE WHEN @ActionScope=N'Login' AND @Result=N'Approved'
+                        THEN N'TechBenchLoginMfaApproved'
+                    WHEN @ActionScope=N'Login' AND @Result=N'Denied'
+                        THEN N'TechBenchLoginMfaDenied'
+                    WHEN @ActionScope=N'Login'
+                        THEN N'TechBenchLoginMfaError'
+                    WHEN @Result=N'Approved' THEN N'ClientSecretMfaApproved'
+                    WHEN @Result=N'Denied' THEN N'ClientSecretMfaDenied'
+                    ELSE N'ClientSecretMfaError' END,
+               N'MfaChallenge',CONVERT(nvarchar(36),[ChallengeId]),
+               [RequestId],NULL,@NowUtc
+        FROM [tb_security].[MfaChallenges]
+        WHERE [ChallengeId]=@ChallengeId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        BEGIN TRY
+            CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+        END TRY BEGIN CATCH END CATCH;
+        THROW;
+    END CATCH;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminIssueMfaBreakGlassGrant', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminIssueMfaBreakGlassGrant];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminIssueMfaBreakGlassGrant]
+    @TargetLoginName nvarchar(256),
+    @SecretId bigint,
+    @ActionScope nvarchar(16),
+    @Reason nvarchar(500),
+    @ValidMinutes int = 10,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ApproverSid varbinary(85),@IsManager bit,@IsAdmin bit,
+            @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ApproverSid OUTPUT,@IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 OR IS_ROLEMEMBER(N'tb_role_mfa_break_glass')<>1
+        THROW 52430,N'The dedicated MFA break-glass role and Admin permission are required.',1;
+    SET @TargetLoginName=NULLIF(LTRIM(RTRIM(@TargetLoginName)),N'');
+    SET @Reason=NULLIF(LTRIM(RTRIM(@Reason)),N'');
+    IF @ActionScope NOT IN (N'Reveal',N'Copy') OR LEN(COALESCE(@Reason,N''))<12
+        THROW 52431,N'A valid action and a specific break-glass reason are required.',1;
+    IF @ValidMinutes<1 OR @ValidMinutes>10
+        THROW 52432,N'Break-glass access must expire within ten minutes.',1;
+    DECLARE @TargetSid varbinary(85)=(SELECT [WindowsSid]
+        FROM [tb_security].[Users] WHERE [LoginName]=@TargetLoginName);
+    IF @TargetSid IS NULL THROW 52402,N'The selected TechBench user no longer exists.',1;
+    IF @TargetSid=@ApproverSid
+        THROW 52433,N'A second administrator must approve break-glass access.',1;
+    IF NOT EXISTS (SELECT 1 FROM [tb_client].[CredentialSecrets]
+        WHERE [SecretId]=@SecretId AND [IsCurrent]=1)
+        THROW 52393,N'The requested client secret was not found.',1;
+
+    DECLARE @GrantId uniqueidentifier=NEWID(),@NowUtc datetime2(3)=SYSUTCDATETIME();
+    INSERT INTO [tb_security].[MfaBreakGlassGrants]
+    (
+        [GrantId],[TargetWindowsSid],[ActionScope],[SecretId],[Reason],
+        [ApprovedByWindowsSid],[ApprovedByLoginName],[ExpiresAtUtc]
+    )
+    VALUES
+    (
+        @GrantId,@TargetSid,@ActionScope,@SecretId,@Reason,@ApproverSid,
+        CONVERT(nvarchar(256),ORIGINAL_LOGIN()),DATEADD(minute,@ValidMinutes,@NowUtc)
+    );
+    DECLARE @EntityId nvarchar(120)=CONVERT(nvarchar(36),@GrantId);
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action=N'MfaBreakGlassIssued',@EntityType=N'MfaBreakGlassGrant',
+        @EntityId=@EntityId,@RequestId=@RequestId;
+    SELECT @GrantId AS [GrantId],DATEADD(minute,@ValidMinutes,@NowUtc) AS [ExpiresAtUtc];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminRevokeMfaBreakGlassGrant', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminRevokeMfaBreakGlassGrant];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminRevokeMfaBreakGlassGrant]
+    @GrantId uniqueidentifier,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85),@IsManager bit,@IsAdmin bit,
+            @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,@IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 OR IS_ROLEMEMBER(N'tb_role_mfa_break_glass')<>1
+        THROW 52430,N'The dedicated MFA break-glass role and Admin permission are required.',1;
+    UPDATE [tb_security].[MfaBreakGlassGrants]
+    SET [RevokedAtUtc]=SYSUTCDATETIME(),[RevokedByWindowsSid]=@ActorSid,
+        [RemainingUses]=0
+    WHERE [GrantId]=@GrantId AND [RevokedAtUtc] IS NULL
+      AND [ConsumedAtUtc] IS NULL;
+    DECLARE @EntityId nvarchar(120)=CONVERT(nvarchar(36),@GrantId);
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action=N'MfaBreakGlassRevoked',@EntityType=N'MfaBreakGlassGrant',
+        @EntityId=@EntityId,@RequestId=@RequestId;
+END;
+GO
+
+/* Replace only the canonical Client Info secret procedure. FireDrill remains unchanged. */
+IF OBJECT_ID(N'tb_app.RevealClientCredentialSecret', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[RevealClientCredentialSecret];
+GO
+
+CREATE PROCEDURE [tb_app].[RevealClientCredentialSecret]
+    @SecretId bigint,
+    @AccessAction nvarchar(12) = N'Reveal',
+    @AuthorizationToken varbinary(32) = NULL,
+    @MfaSessionId uniqueidentifier = NULL,
+    @MfaSessionToken varbinary(32) = NULL,
+    @RequestId uniqueidentifier = NULL
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    IF @AccessAction NOT IN (N'Reveal',N'Copy')
+        THROW 52392,N'The secret access action is invalid.',1;
+
+    /* Keep the real Windows SID while running as owner for certificate/key
+       access. Execute permission remains limited to the secret-reader role. */
+    DECLARE @ActorSid varbinary(85)=SUSER_SID(ORIGINAL_LOGIN());
+    IF @ActorSid IS NULL OR DATALENGTH(@ActorSid) NOT BETWEEN 8 AND 85
+        THROW 51000,N'SQL Server did not provide a valid authenticated Windows identity.',1;
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(),@Authorized bit=0,
+            @UsedBreakGlass bit=0,
+            @MfaEnabled bit=COALESCE(TRY_CONVERT(bit,
+                (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+                 WHERE [SettingKey]=N'AuthPoint.Enabled')),0),
+            @RequireAll bit=COALESCE(TRY_CONVERT(bit,
+                (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+                 WHERE [SettingKey]=N'AuthPoint.RequireAllUsers')),1),
+            @RequireAtLogin bit=COALESCE((
+                SELECT [RequireAtLogin]
+                FROM [tb_security].[AuthPointUserMappings]
+                WHERE [WindowsSid]=@ActorSid),0),
+            @UserRequiresMfa bit;
+    SET @UserRequiresMfa=CASE WHEN @MfaEnabled=1
+        AND (@RequireAll=1 OR @RequireAtLogin=1) THEN 1 ELSE 0 END;
+
+    DECLARE @Authenticator varbinary(32)=HASHBYTES(N'SHA2_256',
+        CONVERT(varbinary(max),N'ClientSecret|'+CONVERT(nvarchar(30),@SecretId)));
+    DECLARE @CredentialId bigint,@ClientId int,@CredentialName nvarchar(240),
+            @SecretType nvarchar(80),@SecretLabel nvarchar(200),
+            @SecretValue nvarchar(max),@SecretRowVersion binary(8);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        IF @UserRequiresMfa=0
+            SET @Authorized=1;
+        ELSE IF @MfaSessionId IS NOT NULL
+             AND @MfaSessionToken IS NOT NULL
+             AND DATALENGTH(@MfaSessionToken)=32
+        BEGIN
+            UPDATE [tb_security].[MfaLoginSessions]
+            SET [LastUsedAtUtc]=@NowUtc
+            WHERE [SessionId]=@MfaSessionId
+              AND [ActorWindowsSid]=@ActorSid
+              AND [SessionTokenHash]=HASHBYTES(N'SHA2_512',@MfaSessionToken)
+              AND [EndedAtUtc] IS NULL AND [ExpiresAtUtc]>@NowUtc;
+            IF @@ROWCOUNT=1 SET @Authorized=1;
+        END
+        ELSE IF @AuthorizationToken IS NOT NULL
+             AND DATALENGTH(@AuthorizationToken)=32
+        BEGIN
+            UPDATE [tb_security].[MfaChallenges]
+            SET [Status]=N'Consumed',[ConsumedAtUtc]=@NowUtc,
+                [AuthorizationTokenHash]=NULL,
+                [AuthorizationTokenEncrypted]=NULL,
+                [AuthorizationExpiresAtUtc]=NULL
+            WHERE [ActorWindowsSid]=@ActorSid AND [SecretId]=@SecretId
+              AND [ActionScope]=@AccessAction AND [Status]=N'Approved'
+              AND [AuthorizationExpiresAtUtc]>@NowUtc
+              AND [AuthorizationTokenHash]=HASHBYTES(N'SHA2_512',@AuthorizationToken);
+            IF @@ROWCOUNT=1 SET @Authorized=1;
+        END;
+
+        IF @Authorized=0 AND @UserRequiresMfa=1
+        BEGIN
+            DECLARE @GrantId uniqueidentifier;
+            SELECT TOP (1) @GrantId=[GrantId]
+            FROM [tb_security].[MfaBreakGlassGrants] WITH (UPDLOCK,READPAST,ROWLOCK)
+            WHERE [TargetWindowsSid]=@ActorSid AND [SecretId]=@SecretId
+              AND [ActionScope]=@AccessAction AND [RemainingUses]=1
+              AND [RevokedAtUtc] IS NULL AND [ConsumedAtUtc] IS NULL
+              AND [ExpiresAtUtc]>@NowUtc
+            ORDER BY [CreatedAtUtc];
+            IF @GrantId IS NOT NULL
+            BEGIN
+                UPDATE [tb_security].[MfaBreakGlassGrants]
+                SET [RemainingUses]=0,[ConsumedAtUtc]=@NowUtc
+                WHERE [GrantId]=@GrantId AND [RemainingUses]=1;
+                IF @@ROWCOUNT=1
+                BEGIN
+                    SET @Authorized=1;
+                    SET @UsedBreakGlass=1;
+                END;
+            END;
+        END;
+
+        IF @Authorized<>1
+            THROW 52440,N'Your AuthPoint TechBench login is missing or expired. Close and reopen the Client Info beta to sign in again.',1;
+
+        OPEN SYMMETRIC KEY [tb_ClientSecretKey]
+            DECRYPTION BY CERTIFICATE [tb_ClientSecretCertificate];
+        SELECT
+            @CredentialId=secret.[CredentialId],@ClientId=credential.[ClientId],
+            @CredentialName=credential.[Name],@SecretType=secret.[SecretType],
+            @SecretLabel=secret.[SecretLabel],
+            @SecretValue=CONVERT(nvarchar(max),DecryptByKey(
+                secret.[ValueEncrypted],1,@Authenticator)),
+            @SecretRowVersion=secret.[RowVersion]
+        FROM [tb_client].[CredentialSecrets] AS secret
+        INNER JOIN [tb_client].[Credentials] AS credential
+            ON credential.[CredentialId]=secret.[CredentialId]
+        WHERE secret.[SecretId]=@SecretId AND secret.[IsCurrent]=1
+          AND credential.[IsActive]=1;
+        IF @@ROWCOUNT<>1
+        BEGIN
+            CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+            THROW 52393,N'The requested client secret was not found.',1;
+        END;
+        CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+
+        DECLARE @AuditAction nvarchar(80)=CASE
+            WHEN @UsedBreakGlass=1 THEN N'ClientSecretBreakGlassUsed'
+            WHEN @AccessAction=N'Copy' THEN N'ClientSecretCopied'
+            ELSE N'ClientSecretRevealed' END;
+        DECLARE @AuditEntityId nvarchar(120)=CONVERT(nvarchar(120),@SecretId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=@AuditAction,@EntityType=N'ClientCredentialSecret',
+            @EntityId=@AuditEntityId,@RequestId=@RequestId;
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        BEGIN TRY
+            CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+        END TRY BEGIN CATCH END CATCH;
+        THROW;
+    END CATCH;
+
+    SELECT @SecretId AS [SecretId],@CredentialId AS [CredentialId],
+           @ClientId AS [ClientId],@CredentialName AS [CredentialName],
+           @SecretType AS [SecretType],@SecretLabel AS [SecretLabel],
+           @SecretValue AS [SecretValue],@SecretRowVersion AS [RowVersion];
+END;
+GO
+
+PRINT N'WatchGuard AuthPoint MFA procedures installed.';
+GO
+
+-- ============================================================================
+-- END 64-V0015-AuthPointMfaProcedures.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 66-V0015-ClientAttachmentsProcedures.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+GO
+
+IF OBJECT_ID(N'tb_app.GetClientAttachmentStorageConfiguration', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[GetClientAttachmentStorageConfiguration];
+GO
+
+CREATE PROCEDURE [tb_app].[GetClientAttachmentStorageConfiguration]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85), @IsManager bit,
+            @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@UserSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    DECLARE @RootPath nvarchar(max) =
+        (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+         WHERE [SettingKey]=N'ClientAttachments.RootPath');
+    DECLARE @MaximumText nvarchar(max) =
+        (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+         WHERE [SettingKey]=N'ClientAttachments.MaximumFileSizeMegabytes');
+    DECLARE @AllowedExtensions nvarchar(max) =
+        (SELECT [SettingValue] FROM [tb_data].[OrganizationSettings]
+         WHERE [SettingKey]=N'ClientAttachments.AllowedExtensions');
+    DECLARE @Maximum int = TRY_CONVERT(int, @MaximumText);
+
+    SELECT
+        CONVERT(nvarchar(1000), COALESCE(@RootPath, N'')) AS [RootPath],
+        CONVERT(int, CASE
+            WHEN @Maximum BETWEEN 1 AND 2048 THEN @Maximum
+            ELSE 50 END) AS [MaximumFileSizeMegabytes],
+        CONVERT(nvarchar(max), COALESCE(
+            NULLIF(LTRIM(RTRIM(@AllowedExtensions)), N''),
+            N'.jpg,.jpeg,.png,.gif,.bmp,.webp,.tif,.tiff,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.rtf,.ppt,.pptx,.zip'))
+            AS [AllowedExtensions];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.GetClientInfoAttachments', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[GetClientInfoAttachments];
+GO
+
+CREATE PROCEDURE [tb_app].[GetClientInfoAttachments]
+    @ClientId int,
+    @IncludeArchived bit = 0
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85), @IsManager bit,
+            @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@UserSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    IF NOT EXISTS (SELECT 1 FROM [tb_data].[Clients] WHERE [Id]=@ClientId)
+        THROW 52600, N'The selected client no longer exists.', 1;
+
+    SELECT
+        attachment.[AttachmentId], attachment.[ClientId],
+        attachment.[EquipmentId],
+        COALESCE(equipment.[Name], N'') AS [EquipmentName],
+        COALESCE(equipment.[AssetTag], N'') AS [EquipmentAssetTag],
+        attachment.[RelativePath], attachment.[OriginalFileName],
+        attachment.[ContentType], attachment.[Category], attachment.[Caption],
+        attachment.[FileSizeBytes], attachment.[ContentSha256],
+        COALESCE(NULLIF(uploader.[DisplayName],N''), uploader.[LoginName], N'Unknown')
+            AS [UploadedBy],
+        attachment.[UploadedAtUtc], attachment.[IsArchived],
+        COALESCE(NULLIF(archiver.[DisplayName],N''), archiver.[LoginName], N'')
+            AS [ArchivedBy],
+        attachment.[ArchivedAtUtc], attachment.[RowVersion]
+    FROM [tb_client].[ClientAttachments] AS attachment
+    LEFT JOIN [tb_security].[Users] AS uploader
+        ON uploader.[WindowsSid]=attachment.[UploadedByWindowsSid]
+    LEFT JOIN [tb_security].[Users] AS archiver
+        ON archiver.[WindowsSid]=attachment.[ArchivedByWindowsSid]
+    LEFT JOIN [tb_inventory].[Equipment] AS equipment
+        ON equipment.[EquipmentId]=attachment.[EquipmentId]
+    WHERE attachment.[ClientId]=@ClientId
+      AND (@IncludeArchived=1 OR attachment.[IsArchived]=0)
+    ORDER BY attachment.[IsArchived], attachment.[UploadedAtUtc] DESC,
+        attachment.[OriginalFileName], attachment.[AttachmentId];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SaveClientInfoAttachment', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SaveClientInfoAttachment];
+GO
+
+CREATE PROCEDURE [tb_app].[SaveClientInfoAttachment]
+    @AttachmentId uniqueidentifier,
+    @ClientId int,
+    @RelativePath nvarchar(400),
+    @OriginalFileName nvarchar(260),
+    @ContentType nvarchar(160),
+    @Category nvarchar(80),
+    @Caption nvarchar(500) = NULL,
+    @FileSizeBytes bigint,
+    @ContentSha256 binary(32),
+    @ExpectedRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit,
+            @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_info_editor')<>1
+        THROW 52601, N'Client Info editor permission is required.', 1;
+
+    SET @RelativePath=NULLIF(LTRIM(RTRIM(@RelativePath)),N'');
+    SET @OriginalFileName=NULLIF(LTRIM(RTRIM(@OriginalFileName)),N'');
+    SET @ContentType=COALESCE(NULLIF(LTRIM(RTRIM(@ContentType)),N''),
+        N'application/octet-stream');
+    SET @Category=COALESCE(NULLIF(LTRIM(RTRIM(@Category)),N''),N'Other');
+    SET @Caption=NULLIF(LTRIM(RTRIM(@Caption)),N'');
+    SET @RequestId=COALESCE(@RequestId,NEWID());
+
+    IF @AttachmentId IS NULL OR @AttachmentId='00000000-0000-0000-0000-000000000000'
+        THROW 52602, N'A generated attachment ID is required.', 1;
+    IF NOT EXISTS (SELECT 1 FROM [tb_data].[Clients] WHERE [Id]=@ClientId)
+        THROW 52600, N'The selected client no longer exists.', 1;
+    IF @RelativePath IS NULL OR @RelativePath LIKE N'%..%'
+       OR @RelativePath LIKE N':%' OR LEFT(@RelativePath,1) IN (N'\',N'/')
+        THROW 52603, N'The attachment relative path is invalid.', 1;
+    DECLARE @ClientIdText nvarchar(20)=CONVERT(nvarchar(20),@ClientId);
+    DECLARE @ExpectedClientFolder nvarchar(40)=N'Client-'+CASE
+        WHEN LEN(@ClientIdText)>=6 THEN @ClientIdText
+        ELSE RIGHT(N'000000'+@ClientIdText,6) END+N'\';
+    DECLARE @AttachmentExists bit=CONVERT(bit,CASE WHEN EXISTS
+        (SELECT 1 FROM [tb_client].[ClientAttachments]
+         WHERE [AttachmentId]=@AttachmentId) THEN 1 ELSE 0 END);
+    IF @AttachmentExists=0
+       AND @RelativePath NOT LIKE @ExpectedClientFolder + N'%'
+        THROW 52604, N'The attachment path does not belong to the selected client folder.', 1;
+    IF @OriginalFileName IS NULL OR CHARINDEX(N'\',@OriginalFileName)>0
+       OR CHARINDEX(N'/',@OriginalFileName)>0
+        THROW 52605, N'The original attachment filename is invalid.', 1;
+    IF @FileSizeBytes<0 OR @ContentSha256 IS NULL
+        THROW 52606, N'Attachment size and SHA-256 are required.', 1;
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME(),
+            @Action nvarchar(120);
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF @AttachmentExists=0
+        BEGIN
+            INSERT INTO [tb_client].[ClientAttachments]
+            (
+                [AttachmentId],[ClientId],[RelativePath],[OriginalFileName],
+                [ContentType],[Category],[Caption],[FileSizeBytes],
+                [ContentSha256],[UploadedByWindowsSid],[UploadedAtUtc],
+                [IsArchived]
+            )
+            VALUES
+            (
+                @AttachmentId,@ClientId,@RelativePath,@OriginalFileName,
+                @ContentType,@Category,@Caption,@FileSizeBytes,
+                @ContentSha256,@ActorSid,@NowUtc,0
+            );
+            SET @Action=N'ClientInfoAttachmentUploaded';
+        END
+        ELSE
+        BEGIN
+            IF @ExpectedRowVersion IS NULL
+                THROW 52607, N'ExpectedRowVersion is required when editing an attachment.', 1;
+
+            UPDATE [tb_client].[ClientAttachments]
+            SET [Category]=@Category,[Caption]=@Caption
+            WHERE [AttachmentId]=@AttachmentId
+              AND [ClientId]=@ClientId
+              AND [RelativePath]=@RelativePath
+              AND [OriginalFileName]=@OriginalFileName
+              AND [ContentType]=@ContentType
+              AND [FileSizeBytes]=@FileSizeBytes
+              AND [ContentSha256]=@ContentSha256
+              AND [RowVersion]=@ExpectedRowVersion;
+            IF @@ROWCOUNT<>1
+                THROW 52608, N'The attachment changed on another workstation. Refresh and resolve the conflict.', 1;
+            SET @Action=N'ClientInfoAttachmentMetadataUpdated';
+        END;
+
+        DECLARE @AuditEntityId nvarchar(120)=
+            CONVERT(nvarchar(120),@AttachmentId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=@Action,
+            @EntityType=N'ClientInfoAttachment',
+            @EntityId=@AuditEntityId,
+            @RequestId=@RequestId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        attachment.[AttachmentId],attachment.[ClientId],attachment.[EquipmentId],
+        COALESCE(equipment.[Name],N'') AS [EquipmentName],
+        COALESCE(equipment.[AssetTag],N'') AS [EquipmentAssetTag],
+        attachment.[RelativePath],
+        attachment.[OriginalFileName],attachment.[ContentType],attachment.[Category],
+        attachment.[Caption],attachment.[FileSizeBytes],attachment.[ContentSha256],
+        COALESCE(NULLIF(uploader.[DisplayName],N''),uploader.[LoginName],N'Unknown') AS [UploadedBy],
+        attachment.[UploadedAtUtc],attachment.[IsArchived],N'' AS [ArchivedBy],
+        attachment.[ArchivedAtUtc],attachment.[RowVersion]
+    FROM [tb_client].[ClientAttachments] AS attachment
+    LEFT JOIN [tb_security].[Users] AS uploader
+        ON uploader.[WindowsSid]=attachment.[UploadedByWindowsSid]
+    LEFT JOIN [tb_inventory].[Equipment] AS equipment
+        ON equipment.[EquipmentId]=attachment.[EquipmentId]
+    WHERE attachment.[AttachmentId]=@AttachmentId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SetClientInfoAttachmentEquipmentLink', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SetClientInfoAttachmentEquipmentLink];
+GO
+
+CREATE PROCEDURE [tb_app].[SetClientInfoAttachmentEquipmentLink]
+    @AttachmentId uniqueidentifier,
+    @ClientId int,
+    @EquipmentId bigint = NULL,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit,
+            @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_info_editor')<>1
+        THROW 52601, N'Client Info editor permission is required.', 1;
+    IF @ExpectedRowVersion IS NULL
+        THROW 52607, N'ExpectedRowVersion is required when linking an attachment.', 1;
+    IF @EquipmentId IS NOT NULL
+       AND NOT EXISTS
+       (
+           SELECT 1
+           FROM [tb_inventory].[Equipment]
+           WHERE [EquipmentId]=@EquipmentId
+             AND [ClientId]=@ClientId
+             AND [IsArchived]=0
+       )
+        THROW 52609, N'Attachments can only be linked to active equipment assigned to the same client.', 1;
+    SET @RequestId=COALESCE(@RequestId,NEWID());
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        UPDATE [tb_client].[ClientAttachments]
+        SET [EquipmentId]=@EquipmentId
+        WHERE [AttachmentId]=@AttachmentId
+          AND [ClientId]=@ClientId
+          AND [RowVersion]=@ExpectedRowVersion;
+        IF @@ROWCOUNT<>1
+            THROW 52608, N'The attachment changed on another workstation. Refresh and resolve the conflict.', 1;
+
+        DECLARE @AuditEntityId nvarchar(120)=
+            CONVERT(nvarchar(120),@AttachmentId);
+        DECLARE @AuditAction nvarchar(120)=CASE
+            WHEN @EquipmentId IS NULL
+                THEN N'ClientInfoAttachmentEquipmentUnlinked'
+            ELSE N'ClientInfoAttachmentEquipmentLinked'
+        END;
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=@AuditAction,
+            @EntityType=N'ClientInfoAttachment',
+            @EntityId=@AuditEntityId,
+            @RequestId=@RequestId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        attachment.[AttachmentId],attachment.[ClientId],attachment.[EquipmentId],
+        COALESCE(equipment.[Name],N'') AS [EquipmentName],
+        COALESCE(equipment.[AssetTag],N'') AS [EquipmentAssetTag],
+        attachment.[RelativePath],attachment.[OriginalFileName],
+        attachment.[ContentType],attachment.[Category],attachment.[Caption],
+        attachment.[FileSizeBytes],attachment.[ContentSha256],
+        COALESCE(NULLIF(uploader.[DisplayName],N''),uploader.[LoginName],N'Unknown') AS [UploadedBy],
+        attachment.[UploadedAtUtc],attachment.[IsArchived],
+        COALESCE(NULLIF(archiver.[DisplayName],N''),archiver.[LoginName],N'') AS [ArchivedBy],
+        attachment.[ArchivedAtUtc],attachment.[RowVersion]
+    FROM [tb_client].[ClientAttachments] AS attachment
+    LEFT JOIN [tb_security].[Users] AS uploader
+        ON uploader.[WindowsSid]=attachment.[UploadedByWindowsSid]
+    LEFT JOIN [tb_security].[Users] AS archiver
+        ON archiver.[WindowsSid]=attachment.[ArchivedByWindowsSid]
+    LEFT JOIN [tb_inventory].[Equipment] AS equipment
+        ON equipment.[EquipmentId]=attachment.[EquipmentId]
+    WHERE attachment.[AttachmentId]=@AttachmentId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.SetClientInfoAttachmentArchived', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[SetClientInfoAttachmentArchived];
+GO
+
+CREATE PROCEDURE [tb_app].[SetClientInfoAttachmentArchived]
+    @AttachmentId uniqueidentifier,
+    @ClientId int,
+    @IsArchived bit,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit,
+            @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_info_editor')<>1
+        THROW 52601, N'Client Info editor permission is required.', 1;
+    IF @ExpectedRowVersion IS NULL
+        THROW 52607, N'ExpectedRowVersion is required when archiving an attachment.', 1;
+    SET @RequestId=COALESCE(@RequestId,NEWID());
+
+    DECLARE @NowUtc datetime2(3)=SYSUTCDATETIME();
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        UPDATE [tb_client].[ClientAttachments]
+        SET [IsArchived]=@IsArchived,
+            [ArchivedByWindowsSid]=CASE WHEN @IsArchived=1 THEN @ActorSid END,
+            [ArchivedAtUtc]=CASE WHEN @IsArchived=1 THEN @NowUtc END
+        WHERE [AttachmentId]=@AttachmentId
+          AND [ClientId]=@ClientId
+          AND [RowVersion]=@ExpectedRowVersion;
+        IF @@ROWCOUNT<>1
+            THROW 52608, N'The attachment changed on another workstation. Refresh and resolve the conflict.', 1;
+
+        DECLARE @AuditAction nvarchar(120)=CASE WHEN @IsArchived=1
+            THEN N'ClientInfoAttachmentArchived'
+            ELSE N'ClientInfoAttachmentRestored' END;
+        DECLARE @AuditEntityId nvarchar(120)=
+            CONVERT(nvarchar(120),@AttachmentId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=@AuditAction,
+            @EntityType=N'ClientInfoAttachment',
+            @EntityId=@AuditEntityId,
+            @RequestId=@RequestId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        attachment.[AttachmentId],attachment.[ClientId],attachment.[EquipmentId],
+        COALESCE(equipment.[Name],N'') AS [EquipmentName],
+        COALESCE(equipment.[AssetTag],N'') AS [EquipmentAssetTag],
+        attachment.[RelativePath],
+        attachment.[OriginalFileName],attachment.[ContentType],attachment.[Category],
+        attachment.[Caption],attachment.[FileSizeBytes],attachment.[ContentSha256],
+        COALESCE(NULLIF(uploader.[DisplayName],N''),uploader.[LoginName],N'Unknown') AS [UploadedBy],
+        attachment.[UploadedAtUtc],attachment.[IsArchived],
+        COALESCE(NULLIF(archiver.[DisplayName],N''),archiver.[LoginName],N'') AS [ArchivedBy],
+        attachment.[ArchivedAtUtc],attachment.[RowVersion]
+    FROM [tb_client].[ClientAttachments] AS attachment
+    LEFT JOIN [tb_security].[Users] AS uploader
+        ON uploader.[WindowsSid]=attachment.[UploadedByWindowsSid]
+    LEFT JOIN [tb_security].[Users] AS archiver
+        ON archiver.[WindowsSid]=attachment.[ArchivedByWindowsSid]
+    LEFT JOIN [tb_inventory].[Equipment] AS equipment
+        ON equipment.[EquipmentId]=attachment.[EquipmentId]
+    WHERE attachment.[AttachmentId]=@AttachmentId;
+END;
+GO
+
+PRINT N'Client Attachments procedures installed.';
+GO
+
+-- ============================================================================
+-- END 66-V0015-ClientAttachmentsProcedures.sql
 -- ============================================================================
 
 -- ============================================================================
@@ -24027,6 +29854,290 @@ GO
 
 -- ============================================================================
 -- END 60-V0014-EquipmentBoardGrants.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 63-V0015-ClientInfoBetaGrants.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF DATABASE_PRINCIPAL_ID(N'$(AdminGroup)') IS NOT NULL
+BEGIN
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.database_role_members
+        WHERE [role_principal_id]=DATABASE_PRINCIPAL_ID(N'tb_role_client_info_editor')
+          AND [member_principal_id]=DATABASE_PRINCIPAL_ID(N'$(AdminGroup)')
+    )
+        ALTER ROLE [tb_role_client_info_editor] ADD MEMBER [$(AdminGroup)];
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.database_role_members
+        WHERE [role_principal_id]=DATABASE_PRINCIPAL_ID(N'tb_role_client_secret_reader')
+          AND [member_principal_id]=DATABASE_PRINCIPAL_ID(N'$(AdminGroup)')
+    )
+        ALTER ROLE [tb_role_client_secret_reader] ADD MEMBER [$(AdminGroup)];
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.database_role_members
+        WHERE [role_principal_id]=DATABASE_PRINCIPAL_ID(N'tb_role_client_secret_editor')
+          AND [member_principal_id]=DATABASE_PRINCIPAL_ID(N'$(AdminGroup)')
+    )
+        ALTER ROLE [tb_role_client_secret_editor] ADD MEMBER [$(AdminGroup)];
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.database_role_members
+        WHERE [role_principal_id]=DATABASE_PRINCIPAL_ID(N'tb_role_client_migration_operator')
+          AND [member_principal_id]=DATABASE_PRINCIPAL_ID(N'$(AdminGroup)')
+    )
+        ALTER ROLE [tb_role_client_migration_operator] ADD MEMBER [$(AdminGroup)];
+END;
+GO
+
+IF DATABASE_PRINCIPAL_ID(N'$(UserGroup)') IS NOT NULL
+BEGIN
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.database_role_members
+        WHERE [role_principal_id]=DATABASE_PRINCIPAL_ID(N'tb_role_client_secret_reader')
+          AND [member_principal_id]=DATABASE_PRINCIPAL_ID(N'$(UserGroup)')
+    )
+        ALTER ROLE [tb_role_client_secret_reader] ADD MEMBER [$(UserGroup)];
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.database_role_members
+        WHERE [role_principal_id]=DATABASE_PRINCIPAL_ID(N'tb_role_client_info_editor')
+          AND [member_principal_id]=DATABASE_PRINCIPAL_ID(N'$(UserGroup)')
+    )
+        ALTER ROLE [tb_role_client_info_editor] ADD MEMBER [$(UserGroup)];
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.database_role_members
+        WHERE [role_principal_id]=DATABASE_PRINCIPAL_ID(N'tb_role_client_secret_editor')
+          AND [member_principal_id]=DATABASE_PRINCIPAL_ID(N'$(UserGroup)')
+    )
+        ALTER ROLE [tb_role_client_secret_editor] ADD MEMBER [$(UserGroup)];
+END;
+GO
+
+GRANT EXECUTE ON OBJECT::[tb_app].[SearchClientInfoClients]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetClientInfoSnapshot]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetClientInfoImportBatch]
+    TO [tb_role_client_migration_operator];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetClientInfoImportBatch]
+    TO [tb_role_admin];
+GO
+
+GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoProfile]
+    TO [tb_role_client_info_editor];
+GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoLocation]
+    TO [tb_role_client_info_editor];
+GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoPerson]
+    TO [tb_role_client_info_editor];
+GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoResource]
+    TO [tb_role_client_info_editor];
+GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoResourceField]
+    TO [tb_role_client_info_editor];
+GRANT EXECUTE ON OBJECT::[tb_app].[DeleteClientInfoResourceField]
+    TO [tb_role_client_info_editor];
+GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoFact]
+    TO [tb_role_client_info_editor];
+GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientCredential]
+    TO [tb_role_client_info_editor];
+GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientCredential]
+    TO [tb_role_client_secret_editor];
+GRANT EXECUTE ON OBJECT::[tb_app].[SetClientCredentialSecret]
+    TO [tb_role_client_secret_editor];
+GRANT EXECUTE ON OBJECT::[tb_app].[RevealClientCredentialSecret]
+    TO [tb_role_client_secret_reader];
+GO
+
+GRANT EXECUTE ON OBJECT::[tb_app].[BeginClientInfoImport]
+    TO [tb_role_client_migration_operator];
+GRANT EXECUTE ON OBJECT::[tb_app].[StageClientInfoRecord]
+    TO [tb_role_client_migration_operator];
+GRANT EXECUTE ON OBJECT::[tb_app].[StageClientInfoSecret]
+    TO [tb_role_client_migration_operator];
+GRANT EXECUTE ON OBJECT::[tb_app].[ValidateClientInfoImport]
+    TO [tb_role_client_migration_operator];
+GRANT EXECUTE ON OBJECT::[tb_app].[CompareClientInfoImportToFireDrill]
+    TO [tb_role_client_migration_operator];
+GRANT EXECUTE ON OBJECT::[tb_app].[ResolveClientInfoImportIssue]
+    TO [tb_role_client_migration_operator];
+GRANT EXECUTE ON OBJECT::[tb_app].[ApproveClientInfoImport]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[PromoteClientInfoImport]
+    TO [tb_role_admin];
+GO
+
+DENY SELECT, INSERT, UPDATE, DELETE
+    ON SCHEMA::[tb_client] TO [tb_role_user];
+DENY SELECT, INSERT, UPDATE, DELETE
+    ON SCHEMA::[tb_import] TO [tb_role_user];
+DENY SELECT, INSERT, UPDATE, DELETE
+    ON SCHEMA::[tb_client] TO [tb_role_client_info_editor];
+DENY SELECT, INSERT, UPDATE, DELETE
+    ON SCHEMA::[tb_import] TO [tb_role_client_migration_operator];
+GO
+
+REVOKE EXECUTE ON OBJECT::[tb_app].[RevealClientCredentialSecret]
+    FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[SetClientCredentialSecret]
+    FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[PromoteClientInfoImport]
+    FROM [tb_preview_reader];
+GO
+
+PRINT N'Client Info beta permissions installed.';
+GO
+
+-- ============================================================================
+-- END 63-V0015-ClientInfoBetaGrants.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 65-V0015-AuthPointMfaGrants.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+GRANT EXECUTE ON OBJECT::[tb_app].[BeginClientSecretMfaChallenge]
+    TO [tb_role_client_secret_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetClientSecretMfaChallenge]
+    TO [tb_role_client_secret_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[CancelClientSecretMfaChallenge]
+    TO [tb_role_client_secret_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[RevealClientCredentialSecret]
+    TO [tb_role_client_secret_reader];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetAuthPointLoginRequirement]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[BeginAuthPointLoginMfaChallenge]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetClientSecretMfaChallenge]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[CancelClientSecretMfaChallenge]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[ActivateAuthPointLoginSession]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[EndAuthPointLoginSession]
+    TO [tb_role_user];
+
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetAuthPointUserMappings]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminSaveAuthPointUserMapping]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminSaveAuthPointLoginPolicy]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminIssueMfaBreakGlassGrant]
+    TO [tb_role_mfa_break_glass];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminRevokeMfaBreakGlassGrant]
+    TO [tb_role_mfa_break_glass];
+
+GRANT EXECUTE ON OBJECT::[tb_service].[GetAuthPointMfaConfiguration]
+    TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[ClaimAuthPointMfaChallenge]
+    TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[CompleteAuthPointMfaChallenge]
+    TO [tb_role_sync_service];
+
+DENY SELECT, INSERT, UPDATE, DELETE ON OBJECT::[tb_security].[AuthPointUserMappings]
+    TO [tb_role_user];
+DENY SELECT, INSERT, UPDATE, DELETE ON OBJECT::[tb_security].[MfaChallenges]
+    TO [tb_role_user];
+DENY SELECT, INSERT, UPDATE, DELETE ON OBJECT::[tb_security].[MfaLoginSessions]
+    TO [tb_role_user];
+DENY SELECT, INSERT, UPDATE, DELETE ON OBJECT::[tb_security].[MfaBreakGlassGrants]
+    TO [tb_role_user];
+DENY SELECT, INSERT, UPDATE, DELETE ON OBJECT::[tb_security].[AuthPointUserMappings]
+    TO [tb_role_sync_service];
+DENY SELECT, INSERT, UPDATE, DELETE ON OBJECT::[tb_security].[MfaChallenges]
+    TO [tb_role_sync_service];
+DENY SELECT, INSERT, UPDATE, DELETE ON OBJECT::[tb_security].[MfaLoginSessions]
+    TO [tb_role_sync_service];
+DENY SELECT, INSERT, UPDATE, DELETE ON OBJECT::[tb_security].[MfaBreakGlassGrants]
+    TO [tb_role_sync_service];
+
+REVOKE EXECUTE ON OBJECT::[tb_app].[BeginClientSecretMfaChallenge]
+    FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[GetClientSecretMfaChallenge]
+    FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[CancelClientSecretMfaChallenge]
+    FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[RevealClientCredentialSecret]
+    FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[GetAuthPointLoginRequirement]
+    FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[BeginAuthPointLoginMfaChallenge]
+    FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[ActivateAuthPointLoginSession]
+    FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[EndAuthPointLoginSession]
+    FROM [tb_preview_reader];
+GO
+
+PRINT N'WatchGuard AuthPoint MFA permissions installed.';
+GO
+
+-- ============================================================================
+-- END 65-V0015-AuthPointMfaGrants.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 67-V0015-ClientAttachmentsGrants.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+GRANT EXECUTE ON OBJECT::[tb_app].[GetClientAttachmentStorageConfiguration]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetClientInfoAttachments]
+    TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[SaveClientInfoAttachment]
+    TO [tb_role_client_info_editor];
+GRANT EXECUTE ON OBJECT::[tb_app].[SetClientInfoAttachmentEquipmentLink]
+    TO [tb_role_client_info_editor];
+GRANT EXECUTE ON OBJECT::[tb_app].[SetClientInfoAttachmentArchived]
+    TO [tb_role_client_info_editor];
+GO
+
+DENY SELECT, INSERT, UPDATE, DELETE
+    ON OBJECT::[tb_client].[ClientAttachments] TO [tb_role_user];
+DENY SELECT, INSERT, UPDATE, DELETE
+    ON OBJECT::[tb_client].[ClientAttachments]
+    TO [tb_role_client_info_editor];
+GO
+
+PRINT N'Client Attachments permissions installed.';
+GO
+
+-- ============================================================================
+-- END 67-V0015-ClientAttachmentsGrants.sql
 -- ============================================================================
 
 -- ============================================================================
@@ -27898,6 +34009,14 @@ BEGIN
         (N'tb_service.ApplyCredentialsClientUserSnapshot');
 END;
 
+IF OBJECT_ID(N'tb_service.GetAuthPointMfaConfiguration', N'P') IS NOT NULL
+BEGIN
+    INSERT INTO @ServiceProcedures([ObjectName]) VALUES
+        (N'tb_service.GetAuthPointMfaConfiguration'),
+        (N'tb_service.ClaimAuthPointMfaChallenge'),
+        (N'tb_service.CompleteAuthPointMfaChallenge');
+END;
+
 IF EXISTS
 (
     SELECT 1
@@ -28519,6 +34638,14 @@ IF @InstalledSchemaVersion >= 14
 BEGIN
     INSERT INTO @ServiceProcedures([ObjectName]) VALUES
         (N'tb_service.ApplyCredentialsClientUserSnapshot');
+END;
+
+IF OBJECT_ID(N'tb_service.GetAuthPointMfaConfiguration', N'P') IS NOT NULL
+BEGIN
+    INSERT INTO @ServiceProcedures([ObjectName]) VALUES
+        (N'tb_service.GetAuthPointMfaConfiguration'),
+        (N'tb_service.ClaimAuthPointMfaChallenge'),
+        (N'tb_service.CompleteAuthPointMfaChallenge');
 END;
 
 IF EXISTS
@@ -29782,7 +35909,7 @@ BEGIN
 END;
 
 IF CHARINDEX(
-    N'@SourceStage NOT IN (N''Assigned'', N''Deployment'')',
+    N'@SourceStage NOT IN (N''Assigned'', N''Deployment'', N''Deployed'')',
     COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminMoveEquipment', N'P')), N''))=0
 BEGIN
     PRINT N'FAIL: equipment priority maintenance does not isolate each technician deployment lane.';
@@ -30129,6 +36256,312 @@ GO
 
 -- ============================================================================
 -- END 105-V0015-EquipmentDeploymentLifecycleVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 106-V0015-ClientInfoBetaVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId]=N'SqlServer2016.ClientInfoBeta.0015'
+      AND [SchemaVersion]=15
+)
+    THROW 52500,N'Client Info beta migration record is missing.',1;
+
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations])<>15
+    THROW 52501,N'Client Info beta must remain compatible with stable schema version 15.',1;
+
+DECLARE @MissingObjects TABLE([ObjectName] nvarchar(256) NOT NULL);
+INSERT INTO @MissingObjects([ObjectName])
+SELECT required.[ObjectName]
+FROM
+(
+    VALUES
+        (N'tb_client.ClientProfiles',N'U'),
+        (N'tb_client.Locations',N'U'),
+        (N'tb_client.People',N'U'),
+        (N'tb_client.Resources',N'U'),
+        (N'tb_client.ResourceFields',N'U'),
+        (N'tb_client.Credentials',N'U'),
+        (N'tb_client.CredentialSecrets',N'U'),
+        (N'tb_client.ClientFacts',N'U'),
+        (N'tb_client.SourceDocuments',N'U'),
+        (N'tb_client.RecordProvenance',N'U'),
+        (N'tb_import.ClientInfoBatches',N'U'),
+        (N'tb_import.ClientInfoRecords',N'U'),
+        (N'tb_import.ClientInfoSecrets',N'U'),
+        (N'tb_import.ClientInfoIssues',N'U'),
+        (N'tb_import.ClientInfoPromotionMap',N'U'),
+        (N'tb_ops.ClientInfoCutovers',N'U'),
+        (N'tb_app.SearchClientInfoClients',N'P'),
+        (N'tb_app.GetClientInfoSnapshot',N'P'),
+        (N'tb_app.SaveClientInfoProfile',N'P'),
+        (N'tb_app.SaveClientInfoLocation',N'P'),
+        (N'tb_app.SaveClientInfoPerson',N'P'),
+        (N'tb_app.SaveClientInfoResource',N'P'),
+        (N'tb_app.SaveClientInfoResourceField',N'P'),
+        (N'tb_app.DeleteClientInfoResourceField',N'P'),
+        (N'tb_app.SaveClientInfoFact',N'P'),
+        (N'tb_app.SaveClientCredential',N'P'),
+        (N'tb_app.SetClientCredentialSecret',N'P'),
+        (N'tb_app.RevealClientCredentialSecret',N'P'),
+        (N'tb_app.BeginClientInfoImport',N'P'),
+        (N'tb_app.StageClientInfoRecord',N'P'),
+        (N'tb_app.StageClientInfoSecret',N'P'),
+        (N'tb_app.ValidateClientInfoImport',N'P'),
+        (N'tb_app.CompareClientInfoImportToFireDrill',N'P'),
+        (N'tb_app.GetClientInfoImportBatch',N'P'),
+        (N'tb_app.ResolveClientInfoImportIssue',N'P'),
+        (N'tb_app.ApproveClientInfoImport',N'P'),
+        (N'tb_app.PromoteClientInfoImport',N'P'),
+        (N'tb_client.ReparentClientGraph',N'P')
+) required([ObjectName],[ObjectType])
+WHERE OBJECT_ID(required.[ObjectName],required.[ObjectType]) IS NULL;
+
+IF EXISTS(SELECT 1 FROM @MissingObjects)
+BEGIN
+    SELECT [ObjectName] FROM @MissingObjects ORDER BY [ObjectName];
+    THROW 52502,N'One or more Client Info beta objects are missing.',1;
+END;
+
+IF CERT_ID(N'tb_ClientSecretCertificate') IS NULL
+    THROW 52503,N'The canonical client-secret certificate is missing.',1;
+
+IF NOT EXISTS
+    (SELECT 1 FROM sys.symmetric_keys WHERE [name]=N'tb_ClientSecretKey')
+    THROW 52504,N'The canonical client-secret key is missing.',1;
+
+DECLARE @Capabilities nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'));
+IF CHARINDEX(N'[ClientInfoBetaAvailable]', @Capabilities) = 0
+   OR CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]', @Capabilities) = 0
+    THROW 52505,N'Repository capabilities do not expose the schema-15-compatible Client Info beta.',1;
+
+DECLARE @MergeManual nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminMergeClients'));
+DECLARE @MergeAuto nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyAutomaticClientMatch'));
+DECLARE @MergeFamily nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyAutomaticWhdFamilyMember'));
+IF @MergeManual NOT LIKE N'%ReparentClientGraph%'
+   OR @MergeAuto NOT LIKE N'%ReparentClientGraph%'
+   OR @MergeFamily NOT LIKE N'%ReparentClientGraph%'
+    THROW 52506,N'Every client merge path must reparent the canonical Client Info graph.',1;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions permission
+    WHERE permission.[grantee_principal_id]=DATABASE_PRINCIPAL_ID(N'tb_role_user')
+      AND permission.[major_id] IN
+        (OBJECT_ID(N'tb_client.CredentialSecrets'),
+         OBJECT_ID(N'tb_import.ClientInfoSecrets'))
+      AND permission.[state] IN (N'G',N'W')
+)
+    THROW 52507,N'Ordinary users received direct secret-table permission.',1;
+
+PRINT N'PASS: Client Info beta schema-15 compatibility and security verified.';
+GO
+
+-- ============================================================================
+-- END 106-V0015-ClientInfoBetaVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 107-V0015-AuthPointMfaVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId]=N'SqlServer2016.AuthPointMfa.0015'
+      AND [SchemaVersion]=15
+)
+    THROW 52490,N'The AuthPoint MFA schema-15 extension is not installed.',1;
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId]=N'SqlServer2016.AuthPointLoginMfa.0015'
+      AND [SchemaVersion]=15
+)
+    THROW 52490,N'The AuthPoint login MFA schema-15 extension is not installed.',1;
+
+IF OBJECT_ID(N'tb_security.AuthPointUserMappings',N'U') IS NULL
+   OR OBJECT_ID(N'tb_security.MfaChallenges',N'U') IS NULL
+   OR OBJECT_ID(N'tb_security.MfaLoginSessions',N'U') IS NULL
+   OR OBJECT_ID(N'tb_security.MfaBreakGlassGrants',N'U') IS NULL
+   OR OBJECT_ID(N'tb_app.GetAuthPointLoginRequirement',N'P') IS NULL
+   OR OBJECT_ID(N'tb_app.BeginAuthPointLoginMfaChallenge',N'P') IS NULL
+   OR OBJECT_ID(N'tb_app.ActivateAuthPointLoginSession',N'P') IS NULL
+   OR OBJECT_ID(N'tb_app.EndAuthPointLoginSession',N'P') IS NULL
+   OR OBJECT_ID(N'tb_app.BeginClientSecretMfaChallenge',N'P') IS NULL
+   OR OBJECT_ID(N'tb_app.GetClientSecretMfaChallenge',N'P') IS NULL
+   OR OBJECT_ID(N'tb_app.CancelClientSecretMfaChallenge',N'P') IS NULL
+   OR OBJECT_ID(N'tb_service.GetAuthPointMfaConfiguration',N'P') IS NULL
+   OR OBJECT_ID(N'tb_service.ClaimAuthPointMfaChallenge',N'P') IS NULL
+   OR OBJECT_ID(N'tb_service.CompleteAuthPointMfaChallenge',N'P') IS NULL
+    THROW 52491,N'One or more AuthPoint MFA objects are missing.',1;
+
+IF COL_LENGTH(N'tb_security.MfaChallenges',N'AuthorizationTokenHash') IS NULL
+   OR COL_LENGTH(N'tb_security.MfaChallenges',N'AuthorizationTokenEncrypted') IS NULL
+   OR COL_LENGTH(N'tb_security.MfaChallenges',N'ChallengeNonceHash') IS NULL
+   OR COL_LENGTH(N'tb_security.MfaChallenges',N'ActorWindowsSid') IS NULL
+   OR COL_LENGTH(N'tb_security.MfaChallenges',N'ClientInstanceId') IS NULL
+   OR COL_LENGTH(N'tb_security.AuthPointUserMappings',N'RequireAtLogin') IS NULL
+    THROW 52492,N'The AuthPoint challenge binding columns are incomplete.',1;
+
+IF OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientCredentialSecret'))
+        NOT LIKE N'%AuthorizationToken%'
+   OR OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientCredentialSecret'))
+        NOT LIKE N'%ActorWindowsSid%'
+   OR OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientCredentialSecret'))
+        NOT LIKE N'%MfaLoginSessions%'
+   OR OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealClientCredentialSecret'))
+        NOT LIKE N'%MfaSessionToken%'
+    THROW 52493,N'The canonical secret reveal procedure is not MFA enforcing.',1;
+
+IF OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealFireDrillCredential'))
+        LIKE N'%AuthPoint%'
+   OR OBJECT_DEFINITION(OBJECT_ID(N'tb_app.RevealFireDrillCredential'))
+        LIKE N'%MfaChallenge%'
+    THROW 52494,N'FireDrill was unexpectedly modified by the AuthPoint extension.',1;
+
+IF EXISTS
+(
+    SELECT 1 FROM [tb_data].[OrganizationSettings]
+    WHERE [SettingKey] IN
+        (N'AuthPoint.ApiKey',N'AuthPoint.AccessPassword',N'AuthPoint.BearerToken',
+         N'AuthPoint.Secret',N'AuthPoint.SecretKey')
+)
+    THROW 52495,N'AuthPoint secret material must not be stored in SQL.',1;
+
+IF HAS_PERMS_BY_NAME(N'tb_security.MfaChallenges',N'OBJECT',N'SELECT')=1
+   AND IS_ROLEMEMBER(N'tb_role_user')=1
+    THROW 52496,N'Desktop users must not directly read MFA challenge storage.',1;
+
+IF HAS_PERMS_BY_NAME(N'tb_security.MfaLoginSessions',N'OBJECT',N'SELECT')=1
+   AND IS_ROLEMEMBER(N'tb_role_user')=1
+    THROW 52497,N'Desktop users must not directly read MFA login-session storage.',1;
+
+PRINT N'WatchGuard AuthPoint MFA verification passed; schema version remains 15.';
+GO
+
+-- ============================================================================
+-- END 107-V0015-AuthPointMfaVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 108-V0015-ClientAttachmentsVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId]=N'SqlServer2016.ClientAttachments.0015'
+      AND [SchemaVersion]=15
+)
+    THROW 52650,N'Client Attachments migration record is missing.',1;
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId]=N'SqlServer2016.ClientAttachmentEquipmentLinks.0015'
+      AND [SchemaVersion]=15
+)
+    THROW 52656,N'Client Attachment equipment-link migration record is missing.',1;
+
+IF (SELECT MAX([SchemaVersion]) FROM [tb_deploy].[SchemaMigrations])<>15
+    THROW 52651,N'Client Attachments must remain compatible with schema version 15.',1;
+
+DECLARE @MissingObjects TABLE([ObjectName] nvarchar(256) NOT NULL);
+INSERT INTO @MissingObjects([ObjectName])
+SELECT required.[ObjectName]
+FROM
+(
+    VALUES
+        (N'tb_client.ClientAttachments',N'U'),
+        (N'tb_app.GetClientAttachmentStorageConfiguration',N'P'),
+        (N'tb_app.GetClientInfoAttachments',N'P'),
+        (N'tb_app.SaveClientInfoAttachment',N'P'),
+        (N'tb_app.SetClientInfoAttachmentEquipmentLink',N'P'),
+        (N'tb_app.SetClientInfoAttachmentArchived',N'P')
+) required([ObjectName],[ObjectType])
+WHERE OBJECT_ID(required.[ObjectName],required.[ObjectType]) IS NULL;
+
+IF EXISTS(SELECT 1 FROM @MissingObjects)
+BEGIN
+    SELECT [ObjectName] FROM @MissingObjects ORDER BY [ObjectName];
+    THROW 52652,N'One or more Client Attachments objects are missing.',1;
+END;
+
+IF EXISTS
+(
+    SELECT 1 FROM sys.database_permissions permission
+    WHERE permission.[grantee_principal_id]=DATABASE_PRINCIPAL_ID(N'tb_role_user')
+      AND permission.[major_id]=OBJECT_ID(N'tb_client.ClientAttachments')
+      AND permission.[state] IN (N'G',N'W')
+)
+    THROW 52653,N'Ordinary users received direct attachment-table permission.',1;
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.database_permissions permission
+    WHERE permission.[grantee_principal_id]=DATABASE_PRINCIPAL_ID(N'tb_role_user')
+      AND permission.[major_id]=OBJECT_ID(N'tb_app.GetClientInfoAttachments')
+      AND permission.[permission_name]=N'EXECUTE'
+      AND permission.[state] IN (N'G',N'W')
+)
+    THROW 52654,N'Ordinary users cannot list attachment metadata.',1;
+
+DECLARE @SaveDefinition nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SaveClientInfoAttachment'));
+IF @SaveDefinition NOT LIKE N'%@ContentSha256 binary(32)%'
+   OR @SaveDefinition NOT LIKE N'%@ExpectedRowVersion binary(8)%'
+   OR @SaveDefinition NOT LIKE N'%WriteAuditEvent%'
+    THROW 52655,N'Attachment writes are missing integrity, concurrency, or audit controls.',1;
+
+IF COL_LENGTH(N'tb_client.ClientAttachments',N'EquipmentId') IS NULL
+    THROW 52657,N'Client Attachments cannot link to equipment.',1;
+
+DECLARE @LinkDefinition nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SetClientInfoAttachmentEquipmentLink'));
+IF CHARINDEX(N'[ClientId]=@ClientId',@LinkDefinition)=0
+   OR CHARINDEX(N'[IsArchived]=0',@LinkDefinition)=0
+   OR @LinkDefinition NOT LIKE N'%@ExpectedRowVersion binary(8)%'
+   OR @LinkDefinition NOT LIKE N'%WriteAuditEvent%'
+    THROW 52658,N'Attachment equipment links are missing client ownership, concurrency, or audit controls.',1;
+
+PRINT N'PASS: Client Attachments, equipment links, schema-15 compatibility, and security verified.';
+GO
+
+-- ============================================================================
+-- END 108-V0015-ClientAttachmentsVerify.sql
 -- ============================================================================
 
 PRINT N'TechBench deployment completed successfully on CSRI-SQL.';

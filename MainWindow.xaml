@@ -2831,6 +2831,369 @@
                     </Border>
                 </Grid>
 
+                <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Client Database}">
+                    <Border Style="{StaticResource CardStyle}">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Top" Margin="0,0,0,14">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="Client Information"
+                                                   Style="{StaticResource SectionHeadingStyle}"
+                                                   Margin="0,0,0,4" />
+                                        <TextBlock Text="{Binding ClientInfoWorkspaceDescription}"
+                                                   Style="{StaticResource MutedTextStyle}"
+                                                   TextWrapping="Wrap"
+                                                   MaxWidth="850"
+                                                   HorizontalAlignment="Left" />
+                                    </StackPanel>
+                                    <Border Grid.Column="1"
+                                            Background="{DynamicResource AccentBrush}"
+                                            CornerRadius="10"
+                                            Padding="10,5"
+                                            VerticalAlignment="Top">
+                                        <TextBlock Text="SQL SOURCE OF TRUTH · BETA"
+                                                   Foreground="White"
+                                                   FontSize="10"
+                                                   FontWeight="Bold" />
+                                    </Border>
+                                </Grid>
+
+                                <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                        BorderBrush="{DynamicResource WarningBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="9"
+                                        Padding="12,10"
+                                        Margin="0,14,0,0"
+                                        Visibility="{Binding ClientInfoWorkspaceAvailable, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                    <TextBlock Text="{Binding ClientInfoEmptyText}"
+                                               Foreground="{DynamicResource WarningBrush}"
+                                               TextWrapping="Wrap" />
+                                </Border>
+
+                                <Grid Margin="0,14,0,0"
+                                      IsEnabled="{Binding ClientInfoWorkspaceAvailable}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0"
+                                             Text="{Binding ClientInfoSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="Search client name or internal client ID"
+                                             Margin="0,0,8,0">
+                                        <TextBox.InputBindings>
+                                            <KeyBinding Key="Enter" Command="{Binding SearchClientInfoClientsCommand}" />
+                                        </TextBox.InputBindings>
+                                    </TextBox>
+                                    <Button Grid.Column="1"
+                                            Content="Search"
+                                            Command="{Binding SearchClientInfoClientsCommand}"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Padding="14,7"
+                                            Margin="0,0,8,0" />
+                                    <Button Grid.Column="2"
+                                            Content="Clear"
+                                            Command="{Binding ClearClientInfoSearchCommand}"
+                                            Padding="14,7" />
+                                </Grid>
+                            </StackPanel>
+
+                            <TextBlock Text="{Binding ClientInfoEmptyText}"
+                                       Style="{StaticResource MutedTextStyle}"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Visibility="{Binding IsClientInfoResultsEmpty, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                            <ListBox x:Name="ClientInfoClientListBox"
+                                     ItemsSource="{Binding ClientInfoClients}"
+                                     SelectedItem="{Binding SelectedClientInfoClient}"
+                                     Style="{StaticResource ListBoxChromeLessStyle}"
+                                     ItemContainerStyle="{StaticResource ListBoxItemCardStyle}"
+                                     MouseDoubleClick="ClientInfoClientListBox_MouseDoubleClick"
+                                     Visibility="{Binding HasClientInfoClients, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource CardStyle}" Padding="16,13">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="70" />
+                                                    <ColumnDefinition Width="1.6*" />
+                                                    <ColumnDefinition Width="1.2*" />
+                                                    <ColumnDefinition Width="150" />
+                                                    <ColumnDefinition Width="140" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Grid.Column="0"
+                                                        Background="{DynamicResource ControlBackgroundBrush}"
+                                                        BorderBrush="{DynamicResource BorderBrush}"
+                                                        BorderThickness="1"
+                                                        CornerRadius="8"
+                                                        Padding="8,4"
+                                                        HorizontalAlignment="Left"
+                                                        VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding InternalIdLabel}"
+                                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                                               FontWeight="SemiBold" />
+                                                </Border>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding ClientName}"
+                                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="14"
+                                                           VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           Margin="8,0,14,0" />
+                                                <TextBlock Grid.Column="2"
+                                                           Text="{Binding CountLabel}"
+                                                           Foreground="{DynamicResource MutedTextBrush}"
+                                                           FontSize="11"
+                                                           VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           Margin="0,0,14,0" />
+                                                <StackPanel Grid.Column="3" VerticalAlignment="Center">
+                                                    <TextBlock Text="REVIEW"
+                                                               Style="{StaticResource FieldLabelStyle}"
+                                                               Margin="0,0,0,2" />
+                                                    <TextBlock Text="{Binding ReviewStatus}"
+                                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="4" VerticalAlignment="Center">
+                                                    <TextBlock Text="CUTOVER"
+                                                               Style="{StaticResource FieldLabelStyle}"
+                                                               Margin="0,0,0,2" />
+                                                    <TextBlock Text="{Binding CutoverState}"
+                                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                                <Button Grid.Column="5"
+                                                        Content="View / Edit"
+                                                        Style="{StaticResource PrimaryButtonStyle}"
+                                                        Padding="14,7"
+                                                        Margin="12,0,0,0"
+                                                        VerticalAlignment="Center"
+                                                        Click="OpenClientInfoBeta_Click" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                    </Border>
+                </Grid>
+
+                <Grid Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=Workbook Imports}">
+                    <Border Style="{StaticResource CardStyle}">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Top" Margin="0,0,0,14">
+                                <TextBlock Text="Workbook Imports"
+                                           Style="{StaticResource SectionHeadingStyle}"
+                                           Margin="0,0,0,4" />
+                                <TextBlock Text="{Binding ClientInfoImportWorkspaceDescription}"
+                                           Style="{StaticResource MutedTextStyle}"
+                                           TextWrapping="Wrap"
+                                           MaxWidth="900"
+                                           HorizontalAlignment="Left" />
+
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0"
+                                            Background="{DynamicResource PanelAltBackgroundBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="9"
+                                            Padding="13,10">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border Background="{DynamicResource AccentBrush}"
+                                                    CornerRadius="12"
+                                                    Width="24"
+                                                    Height="24"
+                                                    Margin="0,0,9,0">
+                                                <TextBlock Text="1"
+                                                           Foreground="White"
+                                                           FontWeight="Bold"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center" />
+                                            </Border>
+                                            <TextBlock Text="Choose the client"
+                                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                                       FontWeight="SemiBold"
+                                                       VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="2"
+                                            Background="{DynamicResource PanelAltBackgroundBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="9"
+                                            Padding="13,10">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border Background="{DynamicResource AccentBrush}"
+                                                    CornerRadius="12"
+                                                    Width="24"
+                                                    Height="24"
+                                                    Margin="0,0,9,0">
+                                                <TextBlock Text="2"
+                                                           Foreground="White"
+                                                           FontWeight="Bold"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center" />
+                                            </Border>
+                                            <TextBlock Text="Create and fill its workbook"
+                                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                                       FontWeight="SemiBold"
+                                                       VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="4"
+                                            Background="{DynamicResource PanelAltBackgroundBrush}"
+                                            BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="9"
+                                            Padding="13,10">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border Background="{DynamicResource AccentBrush}"
+                                                    CornerRadius="12"
+                                                    Width="24"
+                                                    Height="24"
+                                                    Margin="0,0,9,0">
+                                                <TextBlock Text="3"
+                                                           Foreground="White"
+                                                           FontWeight="Bold"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center" />
+                                            </Border>
+                                            <TextBlock Text="Import, review, and finish"
+                                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                                       FontWeight="SemiBold"
+                                                       VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+
+                                <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                                        BorderBrush="{DynamicResource WarningBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="9"
+                                        Padding="12,10"
+                                        Margin="0,14,0,0"
+                                        Visibility="{Binding ClientInfoWorkspaceAvailable, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                    <TextBlock Text="{Binding ClientInfoEmptyText}"
+                                               Foreground="{DynamicResource WarningBrush}"
+                                               TextWrapping="Wrap" />
+                                </Border>
+
+                                <Grid Margin="0,14,0,0"
+                                      IsEnabled="{Binding ClientInfoWorkspaceAvailable}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0"
+                                             Text="{Binding ClientInfoSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="Search client name or internal client ID"
+                                             Margin="0,0,8,0">
+                                        <TextBox.InputBindings>
+                                            <KeyBinding Key="Enter" Command="{Binding SearchClientInfoClientsCommand}" />
+                                        </TextBox.InputBindings>
+                                    </TextBox>
+                                    <Button Grid.Column="1"
+                                            Content="Search"
+                                            Command="{Binding SearchClientInfoClientsCommand}"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Padding="14,7"
+                                            Margin="0,0,8,0" />
+                                    <Button Grid.Column="2"
+                                            Content="Clear"
+                                            Command="{Binding ClearClientInfoSearchCommand}"
+                                            Padding="14,7" />
+                                </Grid>
+                            </StackPanel>
+
+                            <TextBlock Text="{Binding ClientInfoEmptyText}"
+                                       Style="{StaticResource MutedTextStyle}"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Visibility="{Binding IsClientInfoResultsEmpty, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                            <ListBox x:Name="ClientInfoImportClientListBox"
+                                     ItemsSource="{Binding ClientInfoClients}"
+                                     SelectedItem="{Binding SelectedClientInfoClient}"
+                                     Style="{StaticResource ListBoxChromeLessStyle}"
+                                     ItemContainerStyle="{StaticResource ListBoxItemCardStyle}"
+                                     MouseDoubleClick="ClientInfoImportClientListBox_MouseDoubleClick"
+                                     Visibility="{Binding HasClientInfoClients, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource CardStyle}" Padding="16,13">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="70" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="180" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Grid.Column="0"
+                                                        Background="{DynamicResource ControlBackgroundBrush}"
+                                                        BorderBrush="{DynamicResource BorderBrush}"
+                                                        BorderThickness="1"
+                                                        CornerRadius="8"
+                                                        Padding="8,4"
+                                                        HorizontalAlignment="Left"
+                                                        VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding InternalIdLabel}"
+                                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                                               FontWeight="SemiBold" />
+                                                </Border>
+                                                <StackPanel Grid.Column="1"
+                                                            VerticalAlignment="Center"
+                                                            Margin="8,0,14,0">
+                                                    <TextBlock Text="{Binding ClientName}"
+                                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                                               FontWeight="SemiBold"
+                                                               FontSize="14"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding CountLabel}"
+                                                               Foreground="{DynamicResource MutedTextBrush}"
+                                                               FontSize="11"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               Margin="0,3,0,0" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                                    <TextBlock Text="MIGRATION STATUS"
+                                                               Style="{StaticResource FieldLabelStyle}"
+                                                               Margin="0,0,0,2" />
+                                                    <TextBlock Text="{Binding CutoverState}"
+                                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                                <Button Grid.Column="3"
+                                                        Content="Prepare Import"
+                                                        Style="{StaticResource PrimaryButtonStyle}"
+                                                        Padding="14,7"
+                                                        Margin="12,0,0,0"
+                                                        VerticalAlignment="Center"
+                                                        Click="OpenClientInfoImport_Click" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                    </Border>
+                </Grid>
+
                 <Grid Visibility="{Binding IsCredentialWorkspaceSection, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="0.9*" />
@@ -4831,12 +5194,6 @@
                                                      Margin="0,0,0,12"
                                                      Visibility="{Binding Updates.IsProgressVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                         <CheckBox Content="Light theme" IsChecked="{Binding IsLightTheme}" Margin="0,0,0,12" />
-                                        <TextBlock Text="Update channel"
-                                                   Style="{StaticResource FieldLabelStyle}" />
-                                        <TextBlock Text="{Binding UpdateChannelDescription}"
-                                                   Style="{StaticResource MutedTextStyle}"
-                                                   TextWrapping="Wrap"
-                                                   Margin="0,0,0,12" />
                                         <TextBlock Text="Shared data refresh" Style="{StaticResource FieldLabelStyle}" />
                                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,4">
                                             <TextBlock Text="Every"
@@ -5059,6 +5416,9 @@
                                       VerticalScrollBarVisibility="Auto">
                             <controls:EquipmentDetailsContent Equipment="{Binding SelectedEquipment}"
                                                               AssignmentHistory="{Binding EquipmentAssignmentHistory}"
+                                                              Attachments="{Binding EquipmentAttachments}"
+                                                              OpenAttachmentCommand="{Binding OpenEquipmentAttachmentCommand}"
+                                                              CopyAttachmentCommand="{Binding CopyEquipmentAttachmentCommand}"
                                                               ShowSensitiveValue="{Binding ShowEquipmentAnyDeskPassword, Mode=TwoWay}"
                                                               LaunchAnyDeskCommand="{Binding LaunchAnyDeskCommand}"
                                                               Margin="0,0,8,8" />

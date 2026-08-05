@@ -37,6 +37,34 @@ public sealed class SqlServerTechBenchRepositoryContractTests
     }
 
     [Fact]
+    public void EditorDraftConcurrencyDoesNotUseTheDeviceGuidHashAsAnEntityId()
+    {
+        var repositorySource = File.ReadAllText(FindRepositoryFile(
+            "Data",
+            "SqlServerTechBenchRepository.PersonalShared.cs"));
+        var sharedSource = File.ReadAllText(FindRepositoryFile(
+            "Data",
+            "SqlServerTechBenchRepository.cs"));
+
+        Assert.DoesNotContain(
+            "DeviceId.GetHashCode()",
+            repositorySource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "draft.RowVersion = rowVersion;",
+            repositorySource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "?? _editorDraftRowVersion",
+            repositorySource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "private byte[]? _editorDraftRowVersion;",
+            sharedSource,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void StoredProcedureContractUsesOnlyQualifiedApplicationProcedures()
     {
         var procedureFields = typeof(SqlServerTechBenchRepository.Procedures)
@@ -178,6 +206,27 @@ public sealed class SqlServerTechBenchRepositoryContractTests
             "SqlServerTechBenchRepository.Equipment.cs"));
         Assert.DoesNotContain(
             "@IncludeDeployed",
+            repositorySource,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ClientAttachmentsUseADedicatedEquipmentLinkContract()
+    {
+        Assert.Equal(
+            "[tb_app].[SetClientInfoAttachmentEquipmentLink]",
+            SqlServerTechBenchRepository.Procedures
+                .SetClientInfoAttachmentEquipmentLink);
+
+        var repositorySource = File.ReadAllText(FindRepositoryFile(
+            "Data",
+            "SqlServerTechBenchRepository.ClientInfo.cs"));
+        Assert.Contains(
+            "AddBigInt(command, \"@EquipmentId\", equipmentId)",
+            repositorySource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "EquipmentId = GetNullableInt64(reader, \"EquipmentId\")",
             repositorySource,
             StringComparison.Ordinal);
     }

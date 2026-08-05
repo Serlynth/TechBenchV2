@@ -18,6 +18,7 @@ internal sealed class SqlAdminRepository(AppPaths paths)
         configuration.SageStatus = LoadStatus(connection, "tb_app.GetSageSyncStatus", true);
         configuration.FireDrillStatus = LoadStatus(connection, "tb_app.GetFireDrillSyncStatus", true);
         LoadMappings(connection, configuration);
+        LoadAuthPointMappings(connection, configuration);
         LoadTechnicians(connection, configuration);
         return configuration;
     }
@@ -149,6 +150,118 @@ internal sealed class SqlAdminRepository(AppPaths paths)
         }
     }
 
+    public void SaveAuthPointMappings(
+        IReadOnlyCollection<AuthPointMappingAssignment> mappings)
+    {
+        using var connection = OpenAdminConnection();
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            foreach (var mapping in mappings
+                         .Where(static item => !string.IsNullOrWhiteSpace(item.AuthPointLogin))
+                         .OrderBy(static item => item.LoginName, StringComparer.OrdinalIgnoreCase))
+            {
+                using var command = StoredProcedure(
+                    connection,
+                    "tb_app.AdminSaveAuthPointUserMapping",
+                    transaction);
+                command.Parameters.Add("@LoginName", SqlDbType.NVarChar, 256).Value =
+                    mapping.LoginName;
+                command.Parameters.Add("@AuthPointLogin", SqlDbType.NVarChar, 256).Value =
+                    mapping.AuthPointLogin.Trim();
+                command.Parameters.Add("@IsEnabled", SqlDbType.Bit).Value = mapping.IsEnabled;
+                command.Parameters.Add("@ExpectedRowVersion", SqlDbType.Binary, 8).Value =
+                    mapping.ExpectedRowVersion ?? (object)DBNull.Value;
+                command.Parameters.Add("@RequestId", SqlDbType.UniqueIdentifier).Value =
+                    Guid.NewGuid();
+                command.ExecuteNonQuery();
+            }
+
+            transaction.Commit();
+        }
+        catch
+        {
+            try
+            {
+                if (transaction.Connection is not null)
+                {
+                    transaction.Rollback();
+                }
+            }
+            catch
+            {
+            }
+
+            throw;
+        }
+    }
+
+    public bool TrySyncAuthPointDirectoryMappings(
+        IReadOnlyCollection<AuthPointMappingAssignment> mappings)
+    {
+        if (mappings.Count == 0)
+        {
+            return true;
+        }
+
+        try
+        {
+            SaveAuthPointMappings(mappings);
+            return true;
+        }
+        catch (SqlException exception) when (exception.Number == 2812)
+        {
+            // The shared Server Manager remains usable until the additive
+            // AuthPoint SQL package is installed.
+            return false;
+        }
+    }
+
+    public void SaveAuthPointLoginPolicies(
+        IReadOnlyCollection<AuthPointLoginPolicyAssignment> policies)
+    {
+        using var connection = OpenAdminConnection();
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            foreach (var policy in policies.OrderBy(
+                         static item => item.LoginName,
+                         StringComparer.OrdinalIgnoreCase))
+            {
+                using var command = StoredProcedure(
+                    connection,
+                    "tb_app.AdminSaveAuthPointLoginPolicy",
+                    transaction);
+                command.Parameters.Add("@LoginName", SqlDbType.NVarChar, 256).Value =
+                    policy.LoginName;
+                command.Parameters.Add("@RequireAtLogin", SqlDbType.Bit).Value =
+                    policy.RequireAtLogin;
+                command.Parameters.Add("@ExpectedRowVersion", SqlDbType.Binary, 8).Value =
+                    policy.ExpectedRowVersion;
+                command.Parameters.Add("@RequestId", SqlDbType.UniqueIdentifier).Value =
+                    Guid.NewGuid();
+                command.ExecuteNonQuery();
+            }
+
+            transaction.Commit();
+        }
+        catch
+        {
+            try
+            {
+                if (transaction.Connection is not null)
+                {
+                    transaction.Rollback();
+                }
+            }
+            catch
+            {
+            }
+
+            throw;
+        }
+    }
+
     public int ReconcileAuthorizedUsers(IReadOnlyCollection<DirectoryUser> users)
     {
         ArgumentNullException.ThrowIfNull(users);
@@ -267,7 +380,11 @@ internal sealed class SqlAdminRepository(AppPaths paths)
         {
             "Whd.BaseUrl", "Whd.AuthenticationMode", "Whd.ServiceUsername", "Whd.AutoSyncEnabled",
             "Whd.AutoSyncMinutes", "Sage.SyncDsn", "Sage.SyncUsername",
-            "FireDrill.SourcePath", "FireDrill.DailySyncEnabled", "FireDrill.DailySyncTime"
+            "FireDrill.SourcePath", "FireDrill.DailySyncEnabled", "FireDrill.DailySyncTime",
+            "ClientAttachments.RootPath", "ClientAttachments.MaximumFileSizeMegabytes",
+            "ClientAttachments.AllowedExtensions",
+            "AuthPoint.Enabled", "AuthPoint.RequireAllUsers", "AuthPoint.BaseApiUrl", "AuthPoint.AccountId",
+            "AuthPoint.ResourceId", "AuthPoint.AccessId"
         };
         using var command = StoredProcedure(connection, "tb_app.GetSettings");
         using var reader = command.ExecuteReader();
@@ -339,6 +456,61 @@ internal sealed class SqlAdminRepository(AppPaths paths)
             var id = ReadString(reader, "ExternalId");
             var display = ReadString(reader, "DisplayName", id);
             configuration.Technicians.Add(new(id, display, ReadString(reader, "Username")));
+        }
+    }
+
+    private static void LoadAuthPointMappings(
+        SqlConnection connection,
+        SynchronizationConfiguration configuration)
+    {
+        try
+        {
+            using var command = StoredProcedure(
+                connection,
+                "tb_app.AdminGetAuthPointUserMappings");
+            using var reader = command.ExecuteReader();
+            var values = new Dictionary<string, (
+                string Login,
+                bool Enabled,
+                bool RequireAtLogin,
+                byte[]? Version)>(
+                StringComparer.OrdinalIgnoreCase);
+            while (reader.Read())
+            {
+                var loginName = ReadString(reader, "LoginName");
+                var versionOrdinal = TryOrdinal(reader, "RowVersion");
+                var version = versionOrdinal >= 0 && !reader.IsDBNull(versionOrdinal)
+                    ? (byte[])reader.GetValue(versionOrdinal)
+                    : null;
+                values[loginName] = (
+                    ReadString(reader, "AuthPointLogin"),
+                    ReadBool(reader, "IsEnabled"),
+                    TryOrdinal(reader, "RequireAtLogin") is var requireOrdinal
+                        && requireOrdinal >= 0
+                        && !reader.IsDBNull(requireOrdinal)
+                            ? Convert.ToBoolean(reader.GetValue(requireOrdinal))
+                            : true,
+                    version);
+            }
+
+            for (var index = 0; index < configuration.UserMappings.Count; index++)
+            {
+                var mapping = configuration.UserMappings[index];
+                if (values.TryGetValue(mapping.LoginName, out var authPoint))
+                {
+                    configuration.UserMappings[index] = mapping with
+                    {
+                        AuthPointLogin = authPoint.Login,
+                        AuthPointEnabled = authPoint.Enabled,
+                        AuthPointRequireAtLogin = authPoint.RequireAtLogin,
+                        AuthPointRowVersion = authPoint.Version
+                    };
+                }
+            }
+        }
+        catch (SqlException exception) when (exception.Number == 2812)
+        {
+            // The stable Server Manager remains usable before the additive beta SQL is installed.
         }
     }
 

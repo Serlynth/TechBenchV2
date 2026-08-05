@@ -101,6 +101,20 @@ public sealed class ServerManagerScriptTests
         var uninstaller = ReadScript("Uninstall-TechBenchSyncService.ps1");
 
         Assert.Contains("[int]$RequiredDatabaseSchemaVersion = 15", publisher, StringComparison.Ordinal);
+        Assert.Contains(
+            "[ValidatePattern('^\\d+\\.\\d+\\.\\d+$')]",
+            publisher,
+            StringComparison.Ordinal);
+        Assert.Contains("if ($versionIsPrerelease) { continue }", ReadScript("TechBench-ServerManager.ps1"), StringComparison.Ordinal);
+        Assert.Contains("^server-v", ReadScript("TechBench-ServerManager.ps1"), StringComparison.Ordinal);
+        Assert.Contains("$serverReleaseTag = \"server-v$Version\"", publisher, StringComparison.Ordinal);
+        Assert.Contains("New-AnnotatedServerReleaseTag", publisher, StringComparison.Ordinal);
+        Assert.Contains("git/tags", publisher, StringComparison.Ordinal);
+        Assert.Contains("--raw-field \"tag=$Tag\"", publisher, StringComparison.Ordinal);
+        Assert.Contains("--raw-field \"ref=refs/tags/$Tag\"", publisher, StringComparison.Ordinal);
+        Assert.DoesNotContain("--input -", publisher, StringComparison.Ordinal);
+        Assert.Contains("--verify-tag", publisher, StringComparison.Ordinal);
+        Assert.Contains("'release', 'create', $serverReleaseTag", publisher, StringComparison.Ordinal);
         Assert.Contains("'TechBench-ServerManager.ps1'", publisher, StringComparison.Ordinal);
         Assert.Contains(
             "RequiredDatabaseSchemaVersion = $RequiredDatabaseSchemaVersion",

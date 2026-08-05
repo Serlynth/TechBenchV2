@@ -56,4 +56,9 @@ internal sealed class ProtectedSecretStore(string path, string entropyLabel, str
         paths.FireDrillSecretPath,
         "CSRI.TechBench.SyncService.FireDrillWorkbook.v1",
         "FireDrill workbook password");
+
+    public static ProtectedSecretStore AuthPoint(AppPaths paths) => new(
+        paths.AuthPointSecretPath,
+        "CSRI.TechBench.SyncService.AuthPoint.v1",
+        "WatchGuard AuthPoint API credentials");
 }

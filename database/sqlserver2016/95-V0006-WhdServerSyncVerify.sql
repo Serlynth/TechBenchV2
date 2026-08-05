@@ -299,6 +299,14 @@ BEGIN
         (N'tb_service.ApplyCredentialsClientUserSnapshot');
 END;
 
+IF OBJECT_ID(N'tb_service.GetAuthPointMfaConfiguration', N'P') IS NOT NULL
+BEGIN
+    INSERT INTO @ServiceProcedures([ObjectName]) VALUES
+        (N'tb_service.GetAuthPointMfaConfiguration'),
+        (N'tb_service.ClaimAuthPointMfaChallenge'),
+        (N'tb_service.CompleteAuthPointMfaChallenge');
+END;
+
 IF EXISTS
 (
     SELECT 1

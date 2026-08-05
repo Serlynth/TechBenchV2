@@ -4,7 +4,7 @@ using TechBench.Models;
 
 namespace TechBench.Data;
 
-public sealed class SqlServerConnectionFactory
+public sealed partial class SqlServerConnectionFactory
 {
     public const string CurrentUserContextStoredProcedure =
         "[tb_app].[GetCurrentUserContext]";
