@@ -601,6 +601,8 @@
                                      UndoLimit="200"
                                      MinHeight="230"
                                      IsReadOnly="{Binding IsEditorReadOnly}" />
+                            <ContentControl Content="{Binding}"
+                                            ContentTemplate="{StaticResource WhdImageAttachmentPickerTemplate}" />
 
                             <Grid Margin="0,11,0,0" IsEnabled="{Binding IsEditorEditable}">
                                 <Grid.ColumnDefinitions>
@@ -661,8 +663,6 @@
                                              SpellCheck.IsEnabled="True"
                                              MinHeight="100"
                                              IsReadOnly="{Binding IsEditorReadOnly}" />
-                                    <ContentControl Content="{Binding}"
-                                                    ContentTemplate="{StaticResource WhdImageAttachmentPickerTemplate}" />
                                 </StackPanel>
                             </Expander>
 
@@ -1301,6 +1301,8 @@
                                                  UndoLimit="200"
                                                  MinHeight="240"
                                                  IsReadOnly="{Binding IsEditorReadOnly}" />
+                                        <ContentControl Content="{Binding}"
+                                                        ContentTemplate="{StaticResource WhdImageAttachmentPickerTemplate}" />
 
                                         <Grid IsEnabled="{Binding IsEditorEditable}">
                                             <Grid.ColumnDefinitions>
@@ -1425,7 +1427,6 @@
                                                 <Grid.RowDefinitions>
                                                     <RowDefinition Height="Auto" />
                                                     <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="Auto" />
                                                 </Grid.RowDefinitions>
                                                 <Grid>
                                                     <Grid.ColumnDefinitions>
@@ -1463,9 +1464,6 @@
                                                          FontFamily="Cascadia Mono, Consolas"
                                                          MinHeight="110"
                                                          Margin="0,8,0,0" />
-                                                <ContentControl Grid.Row="2"
-                                                                Content="{Binding}"
-                                                                ContentTemplate="{StaticResource WhdImageAttachmentPickerTemplate}" />
                                             </Grid>
                                         </Expander>
 
