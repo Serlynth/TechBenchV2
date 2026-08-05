@@ -87,6 +87,8 @@ BEGIN TRY
         (
             [ClientId] int NOT NULL,
             [Summary] nvarchar(2000) NULL,
+            [ClientFolderPath] nvarchar(2048) NULL,
+            [LegacyClientInfoSheetPath] nvarchar(2048) NULL,
             [ReviewStatus] nvarchar(24) NOT NULL
                 CONSTRAINT [DF_ClientProfiles_ReviewStatus] DEFAULT (N'Unverified'),
             [IsLive] bit NOT NULL
@@ -117,6 +119,14 @@ BEGIN TRY
                     (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview'))
         );
     END;
+
+    IF COL_LENGTH(N'tb_client.ClientProfiles', N'ClientFolderPath') IS NULL
+        ALTER TABLE [tb_client].[ClientProfiles]
+            ADD [ClientFolderPath] nvarchar(2048) NULL;
+
+    IF COL_LENGTH(N'tb_client.ClientProfiles', N'LegacyClientInfoSheetPath') IS NULL
+        ALTER TABLE [tb_client].[ClientProfiles]
+            ADD [LegacyClientInfoSheetPath] nvarchar(2048) NULL;
 
     IF OBJECT_ID(N'tb_client.Locations', N'U') IS NULL
     BEGIN

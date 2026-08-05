@@ -40,6 +40,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     private readonly ClientInfoDemoSnapshotData? _demoData;
     private ClientInfoProfile _profile = new();
     private string _summary = "";
+    private string _clientFolderPath = "";
+    private string _legacyClientInfoSheetPath = "";
     private string _reviewStatus = "Unverified";
     private string _statusMessage = "Loading client information...";
     private ClientInfoLocation? _selectedLocation;
@@ -77,6 +79,14 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         SaveProfileCommand = new RelayCommand(
             _ => SaveProfile(),
             _ => CanEdit);
+        OpenClientFolderCommand = new RelayCommand(
+            _ => OpenServerLink(ClientFolderPath, "client folder"),
+            _ => !string.IsNullOrWhiteSpace(ClientFolderPath));
+        OpenLegacyClientInfoSheetCommand = new RelayCommand(
+            _ => OpenServerLink(
+                LegacyClientInfoSheetPath,
+                "legacy Client Info sheet"),
+            _ => !string.IsNullOrWhiteSpace(LegacyClientInfoSheetPath));
         AddLocationCommand = new RelayCommand(
             _ => EditLocation(null),
             _ => CanEdit);
@@ -205,6 +215,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         ? $"Client Information is live - {Profile.CutoverState}"
         : $"Client Information draft - {Profile.CutoverState}";
     public bool CanEdit => !IsDemo && _currentUser.CanWrite;
+    public bool IsProfileReadOnly => !CanEdit;
     public bool CanRevealSecrets => IsDemo || !_currentUser.IsReadOnlyPreview;
     public bool CanManageImports => !IsDemo && _currentUser.IsAdmin && _currentUser.CanWrite;
     public bool CanEditAttachments =>
@@ -240,6 +251,30 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     {
         get => _summary;
         set => SetProperty(ref _summary, value);
+    }
+
+    public string ClientFolderPath
+    {
+        get => _clientFolderPath;
+        set
+        {
+            if (SetProperty(ref _clientFolderPath, value))
+            {
+                OpenClientFolderCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string LegacyClientInfoSheetPath
+    {
+        get => _legacyClientInfoSheetPath;
+        set
+        {
+            if (SetProperty(ref _legacyClientInfoSheetPath, value))
+            {
+                OpenLegacyClientInfoSheetCommand.RaiseCanExecuteChanged();
+            }
+        }
     }
 
     public string ReviewStatus
@@ -466,6 +501,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 
     public RelayCommand RefreshCommand { get; }
     public RelayCommand SaveProfileCommand { get; }
+    public RelayCommand OpenClientFolderCommand { get; }
+    public RelayCommand OpenLegacyClientInfoSheetCommand { get; }
     public RelayCommand AddLocationCommand { get; }
     public RelayCommand EditLocationCommand { get; }
     public RelayCommand AddPersonCommand { get; }
@@ -511,6 +548,9 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                     "The selected client is no longer available.");
             Profile = snapshot.Profile;
             Summary = snapshot.Profile.Summary;
+            ClientFolderPath = snapshot.Profile.ClientFolderPath;
+            LegacyClientInfoSheetPath =
+                snapshot.Profile.LegacyClientInfoSheetPath;
             ReviewStatus = snapshot.Profile.ReviewStatus;
             Replace(Locations, snapshot.Locations);
             Replace(
@@ -1053,10 +1093,34 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 Profile = _repository.SaveClientInfoProfile(Profile with
                 {
                     Summary = Summary,
+                    ClientFolderPath = ClientFolderPath,
+                    LegacyClientInfoSheetPath = LegacyClientInfoSheetPath,
                     ReviewStatus = ReviewStatus
                 });
                 StatusMessage = "Client profile saved.";
             });
+    }
+
+    private void OpenServerLink(string path, string label)
+    {
+        var normalizedPath = path.Trim();
+        if (normalizedPath.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(normalizedPath)
+            {
+                UseShellExecute = true
+            });
+            StatusMessage = $"Opened the {label}.";
+        }
+        catch (Exception exception)
+        {
+            ShowError($"The {label} could not be opened", exception);
+        }
     }
 
     private void EditLocation(ClientInfoLocation? current)

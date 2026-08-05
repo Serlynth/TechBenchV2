@@ -55,6 +55,17 @@ public sealed class ClientInfoBetaTests
         var viewModel = Read("ViewModels", "ClientInfoBetaViewModel.cs");
         var resourceGrid = Read("Controls", "ClientInfoResourceDataGrid.cs");
         Assert.Contains("Text=\"Overview\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"CLIENT DESCRIPTION\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"SERVER LINKS\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"CLIENT FOLDER\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"LEGACY CLIENT INFO SHEET\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"Read-only reference after migration\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding ClientFolderPath", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding LegacyClientInfoSheetPath", xaml, StringComparison.Ordinal);
+        Assert.Contains("Command=\"{Binding OpenClientFolderCommand}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Command=\"{Binding OpenLegacyClientInfoSheetCommand}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Height=\"72\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("OpenServerLink", viewModel, StringComparison.Ordinal);
         Assert.Contains("Text=\"Full list\"", xaml, StringComparison.Ordinal);
         Assert.Contains("ResizeDirection=\"Rows\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Content=\"At-a-glance\"", xaml, StringComparison.Ordinal);
@@ -1352,6 +1363,16 @@ public sealed class ClientInfoBetaTests
             Assert.Contains(userColumn, procedures, StringComparison.Ordinal);
             Assert.Contains(userColumn, imports, StringComparison.OrdinalIgnoreCase);
             Assert.Contains(userColumn, verifier, StringComparison.Ordinal);
+        }
+        foreach (var serverLinkColumn in new[]
+                 {
+                     "ClientFolderPath",
+                     "LegacyClientInfoSheetPath"
+                 })
+        {
+            Assert.Contains(serverLinkColumn, schema, StringComparison.Ordinal);
+            Assert.Contains(serverLinkColumn, procedures, StringComparison.Ordinal);
+            Assert.Contains(serverLinkColumn, verifier, StringComparison.Ordinal);
         }
         Assert.DoesNotContain(
             "AdPassword",

@@ -3869,6 +3869,8 @@ BEGIN TRY
         (
             [ClientId] int NOT NULL,
             [Summary] nvarchar(2000) NULL,
+            [ClientFolderPath] nvarchar(2048) NULL,
+            [LegacyClientInfoSheetPath] nvarchar(2048) NULL,
             [ReviewStatus] nvarchar(24) NOT NULL
                 CONSTRAINT [DF_ClientProfiles_ReviewStatus] DEFAULT (N'Unverified'),
             [IsLive] bit NOT NULL
@@ -3899,6 +3901,14 @@ BEGIN TRY
                     (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview'))
         );
     END;
+
+    IF COL_LENGTH(N'tb_client.ClientProfiles', N'ClientFolderPath') IS NULL
+        ALTER TABLE [tb_client].[ClientProfiles]
+            ADD [ClientFolderPath] nvarchar(2048) NULL;
+
+    IF COL_LENGTH(N'tb_client.ClientProfiles', N'LegacyClientInfoSheetPath') IS NULL
+        ALTER TABLE [tb_client].[ClientProfiles]
+            ADD [LegacyClientInfoSheetPath] nvarchar(2048) NULL;
 
     IF OBJECT_ID(N'tb_client.Locations', N'U') IS NULL
     BEGIN
@@ -24513,6 +24523,12 @@ BEGIN
                 [Summary] = COALESCE(
                     NULLIF(target_profile.[Summary], N''),
                     source_profile.[Summary]),
+                [ClientFolderPath] = COALESCE(
+                    NULLIF(target_profile.[ClientFolderPath], N''),
+                    source_profile.[ClientFolderPath]),
+                [LegacyClientInfoSheetPath] = COALESCE(
+                    NULLIF(target_profile.[LegacyClientInfoSheetPath], N''),
+                    source_profile.[LegacyClientInfoSheetPath]),
                 [ReviewStatus] =
                     CASE
                         WHEN target_profile.[ReviewStatus] = N'Verified'
@@ -24916,6 +24932,8 @@ BEGIN
         client.[WhdPhone],
         client.[WhdAddress],
         profile.[Summary],
+        profile.[ClientFolderPath],
+        profile.[LegacyClientInfoSheetPath],
         COALESCE(profile.[ReviewStatus], N'Unverified') AS [ReviewStatus],
         COALESCE(profile.[IsLive], CONVERT(bit, 0)) AS [IsLive],
         profile.[LastVerifiedAtUtc],
@@ -25064,6 +25082,8 @@ GO
 CREATE PROCEDURE [tb_app].[SaveClientInfoProfile]
     @ClientId int,
     @Summary nvarchar(2000) = NULL,
+    @ClientFolderPath nvarchar(2048) = NULL,
+    @LegacyClientInfoSheetPath nvarchar(2048) = NULL,
     @ReviewStatus nvarchar(24) = N'Unverified',
     @ExpectedRowVersion binary(8) = NULL,
     @RequestId uniqueidentifier = NULL
@@ -25084,6 +25104,9 @@ BEGIN
         THROW 52320, N'Client Info editor permission is required.', 1;
 
     SET @Summary = NULLIF(LTRIM(RTRIM(@Summary)), N'');
+    SET @ClientFolderPath = NULLIF(LTRIM(RTRIM(@ClientFolderPath)), N'');
+    SET @LegacyClientInfoSheetPath =
+        NULLIF(LTRIM(RTRIM(@LegacyClientInfoSheetPath)), N'');
     SET @ReviewStatus = COALESCE(NULLIF(LTRIM(RTRIM(@ReviewStatus)), N''), N'Unverified');
     IF @ReviewStatus NOT IN
         (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview')
@@ -25114,6 +25137,8 @@ BEGIN
             UPDATE [tb_client].[ClientProfiles]
             SET
                 [Summary] = @Summary,
+                [ClientFolderPath] = @ClientFolderPath,
+                [LegacyClientInfoSheetPath] = @LegacyClientInfoSheetPath,
                 [ReviewStatus] = @ReviewStatus,
                 [LastVerifiedAtUtc] =
                     CASE WHEN @ReviewStatus = N'Verified'
@@ -25137,14 +25162,16 @@ BEGIN
 
             INSERT INTO [tb_client].[ClientProfiles]
             (
-                [ClientId], [Summary], [ReviewStatus],
+                [ClientId], [Summary], [ClientFolderPath],
+                [LegacyClientInfoSheetPath], [ReviewStatus],
                 [LastVerifiedAtUtc], [LastVerifiedByWindowsSid],
                 [CreatedByWindowsSid], [UpdatedByWindowsSid],
                 [CreatedAtUtc], [UpdatedAtUtc]
             )
             VALUES
             (
-                @ClientId, @Summary, @ReviewStatus,
+                @ClientId, @Summary, @ClientFolderPath,
+                @LegacyClientInfoSheetPath, @ReviewStatus,
                 CASE WHEN @ReviewStatus = N'Verified' THEN @NowUtc END,
                 CASE WHEN @ReviewStatus = N'Verified' THEN @ActorSid END,
                 @ActorSid, @ActorSid, @NowUtc, @NowUtc
@@ -25168,7 +25195,8 @@ BEGIN
     END CATCH;
 
     SELECT
-        [ClientId], [Summary], [ReviewStatus], [IsLive],
+        [ClientId], [Summary], [ClientFolderPath],
+        [LegacyClientInfoSheetPath], [ReviewStatus], [IsLive],
         [LastVerifiedAtUtc], [UpdatedAtUtc], [RowVersion]
     FROM [tb_client].[ClientProfiles]
     WHERE [ClientId] = @ClientId;
@@ -36387,6 +36415,10 @@ IF COL_LENGTH(N'tb_client.People', N'AdUsername') IS NULL
    OR COL_LENGTH(N'tb_client.People', N'Microsoft365License') IS NULL
    OR COL_LENGTH(N'tb_client.People', N'PcName') IS NULL
     THROW 52508,N'One or more Client Info user identity columns are missing.',1;
+
+IF COL_LENGTH(N'tb_client.ClientProfiles', N'ClientFolderPath') IS NULL
+   OR COL_LENGTH(N'tb_client.ClientProfiles', N'LegacyClientInfoSheetPath') IS NULL
+    THROW 52509,N'One or more Client Info server-link columns are missing.',1;
 
 IF CERT_ID(N'tb_ClientSecretCertificate') IS NULL
     THROW 52503,N'The canonical client-secret certificate is missing.',1;

@@ -76,6 +76,10 @@ IF COL_LENGTH(N'tb_client.People', N'AdUsername') IS NULL
    OR COL_LENGTH(N'tb_client.People', N'PcName') IS NULL
     THROW 52508,N'One or more Client Info user identity columns are missing.',1;
 
+IF COL_LENGTH(N'tb_client.ClientProfiles', N'ClientFolderPath') IS NULL
+   OR COL_LENGTH(N'tb_client.ClientProfiles', N'LegacyClientInfoSheetPath') IS NULL
+    THROW 52509,N'One or more Client Info server-link columns are missing.',1;
+
 IF CERT_ID(N'tb_ClientSecretCertificate') IS NULL
     THROW 52503,N'The canonical client-secret certificate is missing.',1;
 

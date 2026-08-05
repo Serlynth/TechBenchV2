@@ -567,7 +567,7 @@
                     <StackPanel Margin="22">
                         <TextBlock Text="Overview"
                                    Style="{StaticResource SectionHeaderStyle}" />
-                        <TextBlock Text="Contact details are synchronized from the existing client record. The summary and review state belong to canonical Client Info."
+                        <TextBlock Text="Contact details are synchronized from the existing client record. The description, server links, and review state are saved with Client Info."
                                    Foreground="{DynamicResource SecondaryTextBrush}"
                                    TextWrapping="Wrap"
                                    Margin="0,4,0,18" />
@@ -616,18 +616,20 @@
                                 <Grid>
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
-                                    <TextBlock Text="CANONICAL SUMMARY"
+                                    <TextBlock Text="CLIENT DESCRIPTION"
                                                Style="{StaticResource SubtleLabelStyle}" />
                                     <TextBox Grid.Row="1"
                                              Text="{Binding Summary, UpdateSourceTrigger=PropertyChanged}"
                                              AcceptsReturn="True"
                                              TextWrapping="Wrap"
                                              VerticalScrollBarVisibility="Auto"
-                                             MinHeight="155"
+                                             Height="72"
                                              Margin="0,6,0,12"
                                              Padding="10" />
                                     <ComboBox Grid.Row="2"
@@ -635,9 +637,56 @@
                                               SelectedItem="{Binding ReviewStatus}"
                                               MinWidth="190"
                                               HorizontalAlignment="Left"
-                                              Margin="0,0,0,12"
+                                              Margin="0,0,0,14"
                                               IsEnabled="{Binding CanEdit}" />
-                                    <Button Grid.Row="3"
+                                    <Border Grid.Row="3"
+                                            BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="0,1,0,0"
+                                            Margin="0,0,0,14" />
+                                    <StackPanel Grid.Row="4">
+                                        <TextBlock Text="SERVER LINKS"
+                                                   Style="{StaticResource SubtleLabelStyle}"
+                                                   Margin="0,0,0,10" />
+                                        <TextBlock Text="CLIENT FOLDER"
+                                                   Style="{StaticResource SubtleLabelStyle}" />
+                                        <Grid Margin="0,5,0,12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox Text="{Binding ClientFolderPath, UpdateSourceTrigger=PropertyChanged}"
+                                                     ToolTip="UNC path, local path, or server URL"
+                                                     IsReadOnly="{Binding IsProfileReadOnly}"
+                                                     Padding="9,7" />
+                                            <Button Grid.Column="1"
+                                                    Content="Open"
+                                                    Command="{Binding OpenClientFolderCommand}"
+                                                    MinWidth="72"
+                                                    Margin="8,0,0,0" />
+                                        </Grid>
+                                        <TextBlock Text="LEGACY CLIENT INFO SHEET"
+                                                   Style="{StaticResource SubtleLabelStyle}" />
+                                        <TextBlock Text="Read-only reference after migration"
+                                                   Foreground="{DynamicResource MutedTextBrush}"
+                                                   FontSize="11"
+                                                   Margin="0,2,0,5" />
+                                        <Grid Margin="0,0,0,14">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox Text="{Binding LegacyClientInfoSheetPath, UpdateSourceTrigger=PropertyChanged}"
+                                                     ToolTip="UNC path, local path, or server URL"
+                                                     IsReadOnly="{Binding IsProfileReadOnly}"
+                                                     Padding="9,7" />
+                                            <Button Grid.Column="1"
+                                                    Content="Open"
+                                                    Command="{Binding OpenLegacyClientInfoSheetCommand}"
+                                                    MinWidth="72"
+                                                    Margin="8,0,0,0" />
+                                        </Grid>
+                                    </StackPanel>
+                                    <Button Grid.Row="5"
                                             Content="Save overview"
                                             Command="{Binding SaveProfileCommand}"
                                             Style="{StaticResource PrimaryButtonStyle}"

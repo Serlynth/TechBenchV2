@@ -35,6 +35,8 @@ public sealed record ClientInfoProfile
     public string WhdPhone { get; init; } = string.Empty;
     public string WhdAddress { get; init; } = string.Empty;
     public string Summary { get; init; } = string.Empty;
+    public string ClientFolderPath { get; init; } = string.Empty;
+    public string LegacyClientInfoSheetPath { get; init; } = string.Empty;
     public string ReviewStatus { get; init; } = "Unverified";
     public bool IsLive { get; init; }
     public DateTime? LastVerifiedAtUtc { get; init; }

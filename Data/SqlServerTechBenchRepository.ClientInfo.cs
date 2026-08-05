@@ -204,6 +204,16 @@ public sealed partial class SqlServerTechBenchRepository
             {
                 AddInt(command, "@ClientId", profile.ClientId);
                 AddText(command, "@Summary", 2000, profile.Summary);
+                AddText(
+                    command,
+                    "@ClientFolderPath",
+                    2048,
+                    profile.ClientFolderPath);
+                AddText(
+                    command,
+                    "@LegacyClientInfoSheetPath",
+                    2048,
+                    profile.LegacyClientInfoSheetPath);
                 AddRequiredText(
                     command,
                     "@ReviewStatus",
@@ -956,6 +966,10 @@ public sealed partial class SqlServerTechBenchRepository
         WhdPhone = GetString(reader, "WhdPhone"),
         WhdAddress = GetString(reader, "WhdAddress"),
         Summary = GetString(reader, "Summary"),
+        ClientFolderPath = GetString(reader, "ClientFolderPath"),
+        LegacyClientInfoSheetPath = GetString(
+            reader,
+            "LegacyClientInfoSheetPath"),
         ReviewStatus = GetString(reader, "ReviewStatus", "Unverified"),
         IsLive = GetBoolean(reader, "IsLive"),
         LastVerifiedAtUtc = GetNullableDateTime(
