@@ -114,6 +114,40 @@ public sealed class WorklogInlineEditorTests
         Assert.Equal(2, personalNoteCount);
     }
 
+    [Fact]
+    public void WhdDeletionIsExactRemoteFirstAndSagePostedEntriesStayLocked()
+    {
+        var viewModel = ReadRepositoryFile("ViewModels", "MainWindowViewModel.cs");
+        var deleteStart = viewModel.IndexOf(
+            "private async Task DeleteEntryAsync",
+            StringComparison.Ordinal);
+        var deleteEnd = viewModel.IndexOf(
+            "private bool DeleteLocalEntry",
+            deleteStart,
+            StringComparison.Ordinal);
+
+        Assert.True(deleteStart >= 0, "The async entry deletion workflow was not found.");
+        Assert.True(deleteEnd > deleteStart, "The entry deletion workflow is incomplete.");
+
+        var deletion = viewModel[deleteStart..deleteEnd];
+        var sageLock = deletion.IndexOf("if (entry.SagePosted)", StringComparison.Ordinal);
+        var exactWhdDelete = deletion.IndexOf("DeleteTechNoteAsync", StringComparison.Ordinal);
+        var recoveryRecord = deletion.IndexOf("RecordWhdSyncFailure", exactWhdDelete, StringComparison.Ordinal);
+        var localDelete = deletion.IndexOf("DeleteLocalEntry(entry", StringComparison.Ordinal);
+
+        Assert.True(sageLock >= 0, "Sage-posted entries must have an explicit deletion lock.");
+        Assert.True(exactWhdDelete > sageLock, "The Sage lock must run before any WHD deletion.");
+        Assert.True(recoveryRecord > exactWhdDelete, "A verified-missing recovery record must follow the exact WHD deletion.");
+        Assert.True(localDelete > recoveryRecord, "The SQL recovery record must be saved before the local entry is deleted.");
+        Assert.Contains("TryAcquireAsync(entry.Id, \"Sage\")", deletion, StringComparison.Ordinal);
+        Assert.Contains("TryAcquireAsync(entry.Id, \"WHD\")", deletion, StringComparison.Ordinal);
+        Assert.Contains("was not found. It was deleted at the user's request.", deletion, StringComparison.Ordinal);
+        Assert.Contains("confirmMissingWhdTechNote: true", deletion, StringComparison.Ordinal);
+        Assert.Contains("The TechBench entry was kept", deletion, StringComparison.Ordinal);
+        Assert.Contains("permanently locked", deletion, StringComparison.Ordinal);
+        Assert.Contains("did not delete either the local entry or its WHD TechNote", deletion, StringComparison.Ordinal);
+    }
+
     private static string ReadRepositoryFile(params string[] parts)
     {
         var current = AppContext.BaseDirectory;

@@ -432,6 +432,20 @@ public sealed class WhdRestClientTests
     }
 
     [Fact]
+    public async Task TicketNotesRouteNotFoundIsNotConclusiveProofThatTheExactNoteIsMissing()
+    {
+        var handler = new RecordingHandler(_ => Json(HttpStatusCode.NotFound, "Route not found."));
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetTechNoteAsync(ExplicitSettings(), 101, 987);
+
+        Assert.False(result.Success);
+        Assert.False(result.IsNotFound);
+        Assert.Contains("could not conclusively verify", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task UpdatesOnlyTheExactTechNoteTextAndVerifiesIt()
     {
         var handler = new RecordingHandler(request => request.Method == HttpMethod.Put
@@ -481,6 +495,125 @@ public sealed class WhdRestClientTests
         Assert.Single(handler.Requests);
         Assert.Equal(HttpMethod.Put, handler.Requests[0].Method);
         Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task TechNoteUpdateVerificationAcceptsWhdHtmlEquivalentText()
+    {
+        var handler = new RecordingHandler(request => request.Method == HttpMethod.Put
+            ? Json(HttpStatusCode.OK, "{}")
+            : Json(HttpStatusCode.OK, """
+                [{"id":987,"noteText":"<p>Line one<br>Line two &amp; more</p>","workTime":"15"}]
+                """));
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.UpdateTechNoteAsync(
+            ExplicitSettings(),
+            101,
+            987,
+            "Line one\nLine two & more");
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("WHD-TECHNOTE-987", result.ExternalReference);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task DeletesOnlyTheExactTrackedTechNoteAndVerifiesItIsGone()
+    {
+        var lookupCount = 0;
+        var handler = new RecordingHandler(request =>
+        {
+            if (request.Method == HttpMethod.Delete)
+            {
+                return Json(HttpStatusCode.OK, "{}");
+            }
+
+            lookupCount++;
+            return lookupCount == 1
+                ? Json(HttpStatusCode.OK, """
+                    [{"id":987,"noteText":"Existing note.","workTime":"15"}]
+                    """)
+                : Json(HttpStatusCode.OK, "[]");
+        });
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.DeleteTechNoteAsync(ExplicitSettings(), 101, 987);
+
+        Assert.True(result.Success, result.Message);
+        Assert.False(result.MarkPosted);
+        Assert.Equal("WHD-TECHNOTE-987", result.ExternalReference);
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.Equal(HttpMethod.Get, handler.Requests[0].Method);
+        Assert.Equal(HttpMethod.Delete, handler.Requests[1].Method);
+        Assert.EndsWith("/TechNotes/987", handler.Requests[1].Uri?.AbsolutePath);
+        Assert.Equal(HttpMethod.Get, handler.Requests[2].Method);
+        Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Post);
+        Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Put);
+    }
+
+    [Fact]
+    public async Task TechNoteDeleteFailureDoesNotReportSuccessOrRetryAsAnotherMethod()
+    {
+        var handler = new RecordingHandler(request => request.Method == HttpMethod.Delete
+            ? Json(HttpStatusCode.Forbidden, "Deletion is not permitted.")
+            : Json(HttpStatusCode.OK, """
+                [{"id":987,"noteText":"Existing note.","workTime":"15"}]
+                """));
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.DeleteTechNoteAsync(ExplicitSettings(), 101, 987);
+
+        Assert.False(result.Success);
+        Assert.False(result.OutcomeUncertain);
+        Assert.False(result.MarkPosted);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal(HttpMethod.Get, handler.Requests[0].Method);
+        Assert.Equal(HttpMethod.Delete, handler.Requests[1].Method);
+        Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Post);
+        Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Put);
+    }
+
+    [Fact]
+    public async Task DeleteRouteNotFoundDoesNotDeleteLocalStateWithoutMissingNoteVerification()
+    {
+        var handler = new RecordingHandler(request => request.Method == HttpMethod.Delete
+            ? Json(HttpStatusCode.NotFound, "The delete route was not found.")
+            : Json(HttpStatusCode.OK, """
+                [{"id":987,"noteText":"Existing note.","workTime":"15"}]
+                """));
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(750));
+
+        var result = await client.DeleteTechNoteAsync(
+            ExplicitSettings(),
+            101,
+            987,
+            cancellation.Token);
+
+        Assert.False(result.Success);
+        Assert.True(result.OutcomeUncertain);
+        Assert.True(handler.Requests.Count >= 3);
+        Assert.Equal(HttpMethod.Delete, handler.Requests[1].Method);
+        Assert.Contains(
+            handler.Requests.Skip(2),
+            request => request.Method == HttpMethod.Get);
+    }
+
+    [Theory]
+    [InlineData("Line one\nLine two & more", "<p>Line one<br>Line two &amp; more</p>")]
+    [InlineData("Line one\r\nLine two", "Line one\nLine two")]
+    [InlineData("A non-breaking space", "A non-breaking\u00a0space")]
+    public void NormalizesWhdNoteRepresentationsForVerification(string local, string whd)
+    {
+        Assert.Equal(
+            WhdRestClient.NormalizeNoteForComparison(local),
+            WhdRestClient.NormalizeNoteForComparison(whd));
     }
 
     [Fact]

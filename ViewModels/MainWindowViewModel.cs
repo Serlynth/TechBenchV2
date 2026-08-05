@@ -159,7 +159,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         EditEntryCommand = new RelayCommand(EditEntry, parameter => parameter is WorkEntry { Id: > 0 });
         NewEntryCommand = new RelayCommand(_ => NewEntry(), _ => CanWrite);
         SaveEntryCommand = new AsyncRelayCommand(SaveEntryAsync, _ => CanSaveEditor());
-        DeleteEntryCommand = new RelayCommand(_ => DeleteEntry(), _ => CanDeleteEditorEntry());
+        DeleteEntryCommand = new AsyncRelayCommand(DeleteEntryAsync, _ => CanDeleteEditorEntry());
         DuplicateEntryCommand = new RelayCommand(_ => DuplicateEntry(), _ => CanWrite && Editor.Id > 0);
         UndoDeleteCommand = new RelayCommand(_ => UndoDelete(), _ => CanWrite && _lastDeletedEntry is not null);
         RefreshAllCommand = new RelayCommand(_ => RefreshAll(forceRemoteRefresh: true));
@@ -288,7 +288,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public RelayCommand EditEntryCommand { get; }
     public RelayCommand NewEntryCommand { get; }
     public AsyncRelayCommand SaveEntryCommand { get; }
-    public RelayCommand DeleteEntryCommand { get; }
+    public AsyncRelayCommand DeleteEntryCommand { get; }
     public RelayCommand DuplicateEntryCommand { get; }
     public RelayCommand UndoDeleteCommand { get; }
     public RelayCommand RefreshAllCommand { get; }
@@ -346,6 +346,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public bool IsEditorEditable => CanWrite && !IsEditorLocked && !IsEntryOperationRunning;
     public bool IsEditorReadOnly => !IsEditorEditable;
     public string WhdPostActionLabel => Editor.WhdPosted ? "Update WHD Note" : "Post to WHD";
+    public string DeleteEntryActionLabel => Editor.WhdPosted
+        ? "Delete Entry and WHD Note..."
+        : "Delete Entry...";
     public bool ShowSendWhdImagesAction => Editor.WhdPosted && Editor.HasPendingWhdImages;
     public bool ShowOpenWhdAction => Editor.SelectedTicket is { Id: > 0 }
         || (Editor.UseOtherWhdTicket && IsValidWhdTicketNumber(Editor.ManualTicketNumber));
@@ -2451,7 +2454,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         return savedEntry;
     }
 
-    private void DeleteEntry()
+    private async Task DeleteEntryAsync(object? parameter)
     {
         if (Editor.Id <= 0)
         {
@@ -2459,15 +2462,146 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var entry = _repository.GetWorkEntry(Editor.Id);
-        if (entry is null || entry.SagePosted || (entry.WhdPosted && !entry.HasVerifiedMissingWhdTechNote))
+        if (entry is null)
         {
-            StatusMessage = entry?.SagePosted == true
-                ? "Entries posted to Sage are permanently locked and cannot be deleted."
-                : "Entries synchronized to WHD cannot be deleted because their exact TechNote tracking must be preserved.";
+            StatusMessage = "The work entry no longer exists.";
+            return;
+        }
+
+        if (entry.SagePosted)
+        {
+            StatusMessage = "Entries posted to Sage are permanently locked. TechBench did not delete either the local entry or its WHD TechNote.";
             return;
         }
 
         var deletingVerifiedMissingWhdNote = entry.HasVerifiedMissingWhdTechNote;
+        if (entry.WhdPosted && !deletingVerifiedMissingWhdNote)
+        {
+            if (!TryGetTrackedWhdNote(
+                    entry.Id,
+                    out _,
+                    out var techNoteId,
+                    out _,
+                    out var trackingError))
+            {
+                StatusMessage = trackingError;
+                _dialogService.Error(
+                    "Delete WHD note",
+                    $"{trackingError}\n\nThe TechBench entry was kept, and no WHD note was deleted.");
+                return;
+            }
+
+            var ticket = ResolveWhdTicket(entry);
+            if (ticket is null || !TryResolveWhdTicketId(ticket, out var whdTicketId))
+            {
+                const string ticketError = "TechBench could not resolve the WHD ticket that owns the tracked TechNote.";
+                StatusMessage = ticketError;
+                _dialogService.Error(
+                    "Delete WHD note",
+                    $"{ticketError}\n\nThe TechBench entry was kept, and no WHD note was deleted.");
+                return;
+            }
+
+            var deleteBoth = _dialogService.Confirm(
+                "Delete TechBench entry and WHD note",
+                $"Delete this TechBench entry and its exact WHD TechNote #{techNoteId} from ticket #{whdTicketId}?\n\n"
+                + "Any images attached to that TechNote will also be removed by WHD. TechBench can restore the local entry with Undo, but it cannot restore the deleted WHD note.\n\n"
+                + "This action is never available after the entry is posted to Sage.",
+                "Delete both",
+                "Cancel");
+            if (!deleteBoth)
+            {
+                return;
+            }
+
+            await using var sageDeletionLease = await _postingCoordinator.TryAcquireAsync(entry.Id, "Sage");
+            if (sageDeletionLease is null)
+            {
+                StatusMessage = "A Sage operation is already running for this entry. Nothing was deleted.";
+                return;
+            }
+
+            await using var whdDeletionLease = await _postingCoordinator.TryAcquireAsync(entry.Id, "WHD");
+            if (whdDeletionLease is null)
+            {
+                StatusMessage = "Another WHD operation is already running for this entry. Nothing was deleted.";
+                return;
+            }
+
+            entry = _repository.GetWorkEntry(entry.Id) ?? entry;
+            if (entry.SagePosted)
+            {
+                StatusMessage = "This entry finished posting to Sage before deletion could begin. TechBench did not delete either the local entry or its WHD TechNote.";
+                return;
+            }
+
+            if (!TryGetTrackedWhdNote(
+                    entry.Id,
+                    out _,
+                    out var currentTechNoteId,
+                    out _,
+                    out var currentTrackingError)
+                || currentTechNoteId != techNoteId)
+            {
+                StatusMessage = string.IsNullOrWhiteSpace(currentTrackingError)
+                    ? "The tracked WHD TechNote changed before deletion could begin. Nothing was deleted."
+                    : currentTrackingError;
+                return;
+            }
+
+            IsEntryOperationRunning = true;
+            EntryOperationText = $"Deleting WHD TechNote #{techNoteId}...";
+            try
+            {
+                var whdDeletion = await _whdRestClient.DeleteTechNoteAsync(
+                    BuildWhdConnectionSettings(),
+                    whdTicketId,
+                    techNoteId);
+                if (!whdDeletion.Success)
+                {
+                    StatusMessage = whdDeletion.Message;
+                    _dialogService.Error(
+                        whdDeletion.OutcomeUncertain
+                            ? "WHD deletion could not be verified"
+                            : "WHD note was not deleted",
+                        $"{whdDeletion.Message}\n\nThe TechBench entry was kept so this can be retried safely.");
+                    return;
+                }
+
+                var verifiedMissingMessage = $"WHD sync pending: Web Help Desk verified that TechNote #{techNoteId} was not found. It was deleted at the user's request.";
+                RecordWhdSyncFailure(
+                    entry,
+                    verifiedMissingMessage,
+                    $"WHD-TECHNOTE-{techNoteId}",
+                    refreshAfter: false,
+                    payload: whdDeletion.Payload);
+                entry.WhdPosted = false;
+                entry.WhdPostedAt = null;
+                entry.LastError = null;
+                WorkEntryPostingStatusCalculator.Update(entry);
+                if (!DeleteLocalEntry(entry, confirmMissingWhdTechNote: true))
+                {
+                    return;
+                }
+
+                StatusMessage = $"{whdDeletion.Message} TechBench entry deleted. Local Undo is available, but it will not recreate the WHD note.";
+                return;
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"WHD deletion did not complete safely: {ex.Message}";
+                _dialogService.Error(
+                    "Delete entry",
+                    $"{StatusMessage}\n\nThe TechBench entry was kept. If WHD removed the note before this error, use Sync WHD Note to verify it before deleting locally.");
+                return;
+            }
+            finally
+            {
+                EntryOperationText = string.Empty;
+                IsEntryOperationRunning = false;
+            }
+        }
+
         var confirmed = _dialogService.Confirm(
             deletingVerifiedMissingWhdNote ? "Delete local entry" : "Delete entry",
             deletingVerifiedMissingWhdNote
@@ -2480,22 +2614,41 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _lastDeletedEntry = entry;
-        _lastDeletedEntryLinks = _repository.GetWorkEntryLinks(entry.Id).ToArray();
-        _repository.DeleteWorkEntry(Editor.Id, deletingVerifiedMissingWhdNote);
         if (deletingVerifiedMissingWhdNote)
         {
-            _lastDeletedEntry.WhdPosted = false;
-            _lastDeletedEntry.WhdPostedAt = null;
-            _lastDeletedEntry.LastError = null;
-            WorkEntryPostingStatusCalculator.Update(_lastDeletedEntry);
+            entry.WhdPosted = false;
+            entry.WhdPostedAt = null;
+            entry.LastError = null;
+            WorkEntryPostingStatusCalculator.Update(entry);
         }
+
+        DeleteLocalEntry(entry, deletingVerifiedMissingWhdNote);
+    }
+
+    private bool DeleteLocalEntry(WorkEntry entry, bool confirmMissingWhdTechNote)
+    {
+        var deletedLinks = _repository.GetWorkEntryLinks(entry.Id).ToArray();
+        try
+        {
+            _repository.DeleteWorkEntry(entry.Id, confirmMissingWhdTechNote);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"The work entry could not be deleted locally: {ex.Message}";
+            _dialogService.Error("Delete entry", StatusMessage);
+            return false;
+        }
+
+        _lastDeletedEntry = entry;
+        _lastDeletedEntryLinks = deletedLinks;
+        Editor.MarkClean();
         RefreshAll();
         NewEntry();
         OnPropertyChanged(nameof(HasUndoDelete));
         OnPropertyChanged(nameof(UndoDeleteLabel));
         UndoDeleteCommand.RaiseCanExecuteChanged();
         StatusMessage = "Entry deleted. Undo is available.";
+        return true;
     }
 
     private void UndoDelete()
@@ -3233,7 +3386,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private bool CanDeleteEditorEntry() => CanWrite
         && Editor.Id > 0
         && !Editor.SagePosted
-        && (!Editor.WhdPosted || IsVerifiedMissingWhdTechNote(Editor.LastError))
         && !IsEntryOperationRunning;
 
     private static bool IsVerifiedMissingWhdTechNote(string? lastError) =>
@@ -4011,6 +4163,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsEditorEditable));
         OnPropertyChanged(nameof(IsEditorReadOnly));
         OnPropertyChanged(nameof(WhdPostActionLabel));
+        OnPropertyChanged(nameof(DeleteEntryActionLabel));
         OnPropertyChanged(nameof(ShowSendWhdImagesAction));
         OnPropertyChanged(nameof(ShowOpenWhdAction));
         OnPropertyChanged(nameof(WorkspaceStateLabel));

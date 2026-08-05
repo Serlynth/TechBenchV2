@@ -6,6 +6,7 @@ public sealed class WhdNoteSyncDecisionTests
 {
     [Theory]
     [InlineData("Same", "Same", "Old", 0)]
+    [InlineData("Line one\nLine two & more", "<p>Line one<br>Line two &amp; more</p>", "Old", 0)]
     [InlineData("Local change", "Original", "Original", 1)]
     [InlineData("Original", "WHD change", "Original", 2)]
     [InlineData("Local change", "WHD change", "Original", 3)]
