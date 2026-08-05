@@ -37,6 +37,82 @@
             <Setter Property="Margin" Value="0,0,0,16" />
         </Style>
 
+        <DataTemplate x:Key="WhdImageAttachmentPickerTemplate">
+            <Border Background="{DynamicResource PanelAltBackgroundBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="7"
+                    Padding="10"
+                    Margin="0,9,0,0">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Images for WHD"
+                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding Editor.PendingWhdImageSummary}"
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                       FontSize="11"
+                                       Margin="0,2,0,0" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                            <Button Content="Select images..."
+                                    Command="{Binding AddWhdImagesCommand}"
+                                    Padding="9,5" />
+                            <Button Content="Clear"
+                                    Command="{Binding ClearWhdImagesCommand}"
+                                    Padding="9,5"
+                                    Margin="6,0,0,0"
+                                    Visibility="{Binding Editor.HasPendingWhdImages, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <Button Content="Send to WHD"
+                                    Command="{Binding UploadWhdImagesCommand}"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Padding="9,5"
+                                    Margin="6,0,0,0"
+                                    Visibility="{Binding ShowSendWhdImagesAction, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        </StackPanel>
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding Editor.PendingWhdImages}"
+                                  Margin="0,8,0,0"
+                                  Visibility="{Binding Editor.HasPendingWhdImages, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding FileName}"
+                                                   Foreground="{DynamicResource PrimaryTextBrush}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding SizeLabel, StringFormat={} · {0}}"
+                                                   Foreground="{DynamicResource MutedTextBrush}"
+                                                   Margin="5,0,0,0" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1"
+                                            Content="Remove"
+                                            Command="{Binding DataContext.RemoveWhdImageCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}"
+                                            Padding="7,2"
+                                            Margin="8,0,0,0" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Text="Temporary selection: images go directly to WHD and are not stored in TechBench or SQL."
+                               Foreground="{DynamicResource MutedTextBrush}"
+                               FontSize="10"
+                               TextWrapping="Wrap"
+                               Margin="0,7,0,0" />
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
         <Style x:Key="EquipmentCardItemStyle" TargetType="{x:Type ListBoxItem}">
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="Padding" Value="0" />
@@ -585,6 +661,8 @@
                                              SpellCheck.IsEnabled="True"
                                              MinHeight="100"
                                              IsReadOnly="{Binding IsEditorReadOnly}" />
+                                    <ContentControl Content="{Binding}"
+                                                    ContentTemplate="{StaticResource WhdImageAttachmentPickerTemplate}" />
                                 </StackPanel>
                             </Expander>
 
@@ -1347,6 +1425,7 @@
                                                 <Grid.RowDefinitions>
                                                     <RowDefinition Height="Auto" />
                                                     <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
                                                 </Grid.RowDefinitions>
                                                 <Grid>
                                                     <Grid.ColumnDefinitions>
@@ -1354,7 +1433,7 @@
                                                         <ColumnDefinition Width="Auto" />
                                                     </Grid.ColumnDefinitions>
                                                     <StackPanel>
-                                                        <TextBlock Text="Personal Note Markdown"
+                                                        <TextBlock Text="Personal Note"
                                                                    Style="{StaticResource FieldLabelStyle}"
                                                                    VerticalAlignment="Center"
                                                                    Margin="1,0,0,0" />
@@ -1384,6 +1463,9 @@
                                                          FontFamily="Cascadia Mono, Consolas"
                                                          MinHeight="110"
                                                          Margin="0,8,0,0" />
+                                                <ContentControl Grid.Row="2"
+                                                                Content="{Binding}"
+                                                                ContentTemplate="{StaticResource WhdImageAttachmentPickerTemplate}" />
                                             </Grid>
                                         </Expander>
 
@@ -3741,7 +3823,7 @@
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
                                             <StackPanel>
-                                                <TextBlock Text="Personal Note (Markdown)"
+                                                <TextBlock Text="Personal Note"
                                                        Style="{StaticResource FieldLabelStyle}"
                                                        VerticalAlignment="Center" />
                                                 <TextBlock Text="Included in WHD"

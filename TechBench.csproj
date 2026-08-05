@@ -4,9 +4,9 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <StartupObject>TechBench.App</StartupObject>
-    <Version>0.7.2</Version>
-    <AssemblyVersion>0.7.2.0</AssemblyVersion>
-    <FileVersion>0.7.2.0</FileVersion>
+    <Version>0.7.3</Version>
+    <AssemblyVersion>0.7.3.0</AssemblyVersion>
+    <FileVersion>0.7.3.0</FileVersion>
     <AssemblyName>TechBenchV2</AssemblyName>
     <Company>CSRI</Company>
     <Product>TechBench V2</Product>
@@ -50,6 +50,7 @@
     <Compile Remove="TechBench.SyncService.Tests\**\*.cs" />
     <Compile Remove="TechBench.WHD\**\*.cs" />
     <Compile Remove="Models\WhdConnectionSettings.cs" />
+    <Compile Remove="Models\WhdImageAttachmentPolicy.cs" />
     <Compile Remove="Models\WhdSyncResult.cs" />
     <Compile Remove="Providers\PostingResult.cs" />
     <Compile Remove="Providers\WhdRestClient.cs" />

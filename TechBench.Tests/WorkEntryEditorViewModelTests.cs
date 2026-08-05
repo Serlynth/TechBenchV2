@@ -158,6 +158,39 @@ public sealed class WorkEntryEditorViewModelTests
     }
 
     [Fact]
+    public void WhdImageSelectionsAreTransientAndDoNotDirtyOrEnterDrafts()
+    {
+        var editor = new WorkEntryEditorViewModel();
+        editor.LoadNew(new DateTime(2026, 8, 5));
+
+        editor.AddPendingWhdImages(["C:\\Temp\\first.png", "C:\\Temp\\second.jpg"]);
+
+        Assert.True(editor.HasPendingWhdImages);
+        Assert.Equal(2, editor.PendingWhdImages.Count);
+        Assert.False(editor.IsDirty);
+        var draft = editor.BuildDraft();
+        Assert.DoesNotContain("first.png", System.Text.Json.JsonSerializer.Serialize(draft), StringComparison.Ordinal);
+
+        editor.LoadNew(new DateTime(2026, 8, 6));
+
+        Assert.False(editor.HasPendingWhdImages);
+        Assert.Empty(editor.PendingWhdImages);
+    }
+
+    [Fact]
+    public void PersonalNoteHeaderDoesNotLabelTheNoteAsMarkdown()
+    {
+        var editor = new WorkEntryEditorViewModel();
+
+        Assert.Equal("Personal Note", editor.InternalNoteHeader);
+
+        editor.InternalNote = "Private detail";
+
+        Assert.Equal("Personal Note (contains text)", editor.InternalNoteHeader);
+        Assert.DoesNotContain("Markdown", editor.InternalNoteHeader, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void LoadingExistingManualEntryEnablesManualModeWithoutDirtyingEditor()
     {
         var editor = new WorkEntryEditorViewModel();

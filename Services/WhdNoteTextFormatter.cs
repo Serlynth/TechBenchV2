@@ -4,7 +4,8 @@ namespace TechBench.Services;
 
 public static class WhdNoteTextFormatter
 {
-    internal const string PersonalNoteHeading = "Personal note (Markdown):";
+    internal const string PersonalNoteHeading = "Personal note:";
+    private const string LegacyPersonalNoteHeading = "Personal note (Markdown):";
     private const string LegacyInternalNoteHeading = "Internal note (Markdown):";
 
     public static string BuildWhdNoteText(WorkEntry entry) =>
@@ -34,12 +35,21 @@ public static class WhdNoteTextFormatter
             return (string.Empty, string.Empty, false);
         }
 
-        var heading = PersonalNoteHeading;
-        var markerIndex = text.IndexOf(heading, StringComparison.OrdinalIgnoreCase);
-        if (markerIndex < 0)
+        var heading = string.Empty;
+        var markerIndex = -1;
+        foreach (var candidate in new[]
+                 {
+                     PersonalNoteHeading,
+                     LegacyPersonalNoteHeading,
+                     LegacyInternalNoteHeading
+                 })
         {
-            heading = LegacyInternalNoteHeading;
-            markerIndex = text.IndexOf(heading, StringComparison.OrdinalIgnoreCase);
+            var candidateIndex = text.IndexOf(candidate, StringComparison.OrdinalIgnoreCase);
+            if (candidateIndex >= 0 && (markerIndex < 0 || candidateIndex < markerIndex))
+            {
+                heading = candidate;
+                markerIndex = candidateIndex;
+            }
         }
 
         if (markerIndex < 0)

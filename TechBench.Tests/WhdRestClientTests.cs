@@ -88,6 +88,92 @@ public sealed class WhdRestClientTests
     }
 
     [Fact]
+    public async Task TechNoteImageUploadUsesTemporarySessionCookiesAndMultipartFileUpload()
+    {
+        var imagePath = Path.Combine(
+            Path.GetTempPath(),
+            $"techbench-whd-{Guid.NewGuid():N}.png");
+        await File.WriteAllBytesAsync(imagePath, [0x89, 0x50, 0x4e, 0x47]);
+        try
+        {
+            var handler = new RecordingHandler(request =>
+            {
+                if (request.Method == HttpMethod.Get
+                    && request.RequestUri?.AbsolutePath.EndsWith("/Session", StringComparison.Ordinal) == true)
+                {
+                    var response = Json(
+                        HttpStatusCode.OK,
+                        "{\"sessionKey\":\"attachment-session\",\"currentTechId\":7,\"instanceId\":-1}");
+                    response.Headers.TryAddWithoutValidation(
+                        "Set-Cookie",
+                        [
+                            "JSESSIONID=java-session; Path=/helpdesk; Secure; HttpOnly",
+                            "wosid=webobjects-session; Path=/helpdesk; Secure; HttpOnly"
+                        ]);
+                    return response;
+                }
+
+                if (request.Method == HttpMethod.Delete)
+                {
+                    return Json(HttpStatusCode.OK, "{}");
+                }
+
+                return Json(HttpStatusCode.OK, "{\"id\":11}");
+            });
+            using var httpClient = new HttpClient(handler);
+            var client = new WhdRestClient(httpClient);
+
+            var result = await client.UploadTechNoteImagesAsync(
+                ExplicitSettings(),
+                987,
+                [imagePath]);
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal([imagePath], result.UploadedFilePaths);
+            Assert.Empty(result.Failures);
+            Assert.Equal(3, handler.RequestCount);
+
+            var upload = Assert.Single(handler.Requests, request => request.Method == HttpMethod.Post);
+            Assert.Equal("/helpdesk/attachment/upload", upload.Uri?.AbsolutePath);
+            var query = Uri.UnescapeDataString(upload.Uri?.Query ?? string.Empty);
+            Assert.Contains("type=techNote", query, StringComparison.Ordinal);
+            Assert.Contains("entityId=987", query, StringComparison.Ordinal);
+            Assert.Contains("returnFields=id,uploadDate", query, StringComparison.Ordinal);
+            Assert.Contains("JSESSIONID=java-session", upload.CookieHeader, StringComparison.Ordinal);
+            Assert.Contains("wosid=webobjects-session", upload.CookieHeader, StringComparison.Ordinal);
+            Assert.StartsWith("multipart/form-data", upload.ContentType, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("name=fileUpload", upload.Body, StringComparison.Ordinal);
+            Assert.Contains(Path.GetFileName(imagePath), upload.Body, StringComparison.Ordinal);
+
+            var closeSession = Assert.Single(handler.Requests, request => request.Method == HttpMethod.Delete);
+            Assert.Contains("sessionKey=attachment-session", closeSession.Uri?.Query, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(imagePath);
+        }
+    }
+
+    [Fact]
+    public async Task TechNoteImageUploadRejectsNonImagesBeforeCallingWhd()
+    {
+        var handler = new RecordingHandler(_ => Json(HttpStatusCode.OK, "{}"));
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.UploadTechNoteImagesAsync(
+            ExplicitSettings(),
+            987,
+            ["not-an-image.txt"]);
+
+        Assert.False(result.Success);
+        var failure = Assert.Single(result.Failures);
+        Assert.Equal("not-an-image.txt", failure.FilePath);
+        Assert.Contains("supported image type", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, handler.RequestCount);
+    }
+
+    [Fact]
     public async Task OrganizationSyncRetainsExplicitlyClosedOrDeletedTicketsReturnedByWhd()
     {
         const string responseJson = """
@@ -821,10 +907,24 @@ public sealed class WhdRestClientTests
             var body = request.Content is null
                 ? string.Empty
                 : await request.Content.ReadAsStringAsync(cancellationToken);
-            Requests.Add(new RecordedRequest(request.Method, request.RequestUri, body));
+            var cookieHeader = request.Headers.TryGetValues("Cookie", out var cookies)
+                ? string.Join("; ", cookies)
+                : string.Empty;
+            var contentType = request.Content?.Headers.ContentType?.ToString() ?? string.Empty;
+            Requests.Add(new RecordedRequest(
+                request.Method,
+                request.RequestUri,
+                body,
+                cookieHeader,
+                contentType));
             return responseFactory(request);
         }
     }
 
-    private sealed record RecordedRequest(HttpMethod Method, Uri? Uri, string Body);
+    private sealed record RecordedRequest(
+        HttpMethod Method,
+        Uri? Uri,
+        string Body,
+        string CookieHeader,
+        string ContentType);
 }

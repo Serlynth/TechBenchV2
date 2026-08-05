@@ -571,6 +571,219 @@ public sealed class WhdRestClient
         }
     }
 
+    public async Task<WhdAttachmentUploadResult> UploadTechNoteImagesAsync(
+        WhdConnectionSettings settings,
+        int techNoteId,
+        IReadOnlyCollection<string> filePaths,
+        CancellationToken cancellationToken = default)
+    {
+        var validationError = Validate(settings);
+        if (validationError is not null)
+        {
+            return WhdAttachmentUploadResult.Failed(validationError, filePaths);
+        }
+
+        if (techNoteId <= 0)
+        {
+            return WhdAttachmentUploadResult.Failed(
+                "A verified WHD TechNote ID is required before images can be attached.",
+                filePaths);
+        }
+
+        var requestedPaths = filePaths
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (requestedPaths.Length == 0)
+        {
+            return WhdAttachmentUploadResult.Failed("Select at least one image to attach.", []);
+        }
+
+        var uploadPaths = new List<string>();
+        var failures = new List<WhdAttachmentUploadFailure>();
+        foreach (var filePath in requestedPaths)
+        {
+            if (!WhdImageAttachmentPolicy.IsSupported(filePath))
+            {
+                failures.Add(new WhdAttachmentUploadFailure(
+                    filePath,
+                    "The selected file is not a supported image type."));
+            }
+            else if (!File.Exists(filePath))
+            {
+                failures.Add(new WhdAttachmentUploadFailure(
+                    filePath,
+                    "The selected image is no longer available."));
+            }
+            else
+            {
+                uploadPaths.Add(filePath);
+            }
+        }
+
+        var uploadedPaths = new List<string>();
+        if (uploadPaths.Count > 0)
+        {
+            WhdUploadSession? session = null;
+            try
+            {
+                var auth = await ResolveAuthenticationAsync(settings, cancellationToken);
+                session = await CreateUploadSessionAsync(settings, auth, cancellationToken);
+                foreach (var filePath in uploadPaths)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var upload = await UploadTechNoteImageAsync(
+                        settings,
+                        session,
+                        techNoteId,
+                        filePath,
+                        cancellationToken);
+                    if (upload.Success)
+                    {
+                        uploadedPaths.Add(filePath);
+                    }
+                    else
+                    {
+                        failures.Add(new WhdAttachmentUploadFailure(filePath, upload.Message));
+                    }
+                }
+            }
+            catch (Exception ex) when (
+                ex is HttpRequestException
+                    or TaskCanceledException
+                    or JsonException
+                    or InvalidOperationException
+                    or UriFormatException
+                    or IOException
+                    or UnauthorizedAccessException)
+            {
+                foreach (var filePath in uploadPaths.Except(uploadedPaths, StringComparer.OrdinalIgnoreCase))
+                {
+                    if (failures.All(failure =>
+                            !failure.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        failures.Add(new WhdAttachmentUploadFailure(filePath, ex.Message));
+                    }
+                }
+            }
+            finally
+            {
+                if (session is not null)
+                {
+                    await TryTerminateProbeSessionAsync(
+                        settings,
+                        session.SessionKey,
+                        CancellationToken.None);
+                }
+            }
+        }
+
+        return WhdAttachmentUploadResult.Create(techNoteId, uploadedPaths, failures);
+    }
+
+    private async Task<WhdUploadSession> CreateUploadSessionAsync(
+        WhdConnectionSettings settings,
+        WhdAuthParameters auth,
+        CancellationToken cancellationToken)
+    {
+        var requestUri = BuildRequestUri(
+            settings.BaseUrl,
+            "Session",
+            auth,
+            new Dictionary<string, string>());
+        using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var details = string.IsNullOrWhiteSpace(content) ? response.ReasonPhrase : content.Trim();
+            throw new HttpRequestException(
+                $"WHD could not create the attachment session: HTTP {(int)response.StatusCode} {response.ReasonPhrase}. {details}",
+                null,
+                response.StatusCode);
+        }
+
+        using var document = JsonDocument.Parse(content);
+        var sessionKey = ReadSessionString(document.RootElement, "sessionKey", "key");
+        if (string.IsNullOrWhiteSpace(sessionKey))
+        {
+            throw new InvalidOperationException(
+                "WHD authenticated the attachment request but did not return a temporary REST session key.");
+        }
+
+        var cookieHeader = BuildSessionCookieHeader(response);
+        if (string.IsNullOrWhiteSpace(cookieHeader))
+        {
+            throw new InvalidOperationException(
+                "WHD did not return the Java and WebObjects session cookies required for attachment uploads.");
+        }
+
+        return new WhdUploadSession(sessionKey, cookieHeader);
+    }
+
+    private async Task<WhdSingleAttachmentUploadResult> UploadTechNoteImageAsync(
+        WhdConnectionSettings settings,
+        WhdUploadSession session,
+        int techNoteId,
+        string filePath,
+        CancellationToken cancellationToken)
+    {
+        var requestUri = BuildAttachmentUploadUri(settings.BaseUrl, "techNote", techNoteId);
+        await using var stream = new FileStream(
+            filePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 81920,
+            useAsync: true);
+        using var multipart = new MultipartFormDataContent();
+        using var fileContent = new StreamContent(stream);
+        fileContent.Headers.ContentType = new MediaTypeHeaderValue(
+            WhdImageAttachmentPolicy.GetMediaType(filePath));
+        multipart.Add(fileContent, "fileUpload", Path.GetFileName(filePath));
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, requestUri)
+        {
+            Content = multipart
+        };
+        request.Headers.TryAddWithoutValidation("Cookie", session.CookieHeader);
+        request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
+        request.Headers.Pragma.ParseAdd("no-cache");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (response.IsSuccessStatusCode)
+        {
+            return WhdSingleAttachmentUploadResult.Succeeded();
+        }
+
+        var details = string.IsNullOrWhiteSpace(content)
+            ? response.ReasonPhrase ?? "No response details were returned."
+            : content.Trim();
+        if (details.Length > 500)
+        {
+            details = details[..500];
+        }
+
+        return WhdSingleAttachmentUploadResult.Failed(
+            $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}. {details}");
+    }
+
+    private static string BuildSessionCookieHeader(HttpResponseMessage response)
+    {
+        if (!response.Headers.TryGetValues("Set-Cookie", out var setCookieHeaders))
+        {
+            return string.Empty;
+        }
+
+        return string.Join(
+            "; ",
+            setCookieHeaders
+                .Select(static header => header.Split(';', 2)[0].Trim())
+                .Where(static cookie => !string.IsNullOrWhiteSpace(cookie))
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+    }
+
     public async Task<WhdTechNoteLookupResult> GetTechNoteAsync(
         WhdConnectionSettings settings,
         int ticketId,
@@ -2917,6 +3130,33 @@ public sealed class WhdRestClient
         return uriBuilder.Uri;
     }
 
+    private static Uri BuildAttachmentUploadUri(
+        string baseUrl,
+        string entityType,
+        int entityId)
+    {
+        var apiRoot = BuildApiRoot(baseUrl);
+        var apiPath = apiRoot.AbsolutePath;
+        var webObjectsIndex = apiPath.IndexOf("/WebObjects/", StringComparison.OrdinalIgnoreCase);
+        var applicationRoot = webObjectsIndex >= 0
+            ? apiPath[..webObjectsIndex]
+            : apiPath.EndsWith("/ra", StringComparison.OrdinalIgnoreCase)
+                ? apiPath[..^3]
+                : apiPath;
+        var builder = new UriBuilder(apiRoot)
+        {
+            Path = $"{applicationRoot.TrimEnd('/')}/attachment/upload",
+            Query = string.Join(
+                "&",
+                $"type={Uri.EscapeDataString(entityType)}",
+                $"entityId={entityId.ToString(CultureInfo.InvariantCulture)}",
+                "returnFields=id%2CuploadDate"),
+            Fragment = string.Empty
+        };
+
+        return builder.Uri;
+    }
+
     private static Uri BuildApiRoot(string baseUrl, string? instanceId = null)
     {
         var trimmed = baseUrl.Trim().TrimEnd('/');
@@ -3098,5 +3338,70 @@ public sealed class WhdRestClient
             });
 
         public IEnumerable<KeyValuePair<string, string>> ToQueryParameters() => _parameters;
+    }
+
+    private sealed record WhdUploadSession(string SessionKey, string CookieHeader);
+
+    private sealed record WhdSingleAttachmentUploadResult(bool Success, string Message)
+    {
+        public static WhdSingleAttachmentUploadResult Succeeded() => new(true, string.Empty);
+        public static WhdSingleAttachmentUploadResult Failed(string message) => new(false, message);
+    }
+}
+
+public sealed record WhdAttachmentUploadFailure(string FilePath, string Message)
+{
+    public string FileName => Path.GetFileName(FilePath);
+}
+
+public sealed class WhdAttachmentUploadResult
+{
+    public bool Success => Failures.Count == 0 && UploadedFilePaths.Count > 0;
+    public IReadOnlyList<string> UploadedFilePaths { get; init; } = [];
+    public IReadOnlyList<WhdAttachmentUploadFailure> Failures { get; init; } = [];
+    public string Message { get; init; } = string.Empty;
+
+    public static WhdAttachmentUploadResult Failed(
+        string message,
+        IEnumerable<string> filePaths) => new()
+        {
+            Failures = filePaths
+                .Where(static path => !string.IsNullOrWhiteSpace(path))
+                .Select(path => new WhdAttachmentUploadFailure(path, message))
+                .ToArray(),
+            Message = message
+        };
+
+    public static WhdAttachmentUploadResult Create(
+        int techNoteId,
+        IReadOnlyList<string> uploadedFilePaths,
+        IReadOnlyList<WhdAttachmentUploadFailure> failures)
+    {
+        var successMessage = uploadedFilePaths.Count switch
+        {
+            0 => string.Empty,
+            1 => $"Attached 1 image to WHD TechNote #{techNoteId}.",
+            _ => $"Attached {uploadedFilePaths.Count} images to WHD TechNote #{techNoteId}."
+        };
+        if (failures.Count == 0)
+        {
+            return new WhdAttachmentUploadResult
+            {
+                UploadedFilePaths = uploadedFilePaths.ToArray(),
+                Message = successMessage
+            };
+        }
+
+        var failureText = string.Join(
+            "; ",
+            failures.Select(failure => $"{failure.FileName}: {failure.Message}"));
+        return new WhdAttachmentUploadResult
+        {
+            UploadedFilePaths = uploadedFilePaths.ToArray(),
+            Failures = failures.ToArray(),
+            Message = string.IsNullOrWhiteSpace(successMessage)
+                ? $"WHD image upload failed. {failureText}"
+                : $"{successMessage} {failures.Count} image upload(s) failed: {failureText}"
+        };
     }
 }
