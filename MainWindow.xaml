@@ -247,6 +247,7 @@
                TargetType="{x:Type ComboBoxItem}"
                BasedOn="{StaticResource {x:Type ComboBoxItem}}">
             <EventSetter Event="PreviewMouseLeftButtonUp" Handler="EditorClientComboBoxItem_PreviewMouseLeftButtonUp" />
+            <EventSetter Event="PreviewKeyDown" Handler="EditorClientComboBox_PreviewKeyDown" />
         </Style>
 
         <DataTemplate x:Key="TicketSelectorItemTemplate">
@@ -1118,6 +1119,7 @@
                                                           ItemsSource="{Binding EditorClients}"
                                                           SelectedItem="{Binding Editor.SelectedClient}"
                                                           Text="{Binding EditorClientFilterText, UpdateSourceTrigger=PropertyChanged}"
+                                                          PreviewKeyDown="EditorClientComboBox_PreviewKeyDown"
                                                           TextSearch.TextPath="DisplayName"
                                                           IsDropDownOpen="{Binding IsEditorClientDropDownOpen}"
                                                           ItemTemplate="{StaticResource EditorClientOptionTemplate}"
