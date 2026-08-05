@@ -8,7 +8,6 @@ using TechBench.Models;
 using TechBench.Providers;
 using TechBench.Services;
 using TechBench.ViewModels;
-using WpfKeyEventArgs = System.Windows.Input.KeyEventArgs;
 
 namespace TechBench;
 
@@ -734,6 +733,9 @@ public partial class MainWindow : Window
         InitializeComponent();
         _localPreferences = LocalPreferenceStore.LoadOrCreate();
         ApplyWindowPreferences();
+        EditorClientComboBox.AddHandler(
+            System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent,
+            new TextChangedEventHandler(EditorClientComboBox_TextChanged));
 
         var repository = new SqlServerTechBenchRepository(
             connectionFactory,
@@ -980,81 +982,56 @@ public partial class MainWindow : Window
         }
     }
 
-    private void EditorClientSuggestion_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    private void EditorClientComboBoxItem_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (sender is not ListBoxItem { DataContext: Client client }
+        if (sender is not ComboBoxItem { DataContext: Client client }
             || DataContext is not MainWindowViewModel viewModel
             || !viewModel.SelectEditorClientCommand.CanExecute(client))
         {
             return;
         }
 
-        CommitEditorClientSuggestion(viewModel, client);
+        CommitEditorClient(viewModel, client);
         e.Handled = true;
     }
 
-    private void EditorClientSearchTextBox_PreviewKeyDown(object sender, WpfKeyEventArgs e)
+    private void EditorClientComboBox_KeyboardClientCommitted(
+        object? sender,
+        EditorClientCommittedEventArgs e)
     {
-        if (sender is not System.Windows.Controls.TextBox
-            || DataContext is not MainWindowViewModel viewModel)
+        if (DataContext is not MainWindowViewModel viewModel
+            || !viewModel.SelectEditorClientCommand.CanExecute(e.Client))
         {
             return;
         }
 
-        if (e.Key == Key.Enter
-            && EditorClientSuggestionsListBox.SelectedItem is Client client
-            && viewModel.SelectEditorClientCommand.CanExecute(client))
-        {
-            CommitEditorClientSuggestion(viewModel, client);
-            e.Handled = true;
-            return;
-        }
-
-        if (e.Key == Key.Escape && viewModel.IsEditorClientDropDownOpen)
-        {
-            EditorClientSuggestionsListBox.SelectedIndex = -1;
-            viewModel.IsEditorClientDropDownOpen = false;
-            e.Handled = true;
-            return;
-        }
-
-        if (e.Key is not (Key.Up or Key.Down)
-            || EditorClientSuggestionsListBox.Items.Count == 0)
-        {
-            return;
-        }
-
-        e.Handled = true;
-        viewModel.IsEditorClientDropDownOpen = true;
-        var nextIndex = KeyboardListNavigation.GetNextIndex(
-            EditorClientSuggestionsListBox.Items.Count,
-            EditorClientSuggestionsListBox.SelectedIndex,
-            moveDown: e.Key == Key.Down);
-        EditorClientSuggestionsListBox.SelectedIndex = nextIndex;
-        if (EditorClientSuggestionsListBox.SelectedItem is not null)
-        {
-            EditorClientSuggestionsListBox.ScrollIntoView(
-                EditorClientSuggestionsListBox.SelectedItem);
-        }
+        CommitEditorClient(viewModel, e.Client);
     }
 
-    private void CommitEditorClientSuggestion(
-        MainWindowViewModel viewModel,
-        Client client)
+    private void CommitEditorClient(MainWindowViewModel viewModel, Client client)
     {
         _isCommittingEditorClientSuggestion = true;
         try
         {
-            EditorClientSuggestionsListBox.SelectedIndex = -1;
+            EditorClientComboBox.ResetKeyboardHighlight();
             viewModel.SelectEditorClientCommand.Execute(client);
             viewModel.IsEditorClientDropDownOpen = false;
+            EditorClientComboBox.SetCurrentValue(
+                System.Windows.Controls.ComboBox.IsDropDownOpenProperty,
+                false);
         }
         finally
         {
-            _isCommittingEditorClientSuggestion = false;
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+            {
+                _isCommittingEditorClientSuggestion = false;
+                viewModel.IsEditorClientDropDownOpen = false;
+                EditorClientComboBox.SetCurrentValue(
+                    System.Windows.Controls.ComboBox.IsDropDownOpenProperty,
+                    false);
+                FocusEditorClient();
+            });
         }
-
-        FocusEditorClient();
     }
 
     private void WhdApiTokenPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
@@ -1079,16 +1056,16 @@ public partial class MainWindow : Window
         demoWindow.ShowDialog();
     }
 
-    private void EditorClientSearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    private void EditorClientComboBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (_isCommittingEditorClientSuggestion
-            || sender is not System.Windows.Controls.TextBox editableTextBox
+            || e.OriginalSource is not System.Windows.Controls.TextBox editableTextBox
             || !editableTextBox.IsKeyboardFocused)
         {
             return;
         }
 
-        EditorClientSuggestionsListBox.SelectedIndex = -1;
+        EditorClientComboBox.ResetKeyboardHighlight();
         if (DataContext is MainWindowViewModel viewModel)
         {
             viewModel.IsEditorClientDropDownOpen = true;
@@ -1186,10 +1163,22 @@ public partial class MainWindow : Window
     {
         Dispatcher.BeginInvoke(() =>
         {
-            EditorClientSearchTextBox.Focus();
-            Keyboard.Focus(EditorClientSearchTextBox);
-            EditorClientSearchTextBox.CaretIndex = EditorClientSearchTextBox.Text.Length;
-            EditorClientSearchTextBox.SelectionLength = 0;
+            EditorClientComboBox.ApplyTemplate();
+            if (EditorClientComboBox.Template.FindName(
+                    "PART_EditableTextBox",
+                    EditorClientComboBox)
+                is System.Windows.Controls.TextBox editableTextBox)
+            {
+                editableTextBox.Focus();
+                Keyboard.Focus(editableTextBox);
+                editableTextBox.CaretIndex = editableTextBox.Text.Length;
+                editableTextBox.SelectionLength = 0;
+                return;
+            }
+
+            EditorClientComboBox.Focus();
+            Keyboard.Focus(EditorClientComboBox);
         });
     }
+
 }
