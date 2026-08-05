@@ -161,7 +161,14 @@ public sealed class WorkEntryEditorViewModelTests
     public void WhdImageSelectionsAreTransientAndDoNotDirtyOrEnterDrafts()
     {
         var editor = new WorkEntryEditorViewModel();
-        editor.LoadNew(new DateTime(2026, 8, 5));
+        var entry = new WorkEntry
+        {
+            Id = 41,
+            WorkDate = new DateTime(2026, 8, 5),
+            ManualClientName = "Manual client",
+            Note = "Work completed"
+        };
+        editor.LoadFrom(entry, [], []);
 
         editor.AddPendingWhdImages(["C:\\Temp\\first.png", "C:\\Temp\\second.jpg"]);
 
@@ -171,7 +178,21 @@ public sealed class WorkEntryEditorViewModelTests
         var draft = editor.BuildDraft();
         Assert.DoesNotContain("first.png", System.Text.Json.JsonSerializer.Serialize(draft), StringComparison.Ordinal);
 
-        editor.LoadNew(new DateTime(2026, 8, 6));
+        editor.LoadFrom(entry, [], []);
+
+        Assert.True(editor.HasPendingWhdImages);
+        Assert.Equal(2, editor.PendingWhdImages.Count);
+
+        editor.LoadFrom(
+            new WorkEntry
+            {
+                Id = 42,
+                WorkDate = new DateTime(2026, 8, 6),
+                ManualClientName = "Another client",
+                Note = "Different work"
+            },
+            [],
+            []);
 
         Assert.False(editor.HasPendingWhdImages);
         Assert.Empty(editor.PendingWhdImages);
