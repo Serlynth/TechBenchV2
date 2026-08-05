@@ -8,12 +8,14 @@ using TechBench.Models;
 using TechBench.Providers;
 using TechBench.Services;
 using TechBench.ViewModels;
+using WpfComboBox = System.Windows.Controls.ComboBox;
 using WpfKeyEventArgs = System.Windows.Input.KeyEventArgs;
 
 namespace TechBench;
 
 public partial class MainWindow : Window
 {
+    private const string EditorClientKeyboardHighlightTag = "KeyboardHighlight";
     private readonly WindowsNotificationService _notificationService;
     private readonly LocalPreferences _localPreferences;
     private DispatcherTimer? _previewExpiryTimer;
@@ -37,7 +39,7 @@ public partial class MainWindow : Window
         _clientInfoBetaWindows = [];
     private readonly Dictionary<int, ClientInfoImportWindow>
         _clientInfoImportWindows = [];
-    private bool _isCommittingEditorClientSuggestion;
+    private int _editorClientKeyboardIndex = -1;
 
     private void HideEquipmentLane_Click(
         object sender,
@@ -734,6 +736,9 @@ public partial class MainWindow : Window
         InitializeComponent();
         _localPreferences = LocalPreferenceStore.LoadOrCreate();
         ApplyWindowPreferences();
+        EditorClientComboBox.AddHandler(
+            System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent,
+            new TextChangedEventHandler(EditorClientComboBox_TextChanged));
 
         var repository = new SqlServerTechBenchRepository(
             connectionFactory,
@@ -980,81 +985,128 @@ public partial class MainWindow : Window
         }
     }
 
-    private void EditorClientSuggestion_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    private void EditorClientComboBoxItem_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (sender is not ListBoxItem { DataContext: Client client }
+        if (sender is not ComboBoxItem { DataContext: Client client }
             || DataContext is not MainWindowViewModel viewModel
             || !viewModel.SelectEditorClientCommand.CanExecute(client))
         {
             return;
         }
 
-        CommitEditorClientSuggestion(viewModel, client);
+        viewModel.SelectEditorClientCommand.Execute(client);
         e.Handled = true;
     }
 
-    private void EditorClientSearchTextBox_PreviewKeyDown(object sender, WpfKeyEventArgs e)
+    private void EditorClientComboBox_PreviewKeyDown(object sender, WpfKeyEventArgs e)
     {
-        if (sender is not System.Windows.Controls.TextBox
+        if (sender is not WpfComboBox comboBox
             || DataContext is not MainWindowViewModel viewModel)
         {
             return;
         }
 
         if (e.Key == Key.Enter
-            && EditorClientSuggestionsListBox.SelectedItem is Client client
+            && _editorClientKeyboardIndex >= 0
+            && _editorClientKeyboardIndex < comboBox.Items.Count
+            && comboBox.Items[_editorClientKeyboardIndex] is Client client
             && viewModel.SelectEditorClientCommand.CanExecute(client))
         {
-            CommitEditorClientSuggestion(viewModel, client);
+            ClearEditorClientKeyboardHighlight(comboBox);
+            viewModel.SelectEditorClientCommand.Execute(client);
             e.Handled = true;
+            FocusEditorClient();
             return;
         }
 
         if (e.Key == Key.Escape && viewModel.IsEditorClientDropDownOpen)
         {
-            EditorClientSuggestionsListBox.SelectedIndex = -1;
+            ClearEditorClientKeyboardHighlight(comboBox);
             viewModel.IsEditorClientDropDownOpen = false;
             e.Handled = true;
+            FocusEditorClient();
             return;
         }
 
-        if (e.Key is not (Key.Up or Key.Down)
-            || EditorClientSuggestionsListBox.Items.Count == 0)
+        if (e.Key is not (Key.Up or Key.Down) || comboBox.Items.Count == 0)
         {
             return;
         }
 
+        // Do not let ComboBox's default arrow handling assign SelectedItem.
+        // Assigning it rewrites the editable search text, reruns the SQL-backed
+        // filter, and makes the list appear to blink back to its first result.
         e.Handled = true;
         viewModel.IsEditorClientDropDownOpen = true;
+        comboBox.SetCurrentValue(WpfComboBox.IsDropDownOpenProperty, true);
+
         var nextIndex = KeyboardListNavigation.GetNextIndex(
-            EditorClientSuggestionsListBox.Items.Count,
-            EditorClientSuggestionsListBox.SelectedIndex,
+            comboBox.Items.Count,
+            _editorClientKeyboardIndex,
             moveDown: e.Key == Key.Down);
-        EditorClientSuggestionsListBox.SelectedIndex = nextIndex;
-        if (EditorClientSuggestionsListBox.SelectedItem is not null)
+        _editorClientKeyboardIndex = nextIndex;
+
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Loaded,
+            () => HighlightEditorClientOption(comboBox, nextIndex));
+    }
+
+    private void ClearEditorClientKeyboardHighlight(WpfComboBox comboBox)
+    {
+        _editorClientKeyboardIndex = -1;
+        for (var index = 0; index < comboBox.Items.Count; index++)
         {
-            EditorClientSuggestionsListBox.ScrollIntoView(
-                EditorClientSuggestionsListBox.SelectedItem);
+            if (comboBox.ItemContainerGenerator.ContainerFromIndex(index) is ComboBoxItem container
+                && Equals(container.Tag, EditorClientKeyboardHighlightTag))
+            {
+                container.ClearValue(FrameworkElement.TagProperty);
+            }
         }
     }
 
-    private void CommitEditorClientSuggestion(
-        MainWindowViewModel viewModel,
-        Client client)
+    private void HighlightEditorClientOption(WpfComboBox comboBox, int index)
     {
-        _isCommittingEditorClientSuggestion = true;
-        try
+        if (index < 0 || index >= comboBox.Items.Count)
         {
-            EditorClientSuggestionsListBox.SelectedIndex = -1;
-            viewModel.SelectEditorClientCommand.Execute(client);
-            viewModel.IsEditorClientDropDownOpen = false;
-        }
-        finally
-        {
-            _isCommittingEditorClientSuggestion = false;
+            return;
         }
 
-        FocusEditorClient();
+        comboBox.SetCurrentValue(WpfComboBox.IsDropDownOpenProperty, true);
+        comboBox.ApplyTemplate();
+        comboBox.UpdateLayout();
+        ClearRealizedEditorClientHighlights(comboBox);
+        var container = comboBox.ItemContainerGenerator.ContainerFromIndex(index) as ComboBoxItem;
+        if (container is null
+            && comboBox.Template.FindName("PART_Popup", comboBox)
+                is System.Windows.Controls.Primitives.Popup { Child: { } popupChild })
+        {
+            var scrollViewer = FindVisualDescendant<ScrollViewer>(popupChild);
+            scrollViewer?.ScrollToVerticalOffset(index);
+            popupChild.UpdateLayout();
+            comboBox.UpdateLayout();
+            ClearRealizedEditorClientHighlights(comboBox);
+            container = comboBox.ItemContainerGenerator.ContainerFromIndex(index) as ComboBoxItem;
+        }
+
+        if (container is null)
+        {
+            return;
+        }
+
+        container.BringIntoView();
+        container.SetCurrentValue(FrameworkElement.TagProperty, EditorClientKeyboardHighlightTag);
+    }
+
+    private static void ClearRealizedEditorClientHighlights(WpfComboBox comboBox)
+    {
+        for (var index = 0; index < comboBox.Items.Count; index++)
+        {
+            if (comboBox.ItemContainerGenerator.ContainerFromIndex(index) is ComboBoxItem container
+                && Equals(container.Tag, EditorClientKeyboardHighlightTag))
+            {
+                container.ClearValue(FrameworkElement.TagProperty);
+            }
+        }
     }
 
     private void WhdApiTokenPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
@@ -1079,16 +1131,14 @@ public partial class MainWindow : Window
         demoWindow.ShowDialog();
     }
 
-    private void EditorClientSearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    private void EditorClientComboBox_TextChanged(object sender, TextChangedEventArgs e)
     {
-        if (_isCommittingEditorClientSuggestion
-            || sender is not System.Windows.Controls.TextBox editableTextBox
-            || !editableTextBox.IsKeyboardFocused)
+        if (e.OriginalSource is not System.Windows.Controls.TextBox editableTextBox || !editableTextBox.IsKeyboardFocused)
         {
             return;
         }
 
-        EditorClientSuggestionsListBox.SelectedIndex = -1;
+        ClearEditorClientKeyboardHighlight(EditorClientComboBox);
         if (DataContext is MainWindowViewModel viewModel)
         {
             viewModel.IsEditorClientDropDownOpen = true;
@@ -1186,10 +1236,49 @@ public partial class MainWindow : Window
     {
         Dispatcher.BeginInvoke(() =>
         {
-            EditorClientSearchTextBox.Focus();
-            Keyboard.Focus(EditorClientSearchTextBox);
-            EditorClientSearchTextBox.CaretIndex = EditorClientSearchTextBox.Text.Length;
-            EditorClientSearchTextBox.SelectionLength = 0;
+            EditorClientComboBox.ApplyTemplate();
+            if (EditorClientComboBox.Template.FindName(
+                    "PART_EditableTextBox",
+                    EditorClientComboBox)
+                is System.Windows.Controls.TextBox editableTextBox)
+            {
+                editableTextBox.Focus();
+                Keyboard.Focus(editableTextBox);
+                editableTextBox.CaretIndex = editableTextBox.Text.Length;
+                editableTextBox.SelectionLength = 0;
+                return;
+            }
+
+            EditorClientComboBox.Focus();
+            Keyboard.Focus(EditorClientComboBox);
         });
+    }
+
+    private static T? FindVisualDescendant<T>(DependencyObject? source)
+        where T : DependencyObject
+    {
+        if (source is null)
+        {
+            return null;
+        }
+
+        for (var index = 0;
+             index < System.Windows.Media.VisualTreeHelper.GetChildrenCount(source);
+             index++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(source, index);
+            if (child is T match)
+            {
+                return match;
+            }
+
+            var descendant = FindVisualDescendant<T>(child);
+            if (descendant is not null)
+            {
+                return descendant;
+            }
+        }
+
+        return null;
     }
 }
