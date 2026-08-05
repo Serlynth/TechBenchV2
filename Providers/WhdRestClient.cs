@@ -24,18 +24,33 @@ public sealed class WhdRestClient
     internal static readonly TimeSpan OptionalClientDetailTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan PostReconciliationWindow = TimeSpan.FromSeconds(20);
     private readonly HttpClient _httpClient;
+    private readonly CookieContainer? _cookieContainer;
+    private readonly SemaphoreSlim _attachmentUploadGate = new(1, 1);
     private readonly ConcurrentDictionary<string, WhdAuthParameters> _authenticationCache = new(StringComparer.Ordinal);
 
-    public WhdRestClient() : this(new HttpClient
+    public WhdRestClient()
     {
-        Timeout = DefaultRequestTimeout
-    })
+        var handler = new HttpClientHandler
+        {
+            AllowAutoRedirect = true,
+            UseCookies = true,
+            CookieContainer = new CookieContainer()
+        };
+        _cookieContainer = handler.CookieContainer;
+        _httpClient = new HttpClient(handler)
+        {
+            Timeout = DefaultRequestTimeout
+        };
+    }
+
+    public WhdRestClient(HttpClient httpClient) : this(httpClient, null)
     {
     }
 
-    public WhdRestClient(HttpClient httpClient)
+    internal WhdRestClient(HttpClient httpClient, CookieContainer? cookieContainer)
     {
         _httpClient = httpClient;
+        _cookieContainer = cookieContainer;
     }
 
     public async Task<WhdSyncResult> TestConnectionAsync(WhdConnectionSettings settings, CancellationToken cancellationToken = default)
@@ -625,57 +640,72 @@ public sealed class WhdRestClient
         var uploadedPaths = new List<string>();
         if (uploadPaths.Count > 0)
         {
-            WhdUploadSession? session = null;
+            await _attachmentUploadGate.WaitAsync(cancellationToken);
             try
             {
-                var auth = await ResolveAuthenticationAsync(settings, cancellationToken);
-                session = await CreateUploadSessionAsync(settings, auth, cancellationToken);
-                foreach (var filePath in uploadPaths)
+                WhdUploadSession? session = null;
+                try
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var upload = await UploadTechNoteImageAsync(
-                        settings,
-                        session,
-                        techNoteId,
-                        filePath,
-                        cancellationToken);
-                    if (upload.Success)
+                    var auth = await ResolveAuthenticationAsync(settings, cancellationToken);
+                    session = await CreateUploadSessionAsync(settings, auth, cancellationToken);
+                    foreach (var filePath in uploadPaths)
                     {
-                        uploadedPaths.Add(filePath);
-                    }
-                    else
-                    {
-                        failures.Add(new WhdAttachmentUploadFailure(filePath, upload.Message));
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var upload = await UploadTechNoteImageAsync(
+                            settings,
+                            session,
+                            techNoteId,
+                            filePath,
+                            cancellationToken);
+                        if (upload.Success)
+                        {
+                            uploadedPaths.Add(filePath);
+                        }
+                        else
+                        {
+                            failures.Add(new WhdAttachmentUploadFailure(filePath, upload.Message));
+                        }
                     }
                 }
-            }
-            catch (Exception ex) when (
-                ex is HttpRequestException
-                    or TaskCanceledException
-                    or JsonException
-                    or InvalidOperationException
-                    or UriFormatException
-                    or IOException
-                    or UnauthorizedAccessException)
-            {
-                foreach (var filePath in uploadPaths.Except(uploadedPaths, StringComparer.OrdinalIgnoreCase))
+                catch (Exception ex) when (
+                    ex is HttpRequestException
+                        or TaskCanceledException
+                        or JsonException
+                        or InvalidOperationException
+                        or UriFormatException
+                        or IOException
+                        or UnauthorizedAccessException)
                 {
-                    if (failures.All(failure =>
-                            !failure.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase)))
+                    foreach (var filePath in uploadPaths.Except(uploadedPaths, StringComparer.OrdinalIgnoreCase))
                     {
-                        failures.Add(new WhdAttachmentUploadFailure(filePath, ex.Message));
+                        if (failures.All(failure =>
+                                !failure.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            failures.Add(new WhdAttachmentUploadFailure(filePath, ex.Message));
+                        }
+                    }
+                }
+                finally
+                {
+                    if (session is not null)
+                    {
+                        try
+                        {
+                            await TryTerminateProbeSessionAsync(
+                                settings,
+                                session.SessionKey,
+                                CancellationToken.None);
+                        }
+                        finally
+                        {
+                            ClearUploadSessionCookie(settings, session);
+                        }
                     }
                 }
             }
             finally
             {
-                if (session is not null)
-                {
-                    await TryTerminateProbeSessionAsync(
-                        settings,
-                        session.SessionKey,
-                        CancellationToken.None);
-                }
+                _attachmentUploadGate.Release();
             }
         }
 
@@ -711,14 +741,48 @@ public sealed class WhdRestClient
                 "WHD authenticated the attachment request but did not return a temporary REST session key.");
         }
 
-        var cookieHeader = BuildSessionCookieHeader(response);
-        if (string.IsNullOrWhiteSpace(cookieHeader))
+        var uploadUri = BuildAttachmentUploadUri(settings.BaseUrl, "techNote", 1);
+        if (_cookieContainer is not null)
         {
-            throw new InvalidOperationException(
-                "WHD did not return the Java and WebObjects session cookies required for attachment uploads.");
+            var retainedJavaSessionCookie = FindCookie(_cookieContainer, uploadUri, "JSESSIONID");
+            if (retainedJavaSessionCookie is null)
+            {
+                await TryTerminateProbeSessionAsync(settings, sessionKey, CancellationToken.None);
+                throw new InvalidOperationException(
+                    "WHD created the attachment session but did not retain the JSESSIONID cookie required for attachment uploads.");
+            }
+
+            SetUploadSessionCookie(
+                _cookieContainer,
+                uploadUri,
+                retainedJavaSessionCookie,
+                sessionKey);
+            return new WhdUploadSession(
+                sessionKey,
+                string.Empty,
+                UsesAutomaticCookies: true,
+                retainedJavaSessionCookie.Value);
         }
 
-        return new WhdUploadSession(sessionKey, cookieHeader);
+        var responseCookieHeader = BuildSessionCookieHeader(response);
+        var javaSessionCookie = FindCookie(responseCookieHeader, "JSESSIONID");
+        if (javaSessionCookie is null)
+        {
+            await TryTerminateProbeSessionAsync(settings, sessionKey, CancellationToken.None);
+            throw new InvalidOperationException(
+                "WHD created the attachment session but did not provide the JSESSIONID cookie required for attachment uploads.");
+        }
+
+        var javaSession = javaSessionCookie.Value;
+        var cookieHeader = string.Join(
+            "; ",
+            $"{javaSession.Key}={javaSession.Value}",
+            $"wosid={sessionKey}");
+        return new WhdUploadSession(
+            sessionKey,
+            cookieHeader,
+            UsesAutomaticCookies: false,
+            javaSession.Value);
     }
 
     private async Task<WhdSingleAttachmentUploadResult> UploadTechNoteImageAsync(
@@ -746,7 +810,10 @@ public sealed class WhdRestClient
         {
             Content = multipart
         };
-        request.Headers.TryAddWithoutValidation("Cookie", session.CookieHeader);
+        if (!session.UsesAutomaticCookies && !string.IsNullOrWhiteSpace(session.CookieHeader))
+        {
+            request.Headers.TryAddWithoutValidation("Cookie", session.CookieHeader);
+        }
         request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
         request.Headers.Pragma.ParseAdd("no-cache");
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
@@ -755,19 +822,98 @@ public sealed class WhdRestClient
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
         if (response.IsSuccessStatusCode)
         {
+            if (response.RequestMessage?.Method != HttpMethod.Post
+                || !IsExpectedAttachmentResponseUri(requestUri, response.RequestMessage.RequestUri))
+            {
+                return WhdSingleAttachmentUploadResult.Failed(
+                    "WHD redirected the attachment request away from the upload endpoint. The image was not marked uploaded.");
+            }
+
+            if (!TryReadAttachmentId(content, out _))
+            {
+                return WhdSingleAttachmentUploadResult.Failed(
+                    "WHD returned a successful HTTP status but did not confirm an attachment ID. The image was not marked uploaded.");
+            }
+
             return WhdSingleAttachmentUploadResult.Succeeded();
         }
 
-        var details = string.IsNullOrWhiteSpace(content)
-            ? response.ReasonPhrase ?? "No response details were returned."
-            : content.Trim();
+        var details = response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
+            ? "WHD returned an attachment authentication error."
+            : string.IsNullOrWhiteSpace(content)
+                ? response.ReasonPhrase ?? "No response details were returned."
+                : SanitizeAttachmentResponseDetails(content.Trim(), session);
         if (details.Length > 500)
         {
             details = details[..500];
         }
 
+        var authenticationHint = response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
+                ? " WHD rejected the documented JSESSIONID and wosid attachment session cookies."
+                : string.Empty;
         return WhdSingleAttachmentUploadResult.Failed(
-            $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}. {details}");
+            $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}. {details}{authenticationHint}");
+    }
+
+    private static bool IsExpectedAttachmentResponseUri(Uri requestUri, Uri? responseUri)
+    {
+        if (responseUri is null)
+        {
+            return false;
+        }
+
+        return requestUri.Scheme.Equals(responseUri.Scheme, StringComparison.OrdinalIgnoreCase)
+            && requestUri.Host.Equals(responseUri.Host, StringComparison.OrdinalIgnoreCase)
+            && requestUri.Port == responseUri.Port
+            && requestUri.AbsolutePath.Equals(responseUri.AbsolutePath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryReadAttachmentId(string content, out int attachmentId)
+    {
+        attachmentId = 0;
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(content);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            attachmentId = ReadInt(document.RootElement, "id") ?? 0;
+            return attachmentId > 0;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static string SanitizeAttachmentResponseDetails(
+        string details,
+        WhdUploadSession session)
+    {
+        var sanitized = details;
+        foreach (var sensitiveValue in new[] { session.SessionKey, session.JavaSessionId })
+        {
+            if (string.IsNullOrWhiteSpace(sensitiveValue) || sensitiveValue.Length < 8)
+            {
+                continue;
+            }
+
+            sanitized = sanitized.Replace(sensitiveValue, "[redacted]", StringComparison.Ordinal);
+            var escapedValue = Uri.EscapeDataString(sensitiveValue);
+            if (!escapedValue.Equals(sensitiveValue, StringComparison.Ordinal))
+            {
+                sanitized = sanitized.Replace(escapedValue, "[redacted]", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        return sanitized;
     }
 
     private static string BuildSessionCookieHeader(HttpResponseMessage response)
@@ -783,6 +929,122 @@ public sealed class WhdRestClient
                 .Select(static header => header.Split(';', 2)[0].Trim())
                 .Where(static cookie => !string.IsNullOrWhiteSpace(cookie))
                 .Distinct(StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static KeyValuePair<string, string>? FindCookie(
+        string cookieHeader,
+        string cookieName)
+    {
+        foreach (var segment in cookieHeader.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var separatorIndex = segment.IndexOf('=');
+            if (separatorIndex <= 0)
+            {
+                continue;
+            }
+
+            var name = segment[..separatorIndex].Trim();
+            if (!name.Equals(cookieName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var value = segment[(separatorIndex + 1)..].Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return new KeyValuePair<string, string>(name, value);
+            }
+        }
+
+        return null;
+    }
+
+    private static Cookie? FindCookie(
+        CookieContainer? cookieContainer,
+        Uri requestUri,
+        string cookieName)
+    {
+        if (cookieContainer is null)
+        {
+            return null;
+        }
+
+        foreach (Cookie cookie in cookieContainer.GetCookies(requestUri))
+        {
+            if (cookie.Name.Equals(cookieName, StringComparison.OrdinalIgnoreCase)
+                && !cookie.Expired
+                && !string.IsNullOrWhiteSpace(cookie.Value))
+            {
+                return cookie;
+            }
+        }
+
+        return null;
+    }
+
+    private static void SetUploadSessionCookie(
+        CookieContainer cookieContainer,
+        Uri uploadUri,
+        Cookie javaSessionCookie,
+        string sessionKey)
+    {
+        foreach (Cookie cookie in cookieContainer.GetCookies(uploadUri))
+        {
+            if (cookie.Name.Equals("wosid", StringComparison.OrdinalIgnoreCase))
+            {
+                cookie.Expired = true;
+            }
+        }
+
+        var cookiePath = string.IsNullOrWhiteSpace(javaSessionCookie.Path)
+            ? GetAttachmentApplicationPath(uploadUri)
+            : javaSessionCookie.Path;
+        cookieContainer.Add(
+            uploadUri,
+            new Cookie("wosid", sessionKey, cookiePath)
+            {
+                Secure = uploadUri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase),
+                HttpOnly = true
+            });
+    }
+
+    private void ClearUploadSessionCookie(
+        WhdConnectionSettings settings,
+        WhdUploadSession session)
+    {
+        if (!session.UsesAutomaticCookies || _cookieContainer is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var uploadUri = BuildAttachmentUploadUri(settings.BaseUrl, "techNote", 1);
+            foreach (Cookie cookie in _cookieContainer.GetCookies(uploadUri))
+            {
+                if (cookie.Name.Equals("wosid", StringComparison.OrdinalIgnoreCase)
+                    && cookie.Value.Equals(session.SessionKey, StringComparison.Ordinal))
+                {
+                    cookie.Expired = true;
+                }
+            }
+        }
+        catch (CookieException)
+        {
+            // Session termination is best-effort; stale upload cookies must not hide the upload result.
+        }
+        catch (UriFormatException)
+        {
+            // The connection URL was validated before upload; cleanup remains best-effort.
+        }
+    }
+
+    private static string GetAttachmentApplicationPath(Uri uploadUri)
+    {
+        const string attachmentSuffix = "/attachment/upload";
+        return uploadUri.AbsolutePath.EndsWith(attachmentSuffix, StringComparison.OrdinalIgnoreCase)
+            ? uploadUri.AbsolutePath[..^attachmentSuffix.Length]
+            : "/";
     }
 
     public async Task<WhdTechNoteLookupResult> GetTechNoteAsync(
@@ -1263,6 +1525,10 @@ public sealed class WhdRestClient
         catch (HttpRequestException)
         {
             // Authentication already succeeded; WHD will expire an unclosed probe session.
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // A cleanup timeout must not replace the result of the operation that created the session.
         }
     }
 
@@ -3490,7 +3756,11 @@ public sealed class WhdRestClient
         public IEnumerable<KeyValuePair<string, string>> ToQueryParameters() => _parameters;
     }
 
-    private sealed record WhdUploadSession(string SessionKey, string CookieHeader);
+    private sealed record WhdUploadSession(
+        string SessionKey,
+        string CookieHeader,
+        bool UsesAutomaticCookies,
+        string JavaSessionId);
 
     private sealed record WhdSingleAttachmentUploadResult(bool Success, string Message)
     {
