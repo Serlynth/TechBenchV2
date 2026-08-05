@@ -8,6 +8,8 @@ using TechBench.Models;
 using TechBench.Providers;
 using TechBench.Services;
 using TechBench.ViewModels;
+using WpfComboBox = System.Windows.Controls.ComboBox;
+using WpfKeyEventArgs = System.Windows.Input.KeyEventArgs;
 
 namespace TechBench;
 
@@ -821,6 +823,107 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private void EditorClientComboBox_PreviewKeyDown(object sender, WpfKeyEventArgs e)
+    {
+        var comboBox = sender switch
+        {
+            WpfComboBox directComboBox => directComboBox,
+            ComboBoxItem comboBoxItem =>
+                ItemsControl.ItemsControlFromItemContainer(comboBoxItem) as WpfComboBox,
+            _ => null
+        };
+
+        if (comboBox is null || DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        if (e.Key == Key.Enter
+            && TryGetFocusedEditorClientOption(comboBox) is { DataContext: Client client }
+            && viewModel.SelectEditorClientCommand.CanExecute(client))
+        {
+            viewModel.SelectEditorClientCommand.Execute(client);
+            e.Handled = true;
+            FocusEditorClient();
+            return;
+        }
+
+        if (e.Key == Key.Escape && viewModel.IsEditorClientDropDownOpen)
+        {
+            viewModel.IsEditorClientDropDownOpen = false;
+            e.Handled = true;
+            FocusEditorClient();
+            return;
+        }
+
+        if (e.Key is not (Key.Up or Key.Down) || comboBox.Items.Count == 0)
+        {
+            return;
+        }
+
+        // Do not let ComboBox's default arrow handling assign SelectedItem.
+        // Assigning it rewrites the editable search text, reruns the SQL-backed
+        // filter, and makes the list appear to blink back to its first result.
+        e.Handled = true;
+        viewModel.IsEditorClientDropDownOpen = true;
+
+        var focusedContainer = TryGetFocusedEditorClientOption(comboBox);
+        var currentIndex = focusedContainer is null
+            ? -1
+            : comboBox.ItemContainerGenerator.IndexFromContainer(focusedContainer);
+        var nextIndex = KeyboardListNavigation.GetNextIndex(
+            comboBox.Items.Count,
+            currentIndex,
+            moveDown: e.Key == Key.Down);
+
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Loaded,
+            () => FocusEditorClientOption(comboBox, nextIndex));
+    }
+
+    private static ComboBoxItem? TryGetFocusedEditorClientOption(WpfComboBox comboBox)
+    {
+        var focusedContainer = FindVisualAncestor<ComboBoxItem>(
+            Keyboard.FocusedElement as DependencyObject);
+        return focusedContainer is not null
+               && ReferenceEquals(
+                   ItemsControl.ItemsControlFromItemContainer(focusedContainer),
+                   comboBox)
+            ? focusedContainer
+            : null;
+    }
+
+    private static void FocusEditorClientOption(WpfComboBox comboBox, int index)
+    {
+        if (index < 0 || index >= comboBox.Items.Count)
+        {
+            return;
+        }
+
+        comboBox.ApplyTemplate();
+        comboBox.UpdateLayout();
+        var container = comboBox.ItemContainerGenerator.ContainerFromIndex(index) as ComboBoxItem;
+        if (container is null
+            && comboBox.Template.FindName("PART_Popup", comboBox)
+                is System.Windows.Controls.Primitives.Popup { Child: { } popupChild })
+        {
+            var scrollViewer = FindVisualDescendant<ScrollViewer>(popupChild);
+            scrollViewer?.ScrollToVerticalOffset(index);
+            popupChild.UpdateLayout();
+            comboBox.UpdateLayout();
+            container = comboBox.ItemContainerGenerator.ContainerFromIndex(index) as ComboBoxItem;
+        }
+
+        if (container is null)
+        {
+            return;
+        }
+
+        container.BringIntoView();
+        container.Focus();
+        Keyboard.Focus(container);
+    }
+
     private void WhdApiTokenPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
     {
         if (sender is PasswordBox passwordBox && DataContext is MainWindowViewModel viewModel)
@@ -947,8 +1050,49 @@ public partial class MainWindow : Window
     {
         Dispatcher.BeginInvoke(() =>
         {
+            EditorClientComboBox.ApplyTemplate();
+            if (EditorClientComboBox.Template.FindName(
+                    "PART_EditableTextBox",
+                    EditorClientComboBox)
+                is System.Windows.Controls.TextBox editableTextBox)
+            {
+                editableTextBox.Focus();
+                Keyboard.Focus(editableTextBox);
+                editableTextBox.CaretIndex = editableTextBox.Text.Length;
+                editableTextBox.SelectionLength = 0;
+                return;
+            }
+
             EditorClientComboBox.Focus();
             Keyboard.Focus(EditorClientComboBox);
         });
+    }
+
+    private static T? FindVisualDescendant<T>(DependencyObject? source)
+        where T : DependencyObject
+    {
+        if (source is null)
+        {
+            return null;
+        }
+
+        for (var index = 0;
+             index < System.Windows.Media.VisualTreeHelper.GetChildrenCount(source);
+             index++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(source, index);
+            if (child is T match)
+            {
+                return match;
+            }
+
+            var descendant = FindVisualDescendant<T>(child);
+            if (descendant is not null)
+            {
+                return descendant;
+            }
+        }
+
+        return null;
     }
 }
