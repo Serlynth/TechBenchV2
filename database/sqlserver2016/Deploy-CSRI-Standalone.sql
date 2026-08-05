@@ -4945,10 +4945,11 @@ BEGIN TRY
         WHERE [name] = N'FK_ClientAttachments_Equipment'
           AND [parent_object_id] = OBJECT_ID(N'tb_client.ClientAttachments')
     )
-        ALTER TABLE [tb_client].[ClientAttachments] WITH CHECK
-            ADD CONSTRAINT [FK_ClientAttachments_Equipment]
-                FOREIGN KEY ([EquipmentId])
-                REFERENCES [tb_inventory].[Equipment]([EquipmentId]);
+        EXEC sys.sp_executesql N'
+            ALTER TABLE [tb_client].[ClientAttachments] WITH CHECK
+                ADD CONSTRAINT [FK_ClientAttachments_Equipment]
+                    FOREIGN KEY ([EquipmentId])
+                    REFERENCES [tb_inventory].[Equipment]([EquipmentId]);';
 
     IF NOT EXISTS
     (
@@ -4957,11 +4958,12 @@ BEGIN TRY
         WHERE [name] = N'IX_ClientAttachments_EquipmentStatusDate'
           AND [object_id] = OBJECT_ID(N'tb_client.ClientAttachments')
     )
-        CREATE INDEX [IX_ClientAttachments_EquipmentStatusDate]
-            ON [tb_client].[ClientAttachments]
-                ([EquipmentId], [IsArchived], [UploadedAtUtc] DESC)
-            INCLUDE ([OriginalFileName], [Category], [ContentType])
-            WHERE [EquipmentId] IS NOT NULL;
+        EXEC sys.sp_executesql N'
+            CREATE INDEX [IX_ClientAttachments_EquipmentStatusDate]
+                ON [tb_client].[ClientAttachments]
+                    ([EquipmentId], [IsArchived], [UploadedAtUtc] DESC)
+                INCLUDE ([OriginalFileName], [Category], [ContentType])
+                WHERE [EquipmentId] IS NOT NULL;';
 
     IF NOT EXISTS
     (

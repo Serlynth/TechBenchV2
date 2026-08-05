@@ -157,6 +157,9 @@ public sealed class ClientAttachmentTests
         Assert.Contains("[ContentSha256] binary(32)", schema, StringComparison.Ordinal);
         Assert.Contains("[EquipmentId] bigint NULL", schema, StringComparison.Ordinal);
         Assert.Contains("FK_ClientAttachments_Equipment", schema, StringComparison.Ordinal);
+        Assert.Equal(
+            2,
+            CountOccurrences(schema, "EXEC sys.sp_executesql"));
         Assert.DoesNotContain("varbinary(max)", schema, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("GetClientAttachmentStorageConfiguration", procedures, StringComparison.Ordinal);
         Assert.Contains("SetClientInfoAttachmentEquipmentLink", procedures, StringComparison.Ordinal);
