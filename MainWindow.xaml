@@ -247,7 +247,13 @@
                TargetType="{x:Type ComboBoxItem}"
                BasedOn="{StaticResource {x:Type ComboBoxItem}}">
             <EventSetter Event="PreviewMouseLeftButtonUp" Handler="EditorClientComboBoxItem_PreviewMouseLeftButtonUp" />
-            <EventSetter Event="PreviewKeyDown" Handler="EditorClientComboBox_PreviewKeyDown" />
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="KeyboardHighlight">
+                    <Setter Property="Background" Value="{DynamicResource ComboBoxHighlightBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource ComboBoxHighlightTextBrush}" />
+                    <Setter Property="TextElement.Foreground" Value="{DynamicResource ComboBoxHighlightTextBrush}" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
 
         <DataTemplate x:Key="TicketSelectorItemTemplate">

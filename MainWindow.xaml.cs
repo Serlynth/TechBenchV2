@@ -15,6 +15,7 @@ namespace TechBench;
 
 public partial class MainWindow : Window
 {
+    private const string EditorClientKeyboardHighlightTag = "KeyboardHighlight";
     private readonly WindowsNotificationService _notificationService;
     private readonly LocalPreferences _localPreferences;
     private DispatcherTimer? _previewExpiryTimer;
@@ -34,6 +35,7 @@ public partial class MainWindow : Window
     private bool _equipmentLaneDragStarted;
     private GridLength _expandedEquipmentDeploymentHeight =
         new(230, GridUnitType.Pixel);
+    private int _editorClientKeyboardIndex = -1;
 
     private void HideEquipmentLane_Click(
         object sender,
@@ -825,23 +827,19 @@ public partial class MainWindow : Window
 
     private void EditorClientComboBox_PreviewKeyDown(object sender, WpfKeyEventArgs e)
     {
-        var comboBox = sender switch
-        {
-            WpfComboBox directComboBox => directComboBox,
-            ComboBoxItem comboBoxItem =>
-                ItemsControl.ItemsControlFromItemContainer(comboBoxItem) as WpfComboBox,
-            _ => null
-        };
-
-        if (comboBox is null || DataContext is not MainWindowViewModel viewModel)
+        if (sender is not WpfComboBox comboBox
+            || DataContext is not MainWindowViewModel viewModel)
         {
             return;
         }
 
         if (e.Key == Key.Enter
-            && TryGetFocusedEditorClientOption(comboBox) is { DataContext: Client client }
+            && _editorClientKeyboardIndex >= 0
+            && _editorClientKeyboardIndex < comboBox.Items.Count
+            && comboBox.Items[_editorClientKeyboardIndex] is Client client
             && viewModel.SelectEditorClientCommand.CanExecute(client))
         {
+            ClearEditorClientKeyboardHighlight(comboBox);
             viewModel.SelectEditorClientCommand.Execute(client);
             e.Handled = true;
             FocusEditorClient();
@@ -850,6 +848,7 @@ public partial class MainWindow : Window
 
         if (e.Key == Key.Escape && viewModel.IsEditorClientDropDownOpen)
         {
+            ClearEditorClientKeyboardHighlight(comboBox);
             viewModel.IsEditorClientDropDownOpen = false;
             e.Handled = true;
             FocusEditorClient();
@@ -866,42 +865,43 @@ public partial class MainWindow : Window
         // filter, and makes the list appear to blink back to its first result.
         e.Handled = true;
         viewModel.IsEditorClientDropDownOpen = true;
+        comboBox.SetCurrentValue(WpfComboBox.IsDropDownOpenProperty, true);
 
-        var focusedContainer = TryGetFocusedEditorClientOption(comboBox);
-        var currentIndex = focusedContainer is null
-            ? -1
-            : comboBox.ItemContainerGenerator.IndexFromContainer(focusedContainer);
         var nextIndex = KeyboardListNavigation.GetNextIndex(
             comboBox.Items.Count,
-            currentIndex,
+            _editorClientKeyboardIndex,
             moveDown: e.Key == Key.Down);
+        _editorClientKeyboardIndex = nextIndex;
 
         Dispatcher.BeginInvoke(
             DispatcherPriority.Loaded,
-            () => FocusEditorClientOption(comboBox, nextIndex));
+            () => HighlightEditorClientOption(comboBox, nextIndex));
     }
 
-    private static ComboBoxItem? TryGetFocusedEditorClientOption(WpfComboBox comboBox)
+    private void ClearEditorClientKeyboardHighlight(WpfComboBox comboBox)
     {
-        var focusedContainer = FindVisualAncestor<ComboBoxItem>(
-            Keyboard.FocusedElement as DependencyObject);
-        return focusedContainer is not null
-               && ReferenceEquals(
-                   ItemsControl.ItemsControlFromItemContainer(focusedContainer),
-                   comboBox)
-            ? focusedContainer
-            : null;
+        _editorClientKeyboardIndex = -1;
+        for (var index = 0; index < comboBox.Items.Count; index++)
+        {
+            if (comboBox.ItemContainerGenerator.ContainerFromIndex(index) is ComboBoxItem container
+                && Equals(container.Tag, EditorClientKeyboardHighlightTag))
+            {
+                container.ClearValue(FrameworkElement.TagProperty);
+            }
+        }
     }
 
-    private static void FocusEditorClientOption(WpfComboBox comboBox, int index)
+    private void HighlightEditorClientOption(WpfComboBox comboBox, int index)
     {
         if (index < 0 || index >= comboBox.Items.Count)
         {
             return;
         }
 
+        comboBox.SetCurrentValue(WpfComboBox.IsDropDownOpenProperty, true);
         comboBox.ApplyTemplate();
         comboBox.UpdateLayout();
+        ClearRealizedEditorClientHighlights(comboBox);
         var container = comboBox.ItemContainerGenerator.ContainerFromIndex(index) as ComboBoxItem;
         if (container is null
             && comboBox.Template.FindName("PART_Popup", comboBox)
@@ -911,6 +911,7 @@ public partial class MainWindow : Window
             scrollViewer?.ScrollToVerticalOffset(index);
             popupChild.UpdateLayout();
             comboBox.UpdateLayout();
+            ClearRealizedEditorClientHighlights(comboBox);
             container = comboBox.ItemContainerGenerator.ContainerFromIndex(index) as ComboBoxItem;
         }
 
@@ -920,8 +921,19 @@ public partial class MainWindow : Window
         }
 
         container.BringIntoView();
-        container.Focus();
-        Keyboard.Focus(container);
+        container.SetCurrentValue(FrameworkElement.TagProperty, EditorClientKeyboardHighlightTag);
+    }
+
+    private static void ClearRealizedEditorClientHighlights(WpfComboBox comboBox)
+    {
+        for (var index = 0; index < comboBox.Items.Count; index++)
+        {
+            if (comboBox.ItemContainerGenerator.ContainerFromIndex(index) is ComboBoxItem container
+                && Equals(container.Tag, EditorClientKeyboardHighlightTag))
+            {
+                container.ClearValue(FrameworkElement.TagProperty);
+            }
+        }
     }
 
     private void WhdApiTokenPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
@@ -953,6 +965,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        ClearEditorClientKeyboardHighlight(EditorClientComboBox);
         if (DataContext is MainWindowViewModel viewModel)
         {
             viewModel.IsEditorClientDropDownOpen = true;
