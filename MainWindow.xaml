@@ -239,47 +239,21 @@
 
         <DataTemplate x:Key="EditorClientOptionTemplate">
             <TextBlock Text="{Binding DisplayName}"
+                       Foreground="{DynamicResource ComboBoxTextBrush}"
                        TextTrimming="CharacterEllipsis" />
         </DataTemplate>
 
-        <Style x:Key="EditorClientSuggestionListStyle" TargetType="{x:Type ListBox}">
-            <Setter Property="Background" Value="{DynamicResource ComboBoxBackgroundBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource ComboBoxBorderBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="MaxHeight" Value="260" />
-            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
-            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
-        </Style>
-
-        <Style x:Key="EditorClientSuggestionItemStyle" TargetType="{x:Type ListBoxItem}">
-            <Setter Property="Foreground" Value="{DynamicResource ComboBoxTextBrush}" />
-            <Setter Property="Background" Value="{DynamicResource ComboBoxBackgroundBrush}" />
-            <Setter Property="Padding" Value="10,7" />
-            <Setter Property="MinHeight" Value="32" />
-            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-            <EventSetter Event="PreviewMouseLeftButtonUp" Handler="EditorClientSuggestion_PreviewMouseLeftButtonUp" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type ListBoxItem}">
-                        <Border x:Name="ItemBorder"
-                                Background="{TemplateBinding Background}"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource ComboBoxHighlightBrush}" />
-                                <Setter Property="Foreground" Value="{DynamicResource ComboBoxHighlightTextBrush}" />
-                            </Trigger>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource ComboBoxHighlightBrush}" />
-                                <Setter Property="Foreground" Value="{DynamicResource ComboBoxHighlightTextBrush}" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
+        <Style x:Key="EditorClientComboBoxItemStyle"
+               TargetType="{x:Type ComboBoxItem}"
+               BasedOn="{StaticResource {x:Type ComboBoxItem}}">
+            <EventSetter Event="PreviewMouseLeftButtonUp" Handler="EditorClientComboBoxItem_PreviewMouseLeftButtonUp" />
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="KeyboardHighlight">
+                    <Setter Property="Background" Value="{DynamicResource ComboBoxHighlightBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource ComboBoxHighlightTextBrush}" />
+                    <Setter Property="TextElement.Foreground" Value="{DynamicResource ComboBoxHighlightTextBrush}" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
 
         <DataTemplate x:Key="TicketSelectorItemTemplate">
@@ -1147,45 +1121,26 @@
 
                                             <StackPanel Grid.Column="0">
                                                 <TextBlock Text="Client" Style="{StaticResource FieldLabelStyle}" />
-                                                <Grid>
-                                                    <TextBox x:Name="EditorClientSearchTextBox"
-                                                             Text="{Binding EditorClientFilterText, UpdateSourceTrigger=PropertyChanged}"
-                                                             TextChanged="EditorClientSearchTextBox_TextChanged"
-                                                             PreviewKeyDown="EditorClientSearchTextBox_PreviewKeyDown">
-                                                        <TextBox.Style>
-                                                            <Style TargetType="{x:Type TextBox}" BasedOn="{StaticResource {x:Type TextBox}}">
-                                                                <Style.Triggers>
-                                                                    <DataTrigger Binding="{Binding Editor.UseManualClient}" Value="True">
-                                                                        <Setter Property="IsEnabled" Value="False" />
-                                                                    </DataTrigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </TextBox.Style>
-                                                    </TextBox>
-                                                    <Popup x:Name="EditorClientSuggestionsPopup"
-                                                           PlacementTarget="{Binding ElementName=EditorClientSearchTextBox}"
-                                                           Placement="Bottom"
-                                                           HorizontalOffset="0"
-                                                           VerticalOffset="2"
-                                                           AllowsTransparency="True"
-                                                           Focusable="False"
-                                                           StaysOpen="False"
-                                                           IsOpen="{Binding IsEditorClientDropDownOpen, Mode=TwoWay}">
-                                                        <Border Width="{Binding ActualWidth, ElementName=EditorClientSearchTextBox}"
-                                                                MaxHeight="260"
-                                                                Background="{DynamicResource ComboBoxBackgroundBrush}"
-                                                                BorderBrush="{DynamicResource ComboBoxBorderBrush}"
-                                                                BorderThickness="1">
-                                                            <ListBox x:Name="EditorClientSuggestionsListBox"
-                                                                     ItemsSource="{Binding EditorClients}"
-                                                                     ItemTemplate="{StaticResource EditorClientOptionTemplate}"
-                                                                     ItemContainerStyle="{StaticResource EditorClientSuggestionItemStyle}"
-                                                                     Style="{StaticResource EditorClientSuggestionListStyle}"
-                                                                     SelectionMode="Single"
-                                                                     IsTabStop="False" />
-                                                        </Border>
-                                                    </Popup>
-                                                </Grid>
+                                                <controls:EditorClientComboBox x:Name="EditorClientComboBox"
+                                                                               ItemsSource="{Binding EditorClients}"
+                                                                               SelectedItem="{Binding Editor.SelectedClient}"
+                                                                               Text="{Binding EditorClientFilterText, UpdateSourceTrigger=PropertyChanged}"
+                                                                               TextSearch.TextPath="DisplayName"
+                                                                               IsDropDownOpen="{Binding IsEditorClientDropDownOpen, Mode=TwoWay}"
+                                                                               KeyboardClientCommitted="EditorClientComboBox_KeyboardClientCommitted"
+                                                                               ItemTemplate="{StaticResource EditorClientOptionTemplate}"
+                                                                               ItemContainerStyle="{StaticResource EditorClientComboBoxItemStyle}"
+                                                                               MaxDropDownHeight="260">
+                                                    <controls:EditorClientComboBox.Style>
+                                                        <Style TargetType="{x:Type controls:EditorClientComboBox}" BasedOn="{StaticResource SearchableComboBoxStyle}">
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding Editor.UseManualClient}" Value="True">
+                                                                    <Setter Property="IsEnabled" Value="False" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </controls:EditorClientComboBox.Style>
+                                                </controls:EditorClientComboBox>
                                                 <CheckBox Content="Use custom client"
                                                           IsChecked="{Binding Editor.UseManualClient}"
                                                           Margin="1,7,0,0" />
