@@ -106,10 +106,7 @@ public sealed class WhdRestClientTests
                         "{\"sessionKey\":\"attachment-session\",\"currentTechId\":7,\"instanceId\":-1}");
                     response.Headers.TryAddWithoutValidation(
                         "Set-Cookie",
-                        [
-                            "JSESSIONID=java-session; Path=/helpdesk; Secure; HttpOnly",
-                            "wosid=webobjects-session; Path=/helpdesk; Secure; HttpOnly"
-                        ]);
+                        "JSESSIONID=java-session; Path=/helpdesk; Secure; HttpOnly");
                     return response;
                 }
 
@@ -140,13 +137,432 @@ public sealed class WhdRestClientTests
             Assert.Contains("entityId=987", query, StringComparison.Ordinal);
             Assert.Contains("returnFields=id,uploadDate", query, StringComparison.Ordinal);
             Assert.Contains("JSESSIONID=java-session", upload.CookieHeader, StringComparison.Ordinal);
-            Assert.Contains("wosid=webobjects-session", upload.CookieHeader, StringComparison.Ordinal);
+            Assert.Contains("wosid=attachment-session", upload.CookieHeader, StringComparison.Ordinal);
+            Assert.DoesNotContain("sessionKey=", query, StringComparison.OrdinalIgnoreCase);
             Assert.StartsWith("multipart/form-data", upload.ContentType, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("name=fileUpload", upload.Body, StringComparison.Ordinal);
             Assert.Contains(Path.GetFileName(imagePath), upload.Body, StringComparison.Ordinal);
 
             var closeSession = Assert.Single(handler.Requests, request => request.Method == HttpMethod.Delete);
             Assert.Contains("sessionKey=attachment-session", closeSession.Uri?.Query, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(imagePath);
+        }
+    }
+
+    [Fact]
+    public async Task TechNoteImageUploadContinuesWhenRedirectCookiesAreHiddenFromTheFinalSessionResponse()
+    {
+        var imagePath = Path.Combine(
+            Path.GetTempPath(),
+            $"techbench-whd-redirect-{Guid.NewGuid():N}.jpg");
+        await File.WriteAllBytesAsync(imagePath, [0xff, 0xd8, 0xff, 0xd9]);
+        try
+        {
+            var cookieContainer = new CookieContainer();
+            var uploadUri = new Uri("https://whd.example.test/helpdesk/attachment/upload");
+            cookieContainer.Add(
+                uploadUri,
+                new Cookie("JSESSIONID", "redirect-java", "/helpdesk/"));
+            cookieContainer.Add(
+                uploadUri,
+                new Cookie("wosid", "redirect-webobjects", "/helpdesk/"));
+            string? cookiesDuringUpload = null;
+            var handler = new RecordingHandler(request =>
+            {
+                if (request.Method == HttpMethod.Get
+                    && request.RequestUri?.AbsolutePath.EndsWith("/Session", StringComparison.Ordinal) == true)
+                {
+                    // HttpClientHandler retains cookies set by an earlier redirect, but those
+                    // Set-Cookie headers are not repeated on the final Session response.
+                    return Json(
+                        HttpStatusCode.OK,
+                        "{\"sessionKey\":\"redirect-session\",\"currentTechId\":7,\"instanceId\":-1}");
+                }
+
+                if (request.Method == HttpMethod.Delete)
+                {
+                    return Json(HttpStatusCode.OK, "{}");
+                }
+
+                cookiesDuringUpload = cookieContainer.GetCookieHeader(uploadUri);
+                return Json(HttpStatusCode.OK, "{\"id\":12}");
+            });
+            using var httpClient = new HttpClient(handler);
+            var client = new WhdRestClient(httpClient, cookieContainer);
+
+            var result = await client.UploadTechNoteImagesAsync(
+                ExplicitSettings(),
+                987,
+                [imagePath]);
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal([imagePath], result.UploadedFilePaths);
+            var upload = Assert.Single(handler.Requests, request => request.Method == HttpMethod.Post);
+            Assert.Empty(upload.CookieHeader);
+            Assert.DoesNotContain(
+                "sessionKey=",
+                Uri.UnescapeDataString(upload.Uri?.Query ?? string.Empty),
+                StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("JSESSIONID=redirect-java", cookiesDuringUpload, StringComparison.Ordinal);
+            Assert.Contains("wosid=redirect-session", cookiesDuringUpload, StringComparison.Ordinal);
+            Assert.DoesNotContain("redirect-webobjects", cookiesDuringUpload, StringComparison.Ordinal);
+            var retainedCookies = cookieContainer.GetCookieHeader(uploadUri);
+            Assert.Contains("JSESSIONID=redirect-java", retainedCookies, StringComparison.Ordinal);
+            Assert.DoesNotContain("wosid=", retainedCookies, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("redirect-webobjects", retainedCookies, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(imagePath);
+        }
+    }
+
+    [Fact]
+    public async Task TechNoteImageUploadFailsClosedWhenWhdDoesNotProvideJavaSessionCookie()
+    {
+        var imagePath = Path.Combine(
+            Path.GetTempPath(),
+            $"techbench-whd-auth-{Guid.NewGuid():N}.png");
+        await File.WriteAllBytesAsync(imagePath, [0x89, 0x50, 0x4e, 0x47]);
+        try
+        {
+            var handler = new RecordingHandler(request =>
+            {
+                if (request.Method == HttpMethod.Get)
+                {
+                    var response = Json(
+                        HttpStatusCode.OK,
+                        "{\"sessionKey\":\"temporary-session\",\"currentTechId\":7,\"instanceId\":-1}");
+                    response.Headers.TryAddWithoutValidation(
+                        "Set-Cookie",
+                        "proxy-affinity=do-not-disclose; Path=/; Secure; HttpOnly");
+                    return response;
+                }
+
+                return Json(HttpStatusCode.OK, "{}");
+            });
+            using var httpClient = new HttpClient(handler);
+            var client = new WhdRestClient(httpClient);
+
+            var result = await client.UploadTechNoteImagesAsync(
+                ExplicitSettings(),
+                987,
+                [imagePath]);
+
+            Assert.False(result.Success);
+            var failure = Assert.Single(result.Failures);
+            Assert.Equal(imagePath, failure.FilePath);
+            Assert.Contains("JSESSIONID", failure.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("do-not-disclose", failure.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Post);
+            Assert.Contains(handler.Requests, request => request.Method == HttpMethod.Delete);
+        }
+        finally
+        {
+            File.Delete(imagePath);
+        }
+    }
+
+    [Fact]
+    public async Task TechNoteImageUploadDoesNotRehomeFinalResponseCookieInAutomaticMode()
+    {
+        var imagePath = Path.Combine(
+            Path.GetTempPath(),
+            $"techbench-whd-fresh-{Guid.NewGuid():N}.png");
+        await File.WriteAllBytesAsync(imagePath, [0x89, 0x50, 0x4e, 0x47]);
+        try
+        {
+            var cookieContainer = new CookieContainer();
+            var uploadUri = new Uri("https://whd.example.test/helpdesk/attachment/upload");
+            cookieContainer.Add(uploadUri, new Cookie("JSESSIONID", "origin-scoped-java", "/helpdesk/"));
+            cookieContainer.Add(uploadUri, new Cookie("wosid", "old-webobjects", "/helpdesk/"));
+            string? cookiesDuringUpload = null;
+            var handler = new RecordingHandler(request =>
+            {
+                if (request.Method == HttpMethod.Get)
+                {
+                    var response = Json(
+                        HttpStatusCode.OK,
+                        "{\"sessionKey\":\"current-rest-session\",\"currentTechId\":7,\"instanceId\":-1}");
+                    response.Headers.TryAddWithoutValidation(
+                        "Set-Cookie",
+                        "JSESSIONID=untrusted-final-response; Path=/; Secure; HttpOnly");
+                    return response;
+                }
+
+                if (request.Method == HttpMethod.Post)
+                {
+                    cookiesDuringUpload = cookieContainer.GetCookieHeader(uploadUri);
+                }
+
+                return Json(HttpStatusCode.OK, request.Method == HttpMethod.Post ? "{\"id\":13}" : "{}");
+            });
+            using var httpClient = new HttpClient(handler);
+            var client = new WhdRestClient(httpClient, cookieContainer);
+
+            var result = await client.UploadTechNoteImagesAsync(
+                ExplicitSettings(),
+                987,
+                [imagePath]);
+
+            Assert.True(result.Success, result.Message);
+            Assert.Contains("JSESSIONID=origin-scoped-java", cookiesDuringUpload, StringComparison.Ordinal);
+            Assert.Contains("wosid=current-rest-session", cookiesDuringUpload, StringComparison.Ordinal);
+            Assert.DoesNotContain("untrusted-final-response", cookiesDuringUpload, StringComparison.Ordinal);
+            Assert.DoesNotContain("old-webobjects", cookiesDuringUpload, StringComparison.Ordinal);
+            var retainedCookies = cookieContainer.GetCookieHeader(uploadUri);
+            Assert.Contains("JSESSIONID=origin-scoped-java", retainedCookies, StringComparison.Ordinal);
+            Assert.DoesNotContain("wosid=", retainedCookies, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("old-webobjects", retainedCookies, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(imagePath);
+        }
+    }
+
+    [Fact]
+    public async Task TechNoteImageUploadBuildsWebObjectsCookieFromCurrentRestSession()
+    {
+        var imagePath = Path.Combine(
+            Path.GetTempPath(),
+            $"techbench-whd-no-wosid-{Guid.NewGuid():N}.jpg");
+        await File.WriteAllBytesAsync(imagePath, [0xff, 0xd8, 0xff, 0xd9]);
+        try
+        {
+            var handler = new RecordingHandler(request =>
+            {
+                if (request.Method == HttpMethod.Get)
+                {
+                    var response = Json(
+                        HttpStatusCode.OK,
+                        "{\"sessionKey\":\"temporary-session\",\"currentTechId\":7,\"instanceId\":-1}");
+                    response.Headers.TryAddWithoutValidation(
+                        "Set-Cookie",
+                        "JSESSIONID=java-only; Path=/helpdesk; Secure; HttpOnly");
+                    return response;
+                }
+
+                return Json(
+                    HttpStatusCode.OK,
+                    request.Method == HttpMethod.Post ? "{\"id\":14}" : "{}");
+            });
+            using var httpClient = new HttpClient(handler);
+            var client = new WhdRestClient(httpClient);
+
+            var result = await client.UploadTechNoteImagesAsync(
+                ExplicitSettings(),
+                987,
+                [imagePath]);
+
+            Assert.True(result.Success, result.Message);
+            var upload = Assert.Single(handler.Requests, request => request.Method == HttpMethod.Post);
+            Assert.Contains("JSESSIONID=java-only", upload.CookieHeader, StringComparison.Ordinal);
+            Assert.Contains("wosid=temporary-session", upload.CookieHeader, StringComparison.Ordinal);
+            Assert.Contains(handler.Requests, request => request.Method == HttpMethod.Delete);
+        }
+        finally
+        {
+            File.Delete(imagePath);
+        }
+    }
+
+    [Fact]
+    public async Task TechNoteImageUploadRejectsRedirectedHtmlSuccessResponse()
+    {
+        var imagePath = Path.Combine(
+            Path.GetTempPath(),
+            $"techbench-whd-login-{Guid.NewGuid():N}.png");
+        await File.WriteAllBytesAsync(imagePath, [0x89, 0x50, 0x4e, 0x47]);
+        try
+        {
+            var handler = new RecordingHandler(request =>
+            {
+                if (request.Method == HttpMethod.Get)
+                {
+                    var response = Json(
+                        HttpStatusCode.OK,
+                        "{\"sessionKey\":\"redirected-session\",\"currentTechId\":7,\"instanceId\":-1}");
+                    response.Headers.TryAddWithoutValidation(
+                        "Set-Cookie",
+                        "JSESSIONID=redirected-java; Path=/helpdesk; Secure; HttpOnly");
+                    return response;
+                }
+
+                if (request.Method == HttpMethod.Delete)
+                {
+                    return Json(HttpStatusCode.OK, "{}");
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    RequestMessage = new HttpRequestMessage(
+                        HttpMethod.Get,
+                        "https://whd.example.test/helpdesk/login"),
+                    Content = new StringContent("<html>Sign in</html>", Encoding.UTF8, "text/html")
+                };
+            });
+            using var httpClient = new HttpClient(handler);
+            var client = new WhdRestClient(httpClient);
+
+            var result = await client.UploadTechNoteImagesAsync(
+                ExplicitSettings(),
+                987,
+                [imagePath]);
+
+            Assert.False(result.Success);
+            Assert.Empty(result.UploadedFilePaths);
+            Assert.Contains(
+                "redirected",
+                Assert.Single(result.Failures).Message,
+                StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.Delete(imagePath);
+        }
+    }
+
+    [Fact]
+    public async Task TechNoteImageUploadRequiresConfirmedAttachmentId()
+    {
+        var imagePath = Path.Combine(
+            Path.GetTempPath(),
+            $"techbench-whd-unconfirmed-{Guid.NewGuid():N}.jpg");
+        await File.WriteAllBytesAsync(imagePath, [0xff, 0xd8, 0xff, 0xd9]);
+        try
+        {
+            var handler = new RecordingHandler(request =>
+            {
+                if (request.Method == HttpMethod.Get)
+                {
+                    var response = Json(
+                        HttpStatusCode.OK,
+                        "{\"sessionKey\":\"unconfirmed-session\",\"currentTechId\":7,\"instanceId\":-1}");
+                    response.Headers.TryAddWithoutValidation(
+                        "Set-Cookie",
+                        "JSESSIONID=unconfirmed-java; Path=/helpdesk; Secure; HttpOnly");
+                    return response;
+                }
+
+                return Json(HttpStatusCode.OK, "{}");
+            });
+            using var httpClient = new HttpClient(handler);
+            var client = new WhdRestClient(httpClient);
+
+            var result = await client.UploadTechNoteImagesAsync(
+                ExplicitSettings(),
+                987,
+                [imagePath]);
+
+            Assert.False(result.Success);
+            Assert.Contains(
+                "attachment ID",
+                Assert.Single(result.Failures).Message,
+                StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.Delete(imagePath);
+        }
+    }
+
+    [Fact]
+    public async Task TechNoteImageUploadCleanupTimeoutDoesNotReplaceSuccessfulResult()
+    {
+        var imagePath = Path.Combine(
+            Path.GetTempPath(),
+            $"techbench-whd-cleanup-{Guid.NewGuid():N}.png");
+        await File.WriteAllBytesAsync(imagePath, [0x89, 0x50, 0x4e, 0x47]);
+        try
+        {
+            var handler = new RecordingHandler(request =>
+            {
+                if (request.Method == HttpMethod.Get)
+                {
+                    var response = Json(
+                        HttpStatusCode.OK,
+                        "{\"sessionKey\":\"cleanup-session\",\"currentTechId\":7,\"instanceId\":-1}");
+                    response.Headers.TryAddWithoutValidation(
+                        "Set-Cookie",
+                        "JSESSIONID=cleanup-java; Path=/helpdesk; Secure; HttpOnly");
+                    return response;
+                }
+
+                if (request.Method == HttpMethod.Delete)
+                {
+                    throw new TaskCanceledException("Cleanup timed out.");
+                }
+
+                return Json(HttpStatusCode.OK, "{\"id\":15}");
+            });
+            using var httpClient = new HttpClient(handler);
+            var client = new WhdRestClient(httpClient);
+
+            var result = await client.UploadTechNoteImagesAsync(
+                ExplicitSettings(),
+                987,
+                [imagePath]);
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal([imagePath], result.UploadedFilePaths);
+            Assert.Contains(handler.Requests, request => request.Method == HttpMethod.Delete);
+        }
+        finally
+        {
+            File.Delete(imagePath);
+        }
+    }
+
+    [Fact]
+    public async Task TechNoteImageUploadRedactsSessionValuesFromWhdFailureDetails()
+    {
+        const string javaSessionId = "java-session-do-not-log";
+        const string restSessionKey = "rest-session-do-not-log";
+        var imagePath = Path.Combine(
+            Path.GetTempPath(),
+            $"techbench-whd-redact-{Guid.NewGuid():N}.jpg");
+        await File.WriteAllBytesAsync(imagePath, [0xff, 0xd8, 0xff, 0xd9]);
+        try
+        {
+            var handler = new RecordingHandler(request =>
+            {
+                if (request.Method == HttpMethod.Get)
+                {
+                    var response = Json(
+                        HttpStatusCode.OK,
+                        $"{{\"sessionKey\":\"{restSessionKey}\",\"currentTechId\":7,\"instanceId\":-1}}");
+                    response.Headers.TryAddWithoutValidation(
+                        "Set-Cookie",
+                        $"JSESSIONID={javaSessionId}; Path=/helpdesk; Secure; HttpOnly");
+                    return response;
+                }
+
+                if (request.Method == HttpMethod.Delete)
+                {
+                    return Json(HttpStatusCode.OK, "{}");
+                }
+
+                return Json(
+                    HttpStatusCode.BadRequest,
+                    $"Rejected JSESSIONID={javaSessionId}; wosid={restSessionKey}.");
+            });
+            using var httpClient = new HttpClient(handler);
+            var client = new WhdRestClient(httpClient);
+
+            var result = await client.UploadTechNoteImagesAsync(
+                ExplicitSettings(),
+                987,
+                [imagePath]);
+
+            Assert.False(result.Success);
+            var message = Assert.Single(result.Failures).Message;
+            Assert.Contains("[redacted]", message, StringComparison.Ordinal);
+            Assert.DoesNotContain(javaSessionId, message, StringComparison.Ordinal);
+            Assert.DoesNotContain(restSessionKey, message, StringComparison.Ordinal);
         }
         finally
         {
@@ -1050,7 +1466,9 @@ public sealed class WhdRestClientTests
                 body,
                 cookieHeader,
                 contentType));
-            return responseFactory(request);
+            var response = responseFactory(request);
+            response.RequestMessage ??= request;
+            return response;
         }
     }
 
