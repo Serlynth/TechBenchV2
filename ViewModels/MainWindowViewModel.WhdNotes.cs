@@ -127,7 +127,8 @@ public sealed partial class MainWindowViewModel
             return false;
         }
 
-        var localText = NormalizeWhdNote(WhdNoteTextFormatter.BuildWhdNoteText(entry));
+        var localNote = WhdNoteTextFormatter.BuildWhdNoteText(entry);
+        var localText = NormalizeWhdNote(localNote);
         var remoteText = NormalizeWhdNote(remote.NoteText);
         var snapshotText = lastSyncedNote is null ? null : NormalizeWhdNote(lastSyncedNote);
         var syncDecision = DecideWhdNoteSync(localText, remoteText, snapshotText);
@@ -136,10 +137,10 @@ public sealed partial class MainWindowViewModel
         {
             RecordWhdSyncSuccess(
                 entry,
-                remote.NoteText,
+                localNote,
                 $"Verified WHD TechNote #{techNoteId}; the Sage/WHD Note is synchronized.",
                 trackingLog.ExternalReference!,
-                BuildWhdNoteSnapshotPayload(remote.NoteText),
+                BuildWhdNoteSnapshotPayload(localNote),
                 refreshAfter);
             return true;
         }
@@ -398,7 +399,7 @@ public sealed partial class MainWindowViewModel
         new JsonSerializerOptions { WriteIndented = true });
 
     private static string NormalizeWhdNote(string? noteText) =>
-        (noteText ?? string.Empty).ReplaceLineEndings("\n").Trim();
+        WhdRestClient.NormalizeNoteForComparison(noteText);
 
     internal static WhdNoteSyncDecision DecideWhdNoteSync(
         string? localNote,

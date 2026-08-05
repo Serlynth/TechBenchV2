@@ -8,6 +8,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using TechBench.Models;
 
 namespace TechBench.Providers;
@@ -825,7 +826,7 @@ public sealed class WhdRestClient
                         HttpStatusCode.Forbidden => WhdTechNoteLookupResult.Failed(
                             $"Web Help Desk denied access to TechNote #{techNoteId}. The current technician may not have access to the ticket's tech group."),
                         HttpStatusCode.NotFound => WhdTechNoteLookupResult.Failed(
-                            $"Web Help Desk ticket #{ticketId} or TechNote #{techNoteId} was not found."),
+                            $"Web Help Desk returned HTTP 404 while reading ticket #{ticketId}'s TechNotes. TechBench could not conclusively verify whether TechNote #{techNoteId} is missing."),
                         _ => WhdTechNoteLookupResult.Failed(
                             $"Web Help Desk could not read TechNote #{techNoteId}: HTTP {(int)response.StatusCode} {response.ReasonPhrase}. {details}")
                     };
@@ -858,7 +859,8 @@ public sealed class WhdRestClient
                 }
             }
 
-            return WhdTechNoteLookupResult.Failed(
+            return WhdTechNoteLookupResult.NotFound(
+                techNoteId,
                 $"Web Help Desk ticket #{ticketId} is available, but TechNote #{techNoteId} was not found.");
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
@@ -931,15 +933,18 @@ public sealed class WhdRestClient
             WhdTechNoteLookupResult? verification = null;
             foreach (var delay in new[]
                      {
-                         TimeSpan.FromMilliseconds(150),
-                         TimeSpan.FromMilliseconds(500),
-                         TimeSpan.FromSeconds(1)
+                         TimeSpan.FromMilliseconds(250),
+                         TimeSpan.FromSeconds(1),
+                         TimeSpan.FromSeconds(2),
+                         TimeSpan.FromSeconds(4)
                      })
             {
                 await Task.Delay(delay, cancellationToken);
                 verification = await GetTechNoteAsync(settings, ticketId, techNoteId, cancellationToken);
                 if (verification.Success
-                    && NormalizeNote(verification.NoteText).Equals(NormalizeNote(noteText), StringComparison.Ordinal))
+                    && NormalizeNoteForComparison(verification.NoteText).Equals(
+                        NormalizeNoteForComparison(noteText),
+                        StringComparison.Ordinal))
                 {
                     return PostingResult.Succeeded(
                         $"Updated and verified Web Help Desk TechNote #{techNoteId}.",
@@ -968,6 +973,125 @@ public sealed class WhdRestClient
         catch (Exception ex) when (ex is InvalidOperationException or UriFormatException)
         {
             return PostingResult.Failed($"Web Help Desk TechNote update failed: {ex.Message}", payload);
+        }
+    }
+
+    public async Task<PostingResult> DeleteTechNoteAsync(
+        WhdConnectionSettings settings,
+        int ticketId,
+        int techNoteId,
+        CancellationToken cancellationToken = default)
+    {
+        var validationError = Validate(settings);
+        if (validationError is not null)
+        {
+            return PostingResult.Failed(validationError);
+        }
+
+        if (ticketId <= 0 || techNoteId <= 0)
+        {
+            return PostingResult.Failed(
+                "A valid WHD ticket and exact TechNote ID are required before deletion.");
+        }
+
+        var payload = JsonSerializer.Serialize(
+            new { ticketId, techNoteId },
+            new JsonSerializerOptions { WriteIndented = true });
+        var externalReference = $"WHD-TECHNOTE-{techNoteId}";
+        var deleteStarted = false;
+
+        try
+        {
+            var existing = await GetTechNoteAsync(
+                settings,
+                ticketId,
+                techNoteId,
+                cancellationToken);
+            if (existing.IsNotFound)
+            {
+                return PostingResult.Succeeded(
+                    $"WHD TechNote #{techNoteId} was already absent.",
+                    payload,
+                    externalReference,
+                    markPosted: false);
+            }
+
+            if (!existing.Success)
+            {
+                return PostingResult.Failed(
+                    $"TechBench could not verify WHD TechNote #{techNoteId} before deletion. {existing.Message}",
+                    payload);
+            }
+
+            var auth = await ResolveAuthenticationAsync(settings, cancellationToken);
+            var requestUri = BuildRequestUri(
+                settings.BaseUrl,
+                $"TechNotes/{techNoteId}",
+                auth,
+                new Dictionary<string, string>());
+            using var request = new HttpRequestMessage(HttpMethod.Delete, requestUri);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            deleteStarted = true;
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            var content = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode && response.StatusCode != HttpStatusCode.NotFound)
+            {
+                var details = string.IsNullOrWhiteSpace(content)
+                    ? response.ReasonPhrase ?? "No response details were returned."
+                    : content.Trim();
+                return PostingResult.Failed(
+                    $"Web Help Desk did not delete TechNote #{techNoteId}: HTTP {(int)response.StatusCode} {response.ReasonPhrase}. {details}",
+                    payload);
+            }
+
+            WhdTechNoteLookupResult? verification = null;
+            foreach (var delay in new[]
+                     {
+                         TimeSpan.FromMilliseconds(250),
+                         TimeSpan.FromSeconds(1),
+                         TimeSpan.FromSeconds(2),
+                         TimeSpan.FromSeconds(4)
+                     })
+            {
+                await Task.Delay(delay, cancellationToken);
+                verification = await GetTechNoteAsync(
+                    settings,
+                    ticketId,
+                    techNoteId,
+                    cancellationToken);
+                if (verification.IsNotFound)
+                {
+                    return PostingResult.Succeeded(
+                        $"Deleted and verified WHD TechNote #{techNoteId}.",
+                        payload,
+                        externalReference,
+                        markPosted: false);
+                }
+            }
+
+            var verificationMessage = verification?.Success == true
+                ? "WHD still returned the TechNote during verification."
+                : verification?.Message ?? "WHD did not return a conclusive verification result.";
+            return PostingResult.Uncertain(
+                $"Web Help Desk accepted deletion of TechNote #{techNoteId}, but TechBench could not verify that it is gone. {verificationMessage} The TechBench entry was kept.",
+                payload,
+                externalReference);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            return deleteStarted
+                ? PostingResult.Uncertain(
+                    $"Deletion of WHD TechNote #{techNoteId} began but could not be verified: {ex.Message} The TechBench entry was kept.",
+                    payload,
+                    externalReference)
+                : PostingResult.Failed(
+                    $"WHD TechNote deletion failed before any delete request was sent: {ex.Message}",
+                    payload);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UriFormatException)
+        {
+            return PostingResult.Failed($"WHD TechNote deletion failed: {ex.Message}", payload);
         }
     }
 
@@ -1892,7 +2016,9 @@ public sealed class WhdRestClient
                 var noteText = ReadString(noteElement, "noteText");
                 var duration = ReadDurationMinutes(noteElement);
                 if (!string.IsNullOrWhiteSpace(id)
-                    && NormalizeNote(noteText).Equals(NormalizeNote(expectedNote), StringComparison.Ordinal)
+                    && NormalizeNoteForComparison(noteText).Equals(
+                        NormalizeNoteForComparison(expectedNote),
+                        StringComparison.Ordinal)
                     && duration == expectedDurationMinutes)
                 {
                     return $"WHD-TECHNOTE-{id.Trim()}";
@@ -1977,8 +2103,32 @@ public sealed class WhdRestClient
         return null;
     }
 
-    private static string NormalizeNote(string? value) =>
-        (value ?? string.Empty).ReplaceLineEndings("\n").Trim();
+    public static string NormalizeNoteForComparison(string? value)
+    {
+        var normalized = WebUtility.HtmlDecode(value ?? string.Empty)
+            .Replace('\u00a0', ' ')
+            .ReplaceLineEndings("\n");
+        normalized = Regex.Replace(
+            normalized,
+            @"<br\s*/?>",
+            "\n",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        normalized = Regex.Replace(
+            normalized,
+            @"</p>\s*<p(?:\s[^>]*)?>",
+            "\n\n",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        normalized = Regex.Replace(
+            normalized,
+            @"^\s*<p(?:\s[^>]*)?>|</p>\s*$",
+            string.Empty,
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        return string.Join(
+                "\n",
+                normalized.Split('\n').Select(static line => line.TrimEnd()))
+            .Trim();
+    }
 
     private static string BuildTicketNotePayload(
         int ticketId,

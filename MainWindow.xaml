@@ -1783,7 +1783,7 @@
                                                     <MenuItem Header="Duplicate Entry"
                                                               Command="{Binding DuplicateEntryCommand}"
                                                               Style="{StaticResource EditorContextMenuItemStyle}" />
-                                                    <MenuItem Header="Delete Entry"
+                                                    <MenuItem Header="{Binding DeleteEntryActionLabel}"
                                                               Command="{Binding DeleteEntryCommand}"
                                                               Foreground="{DynamicResource DangerBrush}"
                                                               Style="{StaticResource EditorContextMenuItemStyle}" />
