@@ -2653,6 +2653,28 @@ public sealed class ClientInfoBetaTests
             verifier,
             StringComparison.Ordinal);
         Assert.Contains(
+            "CREATE PROCEDURE [tb_security].[GetClientInfoImportBatchResult]",
+            imports,
+            StringComparison.Ordinal);
+        var compareStart = imports.IndexOf(
+            "CREATE PROCEDURE [tb_app].[CompareClientInfoImportToFireDrill]",
+            StringComparison.Ordinal);
+        var compareEnd = imports.IndexOf("\nGO", compareStart, StringComparison.Ordinal);
+        Assert.True(compareStart >= 0 && compareEnd > compareStart);
+        var compareBody = imports[compareStart..compareEnd];
+        Assert.Contains(
+            "EXEC [tb_security].[GetClientInfoImportBatchResult]",
+            compareBody,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "EXEC [tb_app].[GetClientInfoImportBatch]",
+            compareBody,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Client Info import results do not preserve the caller security context.",
+            verifier,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "N'ResourceField'",
             imports,
             StringComparison.Ordinal);

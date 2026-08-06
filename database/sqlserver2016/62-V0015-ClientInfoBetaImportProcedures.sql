@@ -454,16 +454,16 @@ IF OBJECT_ID(N'tb_app.GetClientInfoImportBatch', N'P') IS NOT NULL
     DROP PROCEDURE [tb_app].[GetClientInfoImportBatch];
 GO
 
-CREATE PROCEDURE [tb_app].[GetClientInfoImportBatch]
+IF OBJECT_ID(N'tb_security.GetClientInfoImportBatchResult', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_security].[GetClientInfoImportBatchResult];
+GO
+
+CREATE PROCEDURE [tb_security].[GetClientInfoImportBatchResult]
     @BatchId uniqueidentifier
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
-    DECLARE @ActorSid varbinary(85),@IsManager bit,@IsAdmin bit,@IsSyncOperator bit;
-    EXEC [tb_security].[GetCurrentAccess]
-        @UserSid=@ActorSid OUTPUT,@IsManager=@IsManager OUTPUT,
-        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
     SELECT
         batch.[BatchId],batch.[ClientId],client.[Name] AS [ClientName],
         batch.[TemplateVersion],batch.[WorkbookId],batch.[State],batch.[Message],
@@ -498,6 +498,20 @@ BEGIN
     FROM [tb_import].[ClientInfoIssues]
     WHERE [BatchId]=@BatchId
     ORDER BY [IsResolved],[Severity],[IssueId];
+END;
+GO
+
+CREATE PROCEDURE [tb_app].[GetClientInfoImportBatch]
+    @BatchId uniqueidentifier
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85),@IsManager bit,@IsAdmin bit,@IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,@IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
+    EXEC [tb_security].[GetClientInfoImportBatchResult] @BatchId=@BatchId;
 END;
 GO
 
@@ -703,7 +717,7 @@ BEGIN
         @EntityId=@AuditEntityId,@RequestId=@RequestId,
         @DataJson=N'{"containsSecretValues":false}';
 
-    EXEC [tb_app].[GetClientInfoImportBatch] @BatchId=@BatchId;
+    EXEC [tb_security].[GetClientInfoImportBatchResult] @BatchId=@BatchId;
 END;
 GO
 

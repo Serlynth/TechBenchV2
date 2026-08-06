@@ -57,6 +57,7 @@ FROM
         (N'tb_app.StageClientInfoSecret',N'P'),
         (N'tb_app.ValidateClientInfoImport',N'P'),
         (N'tb_app.CompareClientInfoImportToFireDrill',N'P'),
+        (N'tb_security.GetClientInfoImportBatchResult',N'P'),
         (N'tb_app.GetClientInfoImportBatch',N'P'),
         (N'tb_app.ResolveClientInfoImportIssue',N'P'),
         (N'tb_app.ApproveClientInfoImport',N'P'),
@@ -111,6 +112,18 @@ IF @EncryptClientSecretDefinition IS NULL
    OR CHARINDEX(N'WITH EXECUTE AS OWNER',@SetClientSecretDefinition)>0
    OR CHARINDEX(N'WITH EXECUTE AS OWNER',@StageClientSecretDefinition)>0
     THROW 52511,N'Client Info secret writes do not use the protected encryption boundary.',1;
+
+DECLARE @CompareClientInfoDefinition nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.CompareClientInfoImportToFireDrill'));
+DECLARE @GetClientInfoBatchDefinition nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetClientInfoImportBatch'));
+IF @CompareClientInfoDefinition IS NULL
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER',@CompareClientInfoDefinition)=0
+   OR CHARINDEX(N'[tb_security].[GetClientInfoImportBatchResult]',@CompareClientInfoDefinition)=0
+   OR CHARINDEX(N'[tb_app].[GetClientInfoImportBatch]',@CompareClientInfoDefinition)>0
+   OR CHARINDEX(N'[tb_security].[GetCurrentAccess]',@GetClientInfoBatchDefinition)=0
+   OR CHARINDEX(N'[tb_security].[GetClientInfoImportBatchResult]',@GetClientInfoBatchDefinition)=0
+    THROW 52512,N'Client Info import results do not preserve the caller security context.',1;
 
 DECLARE @Capabilities nvarchar(max)=
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'));
