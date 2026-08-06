@@ -4224,6 +4224,11 @@
                             <StackPanel Grid.Column="2"
                                         Orientation="Horizontal"
                                         VerticalAlignment="Center">
+                                <Button Content="Build sheet template"
+                                        Command="{Binding SaveEquipmentBuildSheetTemplateCommand}"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        ToolTip="Save a current TechBench Inventory build sheet that can be completed and imported."
+                                        Margin="0,0,10,0" />
                                 <Button Content="Import build sheet"
                                         Command="{Binding ImportEquipmentBuildSheetCommand}"
                                         Style="{StaticResource SecondaryButtonStyle}"
