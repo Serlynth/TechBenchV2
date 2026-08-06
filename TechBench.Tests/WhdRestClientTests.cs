@@ -140,11 +140,136 @@ public sealed class WhdRestClientTests
             Assert.Contains("wosid=attachment-session", upload.CookieHeader, StringComparison.Ordinal);
             Assert.DoesNotContain("sessionKey=", query, StringComparison.OrdinalIgnoreCase);
             Assert.StartsWith("multipart/form-data", upload.ContentType, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("name=fileUpload", upload.Body, StringComparison.Ordinal);
+            Assert.Contains("name=file", upload.Body, StringComparison.Ordinal);
+            Assert.DoesNotContain("name=fileUpload", upload.Body, StringComparison.Ordinal);
             Assert.Contains(Path.GetFileName(imagePath), upload.Body, StringComparison.Ordinal);
 
             var closeSession = Assert.Single(handler.Requests, request => request.Method == HttpMethod.Delete);
             Assert.Contains("sessionKey=attachment-session", closeSession.Uri?.Query, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(imagePath);
+        }
+    }
+
+    [Theory]
+    [InlineData("{\"reason\":\"Required request part 'fileUpload' is not present\"}")]
+    [InlineData("Required request part 'fileUpload' is not present")]
+    public async Task TechNoteImageUploadRetriesWithLegacyPartWhenWhdExplicitlyRequiresIt(
+        string missingPartResponse)
+    {
+        var imagePath = Path.Combine(
+            Path.GetTempPath(),
+            $"techbench-whd-current-part-{Guid.NewGuid():N}.jpg");
+        await File.WriteAllBytesAsync(imagePath, [0xff, 0xd8, 0xff, 0xd9]);
+        try
+        {
+            var uploadAttempt = 0;
+            var handler = new RecordingHandler(request =>
+            {
+                if (request.Method == HttpMethod.Get
+                    && request.RequestUri?.AbsolutePath.EndsWith("/Session", StringComparison.Ordinal) == true)
+                {
+                    var response = Json(
+                        HttpStatusCode.OK,
+                        "{\"sessionKey\":\"attachment-session\",\"currentTechId\":7,\"instanceId\":-1}");
+                    response.Headers.TryAddWithoutValidation(
+                        "Set-Cookie",
+                        "JSESSIONID=java-session; Path=/helpdesk; Secure; HttpOnly");
+                    return response;
+                }
+
+                if (request.Method == HttpMethod.Delete)
+                {
+                    return Json(HttpStatusCode.OK, "{}");
+                }
+
+                uploadAttempt++;
+                return uploadAttempt == 1
+                    ? Json(
+                        HttpStatusCode.InternalServerError,
+                        missingPartResponse)
+                    : Json(HttpStatusCode.OK, "{\"id\":14}");
+            });
+            using var httpClient = new HttpClient(handler);
+            var client = new WhdRestClient(httpClient);
+
+            var result = await client.UploadTechNoteImagesAsync(
+                ExplicitSettings(),
+                987,
+                [imagePath]);
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal([imagePath], result.UploadedFilePaths);
+            Assert.Empty(result.Failures);
+            var uploads = handler.Requests
+                .Where(request => request.Method == HttpMethod.Post)
+                .ToArray();
+            Assert.Equal(2, uploads.Length);
+            Assert.Contains("name=file", uploads[0].Body, StringComparison.Ordinal);
+            Assert.DoesNotContain("name=fileUpload", uploads[0].Body, StringComparison.Ordinal);
+            Assert.Contains("name=fileUpload", uploads[1].Body, StringComparison.Ordinal);
+            Assert.All(uploads, upload =>
+            {
+                Assert.Equal("/helpdesk/attachment/upload", upload.Uri?.AbsolutePath);
+                var query = Uri.UnescapeDataString(upload.Uri?.Query ?? string.Empty);
+                Assert.Contains("type=techNote", query, StringComparison.Ordinal);
+                Assert.Contains("entityId=987", query, StringComparison.Ordinal);
+                Assert.Contains("JSESSIONID=java-session", upload.CookieHeader, StringComparison.Ordinal);
+                Assert.Contains("wosid=attachment-session", upload.CookieHeader, StringComparison.Ordinal);
+                Assert.Contains(Path.GetFileName(imagePath), upload.Body, StringComparison.Ordinal);
+            });
+        }
+        finally
+        {
+            File.Delete(imagePath);
+        }
+    }
+
+    [Fact]
+    public async Task TechNoteImageUploadDoesNotRetryAfterUncertainServerFailure()
+    {
+        var imagePath = Path.Combine(
+            Path.GetTempPath(),
+            $"techbench-whd-no-unsafe-retry-{Guid.NewGuid():N}.png");
+        await File.WriteAllBytesAsync(imagePath, [0x89, 0x50, 0x4e, 0x47]);
+        try
+        {
+            var handler = new RecordingHandler(request =>
+            {
+                if (request.Method == HttpMethod.Get
+                    && request.RequestUri?.AbsolutePath.EndsWith("/Session", StringComparison.Ordinal) == true)
+                {
+                    var response = Json(
+                        HttpStatusCode.OK,
+                        "{\"sessionKey\":\"attachment-session\",\"currentTechId\":7,\"instanceId\":-1}");
+                    response.Headers.TryAddWithoutValidation(
+                        "Set-Cookie",
+                        "JSESSIONID=java-session; Path=/helpdesk; Secure; HttpOnly");
+                    return response;
+                }
+
+                if (request.Method == HttpMethod.Delete)
+                {
+                    return Json(HttpStatusCode.OK, "{}");
+                }
+
+                return Json(
+                    HttpStatusCode.InternalServerError,
+                    "{\"reason\":\"Unexpected upload failure\"}");
+            });
+            using var httpClient = new HttpClient(handler);
+            var client = new WhdRestClient(httpClient);
+
+            var result = await client.UploadTechNoteImagesAsync(
+                ExplicitSettings(),
+                987,
+                [imagePath]);
+
+            Assert.False(result.Success);
+            Assert.Single(result.Failures);
+            Assert.Single(handler.Requests, request => request.Method == HttpMethod.Post);
         }
         finally
         {
