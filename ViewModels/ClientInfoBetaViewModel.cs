@@ -157,10 +157,35 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             _ => CanManageImports
                 && SelectedImportBatch is
                     { State: "InReview" or "ValidationFailed" or "Validated" });
+        AcceptUnverifiedImportCommand = new RelayCommand(
+            _ => AcceptUnverifiedImport(),
+            _ => CanManageImports
+                && SelectedImportBatch is
+                    { State: "InReview" or "ValidationFailed" or "Validated" }
+                && SelectedImportBatch.Issues.Any(issue =>
+                    !issue.IsResolved
+                    && issue.IssueCode.Equals(
+                        "UNVERIFIED_RECORD",
+                        StringComparison.OrdinalIgnoreCase)));
+        DiscardImportCommand = new RelayCommand(
+            _ => DiscardImport(),
+            _ => CanManageImports
+                && SelectedImportBatch is
+                    { State: "Draft" or "Parsed" or "Validated" or "InReview"
+                        or "ValidationFailed" or "Approved" });
         ApproveImportCommand = new RelayCommand(
             _ => ApproveImport(),
             _ => CanManageImports
-                && SelectedImportBatch is { State: "InReview" });
+                && SelectedImportBatch is { State: "InReview" }
+                && SelectedImportBatch.BlockingIssueCount == 0
+                && !SelectedImportBatch.Issues.Any(issue =>
+                    !issue.IsResolved
+                    && (issue.IssueCode.Equals(
+                            "UNVERIFIED_RECORD",
+                            StringComparison.OrdinalIgnoreCase)
+                        || issue.IssueCode.Equals(
+                            "NEEDS_REVIEW_RECORD",
+                            StringComparison.OrdinalIgnoreCase))));
         PromoteImportCommand = new RelayCommand(
             _ => PromoteImport(),
             _ => CanManageImports
@@ -503,6 +528,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 
             ReloadImportCommand.RaiseCanExecuteChanged();
             CompareImportCommand.RaiseCanExecuteChanged();
+            AcceptUnverifiedImportCommand.RaiseCanExecuteChanged();
+            DiscardImportCommand.RaiseCanExecuteChanged();
             ApproveImportCommand.RaiseCanExecuteChanged();
             PromoteImportCommand.RaiseCanExecuteChanged();
             OnPropertyChanged(nameof(HasSelectedImportBatch));
@@ -533,6 +560,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     public RelayCommand ImportWorkbookCommand { get; }
     public RelayCommand ReloadImportCommand { get; }
     public RelayCommand CompareImportCommand { get; }
+    public RelayCommand AcceptUnverifiedImportCommand { get; }
+    public RelayCommand DiscardImportCommand { get; }
     public RelayCommand ApproveImportCommand { get; }
     public RelayCommand PromoteImportCommand { get; }
     public AsyncRelayCommand UploadAttachmentCommand { get; }
@@ -2516,9 +2545,24 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 
         try
         {
-            SelectedImportBatch = _repository.GetClientInfoImportBatch(
-                SelectedImportBatch.BatchId);
-            StatusMessage = "Import review refreshed.";
+            if (SelectedImportBatch.State is
+                "Draft" or "Parsed" or "Validated" or "InReview" or "ValidationFailed")
+            {
+                var validated = _repository.ValidateClientInfoImport(
+                    SelectedImportBatch.BatchId);
+                SelectedImportBatch = validated.State is
+                    "InReview" or "ValidationFailed" or "Validated"
+                    ? _repository.CompareClientInfoImportToFireDrill(
+                        validated.BatchId)
+                    : validated;
+                StatusMessage = "Workbook validation and comparison checks refreshed.";
+            }
+            else
+            {
+                SelectedImportBatch = _repository.GetClientInfoImportBatch(
+                    SelectedImportBatch.BatchId);
+                StatusMessage = "Import review refreshed.";
+            }
         }
         catch (Exception exception)
         {
@@ -2546,6 +2590,75 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         catch (Exception exception)
         {
             ShowError("FireDrill comparison could not be completed", exception);
+        }
+    }
+
+    private void AcceptUnverifiedImport()
+    {
+        if (SelectedImportBatch is null)
+        {
+            return;
+        }
+
+        var count = SelectedImportBatch.Issues.Count(issue =>
+            !issue.IsResolved
+            && issue.IssueCode.Equals(
+                "UNVERIFIED_RECORD",
+                StringComparison.OrdinalIgnoreCase));
+        if (count == 0
+            || !_dialogs.Confirm(
+                "Accept remaining rows",
+                $"Mark {count} remaining unverified record(s) as Keep as-is? "
+                + "They will be accepted for import without being marked as independently verified.",
+                "Accept as Keep as-is",
+                "Cancel"))
+        {
+            return;
+        }
+
+        try
+        {
+            _repository.AcceptClientInfoImportUnverified(SelectedImportBatch);
+            var validated = _repository.ValidateClientInfoImport(
+                SelectedImportBatch.BatchId);
+            SelectedImportBatch = validated.State is
+                "InReview" or "ValidationFailed" or "Validated"
+                ? _repository.CompareClientInfoImportToFireDrill(
+                    validated.BatchId)
+                : validated;
+            StatusMessage =
+                $"Accepted {count} remaining record(s) as Keep as-is. "
+                + "The workbook can now be approved if no other review warnings remain.";
+        }
+        catch (Exception exception)
+        {
+            ShowError("Unverified rows could not be accepted", exception);
+            ReloadSelectedImport();
+        }
+    }
+
+    private void DiscardImport()
+    {
+        if (SelectedImportBatch is null
+            || !_dialogs.Confirm(
+                "Discard workbook review",
+                "Discard this staged workbook review? Client Information will not be changed.",
+                "Discard Review",
+                "Keep Review"))
+        {
+            return;
+        }
+
+        try
+        {
+            _repository.DiscardClientInfoImport(SelectedImportBatch);
+            Refresh();
+            StatusMessage = "Workbook review discarded. Client Information was not changed.";
+        }
+        catch (Exception exception)
+        {
+            ShowError("Workbook review could not be discarded", exception);
+            ReloadSelectedImport();
         }
     }
 

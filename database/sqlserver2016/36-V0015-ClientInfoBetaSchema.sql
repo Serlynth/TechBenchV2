@@ -754,6 +754,32 @@ BEGIN TRY
         );
     END;
 
+    -- A revised copy of the same workbook replaces its earlier unfinished
+    -- review. Keep the historical batch for audit purposes, but remove it
+    -- from the active migration workflow.
+    ;WITH active_workbook_reviews AS
+    (
+        SELECT
+            [BatchId],
+            ROW_NUMBER() OVER
+            (
+                PARTITION BY [ClientId], [WorkbookId]
+                ORDER BY [CreatedAtUtc] DESC, [BatchId] DESC
+            ) AS [ReviewOrder]
+        FROM [tb_import].[ClientInfoBatches]
+        WHERE [State] IN
+            (N'Draft',N'Parsed',N'Validated',N'InReview',N'ValidationFailed')
+    )
+    UPDATE batch
+    SET
+        [State]=N'Superseded',
+        [Message]=N'Replaced by a newer revision of this workbook.',
+        [UpdatedAtUtc]=SYSUTCDATETIME()
+    FROM [tb_import].[ClientInfoBatches] AS batch
+    INNER JOIN active_workbook_reviews AS review
+        ON review.[BatchId]=batch.[BatchId]
+    WHERE review.[ReviewOrder]>1;
+
     IF OBJECT_ID(N'tb_import.ClientInfoPromotionMap', N'U') IS NULL
     BEGIN
         CREATE TABLE [tb_import].[ClientInfoPromotionMap]

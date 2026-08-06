@@ -116,6 +116,10 @@ GRANT EXECUTE ON OBJECT::[tb_app].[CompareClientInfoImportToFireDrill]
     TO [tb_role_client_migration_operator];
 GRANT EXECUTE ON OBJECT::[tb_app].[ResolveClientInfoImportIssue]
     TO [tb_role_client_migration_operator];
+GRANT EXECUTE ON OBJECT::[tb_app].[AcceptClientInfoImportUnverified]
+    TO [tb_role_client_migration_operator];
+GRANT EXECUTE ON OBJECT::[tb_app].[DiscardClientInfoImport]
+    TO [tb_role_client_migration_operator];
 GRANT EXECUTE ON OBJECT::[tb_app].[ApproveClientInfoImport]
     TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[PromoteClientInfoImport]

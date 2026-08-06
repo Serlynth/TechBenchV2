@@ -337,6 +337,12 @@
                                     <Button Content="Check Against FireDrill"
                                             Command="{Binding CompareImportCommand}"
                                             Margin="0,0,8,8" />
+                                    <Button Content="Accept Remaining as Keep as-is"
+                                            Command="{Binding AcceptUnverifiedImportCommand}"
+                                            Margin="0,0,8,8" />
+                                    <Button Content="Discard Review"
+                                            Command="{Binding DiscardImportCommand}"
+                                            Margin="0,0,8,8" />
                                     <Button Content="Approve Reviewed Workbook"
                                             Command="{Binding ApproveImportCommand}"
                                             Margin="0,0,8,8" />

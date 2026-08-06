@@ -82,8 +82,11 @@ either direction without a manual reinstall.
 6. Choose **Import Completed Workbook**. Importing is idempotent and does not
    change Client Information yet.
 7. Review validation issues and use **Check Against FireDrill** to investigate
-   matches and mismatches. Correct the workbook and import a new revision when
-   needed.
+   matches and mismatches. Each warning identifies its workbook sheet and row.
+   Correct the workbook and import a new revision when needed; the new revision
+   supersedes the earlier unfinished review. Use **Accept Remaining as Keep
+   as-is** for rows that should be imported without being marked independently
+   verified, or **Discard Review** to cancel an unpromoted import.
 8. An authorized admin chooses **Approve Reviewed Workbook**, then explicitly
    chooses **Add to Client Information**.
 9. Open **CLIENTS > Client Information**, select the same client, and verify or
