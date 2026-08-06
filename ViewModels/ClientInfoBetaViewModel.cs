@@ -1728,6 +1728,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 ("Microsoft 365"
                 or "ESET"
                 or "Barracuda"
+                or "Email Security"
                 or "Core infrastructure"
                 or "Other backup"
                 or "Other security"
