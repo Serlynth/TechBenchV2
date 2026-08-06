@@ -2622,6 +2622,36 @@ public sealed class ClientInfoBetaTests
             "CompareClientInfoImportToFireDrill",
             imports,
             StringComparison.Ordinal);
+        var encryptStart = procedures.IndexOf(
+            "CREATE PROCEDURE [tb_security].[EncryptClientSecretValue]",
+            StringComparison.Ordinal);
+        var encryptEnd = procedures.IndexOf("\nGO", encryptStart, StringComparison.Ordinal);
+        var setStart = procedures.IndexOf(
+            "CREATE PROCEDURE [tb_app].[SetClientCredentialSecret]",
+            StringComparison.Ordinal);
+        var setEnd = procedures.IndexOf("\nGO", setStart, StringComparison.Ordinal);
+        var stageStart = imports.IndexOf(
+            "CREATE PROCEDURE [tb_app].[StageClientInfoSecret]",
+            StringComparison.Ordinal);
+        var stageEnd = imports.IndexOf("\nGO", stageStart, StringComparison.Ordinal);
+        Assert.True(encryptStart >= 0 && encryptEnd > encryptStart);
+        Assert.True(setStart >= 0 && setEnd > setStart);
+        Assert.True(stageStart >= 0 && stageEnd > stageStart);
+        var encryptBody = procedures[encryptStart..encryptEnd];
+        var setBody = procedures[setStart..setEnd];
+        var stageBody = imports[stageStart..stageEnd];
+        Assert.Contains("WITH EXECUTE AS OWNER", encryptBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("OPEN SYMMETRIC KEY [tb_ClientSecretKey]", encryptBody, StringComparison.Ordinal);
+        Assert.Contains("EXEC [tb_security].[EncryptClientSecretValue]", setBody, StringComparison.Ordinal);
+        Assert.Contains("EXEC [tb_security].[EncryptClientSecretValue]", stageBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("WITH EXECUTE AS OWNER", setBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("WITH EXECUTE AS OWNER", stageBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("OPEN SYMMETRIC KEY", setBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("OPEN SYMMETRIC KEY", stageBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "Client Info secret writes do not use the protected encryption boundary.",
+            verifier,
+            StringComparison.Ordinal);
         Assert.Contains(
             "N'ResourceField'",
             imports,

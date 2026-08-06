@@ -25899,6 +25899,45 @@ BEGIN
 END;
 GO
 
+IF OBJECT_ID(N'tb_security.EncryptClientSecretValue', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_security].[EncryptClientSecretValue];
+GO
+
+CREATE PROCEDURE [tb_security].[EncryptClientSecretValue]
+    @SecretValue nvarchar(max),
+    @Authenticator varbinary(32),
+    @EncryptedValue varbinary(max) OUTPUT
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF NULLIF(@SecretValue,N'') IS NULL OR @Authenticator IS NULL
+        THROW 52385,N'The client secret could not be encrypted.',1;
+
+    BEGIN TRY
+        OPEN SYMMETRIC KEY [tb_ClientSecretKey]
+            DECRYPTION BY CERTIFICATE [tb_ClientSecretCertificate];
+        SET @EncryptedValue=EncryptByKey(
+            Key_GUID(N'tb_ClientSecretKey'),
+            CONVERT(varbinary(max),@SecretValue),
+            1,
+            @Authenticator);
+        CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+    END TRY
+    BEGIN CATCH
+        IF EXISTS
+            (SELECT 1 FROM sys.openkeys WHERE [key_name]=N'tb_ClientSecretKey')
+            CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+        THROW;
+    END CATCH;
+
+    IF @EncryptedValue IS NULL OR DATALENGTH(@EncryptedValue)=0
+        THROW 52385,N'The client secret could not be encrypted.',1;
+END;
+GO
+
 IF OBJECT_ID(N'tb_app.SetClientCredentialSecret', N'P') IS NOT NULL
     DROP PROCEDURE [tb_app].[SetClientCredentialSecret];
 GO
@@ -25973,19 +26012,16 @@ BEGIN
             N'SHA2_256',
             CONVERT(varbinary(max),
                 N'ClientSecret|' + CONVERT(nvarchar(30),@SecretId)));
-
-        OPEN SYMMETRIC KEY [tb_ClientSecretKey]
-            DECRYPTION BY CERTIFICATE [tb_ClientSecretCertificate];
+        DECLARE @EncryptedValue varbinary(max);
+        EXEC [tb_security].[EncryptClientSecretValue]
+            @SecretValue=@SecretValue,
+            @Authenticator=@Authenticator,
+            @EncryptedValue=@EncryptedValue OUTPUT;
         UPDATE [tb_client].[CredentialSecrets]
-        SET [ValueEncrypted]=EncryptByKey(
-                Key_GUID(N'tb_ClientSecretKey'),
-                CONVERT(varbinary(max),@SecretValue),
-                1,
-                @Authenticator),
+        SET [ValueEncrypted]=@EncryptedValue,
             [UpdatedByWindowsSid]=@ActorSid,
             [UpdatedAtUtc]=@NowUtc
         WHERE [SecretId]=@SecretId;
-        CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
 
         IF EXISTS
         (
@@ -26003,9 +26039,6 @@ BEGIN
         COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH
-        IF EXISTS
-            (SELECT 1 FROM sys.openkeys WHERE [key_name]=N'tb_ClientSecretKey')
-            CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
         IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
         THROW;
     END CATCH;
@@ -26368,17 +26401,16 @@ BEGIN
         N'SHA2_256',
         CONVERT(varbinary(max),
             N'ClientImportSecret|' + CONVERT(nvarchar(30),@ImportSecretId)));
-    OPEN SYMMETRIC KEY [tb_ClientSecretKey]
-        DECRYPTION BY CERTIFICATE [tb_ClientSecretCertificate];
+    DECLARE @EncryptedValue varbinary(max);
+    EXEC [tb_security].[EncryptClientSecretValue]
+        @SecretValue=@SecretValue,
+        @Authenticator=@Authenticator,
+        @EncryptedValue=@EncryptedValue OUTPUT;
     UPDATE [tb_import].[ClientInfoSecrets]
-    SET [ValueEncrypted]=EncryptByKey(
-            Key_GUID(N'tb_ClientSecretKey'),
-            CONVERT(varbinary(max),@SecretValue),
-            1,@Authenticator),
+    SET [ValueEncrypted]=@EncryptedValue,
         [ComparisonStatus]=N'NotCompared',
         [Resolution]=NULL
     WHERE [ImportSecretId]=@ImportSecretId;
-    CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
 
     IF EXISTS
         (SELECT 1 FROM [tb_import].[ClientInfoSecrets]
@@ -36544,6 +36576,7 @@ FROM
         (N'tb_app.DeleteClientInfoResourceField',N'P'),
         (N'tb_app.SaveClientInfoFact',N'P'),
         (N'tb_app.SaveClientCredential',N'P'),
+        (N'tb_security.EncryptClientSecretValue',N'P'),
         (N'tb_app.SetClientCredentialSecret',N'P'),
         (N'tb_app.RevealClientCredentialSecret',N'P'),
         (N'tb_app.BeginClientInfoImport',N'P'),
@@ -36590,6 +36623,21 @@ IF CERT_ID(N'tb_ClientSecretCertificate') IS NULL
 IF NOT EXISTS
     (SELECT 1 FROM sys.symmetric_keys WHERE [name]=N'tb_ClientSecretKey')
     THROW 52504,N'The canonical client-secret key is missing.',1;
+
+DECLARE @EncryptClientSecretDefinition nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_security.EncryptClientSecretValue'));
+DECLARE @SetClientSecretDefinition nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SetClientCredentialSecret'));
+DECLARE @StageClientSecretDefinition nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.StageClientInfoSecret'));
+IF @EncryptClientSecretDefinition IS NULL
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER',@EncryptClientSecretDefinition)=0
+   OR CHARINDEX(N'OPEN SYMMETRIC KEY [tb_ClientSecretKey]',@EncryptClientSecretDefinition)=0
+   OR CHARINDEX(N'[tb_security].[EncryptClientSecretValue]',@SetClientSecretDefinition)=0
+   OR CHARINDEX(N'[tb_security].[EncryptClientSecretValue]',@StageClientSecretDefinition)=0
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER',@SetClientSecretDefinition)>0
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER',@StageClientSecretDefinition)>0
+    THROW 52511,N'Client Info secret writes do not use the protected encryption boundary.',1;
 
 DECLARE @Capabilities nvarchar(max)=
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'));

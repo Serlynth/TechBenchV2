@@ -49,6 +49,7 @@ FROM
         (N'tb_app.DeleteClientInfoResourceField',N'P'),
         (N'tb_app.SaveClientInfoFact',N'P'),
         (N'tb_app.SaveClientCredential',N'P'),
+        (N'tb_security.EncryptClientSecretValue',N'P'),
         (N'tb_app.SetClientCredentialSecret',N'P'),
         (N'tb_app.RevealClientCredentialSecret',N'P'),
         (N'tb_app.BeginClientInfoImport',N'P'),
@@ -95,6 +96,21 @@ IF CERT_ID(N'tb_ClientSecretCertificate') IS NULL
 IF NOT EXISTS
     (SELECT 1 FROM sys.symmetric_keys WHERE [name]=N'tb_ClientSecretKey')
     THROW 52504,N'The canonical client-secret key is missing.',1;
+
+DECLARE @EncryptClientSecretDefinition nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_security.EncryptClientSecretValue'));
+DECLARE @SetClientSecretDefinition nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SetClientCredentialSecret'));
+DECLARE @StageClientSecretDefinition nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.StageClientInfoSecret'));
+IF @EncryptClientSecretDefinition IS NULL
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER',@EncryptClientSecretDefinition)=0
+   OR CHARINDEX(N'OPEN SYMMETRIC KEY [tb_ClientSecretKey]',@EncryptClientSecretDefinition)=0
+   OR CHARINDEX(N'[tb_security].[EncryptClientSecretValue]',@SetClientSecretDefinition)=0
+   OR CHARINDEX(N'[tb_security].[EncryptClientSecretValue]',@StageClientSecretDefinition)=0
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER',@SetClientSecretDefinition)>0
+   OR CHARINDEX(N'WITH EXECUTE AS OWNER',@StageClientSecretDefinition)>0
+    THROW 52511,N'Client Info secret writes do not use the protected encryption boundary.',1;
 
 DECLARE @Capabilities nvarchar(max)=
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'));
