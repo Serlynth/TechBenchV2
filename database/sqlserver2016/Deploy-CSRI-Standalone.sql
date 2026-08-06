@@ -4135,8 +4135,25 @@ BEGIN TRY
                 CHECK (LEN(LTRIM(RTRIM([FieldLabel]))) > 0),
             CONSTRAINT [CK_ClientResourceFields_Type]
                 CHECK ([ValueType] IN
-                    (N'Text', N'Number', N'Boolean', N'Date', N'Url', N'IpAddress'))
+                    (N'Text', N'Number', N'Boolean', N'Date', N'Url', N'IpAddress', N'Phone', N'Email'))
         );
+    END;
+
+    -- Phone and email are first-class workbook field types. Repair the
+    -- original schema-15 constraint on existing databases as well as new
+    -- installs so generated Support Phone and Support Email columns validate.
+    IF OBJECT_ID(N'tb_client.ResourceFields', N'U') IS NOT NULL
+    BEGIN
+        IF OBJECT_ID(N'tb_client.CK_ClientResourceFields_Type', N'C') IS NOT NULL
+            ALTER TABLE [tb_client].[ResourceFields]
+                DROP CONSTRAINT [CK_ClientResourceFields_Type];
+
+        ALTER TABLE [tb_client].[ResourceFields] WITH CHECK
+            ADD CONSTRAINT [CK_ClientResourceFields_Type]
+            CHECK ([ValueType] IN
+                (N'Text', N'Number', N'Boolean', N'Date', N'Url', N'IpAddress', N'Phone', N'Email'));
+        ALTER TABLE [tb_client].[ResourceFields]
+            CHECK CONSTRAINT [CK_ClientResourceFields_Type];
     END;
 
     IF OBJECT_ID(N'tb_client.Credentials', N'U') IS NULL
@@ -4273,7 +4290,7 @@ BEGIN TRY
                 CHECK (LEN(LTRIM(RTRIM([FieldLabel]))) > 0),
             CONSTRAINT [CK_ClientFacts_Type]
                 CHECK ([ValueType] IN
-                    (N'Text', N'Number', N'Boolean', N'Date', N'Url', N'IpAddress')),
+                    (N'Text', N'Number', N'Boolean', N'Date', N'Url', N'IpAddress', N'Phone', N'Email')),
             CONSTRAINT [CK_ClientFacts_ReviewStatus]
                 CHECK ([ReviewStatus] IN
                     (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview'))
@@ -4286,6 +4303,20 @@ BEGIN TRY
         CREATE UNIQUE INDEX [UX_ClientFacts_LocalKey]
             ON [tb_client].[ClientFacts]([ClientId], [LocalKey])
             WHERE [LocalKey] IS NOT NULL;
+    END;
+
+    IF OBJECT_ID(N'tb_client.ClientFacts', N'U') IS NOT NULL
+    BEGIN
+        IF OBJECT_ID(N'tb_client.CK_ClientFacts_Type', N'C') IS NOT NULL
+            ALTER TABLE [tb_client].[ClientFacts]
+                DROP CONSTRAINT [CK_ClientFacts_Type];
+
+        ALTER TABLE [tb_client].[ClientFacts] WITH CHECK
+            ADD CONSTRAINT [CK_ClientFacts_Type]
+            CHECK ([ValueType] IN
+                (N'Text', N'Number', N'Boolean', N'Date', N'Url', N'IpAddress', N'Phone', N'Email'));
+        ALTER TABLE [tb_client].[ClientFacts]
+            CHECK CONSTRAINT [CK_ClientFacts_Type];
     END;
 
     IF OBJECT_ID(N'tb_client.SourceDocuments', N'U') IS NULL
@@ -25601,7 +25632,7 @@ BEGIN
     SET @FieldLabel=NULLIF(LTRIM(RTRIM(@FieldLabel)),N'');
     IF @FieldKey IS NULL OR @FieldLabel IS NULL
         THROW 52355,N'Resource field key and label are required.',1;
-    IF @ValueType NOT IN (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress')
+    IF @ValueType NOT IN (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress',N'Phone',N'Email')
         THROW 52355,N'The resource field value type is invalid.',1;
     IF NOT EXISTS (SELECT 1 FROM [tb_client].[Resources] WHERE [ResourceId]=@ResourceId)
         THROW 52356,N'The resource for this field no longer exists.',1;
@@ -25735,7 +25766,7 @@ BEGIN
     SET @LocalKey=NULLIF(LTRIM(RTRIM(@LocalKey)),N'');
     IF @SectionName IS NULL OR @FieldLabel IS NULL
         THROW 52360,N'Fact section and label are required.',1;
-    IF @ValueType NOT IN (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress')
+    IF @ValueType NOT IN (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress',N'Phone',N'Email')
         THROW 52361,N'The fact value type is invalid.',1;
     IF @ReviewStatus NOT IN
         (N'Unverified',N'Verified',N'AcceptedUnverified',N'NeedsReview')
@@ -26491,7 +26522,13 @@ BEGIN
         INSERT INTO [tb_import].[ClientInfoIssues]
             ([BatchId],[ImportRecordId],[Severity],[IssueCode],[Message])
         SELECT [BatchId],[ImportRecordId],N'Error',N'RESOURCE_FIELD_INVALID',
-            N'This resource field requires a parent resource, field key, field label, and valid value type.'
+            N'Resource field "'
+            + COALESCE(NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.fieldLabel'))),N''),N'(unnamed)')
+            + N'" on '
+            + COALESCE(NULLIF(LTRIM(RTRIM([SourceSheet])),N''),N'the workbook')
+            + CASE WHEN [SourceRow] IS NULL THEN N''
+                   ELSE N' row ' + CONVERT(nvarchar(20),[SourceRow]) END
+            + N' requires a parent resource, field key, field label, and valid value type. Supported types are Text, Number, Boolean, Date, URL, IP address, Phone, and Email.'
         FROM [tb_import].[ClientInfoRecords]
         WHERE [BatchId]=@BatchId AND [RecordType]=N'ResourceField'
           AND
@@ -26500,7 +26537,7 @@ BEGIN
               OR NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.fieldKey'))),N'') IS NULL
               OR NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.fieldLabel'))),N'') IS NULL
               OR JSON_VALUE([PayloadJson],N'$.valueType') NOT IN
-                  (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress')
+                  (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress',N'Phone',N'Email')
           );
 
         INSERT INTO [tb_import].[ClientInfoIssues]
@@ -36631,6 +36668,24 @@ DECLARE @RecordTypeConstraint nvarchar(max)=
 IF @RecordTypeConstraint IS NULL
    OR CHARINDEX(N'ResourceField', @RecordTypeConstraint)=0
     THROW 52510,N'Client Info staging does not allow resource-field records.',1;
+
+DECLARE @ResourceFieldTypeConstraint nvarchar(max)=
+    (SELECT [definition]
+     FROM sys.check_constraints
+     WHERE [parent_object_id]=OBJECT_ID(N'tb_client.ResourceFields')
+       AND [name]=N'CK_ClientResourceFields_Type');
+DECLARE @FactTypeConstraint nvarchar(max)=
+    (SELECT [definition]
+     FROM sys.check_constraints
+     WHERE [parent_object_id]=OBJECT_ID(N'tb_client.ClientFacts')
+       AND [name]=N'CK_ClientFacts_Type');
+IF @ResourceFieldTypeConstraint IS NULL
+   OR CHARINDEX(N'Phone', @ResourceFieldTypeConstraint)=0
+   OR CHARINDEX(N'Email', @ResourceFieldTypeConstraint)=0
+   OR @FactTypeConstraint IS NULL
+   OR CHARINDEX(N'Phone', @FactTypeConstraint)=0
+   OR CHARINDEX(N'Email', @FactTypeConstraint)=0
+    THROW 52513,N'Client Info does not support phone and email field types.',1;
 
 IF CERT_ID(N'tb_ClientSecretCertificate') IS NULL
     THROW 52503,N'The canonical client-secret certificate is missing.',1;
