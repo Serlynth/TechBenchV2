@@ -21,6 +21,7 @@ public sealed class LocalPreferenceStoreTests
             created.WindowWidth = 1440;
             created.WindowHeight = 900;
             created.WindowState = "Maximized";
+            created.InlineEditorPaneWidth = 680;
             created.ProfileWindowWidth = 1320;
             created.ProfileWindowHeight = 840;
             created.ProfileWindowState = "Maximized";
@@ -66,6 +67,7 @@ public sealed class LocalPreferenceStoreTests
             Assert.Equal(1440, loaded.WindowWidth);
             Assert.Equal(900, loaded.WindowHeight);
             Assert.Equal("Maximized", loaded.WindowState);
+            Assert.Equal(680, loaded.InlineEditorPaneWidth);
             Assert.Equal(1320, loaded.ProfileWindowWidth);
             Assert.Equal(840, loaded.ProfileWindowHeight);
             Assert.Equal("Maximized", loaded.ProfileWindowState);
@@ -163,6 +165,7 @@ public sealed class LocalPreferenceStoreTests
             {
                 Theme = "unexpected",
                 WindowState = "Minimized",
+                InlineEditorPaneWidth = double.PositiveInfinity,
                 ProfileWindowState = "Minimized",
                 PeopleLocationsSplitRatio = 5,
                 LocationGridColumnWidths = [20, 120, double.NaN, 1700],
@@ -193,6 +196,7 @@ public sealed class LocalPreferenceStoreTests
             var loaded = LocalPreferenceStore.LoadOrCreate(path);
             Assert.Equal("Dark", loaded.Theme);
             Assert.Equal("Normal", loaded.WindowState);
+            Assert.Equal(500, loaded.InlineEditorPaneWidth);
             Assert.Equal("Normal", loaded.ProfileWindowState);
             Assert.Equal(0.8, loaded.PeopleLocationsSplitRatio);
             Assert.Equal([120], loaded.LocationGridColumnWidths);

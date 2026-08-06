@@ -36,19 +36,15 @@ IF NOT EXISTS
       AND [system_type_id] = TYPE_ID(N'bit')
 )
 BEGIN
-    PRINT N'FAIL: DeleteWorkEntry does not require explicit missing-TechNote confirmation.';
+    PRINT N'FAIL: DeleteWorkEntry does not expose the compatible explicit WHD deletion confirmation parameter.';
     SET @FailureCount += 1;
 END;
 
 DECLARE @DeleteDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteWorkEntry', N'P'));
 IF CHARINDEX(N'@SagePosted = 1', @DeleteDefinition) = 0
    OR CHARINDEX(N'@ConfirmMissingWhdTechNote <> 1', @DeleteDefinition) = 0
-   OR CHARINDEX(N'WHD sync pending:%TechNote #%was not found.%', @DeleteDefinition) = 0
-   OR CHARINDEX(N'posting_log.[ExternalReference]', @DeleteDefinition) = 0
-   OR CHARINDEX(N'WHD-TECHNOTE-%', @DeleteDefinition) = 0
-   OR CHARINDEX(N'posting_log.[Success] = 0', @DeleteDefinition) = 0
 BEGIN
-    PRINT N'FAIL: DeleteWorkEntry does not preserve the verified missing-TechNote recovery boundary.';
+    PRINT N'FAIL: DeleteWorkEntry does not preserve the Sage lock and explicit WHD deletion boundary.';
     SET @FailureCount += 1;
 END;
 

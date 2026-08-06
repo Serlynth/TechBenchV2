@@ -1213,27 +1213,36 @@ public sealed partial class SqlServer2016SyntaxTests
     }
 
     [Fact]
-    public void V0009PermitsOnlyVerifiedMissingWhdTechNoteRecoveryDeletion()
+    public void Schema15ExtensionPermitsExplicitLocalWhdDeletionAndPreservesSafetyLocks()
     {
         var sqlDirectory = FindSqlDirectory();
         var procedureSource = File.ReadAllText(Path.Combine(
             sqlDirectory,
-            "41-V0002-WorkProcedures.sql"));
-        var body = ProcedureBody(procedureSource, "DeleteWorkEntry", "tb_app");
+            "68-V0015-WhdLocalDeleteProcedures.sql"));
 
-        Assert.Contains("@ConfirmMissingWhdTechNote bit = 0", body, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("@SagePosted = 1", body, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("WHD sync pending:%TechNote #%was not found.%", body, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("posting_log.[ExternalReference]", body, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("WHD-TECHNOTE-%", body, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("posting_log.[Success] = 0", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ALTER PROCEDURE [tb_app].[DeleteWorkEntry]", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("@ConfirmMissingWhdTechNote bit = 0", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("IF @SagePosted = 1", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("IF @WhdPosted = 1", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("@ConfirmMissingWhdTechNote <> 1", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("PostingAttempts", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("PostingLeases", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("WHD sync pending:%TechNote #%was not found.%", procedureSource, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("posting_log.[ExternalReference]", procedureSource, StringComparison.OrdinalIgnoreCase);
 
         var root = Directory.GetParent(sqlDirectory)!.Parent!.FullName;
         var builder = File.ReadAllText(Path.Combine(root, "scripts", "Build-StandaloneSqlDeployment.ps1"));
         var migration = builder.IndexOf("28-V0009-WhdMissingNoteRecovery.sql", StringComparison.Ordinal);
         var procedures = builder.IndexOf("41-V0002-WorkProcedures.sql", StringComparison.Ordinal);
+        var extension = builder.IndexOf("68-V0015-WhdLocalDeleteProcedures.sql", StringComparison.Ordinal);
         var verification = builder.IndexOf("98-V0009-WhdMissingNoteRecoveryVerify.sql", StringComparison.Ordinal);
-        Assert.True(migration >= 0 && procedures > migration && verification > procedures);
+        var extensionVerification = builder.IndexOf("109-V0015-WhdLocalDeleteVerify.sql", StringComparison.Ordinal);
+        Assert.True(
+            migration >= 0
+            && procedures > migration
+            && extension > procedures
+            && verification > extension
+            && extensionVerification > verification);
     }
 
     private static string ProcedureBody(

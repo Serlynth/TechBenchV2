@@ -21,6 +21,44 @@ public sealed class WorklogInlineEditorTests
     }
 
     [Fact]
+    public void WeekAndHistoryShareAPersistedResizableEditorWidth()
+    {
+        var xaml = ReadRepositoryFile("MainWindow.xaml");
+        var codeBehind = ReadRepositoryFile("MainWindow.xaml.cs");
+        var preferences = ReadRepositoryFile("Services", "LocalPreferenceStore.cs");
+
+        Assert.Contains("x:Name=\"ThisWeekInlineEditorPane\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"HistoryInlineEditorPane\"", xaml, StringComparison.Ordinal);
+        Assert.Equal(
+            2,
+            xaml.Split("InlineWorkEntryEditorResizeThumb_DragDelta", StringSplitOptions.None).Length - 1);
+        Assert.Contains("InlineWorkEntryEditorResizeThumb_DragCompleted", xaml, StringComparison.Ordinal);
+        Assert.Contains("ApplyInlineWorkEntryEditorWidth", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("InlineEditorPaneWidth", preferences, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WeekAndHistoryInlineEditorIncludesTheFullMoreMenu()
+    {
+        var xaml = ReadRepositoryFile("MainWindow.xaml");
+        var viewModel = ReadRepositoryFile("ViewModels", "MainWindowViewModel.cs");
+        const string templateMarker = "<DataTemplate x:Key=\"InlineWorkEntryEditorTemplate\">";
+        var templateStart = xaml.IndexOf(templateMarker, StringComparison.Ordinal);
+        var templateEnd = xaml.IndexOf("</DataTemplate>", templateStart, StringComparison.Ordinal);
+
+        Assert.True(templateStart >= 0, "The inline editor template was not found.");
+        Assert.True(templateEnd > templateStart, "The inline editor template is incomplete.");
+
+        var template = xaml[templateStart..templateEnd];
+        Assert.Contains("Content=\"More\"", template, StringComparison.Ordinal);
+        Assert.Contains("Click=\"MoreActionsButton_Click\"", template, StringComparison.Ordinal);
+        Assert.Contains("Command=\"{Binding LinkSageTicketCommand}\"", template, StringComparison.Ordinal);
+        Assert.Contains("Command=\"{Binding DuplicateEntryCommand}\"", template, StringComparison.Ordinal);
+        Assert.Contains("Command=\"{Binding DeleteEntryCommand}\"", template, StringComparison.Ordinal);
+        Assert.Contains("Delete from TechBench...", viewModel, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SavingKeepsTheEntryAndTicketOpenForPosting()
     {
         var xaml = ReadRepositoryFile("MainWindow.xaml");
@@ -144,7 +182,7 @@ public sealed class WorklogInlineEditorTests
     }
 
     [Fact]
-    public void PostedEntriesStayLockedAndWHDNotesAreNeverDeleted()
+    public void WhdPostedEntriesAllowExplicitLocalOnlyDeletionWhileSageStaysLocked()
     {
         var viewModel = ReadRepositoryFile("ViewModels", "MainWindowViewModel.cs");
         var deleteStart = viewModel.IndexOf(
@@ -160,15 +198,32 @@ public sealed class WorklogInlineEditorTests
 
         var deletion = viewModel[deleteStart..deleteEnd];
         var sageLock = deletion.IndexOf("if (entry.SagePosted)", StringComparison.Ordinal);
-        var localDelete = deletion.IndexOf("DeleteLocalEntry(entry", StringComparison.Ordinal);
+        var whdBranch = deletion.IndexOf("if (entry.WhdPosted)", StringComparison.Ordinal);
+        var localDelete = deletion.IndexOf(
+            "DeleteLocalEntry(entry, allowWhdPostedLocalDelete: true)",
+            StringComparison.Ordinal);
 
         Assert.True(sageLock >= 0, "Sage-posted entries must have an explicit deletion lock.");
-        Assert.True(localDelete > sageLock, "Only the unposted-entry path may reach local deletion.");
-        Assert.Contains("if (entry.WhdPosted)", deletion, StringComparison.Ordinal);
-        Assert.Contains("keeps posted entries and their tracking history", deletion, StringComparison.Ordinal);
+        Assert.True(whdBranch > sageLock, "The Sage lock must be checked before WHD-posted local deletion.");
+        Assert.True(localDelete > whdBranch, "WHD-posted local deletion must require its explicit branch.");
+        Assert.Contains("Delete TechBench entry only", deletion, StringComparison.Ordinal);
+        Assert.Contains("This never deletes or changes anything in WHD", deletion, StringComparison.Ordinal);
+        Assert.Contains("Undo restores an unposted TechBench draft", deletion, StringComparison.Ordinal);
         Assert.DoesNotContain("DeleteTechNoteAsync", deletion, StringComparison.Ordinal);
         Assert.DoesNotContain("RecordWhdSync", deletion, StringComparison.Ordinal);
-        Assert.DoesNotContain("confirmMissingWhdTechNote: true", deletion, StringComparison.Ordinal);
+
+        var canDeleteStart = viewModel.IndexOf("private bool CanDeleteEditorEntry()", StringComparison.Ordinal);
+        var canDeleteEnd = viewModel.IndexOf("private bool CanLinkSageTicket", canDeleteStart, StringComparison.Ordinal);
+        var canDelete = viewModel[canDeleteStart..canDeleteEnd];
+        Assert.Contains("!Editor.SagePosted", canDelete, StringComparison.Ordinal);
+        Assert.DoesNotContain("!Editor.WhdPosted", canDelete, StringComparison.Ordinal);
+
+        var undoStart = viewModel.IndexOf("private void UndoDelete()", StringComparison.Ordinal);
+        var undoEnd = viewModel.IndexOf("private void DuplicateEntry()", undoStart, StringComparison.Ordinal);
+        var undo = viewModel[undoStart..undoEnd];
+        Assert.Contains("restored.WhdPosted = false", undo, StringComparison.Ordinal);
+        Assert.Contains("restored.WhdPostedAt = null", undo, StringComparison.Ordinal);
+        Assert.Contains("restored.PostingStatus = PostingStatus.Draft", undo, StringComparison.Ordinal);
     }
 
     [Fact]

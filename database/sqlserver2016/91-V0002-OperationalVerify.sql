@@ -284,7 +284,7 @@ IF CHARINDEX(
        N'@ConfirmMissingWhdTechNote <> 1',
        OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteWorkEntry'))) = 0
 BEGIN
-    PRINT N'FAIL: DeleteWorkEntry does not preserve Sage locking and explicit WHD recovery confirmation.';
+    PRINT N'FAIL: DeleteWorkEntry does not preserve Sage locking and explicit WHD local-delete confirmation.';
     SET @FailureCount += 1;
 END;
 

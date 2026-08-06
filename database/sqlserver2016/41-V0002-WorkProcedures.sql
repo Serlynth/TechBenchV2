@@ -1230,7 +1230,6 @@ BEGIN
     DECLARE @IsSyncOperator bit;
     DECLARE @WhdPosted bit;
     DECLARE @SagePosted bit;
-    DECLARE @LastError nvarchar(2000);
 
     EXEC [tb_security].[EnsureCurrentUser]
         @UserSid = @UserSid OUTPUT,
@@ -1246,8 +1245,7 @@ BEGIN
 
         SELECT
             @WhdPosted = [WhdPosted],
-            @SagePosted = [SagePosted],
-            @LastError = [LastError]
+            @SagePosted = [SagePosted]
         FROM [tb_data].[WorkEntries] WITH (UPDLOCK, HOLDLOCK)
         WHERE [Id] = @Id
           AND [OwnerWindowsSid] = @UserSid
@@ -1272,23 +1270,8 @@ BEGIN
             THROW 51138, N'A work entry posted to Sage cannot be deleted.', 1;
 
         IF @WhdPosted = 1
-           AND
-           (
-               @ConfirmMissingWhdTechNote <> 1
-               OR COALESCE(@LastError, N'') NOT LIKE N'WHD sync pending:%TechNote #%was not found.%'
-               OR NOT EXISTS
-               (
-                   SELECT 1
-                   FROM [tb_ops].[PostingLogs] AS posting_log WITH (UPDLOCK, HOLDLOCK)
-                   WHERE posting_log.[WorkEntryId] = @Id
-                     AND posting_log.[OwnerWindowsSid] = @UserSid
-                     AND posting_log.[Destination] = N'WHD'
-                     AND posting_log.[Success] = 0
-                     AND COALESCE(posting_log.[ExternalReference], N'') LIKE N'WHD-TECHNOTE-%'
-                     AND posting_log.[Message] LIKE N'%TechNote #%was not found.%'
-               )
-           )
-            THROW 51140, N'Only a work entry whose tracked WHD TechNote was verified missing may be deleted after WHD posting.', 1;
+           AND @ConfirmMissingWhdTechNote <> 1
+            THROW 51140, N'A WHD-posted entry requires explicit confirmation before its TechBench copy can be deleted.', 1;
 
         IF EXISTS
         (

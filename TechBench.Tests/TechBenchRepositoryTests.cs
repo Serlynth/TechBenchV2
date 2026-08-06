@@ -235,12 +235,14 @@ public sealed class TechBenchRepositoryTests
 
             Assert.Throws<InvalidOperationException>(() => repository.SaveWorkEntry(entry));
             Assert.Throws<InvalidOperationException>(() => repository.DeleteWorkEntry(entry.Id));
+            Assert.Throws<InvalidOperationException>(() =>
+                repository.DeleteWorkEntry(entry.Id, allowWhdPostedLocalDelete: true));
             Assert.Equal("Final billed note", repository.GetWorkEntry(entry.Id)?.Note);
         });
     }
 
     [Fact]
-    public void WhdPostedEntryCanBeChangedButCannotLoseItsTrackingThroughDeletion()
+    public void WhdPostedEntryCanBeChangedAndRequiresExplicitLocalDeletion()
     {
         WithRepository((repository, _) =>
         {
@@ -261,40 +263,44 @@ public sealed class TechBenchRepositoryTests
 
             Assert.Equal("Edited before Sage", repository.GetWorkEntry(entry.Id)?.Note);
             Assert.Throws<InvalidOperationException>(() => repository.DeleteWorkEntry(entry.Id));
+            repository.DeleteWorkEntry(entry.Id, allowWhdPostedLocalDelete: true);
+            Assert.Null(repository.GetWorkEntry(entry.Id));
         });
     }
 
     [Fact]
-    public void WhdPostedEntryCanBeDeletedOnlyAfterVerifiedTrackedTechNoteIsMissing()
+    public void ActivePostingAttemptBlocksExplicitLocalDeletion()
     {
         WithRepository((repository, _) =>
         {
             var entry = new WorkEntry
             {
                 WorkDate = new DateTime(2026, 7, 22),
-                ManualClientName = "Deleted WHD Test Note",
+                ManualClientName = "Active Posting Test",
                 TicketNumberText = "31689",
                 DurationMinutes = 15,
                 Note = "test",
                 WhdPosted = true,
-                WhdPostedAt = DateTime.Now.AddMinutes(-5),
-                LastError = "WHD sync pending: Web Help Desk ticket #31689 is available, but TechNote #52445 was not found."
+                WhdPostedAt = DateTime.Now.AddMinutes(-5)
             };
             repository.SaveWorkEntry(entry);
-            repository.AddPostingLog(new PostingLog
-            {
-                WorkEntryId = entry.Id,
-                Destination = "WHD",
-                Payload = "test",
-                Success = false,
-                Message = entry.LastError,
-                ExternalReference = "WHD-TECHNOTE-52445"
-            });
+            var started = repository.TryBeginPostingAttempt(
+                entry.Id,
+                "WHD",
+                "active-delete-test",
+                "hash");
+            Assert.True(started.Started);
+            Assert.NotNull(started.Attempt);
 
-            Assert.Throws<InvalidOperationException>(() => repository.DeleteWorkEntry(entry.Id));
+            Assert.Throws<InvalidOperationException>(() =>
+                repository.DeleteWorkEntry(entry.Id, allowWhdPostedLocalDelete: true));
 
-            repository.DeleteWorkEntry(entry.Id, confirmMissingWhdTechNote: true);
-
+            repository.CompletePostingAttempt(
+                started.Attempt!.Id,
+                PostingAttemptStatus.Abandoned,
+                "Test operation ended.",
+                markPosted: false);
+            repository.DeleteWorkEntry(entry.Id, allowWhdPostedLocalDelete: true);
             Assert.Null(repository.GetWorkEntry(entry.Id));
         });
     }

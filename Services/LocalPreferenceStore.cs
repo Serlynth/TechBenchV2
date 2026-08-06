@@ -156,6 +156,8 @@ public sealed class LocalPreferences
 
     public string WindowState { get; set; } = "Normal";
 
+    public double InlineEditorPaneWidth { get; set; } = 500;
+
     public double? ProfileWindowWidth { get; set; }
 
     public double? ProfileWindowHeight { get; set; }
@@ -208,6 +210,10 @@ public sealed class LocalPreferences
             StringComparison.OrdinalIgnoreCase)
             ? "Maximized"
             : "Normal";
+        InlineEditorPaneWidth =
+            double.IsFinite(InlineEditorPaneWidth)
+            ? Math.Clamp(InlineEditorPaneWidth, 360, 1200)
+            : 500;
         ProfileWindowState = ProfileWindowState.Equals(
             "Maximized",
             StringComparison.OrdinalIgnoreCase)

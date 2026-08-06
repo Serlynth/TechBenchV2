@@ -469,6 +469,21 @@
             <Setter Property="Foreground" Value="#101820" />
         </Style>
 
+        <Style x:Key="InlineEditorResizeThumbStyle" TargetType="{x:Type Thumb}">
+            <Setter Property="Width" Value="6" />
+            <Setter Property="Cursor" Value="SizeWE" />
+            <Setter Property="ToolTip" Value="Drag to resize the note editor" />
+            <Setter Property="Background" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Thumb}">
+                        <Border Background="{TemplateBinding Background}"
+                                CornerRadius="3" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <DataTemplate x:Key="InlineWorkEntryEditorTemplate">
             <Border Style="{StaticResource CardStyle}">
                 <Grid>
@@ -710,6 +725,28 @@
                                                   Style="{StaticResource EditorContextMenuItemStyle}" />
                                         <MenuItem Header="Create Sage Ticket"
                                                   Command="{Binding PostSageCommand}"
+                                                  Style="{StaticResource EditorContextMenuItemStyle}" />
+                                    </ContextMenu>
+                                </Button.ContextMenu>
+                            </Button>
+                            <Button Content="More"
+                                    Click="MoreActionsButton_Click"
+                                    Padding="12,5"
+                                    Margin="6,0,0,0">
+                                <Button.ContextMenu>
+                                    <ContextMenu Style="{StaticResource EditorContextMenuStyle}"
+                                                 Placement="Top"
+                                                 DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                        <MenuItem Header="Link Existing Sage Ticket..."
+                                                  Command="{Binding LinkSageTicketCommand}"
+                                                  Style="{StaticResource EditorContextMenuItemStyle}" />
+                                        <Separator />
+                                        <MenuItem Header="Duplicate Entry"
+                                                  Command="{Binding DuplicateEntryCommand}"
+                                                  Style="{StaticResource EditorContextMenuItemStyle}" />
+                                        <MenuItem Header="{Binding DeleteEntryActionLabel}"
+                                                  Command="{Binding DeleteEntryCommand}"
+                                                  Foreground="{DynamicResource DangerBrush}"
                                                   Style="{StaticResource EditorContextMenuItemStyle}" />
                                     </ContextMenu>
                                 </Button.ContextMenu>
@@ -1776,13 +1813,23 @@
                 </Grid>
 
                 <DockPanel Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=This Week}"
-                           LastChildFill="True">
-                    <ContentControl DockPanel.Dock="Right"
+                           LastChildFill="True"
+                           x:Name="ThisWeekInlineEditorHost">
+                    <ContentControl x:Name="ThisWeekInlineEditorPane"
+                                    DockPanel.Dock="Right"
                                     Width="500"
-                                    Margin="14,0,0,0"
+                                    MinWidth="360"
+                                    MaxWidth="1200"
+                                    Margin="8,0,0,0"
                                     Content="{Binding}"
                                     ContentTemplate="{StaticResource InlineWorkEntryEditorTemplate}"
                                     Visibility="{Binding Editor.IsExistingEntry, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <Thumb x:Name="ThisWeekInlineEditorResizeThumb"
+                           DockPanel.Dock="Right"
+                           Style="{StaticResource InlineEditorResizeThumbStyle}"
+                           DragDelta="InlineWorkEntryEditorResizeThumb_DragDelta"
+                           DragCompleted="InlineWorkEntryEditorResizeThumb_DragCompleted"
+                           Visibility="{Binding Editor.IsExistingEntry, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
                         <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
@@ -1933,13 +1980,23 @@
                 </DockPanel>
 
                 <DockPanel Visibility="{Binding CurrentSection, Converter={StaticResource SectionVisibilityConverter}, ConverterParameter=History}"
-                           LastChildFill="True">
-                    <ContentControl DockPanel.Dock="Right"
+                           LastChildFill="True"
+                           x:Name="HistoryInlineEditorHost">
+                    <ContentControl x:Name="HistoryInlineEditorPane"
+                                    DockPanel.Dock="Right"
                                     Width="500"
-                                    Margin="14,0,0,0"
+                                    MinWidth="360"
+                                    MaxWidth="1200"
+                                    Margin="8,0,0,0"
                                     Content="{Binding}"
                                     ContentTemplate="{StaticResource InlineWorkEntryEditorTemplate}"
                                     Visibility="{Binding Editor.IsExistingEntry, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <Thumb x:Name="HistoryInlineEditorResizeThumb"
+                           DockPanel.Dock="Right"
+                           Style="{StaticResource InlineEditorResizeThumbStyle}"
+                           DragDelta="InlineWorkEntryEditorResizeThumb_DragDelta"
+                           DragCompleted="InlineWorkEntryEditorResizeThumb_DragCompleted"
+                           Visibility="{Binding Editor.IsExistingEntry, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
                         <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
