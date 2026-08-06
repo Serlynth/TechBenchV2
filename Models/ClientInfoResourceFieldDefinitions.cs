@@ -8,7 +8,10 @@ public sealed record ClientInfoResourceFieldDefinition(
     string ValueType,
     int SortOrder,
     bool ShowInGrid = true,
-    bool ShowInCompact = true);
+    bool ShowInCompact = true,
+    IReadOnlyList<string>? Options = null,
+    bool AllowCustomValue = false,
+    bool IsMultiline = false);
 
 public static class ClientInfoResourceFieldDefinitions
 {
@@ -38,16 +41,59 @@ public static class ClientInfoResourceFieldDefinitions
                 new("ssl_vpn_port", "SSL VPN Port", "Text", 20),
                 new("gateway", "Gateway", "IpAddress", 30),
                 new("subnet_cidr", "Subnet / CIDR", "Text", 40),
-                new("circuit_id", "Circuit ID", "Text", 50, ShowInGrid: false),
-                new("device_model", "Device Model", "Text", 60, ShowInGrid: false),
-                new("serial_number", "Serial Number", "Text", 70, ShowInGrid: false),
-                new("firmware_version", "Firmware Version", "Text", 80, ShowInGrid: false),
-                new("isp_provider", "ISP / Provider", "Text", 90, ShowInGrid: false),
-                new("support_phone", "Support Phone", "Phone", 100, ShowInGrid: false),
-                new("account_number", "Account Number", "Text", 110, ShowInGrid: false),
-                new("service_type", "Service Type", "Text", 120, ShowInGrid: false),
-                new("bandwidth", "Bandwidth", "Text", 130, ShowInGrid: false),
-                new("support_contact", "Support Contact", "Text", 140, ShowInGrid: false)
+                new(
+                    "ip_assignment_type",
+                    "IP assignment",
+                    "Text",
+                    50,
+                    ShowInGrid: false,
+                    ShowInCompact: false,
+                    Options:
+                    [
+                        "Dynamic",
+                        "Single static",
+                        "Static block"
+                    ],
+                    AllowCustomValue: true),
+                new(
+                    "usable_static_ip_count",
+                    "Usable static IPs",
+                    "Number",
+                    60,
+                    ShowInGrid: false,
+                    ShowInCompact: false),
+                new(
+                    "static_ip_addresses",
+                    "Static IPs (one per line or comma-separated)",
+                    "Text",
+                    70,
+                    ShowInGrid: false,
+                    ShowInCompact: false,
+                    IsMultiline: true),
+                new(
+                    "static_ip_range_start",
+                    "First usable static IP",
+                    "IpAddress",
+                    80,
+                    ShowInGrid: false,
+                    ShowInCompact: false),
+                new(
+                    "static_ip_range_end",
+                    "Last usable static IP",
+                    "IpAddress",
+                    90,
+                    ShowInGrid: false,
+                    ShowInCompact: false),
+                new("circuit_id", "Circuit ID", "Text", 100, ShowInGrid: false),
+                new("device_model", "Device Model", "Text", 110, ShowInGrid: false),
+                new("serial_number", "Serial Number", "Text", 120, ShowInGrid: false),
+                new("firmware_version", "Firmware Version", "Text", 130, ShowInGrid: false),
+                new("isp_provider", "ISP / Provider", "Text", 140, ShowInGrid: false),
+                new("support_phone", "Support Phone", "Phone", 150, ShowInGrid: false),
+                new("account_number", "Account Number", "Text", 160, ShowInGrid: false),
+                new("service_type", "Service Type", "Text", 170, ShowInGrid: false),
+                new("bandwidth", "Bandwidth", "Text", 180, ShowInGrid: false),
+                new("support_contact", "Support Contact", "Text", 190, ShowInGrid: false)
             ],
             [ClientInfoResourceCategories.Wifi] =
             [
@@ -191,7 +237,12 @@ public static class ClientInfoResourceFieldDefinitions
             : ["Other"];
 
     public static string EditorDescriptionForCategory(string? category) =>
-        $"This record belongs to {NormalizeLabel(category)}. Use Move if it belongs in a different section.";
+        string.Equals(
+            category,
+            ClientInfoResourceCategories.ConnectionInternet,
+            StringComparison.OrdinalIgnoreCase)
+            ? $"This record belongs to {NormalizeLabel(category)}. For an ISP static block, enter the usable count and either the address list or the first and last usable IP. The address list is shown when both are entered."
+            : $"This record belongs to {NormalizeLabel(category)}. Use Move if it belongs in a different section.";
 
     private static string NormalizeLabel(string? category) =>
         string.IsNullOrWhiteSpace(category) ? ClientInfoResourceCategories.NeedsSorting : category.Trim();

@@ -1401,7 +1401,10 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             new ClientInfoEditField(
                 StandardFieldEditorKey(field.FieldKey),
                 field.FieldLabel,
-                current?.GetFieldValue(field.FieldKey) ?? "")));
+                current?.GetFieldValue(field.FieldKey) ?? "",
+                IsMultiline: field.IsMultiline,
+                Options: field.Options,
+                AllowCustomValue: field.AllowCustomValue)));
         editorFields.AddRange(
         [
             new("status", "Status", current?.Status ?? ""),
