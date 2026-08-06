@@ -19,6 +19,11 @@ namespace TechBench.ViewModels;
 
 public sealed class ClientInfoBetaViewModel : ObservableObject
 {
+    private sealed record ResourceAccessSlot(
+        string Key,
+        string Label,
+        ClientInfoCredential? Credential);
+
     private const string UserAdCredentialCategory = "Active Directory User";
     private const string UserMicrosoft365CredentialCategory =
         "Microsoft 365 User";
@@ -1504,9 +1509,21 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             : Credentials
                 .Where(credential =>
                     credential.ResourceId == current.ResourceId)
-                .OrderBy(credential => credential.Name)
+                .OrderByDescending(credential => credential.IsActive)
+                .ThenBy(credential => credential.Name)
                 .ThenBy(credential => credential.CredentialId)
                 .ToArray();
+        var accessSlots = BuildResourceAccessSlots(
+            editingCategory,
+            linkedCredentials);
+        var primaryCredentialIds = accessSlots
+            .Where(slot => slot.Credential is not null)
+            .Select(slot => slot.Credential!.CredentialId)
+            .ToHashSet();
+        var additionalCredentials = linkedCredentials
+            .Where(credential => !primaryCredentialIds.Contains(
+                credential.CredentialId))
+            .ToArray();
         var locationOptions = new[] { "(None)" }
             .Concat(Locations.Select(item => item.Name))
             .ToArray();
@@ -1540,6 +1557,22 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 IsMultiline: field.IsMultiline,
                 Options: field.Options,
                 AllowCustomValue: field.AllowCustomValue)));
+        foreach (var slot in accessSlots)
+        {
+            var prefix = string.IsNullOrWhiteSpace(slot.Label)
+                ? string.Empty
+                : $"{slot.Label} ";
+            editorFields.Add(new ClientInfoEditField(
+                ResourceAccessEditorKey(slot.Key, "username"),
+                $"{prefix}username",
+                slot.Credential?.Username ?? ""));
+            editorFields.Add(new ClientInfoEditField(
+                ResourceAccessEditorKey(slot.Key, "password"),
+                FindCurrentPassword(slot.Credential) is null
+                    ? $"{prefix}password"
+                    : $"{prefix}password (leave blank to keep stored password)",
+                IsSecret: true));
+        }
         editorFields.AddRange(
         [
             new("status", "Status", current?.Status ?? ""),
@@ -1563,12 +1596,12 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             };
         }
 
-        for (var index = 0; index < linkedCredentials.Length; index++)
+        for (var index = 0; index < additionalCredentials.Length; index++)
         {
-            var credential = linkedCredentials[index];
-            var label = linkedCredentials.Length == 1
-                ? "Linked login"
-                : $"Linked login {index + 1}";
+            var credential = additionalCredentials[index];
+            var label = additionalCredentials.Length == 1
+                ? "Additional login"
+                : $"Additional login {index + 1}";
             editorFields.AddRange(
             [
                 new(
@@ -1601,28 +1634,20 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         [
             new(
                 "access_new_name",
-                linkedCredentials.Length == 0
-                    ? "Login name (optional)"
-                    : "New login name (optional)",
+                "New additional login name (optional)",
                 Tab: "Passwords"),
             new(
                 "access_new_username",
-                linkedCredentials.Length == 0
-                    ? "Username (optional)"
-                    : "New login username (optional)",
+                "New additional login username (optional)",
                 Tab: "Passwords"),
             new(
                 "access_new_login_url",
-                linkedCredentials.Length == 0
-                    ? "Login URL (optional)"
-                    : "New login URL (optional)",
+                "New additional login URL (optional)",
                 current?.AddressOrUrl ?? "",
                 Tab: "Passwords"),
             new(
                 "access_new_password",
-                linkedCredentials.Length == 0
-                    ? "Password (optional)"
-                    : "New login password (optional)",
+                "New additional login password (optional)",
                 IsSecret: true,
                 Tab: "Passwords")
         ]);
@@ -1700,7 +1725,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 SaveResourceAccessEdits(
                     savedResource,
                     editingCategory,
-                    linkedCredentials,
+                    accessSlots,
+                    additionalCredentials,
                     values);
 
                 Refresh();
@@ -1710,13 +1736,75 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     private void SaveResourceAccessEdits(
         ClientInfoResource savedResource,
         string editingCategory,
-        IReadOnlyList<ClientInfoCredential> linkedCredentials,
+        IReadOnlyList<ResourceAccessSlot> accessSlots,
+        IReadOnlyList<ClientInfoCredential> additionalCredentials,
         IReadOnlyDictionary<string, string> values)
     {
         ClientInfoCredential? savedCredential = null;
         try
         {
-            foreach (var credential in linkedCredentials)
+            foreach (var slot in accessSlots)
+            {
+                var username = values[
+                    ResourceAccessEditorKey(slot.Key, "username")].Trim();
+                var password = values[
+                    ResourceAccessEditorKey(slot.Key, "password")];
+                if (slot.Credential is null
+                    && string.IsNullOrWhiteSpace(username)
+                    && string.IsNullOrWhiteSpace(password))
+                {
+                    continue;
+                }
+
+                savedCredential = _repository.SaveClientInfoCredential(
+                    slot.Credential is null
+                        ? new ClientInfoCredential
+                        {
+                            ClientId = ClientId,
+                            ResourceId = savedResource.ResourceId,
+                            LocalKey = $"resource-access-{slot.Key}-{savedResource.ResourceId}",
+                            Name = $"{savedResource.Name.Trim()} "
+                                + (slot.Key.Equals(
+                                    "primary",
+                                    StringComparison.OrdinalIgnoreCase)
+                                    ? "login"
+                                    : slot.Key),
+                            Category = string.IsNullOrWhiteSpace(
+                                savedResource.TypeLabel)
+                                ? editingCategory
+                                : savedResource.TypeLabel,
+                            Username = username,
+                            LoginUrl = savedResource.AddressOrUrl,
+                            Notes = $"Access for {savedResource.Name}.",
+                            IsActive = savedResource.IsActive,
+                            ReviewStatus = savedResource.ReviewStatus
+                        }
+                        : slot.Credential with
+                        {
+                            ResourceId = savedResource.ResourceId,
+                            PersonId = null,
+                            Username = username,
+                            IsActive = savedResource.IsActive,
+                            ReviewStatus = savedResource.ReviewStatus
+                        });
+                if (!string.IsNullOrWhiteSpace(password))
+                {
+                    _repository.SetClientInfoSecret(
+                        FindCurrentPassword(slot.Credential)
+                        ?? new ClientInfoSecretSummary
+                        {
+                            CredentialId = savedCredential.CredentialId,
+                            SecretType = "Password",
+                            SecretLabel = "Password"
+                        },
+                        password,
+                        savedResource.ReviewStatus.Equals(
+                            "Verified",
+                            StringComparison.OrdinalIgnoreCase));
+                }
+            }
+
+            foreach (var credential in additionalCredentials)
             {
                 var nameKey = ResourceCredentialEditorKey(
                     credential.CredentialId,
@@ -1809,6 +1897,66 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 + $"\n\nDetails: {exception.Message}",
                 exception);
         }
+    }
+
+    private static ResourceAccessSlot[] BuildResourceAccessSlots(
+        string editingCategory,
+        IReadOnlyList<ClientInfoCredential> linkedCredentials)
+    {
+        if (!editingCategory.Equals(
+                ClientInfoResourceCategories.ConnectionInternet,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return
+            [
+                new ResourceAccessSlot(
+                    "primary",
+                    "",
+                    linkedCredentials.FirstOrDefault())
+            ];
+        }
+
+        var status = linkedCredentials.FirstOrDefault(credential =>
+            ResourceCredentialContains(credential, "status"));
+        var admin = linkedCredentials.FirstOrDefault(credential =>
+            credential.CredentialId != status?.CredentialId
+            && ResourceCredentialContains(
+                credential,
+                "watchguard admin",
+                "firebox admin",
+                "firewall admin",
+                "administrator",
+                "admin")
+            && !ResourceCredentialContains(
+                credential,
+                "firebox db",
+                "firebox database",
+                "authpoint",
+                "ssl vpn",
+                "sslvpn",
+                "cloud",
+                "ad auth"));
+        return
+        [
+            new ResourceAccessSlot(
+                "status",
+                "Status",
+                status),
+            new ResourceAccessSlot(
+                "admin",
+                "Admin",
+                admin)
+        ];
+    }
+
+    private static bool ResourceCredentialContains(
+        ClientInfoCredential credential,
+        params string[] terms)
+    {
+        var metadata = $"{credential.Name} {credential.Category} {credential.Username}";
+        return terms.Any(term => metadata.Contains(
+            term,
+            StringComparison.OrdinalIgnoreCase));
     }
 
     private void SaveNewResourceAccess(
@@ -2535,6 +2683,10 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         long credentialId,
         string field) =>
         $"resource_credential_{credentialId}_{field}";
+    private static string ResourceAccessEditorKey(
+        string slot,
+        string field) =>
+        $"resource_access_{slot}_{field}";
     private static bool IsYes(string value) =>
         value.Equals("Yes", StringComparison.OrdinalIgnoreCase);
 
