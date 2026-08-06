@@ -1078,7 +1078,16 @@ public sealed class WhdRestClient
                     ["page"] = page.ToString(CultureInfo.InvariantCulture)
                 });
 
-                using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
+                using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                request.Headers.CacheControl = new CacheControlHeaderValue
+                {
+                    NoCache = true,
+                    NoStore = true
+                };
+                request.Headers.Pragma.ParseAdd("no-cache");
+
+                using var response = await _httpClient.SendAsync(request, cancellationToken);
                 var content = await response.Content.ReadAsStringAsync(cancellationToken);
                 if (!response.IsSuccessStatusCode)
                 {
@@ -1103,9 +1112,15 @@ public sealed class WhdRestClient
                         continue;
                     }
 
+                    if (!TryReadTicketNoteText(noteElement, out var noteText))
+                    {
+                        return WhdTechNoteLookupResult.Failed(
+                            $"Web Help Desk returned TechNote #{techNoteId} without readable note text, so TechBench could not verify it.");
+                    }
+
                     return WhdTechNoteLookupResult.Succeeded(
                         techNoteId,
-                        ReadString(noteElement, "noteText") ?? string.Empty,
+                        noteText,
                         ReadDurationMinutes(noteElement));
                 }
 
@@ -2279,7 +2294,11 @@ public sealed class WhdRestClient
             foreach (var noteElement in EnumerateRecords(document.RootElement))
             {
                 var id = ReadString(noteElement, "id");
-                var noteText = ReadString(noteElement, "noteText");
+                if (!TryReadTicketNoteText(noteElement, out var noteText))
+                {
+                    continue;
+                }
+
                 var duration = ReadDurationMinutes(noteElement);
                 if (!string.IsNullOrWhiteSpace(id)
                     && NormalizeNoteForComparison(noteText).Equals(
@@ -2367,6 +2386,33 @@ public sealed class WhdRestClient
         }
 
         return null;
+    }
+
+    private static bool TryReadTicketNoteText(JsonElement element, out string noteText)
+    {
+        var primaryText = ReadString(element, "noteText");
+        var mobileText = ReadString(element, "mobileNoteText");
+
+        if (!string.IsNullOrEmpty(primaryText))
+        {
+            noteText = primaryText;
+            return true;
+        }
+
+        if (!string.IsNullOrEmpty(mobileText))
+        {
+            noteText = mobileText;
+            return true;
+        }
+
+        if (primaryText is not null || mobileText is not null)
+        {
+            noteText = primaryText ?? mobileText ?? string.Empty;
+            return true;
+        }
+
+        noteText = string.Empty;
+        return false;
     }
 
     public static string NormalizeNoteForComparison(string? value)
