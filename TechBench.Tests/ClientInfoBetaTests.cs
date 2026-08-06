@@ -39,6 +39,180 @@ public sealed class ClientInfoBetaTests
     }
 
     [Fact]
+    public void BlankResourceAccessDoesNotCreateCredentialOrSecret()
+    {
+        var resource = NewSavedResource();
+
+        var result = ClientInfoBetaViewModel.SaveLinkedResourceAccess(
+            42,
+            resource,
+            resource.Category,
+            " ",
+            "",
+            _ => throw new InvalidOperationException("Credential should not be saved."),
+            (_, _, _) => throw new InvalidOperationException("Secret should not be saved."));
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void UsernameOnlyResourceAccessLinksTheExactSavedResource()
+    {
+        var resource = NewSavedResource();
+        ClientInfoCredential? requestedCredential = null;
+        var secretSaveCount = 0;
+
+        var result = ClientInfoBetaViewModel.SaveLinkedResourceAccess(
+            42,
+            resource,
+            resource.Category,
+            " apc-admin ",
+            "",
+            credential =>
+            {
+                requestedCredential = credential;
+                return credential with { CredentialId = 6123 };
+            },
+            (_, _, _) =>
+            {
+                secretSaveCount++;
+                return new ClientInfoSecretSummary();
+            });
+
+        Assert.NotNull(result);
+        Assert.NotNull(requestedCredential);
+        Assert.Equal(resource.ResourceId, requestedCredential!.ResourceId);
+        Assert.Equal("apc-admin", requestedCredential.Username);
+        Assert.Equal("UPS", requestedCredential.Category);
+        Assert.Equal(resource.AddressOrUrl, requestedCredential.LoginUrl);
+        Assert.Equal("Server Room UPS login", requestedCredential.Name);
+        Assert.Equal(
+            $"resource-primary-access-{resource.ResourceId}",
+            requestedCredential.LocalKey);
+        Assert.Equal(0, secretSaveCount);
+    }
+
+    [Fact]
+    public void PasswordOnlyResourceAccessUsesReturnedCredentialIdAndSecretPath()
+    {
+        var resource = NewSavedResource() with
+        {
+            ReviewStatus = "Verified"
+        };
+        var calls = new List<string>();
+        ClientInfoCredential? requestedCredential = null;
+        ClientInfoSecretSummary? requestedSecret = null;
+        string? requestedPassword = null;
+        bool? requestedVerified = null;
+
+        ClientInfoBetaViewModel.SaveLinkedResourceAccess(
+            42,
+            resource,
+            resource.Category,
+            "",
+            "correct horse battery staple",
+            credential =>
+            {
+                calls.Add("credential");
+                requestedCredential = credential;
+                return credential with { CredentialId = 7331 };
+            },
+            (secret, password, verified) =>
+            {
+                calls.Add("secret");
+                requestedSecret = secret;
+                requestedPassword = password;
+                requestedVerified = verified;
+                return secret;
+            });
+
+        Assert.Equal(["credential", "secret"], calls);
+        Assert.Equal(7331, requestedSecret!.CredentialId);
+        Assert.Equal("Password", requestedSecret.SecretType);
+        Assert.Equal("Password", requestedSecret.SecretLabel);
+        Assert.Equal("correct horse battery staple", requestedPassword);
+        Assert.True(requestedVerified);
+        Assert.DoesNotContain(
+            "correct horse battery staple",
+            $"{requestedCredential!.Name} {requestedCredential.Username} "
+            + $"{requestedCredential.LoginUrl} {requestedCredential.Notes}",
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResourceAddUsesTabbedAccessAndPasswordSideKeepsManualLinking()
+    {
+        var editor = Read("ClientInfoRecordEditorWindow.cs");
+        var viewModel = Read("ViewModels", "ClientInfoBetaViewModel.cs");
+
+        Assert.Contains("new TabControl", editor, StringComparison.Ordinal);
+        Assert.Contains("PasswordBox", editor, StringComparison.Ordinal);
+        Assert.Contains("Tab = \"Details\"", viewModel, StringComparison.Ordinal);
+        Assert.Contains(
+            "Tab: \"Username & password\"",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ResourceId = savedResource.ResourceId",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "new(\"resource\", \"System / service\"",
+            viewModel,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ClientProfileWindowsDoNotStayAboveTheMainWorkspace()
+    {
+        var mainWindow = Read("MainWindow.xaml.cs");
+        var legacyStart = mainWindow.IndexOf(
+            "var profileWindow = new ClientInfoWindow",
+            StringComparison.Ordinal);
+        var legacyEnd = mainWindow.IndexOf(
+            "private void ClientInfoClientListBox_MouseDoubleClick",
+            legacyStart,
+            StringComparison.Ordinal);
+        var canonicalStart = mainWindow.IndexOf(
+            "var canonicalWindow = new ClientInfoBetaWindow",
+            StringComparison.Ordinal);
+        var canonicalEnd = mainWindow.IndexOf(
+            "private void ClientInfoImportClientListBox_MouseDoubleClick",
+            canonicalStart,
+            StringComparison.Ordinal);
+
+        Assert.DoesNotContain(
+            "Owner = this",
+            mainWindow[legacyStart..legacyEnd],
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Owner = this",
+            mainWindow[canonicalStart..canonicalEnd],
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "profileWindow.Show();",
+            mainWindow[legacyStart..legacyEnd],
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "canonicalWindow.Show();",
+            mainWindow[canonicalStart..canonicalEnd],
+            StringComparison.Ordinal);
+    }
+
+    private static ClientInfoResource NewSavedResource() => new()
+    {
+        ResourceId = 9001,
+        ClientId = 42,
+        ResourceType = ClientInfoResourceCategories.Encode(
+            ClientInfoResourceCategories.ServersInfrastructure,
+            "UPS"),
+        Name = "Server Room UPS",
+        AddressOrUrl = "https://10.20.0.18",
+        IsActive = true,
+        ReviewStatus = "Unverified"
+    };
+
+    [Fact]
     public void ResourceCategoriesProvideContextualFormsAndCompactViews()
     {
         foreach (var category in ClientInfoResourceCategories.All)
