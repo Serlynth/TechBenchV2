@@ -49,7 +49,8 @@ BEGIN
         SELECT @BatchId=[BatchId]
         FROM [tb_import].[ClientInfoBatches] WITH (UPDLOCK,HOLDLOCK)
         WHERE [ClientId]=@ClientId AND [WorkbookId]=@WorkbookId
-          AND [ContentSha256]=@ContentSha256;
+          AND [ContentSha256]=@ContentSha256
+          AND [State] NOT IN (N'Rejected',N'Superseded',N'Failed');
 
         IF @BatchId IS NULL
         BEGIN

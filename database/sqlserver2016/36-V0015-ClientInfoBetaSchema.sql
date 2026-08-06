@@ -634,14 +634,39 @@ BEGIN TRY
             CONSTRAINT [FK_ClientInfoBatches_ApprovedBy]
                 FOREIGN KEY ([ApprovedByWindowsSid])
                 REFERENCES [tb_security].[Users]([WindowsSid]),
-            CONSTRAINT [UX_ClientInfoBatches_Idempotency]
-                UNIQUE ([ClientId], [WorkbookId], [ContentSha256]),
             CONSTRAINT [CK_ClientInfoBatches_State]
                 CHECK ([State] IN
                     (N'Draft', N'Parsed', N'Validated', N'InReview', N'Approved',
                      N'Promoted', N'ValidationFailed', N'Rejected', N'Superseded', N'Failed'))
         );
     END;
+
+    -- A closed review is immutable audit history, not an idempotency target.
+    -- Keep successful and active imports unique while allowing the identical
+    -- file to begin a fresh batch after rejection, supersession, or failure.
+    IF EXISTS
+    (
+        SELECT 1
+        FROM sys.key_constraints
+        WHERE [parent_object_id]=OBJECT_ID(N'tb_import.ClientInfoBatches')
+          AND [name]=N'UX_ClientInfoBatches_Idempotency'
+    )
+        ALTER TABLE [tb_import].[ClientInfoBatches]
+            DROP CONSTRAINT [UX_ClientInfoBatches_Idempotency];
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.indexes
+        WHERE [object_id]=OBJECT_ID(N'tb_import.ClientInfoBatches')
+          AND [name]=N'UX_ClientInfoBatches_ActiveIdempotency'
+    )
+        CREATE UNIQUE INDEX [UX_ClientInfoBatches_ActiveIdempotency]
+            ON [tb_import].[ClientInfoBatches]
+                ([ClientId], [WorkbookId], [ContentSha256])
+            WHERE [State]<>N'Rejected'
+              AND [State]<>N'Superseded'
+              AND [State]<>N'Failed';
 
     IF OBJECT_ID(N'tb_import.ClientInfoRecords', N'U') IS NULL
     BEGIN
