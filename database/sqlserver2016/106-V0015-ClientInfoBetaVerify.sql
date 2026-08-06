@@ -84,6 +84,20 @@ IF COL_LENGTH(N'tb_client.ClientProfiles', N'ClientFolderPath') IS NULL
    OR COL_LENGTH(N'tb_client.ClientProfiles', N'LegacyClientInfoSheetPath') IS NULL
     THROW 52509,N'One or more Client Info server-link columns are missing.',1;
 
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [object_id]=OBJECT_ID(N'tb_import.ClientInfoBatches')
+      AND [name]=N'UX_ClientInfoBatches_ActiveIdempotency'
+      AND [is_unique]=1
+      AND [has_filter]=1
+      AND [filter_definition] LIKE N'%Rejected%'
+      AND [filter_definition] LIKE N'%Superseded%'
+      AND [filter_definition] LIKE N'%Failed%'
+)
+    THROW 52514,N'Closed Client Info workbook reviews still block an identical reimport.',1;
+
 DECLARE @RecordTypeConstraint nvarchar(max)=
     (SELECT [definition]
      FROM sys.check_constraints

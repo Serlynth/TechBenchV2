@@ -2689,6 +2689,35 @@ public sealed class ClientInfoBetaTests
             "[State]=N'Superseded'",
             imports,
             StringComparison.Ordinal);
+        var beginImportStart = imports.IndexOf(
+            "CREATE PROCEDURE [tb_app].[BeginClientInfoImport]",
+            StringComparison.Ordinal);
+        var beginImportEnd = imports.IndexOf(
+            "\nGO",
+            beginImportStart,
+            StringComparison.Ordinal);
+        Assert.True(beginImportStart >= 0 && beginImportEnd > beginImportStart);
+        var beginImportBody = imports[beginImportStart..beginImportEnd];
+        Assert.Contains(
+            "[State] NOT IN (N'Rejected',N'Superseded',N'Failed')",
+            beginImportBody,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "UX_ClientInfoBatches_ActiveIdempotency",
+            schema,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "DROP CONSTRAINT [UX_ClientInfoBatches_Idempotency]",
+            schema,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[State]<>N'Rejected'",
+            schema,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Closed Client Info workbook reviews still block an identical reimport.",
+            verifier,
+            StringComparison.Ordinal);
         Assert.Contains(
             "[State] NOT IN (N'Rejected',N'Superseded')",
             procedures,
