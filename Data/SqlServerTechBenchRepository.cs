@@ -139,6 +139,10 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
             "[tb_app].[ValidateClientInfoImport]";
         public const string CompareClientInfoImportToFireDrill =
             "[tb_app].[CompareClientInfoImportToFireDrill]";
+        public const string AcceptClientInfoImportUnverified =
+            "[tb_app].[AcceptClientInfoImportUnverified]";
+        public const string DiscardClientInfoImport =
+            "[tb_app].[DiscardClientInfoImport]";
         public const string GetClientInfoImportBatch =
             "[tb_app].[GetClientInfoImportBatch]";
         public const string ApproveClientInfoImport =

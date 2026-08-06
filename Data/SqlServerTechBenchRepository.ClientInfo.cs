@@ -900,6 +900,42 @@ public sealed partial class SqlServerTechBenchRepository
         ?? throw new InvalidOperationException(
             "SQL Server did not return the FireDrill comparison.");
 
+    public void AcceptClientInfoImportUnverified(ClientInfoImportBatch batch)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        ExecuteNonQueryAsync(
+            Procedures.AcceptClientInfoImportUnverified,
+            command =>
+            {
+                AddGuid(command, "@BatchId", batch.BatchId);
+                AddBinary(
+                    command,
+                    "@ExpectedRowVersion",
+                    8,
+                    batch.RowVersion);
+                AddGuid(command, "@RequestId", Guid.NewGuid());
+            },
+            CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    public void DiscardClientInfoImport(ClientInfoImportBatch batch)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        ExecuteNonQueryAsync(
+            Procedures.DiscardClientInfoImport,
+            command =>
+            {
+                AddGuid(command, "@BatchId", batch.BatchId);
+                AddBinary(
+                    command,
+                    "@ExpectedRowVersion",
+                    8,
+                    batch.RowVersion);
+                AddGuid(command, "@RequestId", Guid.NewGuid());
+            },
+            CancellationToken.None).GetAwaiter().GetResult();
+    }
+
     public ClientInfoImportBatch ApproveClientInfoImport(
         ClientInfoImportBatch batch)
     {

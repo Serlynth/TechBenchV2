@@ -2181,6 +2181,9 @@ public sealed class ClientInfoBetaTests
                     .Select(secret => secret.SecretValue)
                     .OrderBy(value => value, StringComparer.Ordinal)
                     .ToArray());
+            Assert.All(
+                package.Records,
+                record => Assert.Equal("Verified", record.ReviewStatus));
         }
         finally
         {
@@ -2675,6 +2678,50 @@ public sealed class ClientInfoBetaTests
             verifier,
             StringComparison.Ordinal);
         Assert.Contains(
+            "CREATE PROCEDURE [tb_app].[AcceptClientInfoImportUnverified]",
+            imports,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CREATE PROCEDURE [tb_app].[DiscardClientInfoImport]",
+            imports,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[State]=N'Superseded'",
+            imports,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[State] NOT IN (N'Rejected',N'Superseded')",
+            procedures,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Accept Remaining as Keep as-is before approval.",
+            imports,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "record.[SourceSheet]",
+            imports,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "record.[SourceRow]",
+            imports,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "tb_app.AcceptClientInfoImportUnverified",
+            verifier,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "tb_app.DiscardClientInfoImport",
+            verifier,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "GRANT EXECUTE ON OBJECT::[tb_app].[AcceptClientInfoImportUnverified]",
+            grants,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "GRANT EXECUTE ON OBJECT::[tb_app].[DiscardClientInfoImport]",
+            grants,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "N'ResourceField'",
             imports,
             StringComparison.Ordinal);
@@ -2832,6 +2879,22 @@ public sealed class ClientInfoBetaTests
         Assert.Contains(
             "Content=\"Add to Client Information\"",
             importWindow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Content=\"Accept Remaining as Keep as-is\"",
+            importWindow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Content=\"Discard Review\"",
+            importWindow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "AcceptUnverifiedImportCommand",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "DiscardImportCommand",
+            viewModel,
             StringComparison.Ordinal);
     }
 

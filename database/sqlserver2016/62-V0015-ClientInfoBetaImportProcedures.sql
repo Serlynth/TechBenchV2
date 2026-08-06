@@ -415,10 +415,39 @@ BEGIN
 
         INSERT INTO [tb_import].[ClientInfoIssues]
             ([BatchId],[ImportRecordId],[Severity],[IssueCode],[Message])
-        SELECT [BatchId],[ImportRecordId],N'Warning',N'UNVERIFIED_RECORD',
-            N'This row has not been verified. Accept it explicitly or verify it before approval.'
-        FROM [tb_import].[ClientInfoRecords]
-        WHERE [BatchId]=@BatchId AND [ReviewStatus] IN (N'Unverified',N'NeedsReview');
+        SELECT
+            record.[BatchId],record.[ImportRecordId],N'Warning',N'UNVERIFIED_RECORD',
+            N'Unverified '+LOWER(record.[RecordType])
+            +CASE
+                WHEN COALESCE(
+                        NULLIF(JSON_VALUE(record.[PayloadJson],N'$.displayName'),N''),
+                        NULLIF(JSON_VALUE(record.[PayloadJson],N'$.name'),N''),
+                        NULLIF(JSON_VALUE(record.[PayloadJson],N'$.fieldLabel'),N''),
+                        NULLIF(JSON_VALUE(record.[PayloadJson],N'$.item'),N'')) IS NULL
+                    THEN N''
+                ELSE N' "'+COALESCE(
+                    NULLIF(JSON_VALUE(record.[PayloadJson],N'$.displayName'),N''),
+                    NULLIF(JSON_VALUE(record.[PayloadJson],N'$.name'),N''),
+                    NULLIF(JSON_VALUE(record.[PayloadJson],N'$.fieldLabel'),N''),
+                    NULLIF(JSON_VALUE(record.[PayloadJson],N'$.item'),N''))+N'"'
+             END
+            +N' on '+COALESCE(NULLIF(record.[SourceSheet],N''),N'the workbook')
+            +CASE WHEN record.[SourceRow] IS NULL THEN N''
+                  ELSE N' row '+CONVERT(nvarchar(20),record.[SourceRow]) END
+            +N'. Set Review Status to Verified or use Accept Remaining as Keep as-is before approval.'
+        FROM [tb_import].[ClientInfoRecords] AS record
+        WHERE record.[BatchId]=@BatchId AND record.[ReviewStatus]=N'Unverified';
+
+        INSERT INTO [tb_import].[ClientInfoIssues]
+            ([BatchId],[ImportRecordId],[Severity],[IssueCode],[Message])
+        SELECT
+            record.[BatchId],record.[ImportRecordId],N'Warning',N'NEEDS_REVIEW_RECORD',
+            N'Record on '+COALESCE(NULLIF(record.[SourceSheet],N''),N'the workbook')
+            +CASE WHEN record.[SourceRow] IS NULL THEN N''
+                  ELSE N' row '+CONVERT(nvarchar(20),record.[SourceRow]) END
+            +N' is marked Needs review. Verify it, accept it, or exclude it in the workbook before approval.'
+        FROM [tb_import].[ClientInfoRecords] AS record
+        WHERE record.[BatchId]=@BatchId AND record.[ReviewStatus]=N'NeedsReview';
 
         DECLARE @ErrorCount int=
             (SELECT COUNT(*) FROM [tb_import].[ClientInfoIssues]
@@ -437,6 +466,20 @@ BEGIN
                 ELSE N'Validation passed.' END,
             [UpdatedAtUtc]=SYSUTCDATETIME()
         WHERE [BatchId]=@BatchId;
+
+        UPDATE older_batch
+        SET
+            [State]=N'Superseded',
+            [Message]=N'Replaced by a newer revision of this workbook.',
+            [UpdatedAtUtc]=SYSUTCDATETIME()
+        FROM [tb_import].[ClientInfoBatches] AS older_batch
+        INNER JOIN [tb_import].[ClientInfoBatches] AS current_batch
+            ON current_batch.[BatchId]=@BatchId
+           AND current_batch.[ClientId]=older_batch.[ClientId]
+           AND current_batch.[WorkbookId]=older_batch.[WorkbookId]
+        WHERE older_batch.[BatchId]<>@BatchId
+          AND older_batch.[State] IN
+              (N'Draft',N'Parsed',N'Validated',N'InReview',N'ValidationFailed');
 
         DECLARE @AuditEntityId nvarchar(120) =
             CONVERT(nvarchar(120), @BatchId);
@@ -760,6 +803,125 @@ BEGIN
     EXEC [tb_security].[WriteAuditEvent]
         @Action=N'ClientInfoImportIssueResolved',
         @EntityType=N'ClientInfoImportIssue',
+        @EntityId=@AuditEntityId,@RequestId=@RequestId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AcceptClientInfoImportUnverified', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AcceptClientInfoImportUnverified];
+GO
+
+CREATE PROCEDURE [tb_app].[AcceptClientInfoImportUnverified]
+    @BatchId uniqueidentifier,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85),@IsManager bit,@IsAdmin bit,@IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,@IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_migration_operator')<>1
+        THROW 52400,N'Client migration operator permission is required.',1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        UPDATE [tb_import].[ClientInfoBatches]
+        SET [Message]=N'Remaining unverified rows were accepted as Keep as-is.',
+            [UpdatedAtUtc]=SYSUTCDATETIME()
+        WHERE [BatchId]=@BatchId
+          AND [State] IN (N'InReview',N'ValidationFailed',N'Validated')
+          AND [RowVersion]=@ExpectedRowVersion;
+        IF @@ROWCOUNT<>1
+            THROW 52442,N'The import batch changed or cannot accept unverified rows.',1;
+
+        UPDATE [tb_import].[ClientInfoRecords]
+        SET [ReviewStatus]=N'AcceptedUnverified'
+        WHERE [BatchId]=@BatchId AND [ReviewStatus]=N'Unverified';
+        IF @@ROWCOUNT=0
+            THROW 52443,N'This import has no remaining unverified rows.',1;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    DECLARE @AuditEntityId nvarchar(120)=CONVERT(nvarchar(120),@BatchId);
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action=N'ClientInfoImportUnverifiedAccepted',
+        @EntityType=N'ClientInfoImportBatch',
+        @EntityId=@AuditEntityId,@RequestId=@RequestId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.DiscardClientInfoImport', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[DiscardClientInfoImport];
+GO
+
+CREATE PROCEDURE [tb_app].[DiscardClientInfoImport]
+    @BatchId uniqueidentifier,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @ActorSid varbinary(85),@IsManager bit,@IsAdmin bit,@IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,@IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,@IsSyncOperator=@IsSyncOperator OUTPUT;
+    IF @IsAdmin<>1 AND IS_ROLEMEMBER(N'tb_role_client_migration_operator')<>1
+        THROW 52400,N'Client migration operator permission is required.',1;
+
+    DECLARE @ClientId int,@NextBatchId uniqueidentifier,@NextBatchState nvarchar(24);
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        SELECT @ClientId=[ClientId]
+        FROM [tb_import].[ClientInfoBatches] WITH (UPDLOCK,HOLDLOCK)
+        WHERE [BatchId]=@BatchId
+          AND [State] IN
+              (N'Draft',N'Parsed',N'Validated',N'InReview',N'ValidationFailed',N'Approved')
+          AND [RowVersion]=@ExpectedRowVersion;
+        IF @ClientId IS NULL
+            THROW 52454,N'The import batch changed or can no longer be discarded.',1;
+
+        UPDATE [tb_import].[ClientInfoBatches]
+        SET [State]=N'Rejected',[Message]=N'Discarded without changing Client Information.',
+            [UpdatedAtUtc]=SYSUTCDATETIME()
+        WHERE [BatchId]=@BatchId;
+
+        SELECT TOP(1)
+            @NextBatchId=[BatchId],@NextBatchState=[State]
+        FROM [tb_import].[ClientInfoBatches]
+        WHERE [ClientId]=@ClientId AND [BatchId]<>@BatchId
+          AND [State] IN
+              (N'Draft',N'Parsed',N'Validated',N'InReview',N'ValidationFailed',N'Approved')
+        ORDER BY [CreatedAtUtc] DESC,[BatchId] DESC;
+
+        UPDATE [tb_ops].[ClientInfoCutovers]
+        SET [ActiveBatchId]=@NextBatchId,
+            [State]=CASE
+                WHEN @NextBatchId IS NULL THEN N'NotStarted'
+                WHEN @NextBatchState=N'Approved' THEN N'Ready'
+                ELSE N'Staging' END,
+            [UpdatedByWindowsSid]=@ActorSid,[UpdatedAtUtc]=SYSUTCDATETIME()
+        WHERE [ClientId]=@ClientId AND [ActiveBatchId]=@BatchId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    DECLARE @AuditEntityId nvarchar(120)=CONVERT(nvarchar(120),@BatchId);
+    EXEC [tb_security].[WriteAuditEvent]
+        @Action=N'ClientInfoImportDiscarded',
+        @EntityType=N'ClientInfoImportBatch',
         @EntityId=@AuditEntityId,@RequestId=@RequestId;
 END;
 GO

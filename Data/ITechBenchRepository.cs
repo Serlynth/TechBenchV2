@@ -237,6 +237,14 @@ public interface ITechBenchRepository
         throw new NotSupportedException(
             "Canonical Client Info comparison requires the shared SQL Server beta extension.");
 
+    void AcceptClientInfoImportUnverified(ClientInfoImportBatch batch) =>
+        throw new NotSupportedException(
+            "Canonical Client Info import requires the shared SQL Server beta extension.");
+
+    void DiscardClientInfoImport(ClientInfoImportBatch batch) =>
+        throw new NotSupportedException(
+            "Canonical Client Info import requires the shared SQL Server beta extension.");
+
     ClientInfoImportBatch ApproveClientInfoImport(ClientInfoImportBatch batch) =>
         throw new NotSupportedException(
             "Canonical Client Info import requires the shared SQL Server beta extension.");

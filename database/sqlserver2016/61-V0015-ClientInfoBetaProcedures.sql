@@ -638,6 +638,7 @@ BEGIN
     INNER JOIN [tb_data].[Clients] client
         ON client.[Id]=batch.[ClientId]
     WHERE batch.[ClientId] = @ClientId
+      AND batch.[State] NOT IN (N'Rejected',N'Superseded')
     ORDER BY batch.[CreatedAtUtc] DESC, batch.[BatchId];
 END;
 GO

@@ -60,6 +60,8 @@ FROM
         (N'tb_security.GetClientInfoImportBatchResult',N'P'),
         (N'tb_app.GetClientInfoImportBatch',N'P'),
         (N'tb_app.ResolveClientInfoImportIssue',N'P'),
+        (N'tb_app.AcceptClientInfoImportUnverified',N'P'),
+        (N'tb_app.DiscardClientInfoImport',N'P'),
         (N'tb_app.ApproveClientInfoImport',N'P'),
         (N'tb_app.PromoteClientInfoImport',N'P'),
         (N'tb_client.ReparentClientGraph',N'P')
