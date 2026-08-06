@@ -890,7 +890,7 @@
                                                     Binding="{Binding Microsoft365License}"
                                                     MinWidth="175" />
                                 <DataGridCheckBoxColumn Header="365 uses AD login"
-                                                        Binding="{Binding Microsoft365UsesAdLogin}"
+                                                        Binding="{Binding Microsoft365UsesAdLogin, Mode=OneWay}"
                                                         MinWidth="125" />
                                 <DataGridTextColumn Header="365 Username"
                                                     Binding="{Binding Microsoft365Username}"

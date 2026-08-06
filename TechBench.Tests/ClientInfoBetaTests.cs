@@ -395,7 +395,10 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("Header=\"365 uses AD login\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"365 Username\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"365 Password\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Microsoft365UsesAdLogin", xaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "Binding=\"{Binding Microsoft365UsesAdLogin, Mode=OneWay}\"",
+            xaml,
+            StringComparison.Ordinal);
         Assert.Contains("Microsoft365Password", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"PC Name\"", xaml, StringComparison.Ordinal);
         Assert.Contains("PART_RightHeaderGripper", xaml, StringComparison.Ordinal);
