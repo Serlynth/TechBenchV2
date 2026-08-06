@@ -792,6 +792,42 @@ public sealed class WhdRestClient
         string filePath,
         CancellationToken cancellationToken)
     {
+        var currentUpload = await UploadTechNoteImagePartAsync(
+            settings,
+            session,
+            techNoteId,
+            filePath,
+            "file",
+            cancellationToken);
+        if (currentUpload.Success
+            || !currentUpload.MissingRequiredPartName.Equals(
+                "fileUpload",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return currentUpload;
+        }
+
+        // Current WHD builds require the part name "file", while the older WHD
+        // API guide documents "fileUpload". Retry the legacy name only when
+        // WHD explicitly says that exact part was absent, so an uncertain
+        // response can never cause the same image to be uploaded twice.
+        return await UploadTechNoteImagePartAsync(
+            settings,
+            session,
+            techNoteId,
+            filePath,
+            "fileUpload",
+            cancellationToken);
+    }
+
+    private async Task<WhdSingleAttachmentUploadResult> UploadTechNoteImagePartAsync(
+        WhdConnectionSettings settings,
+        WhdUploadSession session,
+        int techNoteId,
+        string filePath,
+        string multipartPartName,
+        CancellationToken cancellationToken)
+    {
         var requestUri = BuildAttachmentUploadUri(settings.BaseUrl, "techNote", techNoteId);
         await using var stream = new FileStream(
             filePath,
@@ -804,7 +840,7 @@ public sealed class WhdRestClient
         using var fileContent = new StreamContent(stream);
         fileContent.Headers.ContentType = new MediaTypeHeaderValue(
             WhdImageAttachmentPolicy.GetMediaType(filePath));
-        multipart.Add(fileContent, "fileUpload", Path.GetFileName(filePath));
+        multipart.Add(fileContent, multipartPartName, Path.GetFileName(filePath));
 
         using var request = new HttpRequestMessage(HttpMethod.Post, requestUri)
         {
@@ -852,7 +888,46 @@ public sealed class WhdRestClient
                 ? " WHD rejected the documented JSESSIONID and wosid attachment session cookies."
                 : string.Empty;
         return WhdSingleAttachmentUploadResult.Failed(
-            $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}. {details}{authenticationHint}");
+            $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}. {details}{authenticationHint}",
+            TryReadMissingRequiredPartName(content));
+    }
+
+    private static string TryReadMissingRequiredPartName(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return string.Empty;
+        }
+
+        var details = content;
+        try
+        {
+            using var document = JsonDocument.Parse(content);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("reason", out var reason)
+                && reason.ValueKind == JsonValueKind.String)
+            {
+                details = reason.GetString() ?? content;
+            }
+        }
+        catch (JsonException)
+        {
+            // Some WHD versions return this diagnostic as plain text.
+        }
+
+        const string prefix = "Required request part '";
+        const string suffix = "' is not present";
+        var prefixIndex = details.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+        if (prefixIndex < 0)
+        {
+            return string.Empty;
+        }
+
+        var partStart = prefixIndex + prefix.Length;
+        var suffixIndex = details.IndexOf(suffix, partStart, StringComparison.OrdinalIgnoreCase);
+        return suffixIndex <= partStart
+            ? string.Empty
+            : details[partStart..suffixIndex].Trim();
     }
 
     private static bool IsExpectedAttachmentResponseUri(Uri requestUri, Uri? responseUri)
@@ -3808,10 +3883,18 @@ public sealed class WhdRestClient
         bool UsesAutomaticCookies,
         string JavaSessionId);
 
-    private sealed record WhdSingleAttachmentUploadResult(bool Success, string Message)
+    private sealed record WhdSingleAttachmentUploadResult(
+        bool Success,
+        string Message,
+        string MissingRequiredPartName)
     {
-        public static WhdSingleAttachmentUploadResult Succeeded() => new(true, string.Empty);
-        public static WhdSingleAttachmentUploadResult Failed(string message) => new(false, message);
+        public static WhdSingleAttachmentUploadResult Succeeded() =>
+            new(true, string.Empty, string.Empty);
+
+        public static WhdSingleAttachmentUploadResult Failed(
+            string message,
+            string missingRequiredPartName = "") =>
+            new(false, message, missingRequiredPartName);
     }
 }
 
