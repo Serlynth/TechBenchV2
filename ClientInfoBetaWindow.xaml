@@ -1097,8 +1097,12 @@
                      Content="{Binding DomainsEmailGroup}"
                      ContentTemplate="{StaticResource ResourceCategoryContentTemplate}" />
 
-            <TabItem Header="Backup &amp; Security"
-                     Content="{Binding BackupSecurityGroup}"
+            <TabItem Header="Backup"
+                     Content="{Binding BackupGroup}"
+                     ContentTemplate="{StaticResource ResourceCategoryContentTemplate}" />
+
+            <TabItem Header="Security"
+                     Content="{Binding SecurityGroup}"
                      ContentTemplate="{StaticResource ResourceCategoryContentTemplate}" />
 
             <TabItem Header="Vendors &amp; Services"

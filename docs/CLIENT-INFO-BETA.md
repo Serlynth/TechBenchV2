@@ -64,7 +64,10 @@ either direction without a manual reinstall.
    Backup & Security, Vendors & Services, Passwords, and Other Info. Leave
    tabs or fields that do not apply blank. Switches and network appliances
    belong under Servers & Infrastructure; wireless networks and access points
-   belong under Wi-Fi; antivirus and EDR belong under Backup & Security.
+   belong under Wi-Fi. The migration workbook keeps its combined Backup &
+   Security tab for compatibility: backup and restore rows appear under Backup
+   in Client Information, while antivirus, EDR, MFA, and filtering rows appear
+   under Security.
    Use the category-specific IP/network columns. For an unusual field, add an
    optional column whose heading starts with `Custom:` such as `Custom: Rack`.
    Custom-column values become editable resource fields in Client Information.

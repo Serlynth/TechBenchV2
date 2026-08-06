@@ -350,7 +350,7 @@ public sealed class ClientInfoWorkbookService
                 records,
                 locationKeys,
                 resourceKeys,
-                ClientInfoResourceCategories.BackupSecurity,
+                ClientInfoResourceCategories.LegacyBackupSecurity,
                 "Backup & Security",
                 "security");
             ParseSimpleResources(

@@ -91,42 +91,6 @@ public sealed class WhdTicketLookupResult
     };
 }
 
-public sealed class WhdTechNoteLookupResult
-{
-    public bool Success { get; init; }
-    public bool IsNotFound { get; init; }
-    public string Message { get; init; } = string.Empty;
-    public int TechNoteId { get; init; }
-    public string NoteText { get; init; } = string.Empty;
-    public int? DurationMinutes { get; init; }
-
-    public static WhdTechNoteLookupResult Failed(string message) => new()
-    {
-        Success = false,
-        Message = message
-    };
-
-    public static WhdTechNoteLookupResult NotFound(int techNoteId, string message) => new()
-    {
-        Success = false,
-        IsNotFound = true,
-        TechNoteId = techNoteId,
-        Message = message
-    };
-
-    public static WhdTechNoteLookupResult Succeeded(
-        int techNoteId,
-        string noteText,
-        int? durationMinutes) => new()
-        {
-            Success = true,
-            Message = $"Read Web Help Desk TechNote #{techNoteId}.",
-            TechNoteId = techNoteId,
-            NoteText = noteText,
-            DurationMinutes = durationMinutes
-        };
-}
-
 public sealed class WhdStatusTypeSyncResult
 {
     public bool Success { get; init; }

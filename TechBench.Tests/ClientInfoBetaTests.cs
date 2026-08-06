@@ -51,6 +51,25 @@ public sealed class ClientInfoBetaTests
                 StringComparison.Ordinal);
         }
 
+        Assert.Contains(
+            "Backup Schedule",
+            ClientInfoResourceFieldDefinitions
+                .ForEditorCategory(ClientInfoResourceCategories.Backup)
+                .Select(field => field.FieldLabel));
+        Assert.Contains(
+            "Policy / Monitoring",
+            ClientInfoResourceFieldDefinitions
+                .ForEditorCategory(ClientInfoResourceCategories.Security)
+                .Select(field => field.FieldLabel));
+        Assert.DoesNotContain(
+            "Antivirus / EDR",
+            ClientInfoResourceFieldDefinitions.TypeOptionsForCategory(
+                ClientInfoResourceCategories.Backup));
+        Assert.Contains(
+            "Antivirus / EDR",
+            ClientInfoResourceFieldDefinitions.TypeOptionsForCategory(
+                ClientInfoResourceCategories.Security));
+
         var xaml = Read("ClientInfoBetaWindow.xaml");
         var viewModel = Read("ViewModels", "ClientInfoBetaViewModel.cs");
         var resourceGrid = Read("Controls", "ClientInfoResourceDataGrid.cs");
@@ -117,10 +136,16 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("QuickReferencePriority", viewModel, StringComparison.Ordinal);
         Assert.Contains("!ReferenceEquals(group, NeedsSortingGroup)", viewModel, StringComparison.Ordinal);
         Assert.Contains("or \"Core infrastructure\"", viewModel, StringComparison.Ordinal);
-        Assert.Contains("or \"Other backup & security\"", viewModel, StringComparison.Ordinal);
+        Assert.Contains("or \"Other backup\"", viewModel, StringComparison.Ordinal);
+        Assert.Contains("or \"Other security\"", viewModel, StringComparison.Ordinal);
         Assert.Contains("or \"Remote Access\"", viewModel, StringComparison.Ordinal);
         Assert.Contains("or \"Veeam\"", viewModel, StringComparison.Ordinal);
         Assert.Contains("or \"Vendors & services\"", viewModel, StringComparison.Ordinal);
+        Assert.Contains("<TabItem Header=\"Backup\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"{Binding BackupGroup}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<TabItem Header=\"Security\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"{Binding SecurityGroup}\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Header=\"Backup &amp; Security\"", xaml, StringComparison.Ordinal);
         Assert.Contains("ForEditorCategory(group.CategoryName)", resourceGrid, StringComparison.Ordinal);
         Assert.DoesNotContain(".Where(field => field.ShowInGrid)", resourceGrid, StringComparison.Ordinal);
         Assert.Contains("TextColumn(\"Notes\", \"Notes\"", resourceGrid, StringComparison.Ordinal);
@@ -692,9 +717,10 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("Microsoft 365", Titles(ClientInfoResourceCategories.ApplicationsCloud));
         Assert.Contains("Remote Access", Titles(ClientInfoResourceCategories.ApplicationsCloud));
         Assert.Equal(["Domain & AD"], Titles(ClientInfoResourceCategories.DomainsEmail));
-        Assert.Contains("Veeam", Titles(ClientInfoResourceCategories.BackupSecurity));
-        Assert.Contains("ESET", Titles(ClientInfoResourceCategories.BackupSecurity));
-        Assert.Contains("Barracuda", Titles(ClientInfoResourceCategories.BackupSecurity));
+        Assert.Contains("Veeam", Titles(ClientInfoResourceCategories.Backup));
+        Assert.DoesNotContain("ESET", Titles(ClientInfoResourceCategories.Backup));
+        Assert.Contains("ESET", Titles(ClientInfoResourceCategories.Security));
+        Assert.Contains("Barracuda", Titles(ClientInfoResourceCategories.Security));
 
         var builder = Read("Models", "ClientInfoCategoryOverviewBuilder.cs");
         Assert.Contains("CredentialFieldGrouper.Group", builder, StringComparison.Ordinal);
@@ -846,7 +872,10 @@ public sealed class ClientInfoBetaTests
     [Theory]
     [InlineData("WatchGuard", "Admin", ClientInfoResourceCategories.ConnectionInternet)]
     [InlineData("Wireless", "Aruba Central", ClientInfoResourceCategories.Wifi)]
-    [InlineData("Veeam", "Backup Console", ClientInfoResourceCategories.BackupSecurity)]
+    [InlineData("Veeam", "Backup Console", ClientInfoResourceCategories.Backup)]
+    [InlineData("ESET", "Endpoint Security", ClientInfoResourceCategories.Security)]
+    [InlineData("Backup & Security", "Veeam Admin", ClientInfoResourceCategories.Backup)]
+    [InlineData("Backup & Security", "ESET Admin", ClientInfoResourceCategories.Security)]
     [InlineData("Active Directory", "Domain Admin", ClientInfoResourceCategories.DomainsEmail)]
     [InlineData("Remote Access", "ScreenConnect", ClientInfoResourceCategories.ApplicationsCloud)]
     [InlineData("ILO", "ILO Host 1", ClientInfoResourceCategories.ServersInfrastructure)]
@@ -924,6 +953,48 @@ public sealed class ClientInfoBetaTests
             Assert.Contains(
                 "Tenant / Instance",
                 ReadHeaderRow(workbook, "Applications & Cloud"));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CombinedMigrationSheetRoutesBackupAndSecurityRowsSeparately()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "TechBenchClientInfoTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "Protection Migration.xlsx");
+            var service = new ClientInfoWorkbookService();
+            service.CreateTemplate(path, 477, "Acme Legal");
+            AppendRow(
+                path,
+                "Backup & Security",
+                "Veeam Backup", "Veeam", "Veeam",
+                "https://backup.example.test", "", "Active", "", "Verified");
+            AppendRow(
+                path,
+                "Backup & Security",
+                "Antivirus / EDR", "ESET Protect", "ESET",
+                "https://security.example.test", "", "Active", "", "Verified");
+
+            var resources = service.Read(path).Records
+                .Where(record => record.RecordType == "Resource")
+                .ToArray();
+
+            Assert.Equal(2, resources.Length);
+            Assert.Contains(resources, record => record.PayloadJson.Contains(
+                "\"resourceType\":\"Backup / Veeam Backup\"",
+                StringComparison.Ordinal));
+            Assert.Contains(resources, record => record.PayloadJson.Contains(
+                "\"resourceType\":\"Security / Antivirus / EDR\"",
+                StringComparison.Ordinal));
         }
         finally
         {
@@ -1114,8 +1185,15 @@ public sealed class ClientInfoBetaTests
     }
 
     [Theory]
-    [InlineData("Antivirus / EDR", "Backup & Security")]
-    [InlineData("CrowdStrike", "Backup & Security")]
+    [InlineData("Veeam Backup", "Backup")]
+    [InlineData("Barracuda Backup", "Backup")]
+    [InlineData("Backup & Security / Veeam Backup", "Backup")]
+    [InlineData("Antivirus / EDR", "Security")]
+    [InlineData("Barracuda Email Security", "Security")]
+    [InlineData("CrowdStrike", "Security")]
+    [InlineData("Backup & Security / Antivirus / EDR", "Security")]
+    [InlineData("Backup & Security", "Needs Sorting")]
+    [InlineData("Backup & Security / Other", "Needs Sorting")]
     [InlineData("Firewall", "Connection & Internet")]
     [InlineData("Switch", "Servers & Infrastructure")]
     [InlineData("Network Switch", "Servers & Infrastructure")]
@@ -1475,7 +1553,8 @@ public sealed class ClientInfoBetaTests
                      "Wi-Fi",
                      "Applications &amp; Cloud",
                      "Domains &amp; Email",
-                     "Backup &amp; Security",
+                     "Backup",
+                     "Security",
                      "Vendors &amp; Services",
                      "Needs Sorting",
                      "Passwords",

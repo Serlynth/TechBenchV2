@@ -8,7 +8,7 @@ public static class WorkEntryPostingStatusCalculator
     {
         ArgumentNullException.ThrowIfNull(entry);
 
-        if (!string.IsNullOrWhiteSpace(entry.LastError))
+        if (!string.IsNullOrWhiteSpace(entry.DisplayLastError))
         {
             entry.PostingStatus = PostingStatus.Failed;
             return;

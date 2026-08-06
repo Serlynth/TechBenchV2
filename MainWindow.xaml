@@ -98,7 +98,7 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <TextBlock Text="Selected images are included with the next Post/Update WHD action and are not stored in TechBench or SQL."
+                    <TextBlock Text="Selected images are included with the next Post or Attach Images to WHD action and are not stored in TechBench or SQL."
                                Foreground="{DynamicResource MutedTextBrush}"
                                FontSize="10"
                                TextWrapping="Wrap"
@@ -823,11 +823,6 @@
                                 <TextBlock Text="{Binding WhdBadge}" Style="{StaticResource BadgeTextStyle}" />
                             </Border>
                             <Border Style="{StaticResource BadgeStyle}"
-                                    Background="{DynamicResource WarningBrush}"
-                                    Visibility="{Binding ModifiedAfterPosting, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                <TextBlock Text="Modified After Posting" Style="{StaticResource BadgeTextStyle}" />
-                            </Border>
-                            <Border Style="{StaticResource BadgeStyle}"
                                     Background="{DynamicResource NeutralBadgeBrush}"
                                     Visibility="{Binding HasTags, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <TextBlock Text="{Binding Tags}"
@@ -1373,11 +1368,6 @@
                                                         Background="{DynamicResource NoTicketBadgeBrush}"
                                                         Visibility="{Binding Editor.HasNoTicket, Converter={StaticResource BooleanToVisibilityConverter}}">
                                                     <TextBlock Text="{Binding Editor.TicketWarningText}" Style="{StaticResource BadgeTextStyle}" />
-                                                </Border>
-                                                <Border Style="{StaticResource BadgeStyle}"
-                                                        Background="{DynamicResource WarningBrush}"
-                                                        Visibility="{Binding Editor.ModifiedAfterPosting, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                                    <TextBlock Text="Modified After Posting" Style="{StaticResource BadgeTextStyle}" />
                                                 </Border>
                                             </WrapPanel>
                                             <TextBlock Text="{Binding Editor.LastError}"
@@ -3782,9 +3772,9 @@
                                         </UniformGrid>
                                     </Border>
 
-                                    <TextBlock Text="{Binding SelectedEntry.LastError}"
+                                    <TextBlock Text="{Binding SelectedEntry.DisplayLastError}"
                                                Foreground="{DynamicResource DangerBrush}"
-                                               Visibility="{Binding SelectedEntry.LastError, Converter={StaticResource StringToVisibilityConverter}}"
+                                               Visibility="{Binding SelectedEntry.DisplayLastError, Converter={StaticResource StringToVisibilityConverter}}"
                                                Margin="0,12,0,0" />
 
                                     <TextBlock Text="Sage/WHD Note" Style="{StaticResource FieldLabelStyle}" Margin="0,12,0,0" />

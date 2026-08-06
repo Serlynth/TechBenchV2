@@ -74,7 +74,7 @@ public static class ClientInfoResourceFieldDefinitions
                 new("tenant_name", "Tenant Name", "Text", 50, ShowInGrid: false),
                 new("expiration_date", "Expiration Date", "Date", 60, ShowInGrid: false)
             ],
-            [ClientInfoResourceCategories.BackupSecurity] =
+            [ClientInfoResourceCategories.Backup] =
             [
                 new("product_service", "Product / Service", "Text", 10),
                 new("protected_scope", "Protected Scope", "Text", 20),
@@ -82,6 +82,18 @@ public static class ClientInfoResourceFieldDefinitions
                 new("retention", "Retention", "Text", 40, ShowInGrid: false),
                 new("backup_schedule", "Backup Schedule", "Text", 50, ShowInGrid: false),
                 new("last_restore_test", "Last Restore Test", "Date", 60, ShowInGrid: false),
+                new("renewal_date", "Renewal Date", "Date", 70, ShowInGrid: false)
+            ],
+            [ClientInfoResourceCategories.Security] =
+            [
+                // Keep the legacy combined-category keys so reclassified
+                // records retain their values without a data migration.
+                new("product_service", "Product / Service", "Text", 10),
+                new("protected_scope", "Protected Scope / Coverage", "Text", 20),
+                new("console_url", "Console URL", "Url", 30),
+                new("retention", "Event / Message Retention", "Text", 40, ShowInGrid: false),
+                new("backup_schedule", "Policy / Monitoring", "Text", 50, ShowInGrid: false),
+                new("last_restore_test", "Last Review / Test", "Date", 60, ShowInGrid: false),
                 new("renewal_date", "Renewal Date", "Date", 70, ShowInGrid: false)
             ],
             [ClientInfoResourceCategories.VendorsServices] =
@@ -142,8 +154,10 @@ public static class ClientInfoResourceFieldDefinitions
                 ["Microsoft 365 Tenant", "Line-of-Business Application", "Cloud Service", "Hosted Application", "License", "Other"],
             [ClientInfoResourceCategories.DomainsEmail] =
                 ["Domain", "DNS Hosting", "Email Tenant", "Registrar", "SSL Certificate", "Other"],
-            [ClientInfoResourceCategories.BackupSecurity] =
-                ["Veeam Backup", "Backup Appliance", "Cloud Backup", "Antivirus / EDR", "MFA", "Spam Filtering", "Security Service", "Other"],
+            [ClientInfoResourceCategories.Backup] =
+                ["Veeam Backup", "Backup Appliance", "Cloud Backup", "Microsoft 365 Backup", "Disaster Recovery", "Other"],
+            [ClientInfoResourceCategories.Security] =
+                ["Antivirus / EDR", "MFA", "Spam Filtering", "SOC / SIEM", "Security Service", "Other"],
             [ClientInfoResourceCategories.VendorsServices] =
                 ["Internet Provider", "Phone / VoIP Provider", "Copier Provider", "Software Vendor", "Support Contract", "Managed Service", "Other"],
             [ClientInfoResourceCategories.NeedsSorting] = ["Other", "Unknown"]
@@ -180,7 +194,8 @@ public static class ClientInfoResourceFieldDefinitions
             ClientInfoResourceCategories.Wifi => "Controller / URL",
             ClientInfoResourceCategories.ApplicationsCloud => "URL",
             ClientInfoResourceCategories.DomainsEmail => "Domain / URL",
-            ClientInfoResourceCategories.BackupSecurity => "Console / Portal URL",
+            ClientInfoResourceCategories.Backup => "Console / Portal URL",
+            ClientInfoResourceCategories.Security => "Console / Portal URL",
             ClientInfoResourceCategories.VendorsServices => "Website / Portal URL",
             _ => "Address / URL"
         };
