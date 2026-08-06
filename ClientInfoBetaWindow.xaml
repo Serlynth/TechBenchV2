@@ -91,99 +91,6 @@
             </Grid>
         </DataTemplate>
 
-        <DataTemplate x:Key="LinkedCredentialCardTemplate">
-            <Border Background="{DynamicResource PanelAltBackgroundBrush}"
-                    BorderBrush="{DynamicResource BorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="9"
-                    Padding="12"
-                    Margin="0,0,0,9">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="{Binding Name}"
-                                   FontSize="14"
-                                   FontWeight="SemiBold"
-                                   TextTrimming="CharacterEllipsis"
-                                   VerticalAlignment="Center" />
-                        <Button Grid.Column="1"
-                                Content="Edit"
-                                Command="{Binding DataContext.EditCredentialCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                CommandParameter="{Binding}"
-                                Padding="8,3"
-                                Margin="8,0,0,0" />
-                    </Grid>
-                    <Grid Grid.Row="1" Margin="0,8,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="82" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="Username"
-                                   Style="{StaticResource SubtleLabelStyle}"
-                                   VerticalAlignment="Center" />
-                        <TextBox Grid.Column="1"
-                                 Text="{Binding Username, Mode=OneWay}"
-                                 Style="{StaticResource SelectableValueStyle}" />
-                    </Grid>
-                    <Grid Grid.Row="2" Margin="0,6,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="82" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="Login URL"
-                                   Style="{StaticResource SubtleLabelStyle}"
-                                   VerticalAlignment="Center" />
-                        <TextBox Grid.Column="1"
-                                 Text="{Binding LoginUrl, Mode=OneWay}"
-                                 Style="{StaticResource SelectableValueStyle}" />
-                    </Grid>
-                    <ItemsControl Grid.Row="3"
-                                  ItemsSource="{Binding CurrentSecrets}"
-                                  Margin="0,5,0,0">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Grid Margin="0,4,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="82" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding SecretLabel}"
-                                               Style="{StaticResource SubtleLabelStyle}"
-                                               VerticalAlignment="Center"
-                                               TextWrapping="Wrap" />
-                                    <WrapPanel Grid.Column="1">
-                                        <TextBox Text="{Binding InlineDisplayValue, Mode=OneWay}"
-                                                 Style="{StaticResource SelectableValueStyle}"
-                                                 MinWidth="100"
-                                                 MaxWidth="220"
-                                                 Margin="0,0,7,0" />
-                                        <Button Content="{Binding InlineRevealLabel}"
-                                                Command="{Binding DataContext.RevealSecretCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                CommandParameter="{Binding}"
-                                                Padding="8,3"
-                                                Margin="0,0,5,0" />
-                                        <Button Content="Copy"
-                                                Command="{Binding DataContext.CopySecretCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                CommandParameter="{Binding}"
-                                                Padding="8,3" />
-                                    </WrapPanel>
-                                </Grid>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </Grid>
-            </Border>
-        </DataTemplate>
-
         <Style TargetType="TabControl">
             <Setter Property="Background" Value="{DynamicResource PanelBackgroundBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
@@ -356,119 +263,66 @@
                         </Border>
                     </Grid>
                     <Grid Grid.Row="1">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="1.12*" />
-                            <ColumnDefinition Width="0.88*" />
-                        </Grid.ColumnDefinitions>
-                        <Grid Margin="0,0,10,0">
-                            <TextBlock Text="Select a record in the full list to see its important information."
-                                       Foreground="{DynamicResource MutedTextBrush}"
-                                       HorizontalAlignment="Center"
-                                       VerticalAlignment="Center"
-                                       Visibility="{Binding HasOverviewSections, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
-                            <ListBox ItemsSource="{Binding OverviewSections}"
-                                     Background="Transparent"
-                                     BorderThickness="0"
-                                     Padding="0"
-                                     Focusable="False"
-                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                     Visibility="{Binding HasOverviewSections, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                <ListBox.ItemContainerStyle>
-                                    <Style TargetType="ListBoxItem">
-                                        <Setter Property="Margin" Value="0,0,12,12" />
-                                        <Setter Property="Padding" Value="0" />
-                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                        <Setter Property="Template">
-                                            <Setter.Value>
-                                                <ControlTemplate TargetType="ListBoxItem">
-                                                    <Border x:Name="CardBorder"
-                                                            Background="{DynamicResource PanelAltBackgroundBrush}"
-                                                            BorderBrush="{DynamicResource BorderBrush}"
-                                                            BorderThickness="1"
-                                                            CornerRadius="10">
-                                                        <ContentPresenter />
-                                                    </Border>
-                                                    <ControlTemplate.Triggers>
-                                                        <Trigger Property="IsSelected" Value="True">
-                                                            <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-                                                            <Setter TargetName="CardBorder" Property="BorderThickness" Value="2" />
-                                                        </Trigger>
-                                                        <Trigger Property="IsMouseOver" Value="True">
-                                                            <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ControlBackgroundBrush}" />
-                                                        </Trigger>
-                                                    </ControlTemplate.Triggers>
-                                                </ControlTemplate>
-                                            </Setter.Value>
-                                        </Setter>
-                                    </Style>
-                                </ListBox.ItemContainerStyle>
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <Grid MinWidth="330" MinHeight="170" Margin="15">
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="*" />
-                                            </Grid.RowDefinitions>
-                                            <TextBlock Text="{Binding Title}"
-                                                       FontSize="15"
-                                                       FontWeight="SemiBold"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       Margin="0,0,0,10" />
-                                            <ItemsControl Grid.Row="1"
-                                                          ItemsSource="{Binding Fields}"
-                                                          ItemTemplate="{StaticResource OverviewFieldTemplate}" />
-                                        </Grid>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
-                        </Grid>
-                        <Border Grid.Column="1"
-                                Background="{DynamicResource ControlBackgroundBrush}"
-                                BorderBrush="{DynamicResource BorderBrush}"
-                                BorderThickness="1"
-                                CornerRadius="10"
-                                Padding="12"
-                                Margin="10,0,0,0">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="*" />
-                                </Grid.RowDefinitions>
-                                <Grid Margin="0,0,0,8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Passwords &amp; access"
-                                               FontSize="15"
-                                               FontWeight="SemiBold" />
-                                    <TextBlock Grid.Column="1"
-                                               Text="{Binding SelectedCredentialCountLabel}"
-                                               Foreground="{DynamicResource MutedTextBrush}"
-                                               VerticalAlignment="Center" />
-                                </Grid>
-                                <Grid Grid.Row="1">
-                                    <StackPanel HorizontalAlignment="Center"
-                                                VerticalAlignment="Center"
-                                                Visibility="{Binding HasSelectedCredentials, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
-                                        <TextBlock Text="No passwords are linked to this record."
-                                                   Foreground="{DynamicResource SecondaryTextBrush}"
-                                                   TextAlignment="Center" />
-                                        <TextBlock Text="Use the master Passwords tab to link an existing login."
-                                                   Foreground="{DynamicResource MutedTextBrush}"
-                                                   FontSize="11"
-                                                   TextAlignment="Center"
-                                                   Margin="0,4,0,0" />
-                                    </StackPanel>
-                                    <ScrollViewer VerticalScrollBarVisibility="Auto"
-                                                  HorizontalScrollBarVisibility="Disabled"
-                                                  Visibility="{Binding HasSelectedCredentials, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                        <ItemsControl ItemsSource="{Binding SelectedCredentials}"
-                                                      ItemTemplate="{StaticResource LinkedCredentialCardTemplate}" />
-                                    </ScrollViewer>
-                                </Grid>
-                            </Grid>
-                        </Border>
+                        <TextBlock Text="Select a record in the full list to see its important information."
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Visibility="{Binding HasOverviewSections, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                        <ListBox ItemsSource="{Binding OverviewSections}"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 Padding="0"
+                                 Focusable="False"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 Visibility="{Binding HasOverviewSections, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="Margin" Value="0,0,12,12" />
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="ListBoxItem">
+                                                <Border x:Name="CardBorder"
+                                                        Background="{DynamicResource PanelAltBackgroundBrush}"
+                                                        BorderBrush="{DynamicResource BorderBrush}"
+                                                        BorderThickness="1"
+                                                        CornerRadius="10">
+                                                    <ContentPresenter />
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsSelected" Value="True">
+                                                        <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                                        <Setter TargetName="CardBorder" Property="BorderThickness" Value="2" />
+                                                    </Trigger>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ControlBackgroundBrush}" />
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid MinWidth="330" MinHeight="170" Margin="15">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="{Binding Title}"
+                                                   FontSize="15"
+                                                   FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Margin="0,0,0,10" />
+                                        <ItemsControl Grid.Row="1"
+                                                      ItemsSource="{Binding Fields}"
+                                                      ItemTemplate="{StaticResource OverviewFieldTemplate}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
                     </Grid>
                     <GridSplitter Grid.Row="2"
                                   Height="4"
