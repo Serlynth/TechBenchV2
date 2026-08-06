@@ -8,6 +8,8 @@ using Grid = System.Windows.Controls.Grid;
 using PasswordBox = System.Windows.Controls.PasswordBox;
 using ScrollViewer = System.Windows.Controls.ScrollViewer;
 using StackPanel = System.Windows.Controls.StackPanel;
+using TabControl = System.Windows.Controls.TabControl;
+using TabItem = System.Windows.Controls.TabItem;
 using TextBlock = System.Windows.Controls.TextBlock;
 using TextBox = System.Windows.Controls.TextBox;
 
@@ -21,11 +23,14 @@ public sealed record ClientInfoEditField(
     bool IsMultiline = false,
     bool IsSecret = false,
     IReadOnlyList<string>? Options = null,
-    bool AllowCustomValue = false);
+    bool AllowCustomValue = false,
+    string Tab = "");
 
 public sealed class ClientInfoRecordEditorWindow : Window
 {
     private readonly Dictionary<string, Control> _editors =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, TabItem> _editorTabs =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly IReadOnlyList<ClientInfoEditField> _fields;
 
@@ -53,39 +58,7 @@ public sealed class ClientInfoRecordEditorWindow : Window
         {
             Height = GridLength.Auto
         });
-        var panel = new StackPanel();
-        if (!string.IsNullOrWhiteSpace(description))
-        {
-            panel.Children.Add(new TextBlock
-            {
-                Text = description,
-                TextWrapping = TextWrapping.Wrap,
-                Foreground = (System.Windows.Media.Brush)FindResource("SecondaryTextBrush"),
-                Margin = new Thickness(0, 0, 0, 18)
-            });
-        }
-        foreach (var field in fields)
-        {
-            panel.Children.Add(new TextBlock
-            {
-                Text = field.IsRequired
-                    ? $"{field.Label} *"
-                    : field.Label,
-                Margin = new Thickness(0, 0, 0, 5),
-                FontWeight = FontWeights.SemiBold
-            });
-            var editor = CreateEditor(field);
-            editor.Margin = new Thickness(0, 0, 0, 15);
-            panel.Children.Add(editor);
-            _editors[field.Key] = editor;
-        }
-
-        var scroll = new ScrollViewer
-        {
-            Content = panel,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto
-        };
-        root.Children.Add(scroll);
+        root.Children.Add(CreateEditorContent(description));
 
         var buttons = new StackPanel
         {
@@ -116,6 +89,106 @@ public sealed class ClientInfoRecordEditorWindow : Window
 
     public IReadOnlyDictionary<string, string> Values { get; private set; } =
         new Dictionary<string, string>();
+
+    private FrameworkElement CreateEditorContent(string? description)
+    {
+        var content = new Grid();
+        content.RowDefinitions.Add(new RowDefinition
+        {
+            Height = GridLength.Auto
+        });
+        content.RowDefinitions.Add(new RowDefinition());
+
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            var descriptionText = new TextBlock
+            {
+                Text = description,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = (System.Windows.Media.Brush)FindResource("SecondaryTextBrush"),
+                Margin = new Thickness(0, 0, 0, 18)
+            };
+            content.Children.Add(descriptionText);
+        }
+
+        var tabGroups = _fields
+            .GroupBy(field => string.IsNullOrWhiteSpace(field.Tab)
+                ? "Details"
+                : field.Tab.Trim())
+            .ToArray();
+        FrameworkElement editorContent;
+        if (tabGroups.Length > 1)
+        {
+            var tabs = new TabControl
+            {
+                Background = (System.Windows.Media.Brush)FindResource(
+                    "PanelBackgroundBrush"),
+                Foreground = (System.Windows.Media.Brush)FindResource(
+                    "PrimaryTextBrush"),
+                BorderBrush = (System.Windows.Media.Brush)FindResource(
+                    "BorderBrush"),
+                BorderThickness = new Thickness(1)
+            };
+            foreach (var group in tabGroups)
+            {
+                var tab = new TabItem
+                {
+                    Header = group.Key,
+                    Content = CreateFieldsScroll(group),
+                    Background = (System.Windows.Media.Brush)FindResource(
+                        "ControlAltBackgroundBrush"),
+                    Foreground = (System.Windows.Media.Brush)FindResource(
+                        "PrimaryTextBrush"),
+                    Padding = new Thickness(14, 8, 14, 8)
+                };
+                tabs.Items.Add(tab);
+                foreach (var field in group)
+                {
+                    _editorTabs[field.Key] = tab;
+                }
+            }
+
+            editorContent = tabs;
+        }
+        else
+        {
+            editorContent = CreateFieldsScroll(_fields);
+        }
+
+        Grid.SetRow(editorContent, 1);
+        content.Children.Add(editorContent);
+        return content;
+    }
+
+    private ScrollViewer CreateFieldsScroll(
+        IEnumerable<ClientInfoEditField> fields)
+    {
+        var panel = new StackPanel
+        {
+            Margin = new Thickness(2, 12, 2, 0)
+        };
+        foreach (var field in fields)
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = field.IsRequired
+                    ? $"{field.Label} *"
+                    : field.Label,
+                Margin = new Thickness(0, 0, 0, 5),
+                FontWeight = FontWeights.SemiBold
+            });
+            var editor = CreateEditor(field);
+            editor.Margin = new Thickness(0, 0, 0, 15);
+            panel.Children.Add(editor);
+            _editors[field.Key] = editor;
+        }
+
+        return new ScrollViewer
+        {
+            Content = panel,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+        };
+    }
 
     private static Control CreateEditor(ClientInfoEditField field)
     {
@@ -176,6 +249,11 @@ public sealed class ClientInfoRecordEditorWindow : Window
             AppDialogWindow.Info(
                 "Required field",
                 $"{missing.Label} is required.");
+            if (_editorTabs.TryGetValue(missing.Key, out var tab))
+            {
+                tab.IsSelected = true;
+            }
+
             _editors[missing.Key].Focus();
             return;
         }

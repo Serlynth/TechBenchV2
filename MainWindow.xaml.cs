@@ -537,7 +537,6 @@ public partial class MainWindow : Window
 
         var profileWindow = new ClientInfoWindow
         {
-            Owner = this,
             DataContext = viewModel.CreateClientInfoProfile(summary)
         };
         profileWindow.Show();
@@ -616,7 +615,6 @@ public partial class MainWindow : Window
 
         var canonicalWindow = new ClientInfoBetaWindow(_localPreferences)
         {
-            Owner = this,
             DataContext = canonicalViewModel
         };
         _clientInfoBetaWindows[canonicalViewModel.ClientId] =

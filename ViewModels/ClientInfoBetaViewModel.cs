@@ -1417,6 +1417,30 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 current?.ReviewStatus ?? "Unverified",
                 Options: ReviewStatuses)
         ]);
+        if (current is null)
+        {
+            for (var index = 0; index < editorFields.Count; index++)
+            {
+                editorFields[index] = editorFields[index] with
+                {
+                    Tab = "Details"
+                };
+            }
+
+            editorFields.AddRange(
+            [
+                new(
+                    "access_username",
+                    "Username (optional)",
+                    Tab: "Username & password"),
+                new(
+                    "access_password",
+                    "Password (optional)",
+                    IsSecret: true,
+                    Tab: "Username & password")
+            ]);
+        }
+
         var values = ShowEditor(
             current is null ? $"Add {editingCategory}" : $"Edit {editingCategory}",
             editorFields,
@@ -1486,8 +1510,122 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                             SortOrder = definition.SortOrder
                         });
                 }
+
+                if (current is null)
+                {
+                    SaveNewResourceAccess(
+                        savedResource,
+                        editingCategory,
+                        values["access_username"],
+                        values["access_password"]);
+                }
+
                 Refresh();
             });
+    }
+
+    private void SaveNewResourceAccess(
+        ClientInfoResource savedResource,
+        string editingCategory,
+        string username,
+        string password)
+    {
+        if (string.IsNullOrWhiteSpace(username)
+            && string.IsNullOrWhiteSpace(password))
+        {
+            return;
+        }
+
+        ClientInfoCredential? savedCredential = null;
+        try
+        {
+            savedCredential = SaveLinkedResourceAccess(
+                ClientId,
+                savedResource,
+                editingCategory,
+                username,
+                password,
+                credential => savedCredential =
+                    _repository.SaveClientInfoCredential(credential),
+                _repository.SetClientInfoSecret);
+        }
+        catch (Exception exception)
+        {
+            throw new ClientInfoResourceAccessSaveException(
+                (savedCredential is null
+                    ? "The system or service was saved, but its username and password were not. "
+                      + "Open it from Passwords to finish linking the login."
+                    : "The system or service and linked login were saved, but its password was not. "
+                      + "Open the linked login from Passwords to finish saving it.")
+                + $"\n\nDetails: {exception.Message}",
+                exception);
+        }
+    }
+
+    internal static ClientInfoCredential? SaveLinkedResourceAccess(
+        int clientId,
+        ClientInfoResource savedResource,
+        string editingCategory,
+        string username,
+        string password,
+        Func<ClientInfoCredential, ClientInfoCredential> saveCredential,
+        Func<ClientInfoSecretSummary, string, bool, ClientInfoSecretSummary>
+            saveSecret)
+    {
+        ArgumentNullException.ThrowIfNull(savedResource);
+        ArgumentNullException.ThrowIfNull(saveCredential);
+        ArgumentNullException.ThrowIfNull(saveSecret);
+        if (string.IsNullOrWhiteSpace(username)
+            && string.IsNullOrWhiteSpace(password))
+        {
+            return null;
+        }
+
+        var savedCredential = saveCredential(BuildLinkedResourceCredential(
+            clientId,
+            savedResource,
+            editingCategory,
+            username));
+        if (!string.IsNullOrWhiteSpace(password))
+        {
+            saveSecret(
+                new ClientInfoSecretSummary
+                {
+                    CredentialId = savedCredential.CredentialId,
+                    SecretType = "Password",
+                    SecretLabel = "Password"
+                },
+                password,
+                savedResource.ReviewStatus.Equals(
+                    "Verified",
+                    StringComparison.OrdinalIgnoreCase));
+        }
+
+        return savedCredential;
+    }
+
+    internal static ClientInfoCredential BuildLinkedResourceCredential(
+        int clientId,
+        ClientInfoResource savedResource,
+        string editingCategory,
+        string username)
+    {
+        ArgumentNullException.ThrowIfNull(savedResource);
+        var typeLabel = savedResource.TypeLabel.Trim();
+        return new ClientInfoCredential
+        {
+            ClientId = clientId,
+            ResourceId = savedResource.ResourceId,
+            LocalKey = $"resource-primary-access-{savedResource.ResourceId}",
+            Name = $"{savedResource.Name.Trim()} login",
+            Category = string.IsNullOrWhiteSpace(typeLabel)
+                ? editingCategory.Trim()
+                : typeLabel,
+            Username = username.Trim(),
+            LoginUrl = savedResource.AddressOrUrl.Trim(),
+            IsActive = savedResource.IsActive,
+            ReviewStatus = savedResource.ReviewStatus
+        };
     }
 
     private void MoveResource(ClientInfoResource? resource)
@@ -2053,6 +2191,14 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 $"The {recordName} changed on another workstation. "
                 + "The latest SQL version has been loaded; review it and try again.");
         }
+        catch (ClientInfoResourceAccessSaveException exception)
+        {
+            Refresh();
+            StatusMessage = "System or service saved; login needs attention.";
+            _dialogs.Error(
+                "System saved; login could not be completed",
+                exception.Message);
+        }
         catch (Exception exception)
         {
             ShowError($"{recordName} could not be saved", exception);
@@ -2062,6 +2208,11 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     private static bool IsConcurrencyConflict(SqlException exception) =>
         exception.Number is 52324 or 52332 or 52343 or 52354 or 52363
             or 52358 or 52359 or 52375 or 52384 or 52441 or 52453 or 52460;
+
+    private sealed class ClientInfoResourceAccessSaveException(
+        string message,
+        Exception innerException)
+        : Exception(message, innerException);
 
     private void ShowError(string title, Exception exception)
     {
