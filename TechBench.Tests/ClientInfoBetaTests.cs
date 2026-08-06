@@ -2674,6 +2674,22 @@ public sealed class ClientInfoBetaTests
             compareBody,
             StringComparison.Ordinal);
         Assert.Contains(
+            "CREATE TABLE #WorkbookHashes",
+            compareBody,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "decrypted.[ValuePlain] IS NOT NULL",
+            compareBody,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "WHEN workbook_value.[ValueHash] IS NULL THEN N'NotComparable'",
+            compareBody,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Import review can continue.",
+            compareBody,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "Client Info import results do not preserve the caller security context.",
             verifier,
             StringComparison.Ordinal);

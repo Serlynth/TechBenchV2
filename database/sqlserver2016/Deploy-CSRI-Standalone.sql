@@ -26814,6 +26814,11 @@ BEGIN
         [ValueHash] binary(32) NOT NULL,
         [FieldLabel] nvarchar(200) NOT NULL
     );
+    CREATE TABLE #WorkbookHashes
+    (
+        [ImportSecretId] bigint NOT NULL PRIMARY KEY,
+        [ValueHash] binary(32) NULL
+    );
 
     BEGIN TRY
         OPEN SYMMETRIC KEY [tb_FireDrillCredentialKey]
@@ -26823,21 +26828,24 @@ BEGIN
 
         INSERT INTO #FireDrillHashes([ValueHash],[FieldLabel])
         SELECT
-            HASHBYTES(
-                N'SHA2_256',
-                DecryptByKey(
-                    field.[ValueEncrypted],
-                    1,
-                    CONVERT(
-                        nvarchar(64),
-                        HASHBYTES(N'SHA2_256',credential.[ClientKey]),
-                        2))),
+            HASHBYTES(N'SHA2_256',decrypted.[ValuePlain]),
             field.[FieldLabel]
         FROM [tb_data].[FireDrillCredentials] credential
         INNER JOIN [tb_data].[FireDrillCredentialFields] field
             ON field.[CredentialId]=credential.[CredentialId]
+        CROSS APPLY
+        (
+            SELECT DecryptByKey(
+                field.[ValueEncrypted],
+                1,
+                CONVERT(
+                    nvarchar(64),
+                    HASHBYTES(N'SHA2_256',credential.[ClientKey]),
+                    2)) AS [ValuePlain]
+        ) decrypted
         WHERE credential.[IsCurrent]=1
           AND field.[ValueEncrypted] IS NOT NULL
+          AND decrypted.[ValuePlain] IS NOT NULL
           AND
           (
               LTRIM(RTRIM(credential.[ClientName]))=LTRIM(RTRIM(@ClientName))
@@ -26847,15 +26855,7 @@ BEGIN
 
         INSERT INTO #FireDrillHashes([ValueHash],[FieldLabel])
         SELECT
-            HASHBYTES(
-                N'SHA2_256',
-                DecryptByKey(
-                    legacy.[ValueEncrypted],
-                    1,
-                    CONVERT(
-                        nvarchar(64),
-                        HASHBYTES(N'SHA2_256',credential.[ClientKey]),
-                        2))),
+            HASHBYTES(N'SHA2_256',decrypted.[ValuePlain]),
             legacy.[FieldLabel]
         FROM [tb_data].[FireDrillCredentials] credential
         CROSS APPLY
@@ -26870,14 +26870,44 @@ BEGIN
                 (credential.[AdPasswordEncrypted],N'AD Password'),
                 (credential.[RustPasswordEncrypted],N'Rust Password')
         ) legacy([ValueEncrypted],[FieldLabel])
+        CROSS APPLY
+        (
+            SELECT DecryptByKey(
+                legacy.[ValueEncrypted],
+                1,
+                CONVERT(
+                    nvarchar(64),
+                    HASHBYTES(N'SHA2_256',credential.[ClientKey]),
+                    2)) AS [ValuePlain]
+        ) decrypted
         WHERE credential.[IsCurrent]=1
           AND legacy.[ValueEncrypted] IS NOT NULL
+          AND decrypted.[ValuePlain] IS NOT NULL
           AND
           (
               LTRIM(RTRIM(credential.[ClientName]))=LTRIM(RTRIM(@ClientName))
               OR LTRIM(RTRIM(credential.[ClientName]))=LTRIM(RTRIM(COALESCE(@WhdLocationName,N'')))
               OR LTRIM(RTRIM(credential.[ClientName]))=LTRIM(RTRIM(COALESCE(@SageCustomerName,N'')))
           );
+
+        INSERT INTO #WorkbookHashes([ImportSecretId],[ValueHash])
+        SELECT
+            secret.[ImportSecretId],
+            HASHBYTES(
+                N'SHA2_256',
+                DecryptByKey(
+                    secret.[ValueEncrypted],
+                    1,
+                    HASHBYTES(
+                        N'SHA2_256',
+                        CONVERT(
+                            varbinary(max),
+                            N'ClientImportSecret|'
+                            +CONVERT(
+                                nvarchar(30),
+                                secret.[ImportSecretId])))))
+        FROM [tb_import].[ClientInfoSecrets] secret
+        WHERE secret.[BatchId]=@BatchId;
 
         DECLARE @HasFireDrillValues bit =
             CASE WHEN EXISTS(SELECT 1 FROM #FireDrillHashes)
@@ -26886,35 +26916,36 @@ BEGIN
         SET
             [ComparisonStatus]=
                 CASE
+                    WHEN workbook_value.[ValueHash] IS NULL THEN N'NotComparable'
                     WHEN @HasFireDrillValues=0 THEN N'WorkbookOnly'
                     WHEN EXISTS
                     (
                         SELECT 1
                         FROM #FireDrillHashes fire_value
-                        WHERE fire_value.[ValueHash]=HASHBYTES(
-                            N'SHA2_256',
-                            DecryptByKey(
-                                secret.[ValueEncrypted],
-                                1,
-                                HASHBYTES(
-                                    N'SHA2_256',
-                                    CONVERT(
-                                        varbinary(max),
-                                        N'ClientImportSecret|'
-                                        +CONVERT(
-                                            nvarchar(30),
-                                            secret.[ImportSecretId])))))
+                        WHERE fire_value.[ValueHash]=workbook_value.[ValueHash]
                     )
                         THEN N'Match'
                     ELSE N'Mismatch'
                 END
         FROM [tb_import].[ClientInfoSecrets] secret
+        INNER JOIN #WorkbookHashes workbook_value
+            ON workbook_value.[ImportSecretId]=secret.[ImportSecretId]
         WHERE secret.[BatchId]=@BatchId;
 
         DELETE FROM [tb_import].[ClientInfoIssues]
         WHERE [BatchId]=@BatchId
           AND [IssueCode] IN
-              (N'FIREDRILL_MISMATCH',N'WORKBOOK_ONLY_SECRET',N'FIREDRILL_ONLY_SECRET');
+              (N'FIREDRILL_MISMATCH',N'WORKBOOK_ONLY_SECRET',
+               N'FIREDRILL_ONLY_SECRET',N'SECRET_NOT_COMPARABLE');
+
+        INSERT INTO [tb_import].[ClientInfoIssues]
+            ([BatchId],[Severity],[IssueCode],[Message])
+        SELECT @BatchId,N'Warning',N'SECRET_NOT_COMPARABLE',
+            CONVERT(nvarchar(20),COUNT(*))
+            +N' workbook secret(s) could not be decrypted for optional FireDrill comparison. Import review can continue.'
+        FROM [tb_import].[ClientInfoSecrets]
+        WHERE [BatchId]=@BatchId AND [ComparisonStatus]=N'NotComparable'
+        HAVING COUNT(*)>0;
 
         INSERT INTO [tb_import].[ClientInfoIssues]
             ([BatchId],[Severity],[IssueCode],[Message])
@@ -26944,21 +26975,8 @@ BEGIN
             WHERE NOT EXISTS
             (
                 SELECT 1
-                FROM [tb_import].[ClientInfoSecrets] secret
-                WHERE secret.[BatchId]=@BatchId
-                  AND fire_value.[ValueHash]=HASHBYTES(
-                      N'SHA2_256',
-                      DecryptByKey(
-                          secret.[ValueEncrypted],
-                          1,
-                          HASHBYTES(
-                              N'SHA2_256',
-                              CONVERT(
-                                  varbinary(max),
-                                  N'ClientImportSecret|'
-                                  +CONVERT(
-                                      nvarchar(30),
-                                      secret.[ImportSecretId])))))
+                FROM #WorkbookHashes workbook_value
+                WHERE fire_value.[ValueHash]=workbook_value.[ValueHash]
             )
         );
 
