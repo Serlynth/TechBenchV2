@@ -200,6 +200,16 @@ public sealed class ClientInfoBetaTests
             editor,
             StringComparison.Ordinal);
         Assert.Contains("access_new_name", viewModel, StringComparison.Ordinal);
+        Assert.Contains("BuildResourceAccessSlots", viewModel, StringComparison.Ordinal);
+        Assert.Contains(
+            "ResourceAccessEditorKey(slot.Key, \"username\")",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ResourceAccessEditorKey(slot.Key, \"password\")",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains("New additional login", viewModel, StringComparison.Ordinal);
         Assert.Contains("SaveResourceAccessEdits", viewModel, StringComparison.Ordinal);
         Assert.Contains(
             "ResourceId = savedResource.ResourceId",
@@ -1435,6 +1445,44 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("or \"Barracuda\"", viewModel, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(-104, ClientInfoResourceCategories.ApplicationsCloud, "m365-admin@example.test")]
+    [InlineData(-113, ClientInfoResourceCategories.Security, "security-admin@example.test")]
+    public void SelectedApplicationAndSecurityCardsShowExplicitUsernameAndPassword(
+        long resourceId,
+        string category,
+        string expectedUsername)
+    {
+        var demo = ClientInfoDemoData.Create().Snapshot;
+        var resource = Assert.Single(
+            demo.Resources,
+            item => item.ResourceId == resourceId);
+        var credentials = demo.Credentials
+            .Where(credential => credential.ResourceId == resourceId)
+            .ToArray();
+
+        var section = Assert.Single(
+            ClientInfoCategoryOverviewBuilder.BuildSelected(
+                category,
+                resource,
+                credentials));
+
+        var username = Assert.Single(
+            section.Fields,
+            field => field.Label == "Username");
+        Assert.Equal(expectedUsername, username.Value);
+        var password = Assert.Single(
+            section.Fields,
+            field => field.Label == "Password");
+        Assert.Equal("Password available", password.Value);
+        Assert.NotEmpty(password.Secrets);
+        Assert.DoesNotContain(
+            section.Fields,
+            field => credentials.Any(credential => field.Label.Equals(
+                credential.Name,
+                StringComparison.OrdinalIgnoreCase)));
+    }
+
     [Fact]
     public void CategoryOverviewRecognizesFireDrillStyleLabelsWithoutReadingFireDrillData()
     {
@@ -1678,7 +1726,7 @@ public sealed class ClientInfoBetaTests
                 "Primary IP",
                 ReadHeaderRow(workbook, "Servers & Infrastructure"));
             Assert.Contains(
-                "Password / Secret",
+                "Password",
                 ReadHeaderRow(workbook, "Servers & Infrastructure"));
             Assert.Contains(
                 "Public / WAN IP",
@@ -1687,11 +1735,35 @@ public sealed class ClientInfoBetaTests
                 "SSL VPN Port",
                 ReadHeaderRow(workbook, "Connection & Internet"));
             Assert.Contains(
+                "Status Username",
+                ReadHeaderRow(workbook, "Connection & Internet"));
+            Assert.Contains(
+                "Status Password",
+                ReadHeaderRow(workbook, "Connection & Internet"));
+            Assert.Contains(
+                "Admin Username",
+                ReadHeaderRow(workbook, "Connection & Internet"));
+            Assert.Contains(
+                "Admin Password",
+                ReadHeaderRow(workbook, "Connection & Internet"));
+            Assert.Contains(
                 "SSID",
                 ReadHeaderRow(workbook, "Wi-Fi"));
             Assert.Contains(
                 "Tenant / Instance",
                 ReadHeaderRow(workbook, "Applications & Cloud"));
+            Assert.Contains(
+                "Username",
+                ReadHeaderRow(workbook, "Applications & Cloud"));
+            Assert.Contains(
+                "Password",
+                ReadHeaderRow(workbook, "Applications & Cloud"));
+            Assert.Contains(
+                "Username",
+                ReadHeaderRow(workbook, "Security"));
+            Assert.Contains(
+                "Password",
+                ReadHeaderRow(workbook, "Security"));
         }
         finally
         {
@@ -1934,7 +2006,7 @@ public sealed class ClientInfoBetaTests
                 ("Hostname / URL", "https://10.20.0.18"),
                 ("Login Name", "UPS administrator"),
                 ("Username", "apc-admin"),
-                ("Password / Secret", "ups secret"),
+                ("Password", "ups secret"),
                 ("Review Status", "Verified"));
 
             var package = service.Read(path);
@@ -1978,6 +2050,104 @@ public sealed class ClientInfoBetaTests
                         StringComparison.Ordinal));
             Assert.Equal(
                 ["m365 secret", "ups secret", "user secret"],
+                package.Secrets
+                    .Select(secret => secret.SecretValue)
+                    .OrderBy(value => value, StringComparer.Ordinal)
+                    .ToArray());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CurrentWorkbookLinksApplicationSecurityAndFirewallLoginsToTheirResources()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "TechBenchClientInfoTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "Linked Resource Logins.xlsx");
+            var service = new ClientInfoWorkbookService();
+            service.CreateTemplate(path, 477, "Acme Legal");
+            AppendRowByHeader(
+                path,
+                "Applications & Cloud",
+                ("Type", "Microsoft 365 Tenant"),
+                ("Name", "Microsoft 365"),
+                ("Login Name", "Microsoft 365 Global Admin"),
+                ("Username", "m365-admin@example.test"),
+                ("Password", "m365 secret"),
+                ("Review Status", "Verified"));
+            AppendRowByHeader(
+                path,
+                "Security",
+                ("Type", "Antivirus / EDR"),
+                ("Name", "ESET Protect"),
+                ("Login Name", "ESET Protect Admin"),
+                ("Username", "eset-admin@example.test"),
+                ("Password", "eset secret"),
+                ("Review Status", "Verified"));
+            AppendRowByHeader(
+                path,
+                "Connection & Internet",
+                ("Type", "WatchGuard Firewall"),
+                ("Name", "Main WatchGuard"),
+                ("Status Username", "status"),
+                ("Status Password", "status secret"),
+                ("Admin Username", "admin"),
+                ("Admin Password", "admin secret"),
+                ("Review Status", "Verified"));
+
+            var package = service.Read(path);
+            var resources = package.Records
+                .Where(record => record.RecordType == "Resource")
+                .ToArray();
+            var credentials = package.Records
+                .Where(record => record.RecordType == "Credential")
+                .ToArray();
+            Assert.Equal(3, resources.Length);
+            Assert.Equal(4, credentials.Length);
+
+            void AssertLinkedLogin(
+                string resourceName,
+                string credentialName,
+                string username)
+            {
+                var resource = Assert.Single(
+                    resources,
+                    record => record.PayloadJson.Contains(
+                        $"\"name\":\"{resourceName}\"",
+                        StringComparison.Ordinal));
+                Assert.Contains(
+                    credentials,
+                    credential => credential.PayloadJson.Contains(
+                            $"\"resourceKey\":\"{resource.LocalKey}\"",
+                            StringComparison.Ordinal)
+                        && credential.PayloadJson.Contains(
+                            $"\"name\":\"{credentialName}\"",
+                            StringComparison.Ordinal)
+                        && credential.PayloadJson.Contains(
+                            username,
+                            StringComparison.Ordinal));
+            }
+
+            AssertLinkedLogin(
+                "Microsoft 365",
+                "Microsoft 365 Global Admin",
+                "m365-admin@example.test");
+            AssertLinkedLogin(
+                "ESET Protect",
+                "ESET Protect Admin",
+                "eset-admin@example.test");
+            AssertLinkedLogin("Main WatchGuard", "Main WatchGuard status", "status");
+            AssertLinkedLogin("Main WatchGuard", "Main WatchGuard admin", "admin");
+            Assert.Equal(
+                ["admin secret", "eset secret", "m365 secret", "status secret"],
                 package.Secrets
                     .Select(secret => secret.SecretValue)
                     .OrderBy(value => value, StringComparer.Ordinal)

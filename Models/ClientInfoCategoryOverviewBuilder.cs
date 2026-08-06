@@ -88,10 +88,72 @@ public static class ClientInfoCategoryOverviewBuilder
                 section.Title,
                 title,
                 StringComparison.OrdinalIgnoreCase))
+            .Select(section => ExpandSelectedAccessFields(
+                section,
+                credentials))
             .Select(section => IncludeEverySelectedCredential(
                 section,
                 credentials))
             .ToArray();
+    }
+
+    private static ClientInfoCategoryOverviewSection ExpandSelectedAccessFields(
+        ClientInfoCategoryOverviewSection section,
+        IReadOnlyList<ClientInfoCredential> credentials)
+    {
+        var activeCredentials = credentials
+            .Where(credential => credential.IsActive)
+            .OrderBy(credential => credential.Name,
+                StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var genericCredentialFields = section.Fields
+            .Select(field => new
+            {
+                Field = field,
+                Credential = activeCredentials.FirstOrDefault(credential =>
+                    field.CredentialIds.Contains(credential.CredentialId)
+                    && field.Label.Equals(
+                        credential.Name,
+                        StringComparison.OrdinalIgnoreCase))
+            })
+            .Where(item => item.Credential is not null)
+            .ToArray();
+        if (genericCredentialFields.Length == 0)
+        {
+            return section;
+        }
+
+        var genericFields = genericCredentialFields
+            .Select(item => item.Field)
+            .ToHashSet();
+        var fields = section.Fields
+            .Where(field => !genericFields.Contains(field))
+            .ToList();
+        foreach (var item in genericCredentialFields)
+        {
+            var credential = item.Credential!;
+            var prefix = genericCredentialFields.Length == 1
+                ? string.Empty
+                : $"{credential.Name} ";
+            var secrets = credential.Secrets
+                .Where(secret => secret.IsCurrent)
+                .ToArray();
+            fields.Add(new ClientInfoOverviewField(
+                $"{prefix}Username",
+                string.IsNullOrWhiteSpace(credential.Username)
+                    ? "Not entered"
+                    : credential.Username.Trim(),
+                credentialIds: [credential.CredentialId]));
+            fields.Add(new ClientInfoOverviewField(
+                $"{prefix}Password",
+                secrets.Length > 0
+                    ? "Password available"
+                    : "Not entered",
+                secrets,
+                [credential.CredentialId]));
+        }
+
+        return section with { Fields = fields };
     }
 
     private static ClientInfoCategoryOverviewSection IncludeEverySelectedCredential(
