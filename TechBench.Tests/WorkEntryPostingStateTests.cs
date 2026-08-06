@@ -36,7 +36,7 @@ public sealed class WorkEntryPostingStateTests
     }
 
     [Fact]
-    public void EditedWhdNoteNeedsSynchronizationUntilSageLocksIt()
+    public void EditedWhdNoteRemainsPostedWithoutSynchronization()
     {
         var postedAt = DateTime.Now.AddMinutes(-5);
         var entry = new WorkEntry
@@ -47,8 +47,8 @@ public sealed class WorkEntryPostingStateTests
             UpdatedAt = postedAt.AddMinutes(1)
         };
 
-        Assert.True(entry.NeedsWhdPosting);
-        Assert.Equal("WHD sync pending", entry.WhdBadge);
+        Assert.False(entry.NeedsWhdPosting);
+        Assert.Equal("WHD posted", entry.WhdBadge);
 
         entry.SagePosted = true;
         entry.SagePostedAt = DateTime.Now;
@@ -57,7 +57,7 @@ public sealed class WorkEntryPostingStateTests
     }
 
     [Fact]
-    public void WhdConflictHasADistinctBadge()
+    public void LegacyWhdSyncErrorsDoNotReopenPostedEntries()
     {
         var entry = new WorkEntry
         {
@@ -68,7 +68,9 @@ public sealed class WorkEntryPostingStateTests
             LastError = "WHD sync conflict: Both versions changed."
         };
 
-        Assert.True(entry.NeedsWhdPosting);
-        Assert.Equal("WHD conflict", entry.WhdBadge);
+        Assert.False(entry.NeedsWhdPosting);
+        Assert.Equal("WHD posted", entry.WhdBadge);
+        Assert.True(entry.HasObsoleteWhdMutationError);
+        Assert.Null(entry.DisplayLastError);
     }
 }

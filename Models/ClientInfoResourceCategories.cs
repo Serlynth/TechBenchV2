@@ -8,7 +8,9 @@ public static class ClientInfoResourceCategories
     public const string LegacyNetworkInternet = "Network & Internet";
     public const string ApplicationsCloud = "Applications & Cloud";
     public const string DomainsEmail = "Domains & Email";
-    public const string BackupSecurity = "Backup & Security";
+    public const string Backup = "Backup";
+    public const string Security = "Security";
+    public const string LegacyBackupSecurity = "Backup & Security";
     public const string VendorsServices = "Vendors & Services";
     public const string NeedsSorting = "Needs Sorting";
 
@@ -19,15 +21,22 @@ public static class ClientInfoResourceCategories
         Wifi,
         ApplicationsCloud,
         DomainsEmail,
-        BackupSecurity,
+        Backup,
+        Security,
         VendorsServices,
         NeedsSorting
     ];
 
     public static string Encode(string category, string type)
     {
-        var normalizedCategory = NormalizeCategory(category);
         var normalizedType = GetTypeLabel(type).Trim();
+        var normalizedCategory = string.Equals(
+            category?.Trim(),
+            LegacyBackupSecurity,
+            StringComparison.OrdinalIgnoreCase)
+            ? ClassifyProtection(normalizedType.ToLowerInvariant())
+                ?? NeedsSorting
+            : NormalizeCategory(category);
         if (ContainsAny(
                 normalizedType.ToLowerInvariant(),
                 "switch",
@@ -102,14 +111,29 @@ public static class ClientInfoResourceCategories
             return ConnectionInternet;
         }
 
-        if (ContainsAny(
-                lower,
-                "antivirus", "anti-virus", "edr", "endpoint", "security",
-                "backup", "mfa", "multi-factor", "spam", "filter",
-                "defender", "sentinel", "crowdstrike", "webroot",
-                "sophos", "malwarebytes"))
+        var legacyProtectionPrefix = $"{LegacyBackupSecurity} / ";
+        if (value.StartsWith(
+                legacyProtectionPrefix,
+                StringComparison.OrdinalIgnoreCase))
         {
-            return BackupSecurity;
+            return ClassifyProtection(
+                    value[legacyProtectionPrefix.Length..]
+                        .Trim()
+                        .ToLowerInvariant())
+                ?? NeedsSorting;
+        }
+
+        if (string.Equals(
+                value,
+                LegacyBackupSecurity,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return NeedsSorting;
+        }
+
+        if (ClassifyProtection(lower) is { } protectionCategory)
+        {
+            return protectionCategory;
         }
 
         if (ContainsAny(
@@ -179,6 +203,14 @@ public static class ClientInfoResourceCategories
             return value[legacyNetworkPrefix.Length..].Trim();
         }
 
+        var legacyProtectionPrefix = $"{LegacyBackupSecurity} / ";
+        if (value.StartsWith(
+                legacyProtectionPrefix,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return value[legacyProtectionPrefix.Length..].Trim();
+        }
+
         return value;
     }
 
@@ -194,6 +226,11 @@ public static class ClientInfoResourceCategories
         ArgumentNullException.ThrowIfNull(credential);
         var searchable = $"{credential.Category} {credential.Name}";
         var lower = searchable.ToLowerInvariant();
+        var protectionLower = searchable.Replace(
+                LegacyBackupSecurity,
+                string.Empty,
+                StringComparison.OrdinalIgnoreCase)
+            .ToLowerInvariant();
         if (ContainsAny(lower, "rustdesk", "screenconnect", "connectwise", "splashtop", "teamviewer", "remote access"))
         {
             return ApplicationsCloud;
@@ -204,9 +241,9 @@ public static class ClientInfoResourceCategories
             return ConnectionInternet;
         }
 
-        if (ContainsAny(lower, "veeam", "eset", "barracuda", "backup", "security", "antivirus", "edr", "mfa"))
+        if (ClassifyProtection(protectionLower) is { } protectionCategory)
         {
-            return BackupSecurity;
+            return protectionCategory;
         }
 
         if (ContainsAny(lower, "active directory", "domain admin", "domain", "dns", "registrar"))
@@ -219,13 +256,38 @@ public static class ClientInfoResourceCategories
             return ServersInfrastructure;
         }
 
-        return Classify(searchable);
+        return Classify(protectionLower);
     }
 
     private static bool ContainsAny(
         string value,
         params string[] candidates) =>
         candidates.Any(value.Contains);
+
+    private static string? ClassifyProtection(string value)
+    {
+        if (ContainsAny(
+                value,
+                "backup", "restore", "replication", "disaster recovery",
+                "bdr", "veeam", "acronis", "backblaze", "carbonite",
+                "cove backup", "datto", "nakivo", "rubrik", "cohesity"))
+        {
+            return Backup;
+        }
+
+        if (ContainsAny(
+                value,
+                "antivirus", "anti-virus", "edr", "endpoint", "security",
+                "mfa", "multi-factor", "spam", "filter", "defender",
+                "sentinel", "crowdstrike", "webroot", "sophos",
+                "malwarebytes", "eset", "barracuda", "siem", "soc",
+                "phishing", "authpoint"))
+        {
+            return Security;
+        }
+
+        return null;
+    }
 
     private static bool IsWifi(string value) =>
         ContainsAny(

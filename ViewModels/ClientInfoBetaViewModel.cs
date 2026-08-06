@@ -314,9 +314,12 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     public ClientInfoResourceGroup DomainsEmailGroup { get; } = new(
         ClientInfoResourceCategories.DomainsEmail,
         "Domains, DNS, registrars, email tenants, Exchange, and mailbox services.");
-    public ClientInfoResourceGroup BackupSecurityGroup { get; } = new(
-        ClientInfoResourceCategories.BackupSecurity,
-        "Backup systems, antivirus, EDR, MFA, filtering, and other security services.");
+    public ClientInfoResourceGroup BackupGroup { get; } = new(
+        ClientInfoResourceCategories.Backup,
+        "Backup platforms, protected systems, schedules, retention, restore testing, and disaster recovery services.");
+    public ClientInfoResourceGroup SecurityGroup { get; } = new(
+        ClientInfoResourceCategories.Security,
+        "Antivirus, EDR, MFA, email filtering, security monitoring, and other protection services.");
     public ClientInfoResourceGroup VendorsServicesGroup { get; } = new(
         ClientInfoResourceCategories.VendorsServices,
         "Support vendors, contracts, phone and copier providers, renewals, and managed services.");
@@ -1524,7 +1527,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             WifiGroup,
             ApplicationsCloudGroup,
             DomainsEmailGroup,
-            BackupSecurityGroup,
+            BackupGroup,
+            SecurityGroup,
             VendorsServicesGroup,
             NeedsSortingGroup
         };
@@ -1554,7 +1558,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 or "ESET"
                 or "Barracuda"
                 or "Core infrastructure"
-                or "Other backup & security"
+                or "Other backup"
+                or "Other security"
                 or "Remote Access"
                 or "Veeam"
                 or "Vendors & services"));

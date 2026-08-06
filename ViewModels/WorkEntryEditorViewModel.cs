@@ -59,7 +59,6 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
     private string? _sageTicketNumber;
     private PostingStatus _postingStatus = PostingStatus.Draft;
     private string _lastError = string.Empty;
-    private bool _modifiedAfterPosting;
     private bool _isDirty;
     private int _dirtyTrackingSuppression;
     private readonly ObservableCollection<TimeOption> _timeOptions;
@@ -453,12 +452,6 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
 
     public bool HasError => !string.IsNullOrWhiteSpace(LastError);
 
-    public bool ModifiedAfterPosting
-    {
-        get => _modifiedAfterPosting;
-        set => SetProperty(ref _modifiedAfterPosting, value);
-    }
-
     public bool IsDirty
     {
         get => _isDirty;
@@ -508,7 +501,6 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
             SageTicketNumber = null;
             PostingStatus = PostingStatus.Draft;
             LastError = string.Empty;
-            ModifiedAfterPosting = false;
         });
         MarkClean();
     }
@@ -548,8 +540,7 @@ public sealed class WorkEntryEditorViewModel : ObservableObject
             SagePostedAt = entry.SagePostedAt;
             SageTicketNumber = entry.SageTicketNumber;
             PostingStatus = entry.PostingStatus;
-            LastError = entry.LastError ?? string.Empty;
-            ModifiedAfterPosting = entry.ModifiedAfterPosting;
+            LastError = entry.DisplayLastError ?? string.Empty;
         });
         MarkClean();
     }

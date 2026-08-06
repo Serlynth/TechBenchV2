@@ -84,49 +84,35 @@ public sealed class WorkEntry
     public string FollowUpBadge => FollowUpDueDate.HasValue && HasFollowUp
         ? $"{FollowUpLabel} {FollowUpDueDate.Value:M/d}"
         : FollowUpLabel;
-    public bool HasWhdSyncConflict => LastError?.StartsWith("WHD sync conflict:", StringComparison.OrdinalIgnoreCase) == true;
-    public bool HasVerifiedMissingWhdTechNote => WhdPosted
-        && !SagePosted
-        && LastError?.StartsWith("WHD sync pending:", StringComparison.OrdinalIgnoreCase) == true
-        && LastError?.Contains("TechNote #", StringComparison.OrdinalIgnoreCase) == true
-        && LastError?.Contains("was not found.", StringComparison.OrdinalIgnoreCase) == true;
-    public bool NeedsWhdPosting => HasTicket
-        && !SagePosted
-        && (!WhdPosted || !WhdPostedAt.HasValue || ModifiedAfterPosting || HasWhdSyncConflict);
+    public bool HasObsoleteWhdMutationError => WhdPosted
+        && (LastError?.StartsWith("WHD sync pending:", StringComparison.OrdinalIgnoreCase) == true
+            || LastError?.StartsWith("WHD sync conflict:", StringComparison.OrdinalIgnoreCase) == true);
+    public string? DisplayLastError => HasObsoleteWhdMutationError ? null : LastError;
+    public bool NeedsWhdPosting => HasTicket && !SagePosted && !WhdPosted;
     public bool ShowWhdBadge => HasTicket || WhdPosted;
     public string WhdBadge => !WhdPosted
         ? "WHD pending"
-        : HasWhdSyncConflict
-            ? "WHD conflict"
-            : NeedsWhdPosting
-                ? "WHD sync pending"
-                : "WHD synced";
+        : "WHD posted";
     public bool NeedsSagePosting => Billable && !SagePosted;
     public bool ShowSageBadge => Billable || SagePosted;
     public string SageBadge => SagePosted
         ? string.IsNullOrWhiteSpace(SageTicketNumber) ? "Sage posted" : $"Sage posted #{SageTicketNumber}"
         : string.IsNullOrWhiteSpace(SageTicketNumber) ? "Sage pending" : $"Sage pending #{SageTicketNumber}";
-    public string PostingStatusLabel => PostingStatus switch
-    {
-        PostingStatus.PostedToWhd => "Posted to WHD",
-        PostingStatus.PostedToSage => "Posted to Sage",
-        PostingStatus.PostedToBoth => "Posted to Both",
-        _ => PostingStatus.ToString()
-    };
-
-    public bool ModifiedAfterPosting
-    {
-        get
+    public string PostingStatusLabel => HasObsoleteWhdMutationError
+        ? (WhdPosted, SagePosted) switch
         {
-            var lastPostedAt = new[] { WhdPostedAt, SagePostedAt }
-                .Where(static value => value.HasValue)
-                .Select(static value => value!.Value)
-                .DefaultIfEmpty(DateTime.MaxValue)
-                .Max();
-
-            return (WhdPosted || SagePosted) && UpdatedAt > lastPostedAt.AddSeconds(1);
+            (true, true) => "Posted to Both",
+            (true, false) => "Posted to WHD",
+            (false, true) => "Posted to Sage",
+            _ => PostingStatus.ToString()
         }
-    }
+        : PostingStatus switch
+        {
+            PostingStatus.PostedToWhd => "Posted to WHD",
+            PostingStatus.PostedToSage => "Posted to Sage",
+            PostingStatus.PostedToBoth => "Posted to Both",
+            _ => PostingStatus.ToString()
+        };
 
     public string NotePreview
     {

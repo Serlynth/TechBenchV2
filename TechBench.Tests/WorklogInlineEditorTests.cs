@@ -70,7 +70,7 @@ public sealed class WorklogInlineEditorTests
     }
 
     [Fact]
-    public void WhdImagesUseTheSinglePostOrUpdateActionWithoutMarkdownLabels()
+    public void WhdImagesUseTheSinglePostOrAttachActionWithoutMarkdownLabels()
     {
         var xaml = ReadRepositoryFile("MainWindow.xaml");
         var viewModel = ReadRepositoryFile("ViewModels", "MainWindowViewModel.cs");
@@ -80,7 +80,7 @@ public sealed class WorklogInlineEditorTests
         Assert.DoesNotContain("Send to WHD", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Sync WHD Note", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Mark WHD Posted (Manual)", xaml, StringComparison.Ordinal);
-        Assert.Contains("next Post/Update WHD action", xaml, StringComparison.Ordinal);
+        Assert.Contains("next Post or Attach Images to WHD action", xaml, StringComparison.Ordinal);
         Assert.Contains("not stored in TechBench or SQL", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Personal Note (Markdown)", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Personal Note Markdown", xaml, StringComparison.Ordinal);
@@ -88,7 +88,7 @@ public sealed class WorklogInlineEditorTests
     }
 
     [Fact]
-    public void ExistingWhdNoteUpdatesAlsoAttachSelectedImages()
+    public void ExistingWhdNotesOnlyAllowImageAttachments()
     {
         var viewModel = ReadRepositoryFile("ViewModels", "MainWindowViewModel.cs");
         var postedBranchStart = viewModel.IndexOf(
@@ -103,10 +103,12 @@ public sealed class WorklogInlineEditorTests
         Assert.True(newPostBranchStart > postedBranchStart, "The existing WHD note branch is incomplete.");
 
         var postedBranch = viewModel[postedBranchStart..newPostBranchStart];
-        Assert.Contains("SynchronizeWhdEntryCoreAsync", postedBranch, StringComparison.Ordinal);
+        Assert.DoesNotContain("SynchronizeWhdEntry", postedBranch, StringComparison.Ordinal);
+        Assert.DoesNotContain("PostAsync", postedBranch, StringComparison.Ordinal);
         Assert.Contains("UploadWhdImagesToTechNoteAsync", postedBranch, StringComparison.Ordinal);
         Assert.Contains("HandleWhdImageUploadResult", postedBranch, StringComparison.Ordinal);
-        Assert.Contains("RefreshAfterWhdSync", postedBranch, StringComparison.Ordinal);
+        Assert.Contains("TryGetTrackedWhdNoteId", postedBranch, StringComparison.Ordinal);
+        Assert.Contains("already posted to WHD", postedBranch, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -142,37 +144,45 @@ public sealed class WorklogInlineEditorTests
     }
 
     [Fact]
-    public void WhdDeletionIsExactRemoteFirstAndSagePostedEntriesStayLocked()
+    public void PostedEntriesStayLockedAndWHDNotesAreNeverDeleted()
     {
         var viewModel = ReadRepositoryFile("ViewModels", "MainWindowViewModel.cs");
         var deleteStart = viewModel.IndexOf(
-            "private async Task DeleteEntryAsync",
+            "private Task DeleteEntryAsync",
             StringComparison.Ordinal);
         var deleteEnd = viewModel.IndexOf(
             "private bool DeleteLocalEntry",
             deleteStart,
             StringComparison.Ordinal);
 
-        Assert.True(deleteStart >= 0, "The async entry deletion workflow was not found.");
+        Assert.True(deleteStart >= 0, "The entry deletion workflow was not found.");
         Assert.True(deleteEnd > deleteStart, "The entry deletion workflow is incomplete.");
 
         var deletion = viewModel[deleteStart..deleteEnd];
         var sageLock = deletion.IndexOf("if (entry.SagePosted)", StringComparison.Ordinal);
-        var exactWhdDelete = deletion.IndexOf("DeleteTechNoteAsync", StringComparison.Ordinal);
-        var recoveryRecord = deletion.IndexOf("RecordWhdSyncFailure", exactWhdDelete, StringComparison.Ordinal);
         var localDelete = deletion.IndexOf("DeleteLocalEntry(entry", StringComparison.Ordinal);
 
         Assert.True(sageLock >= 0, "Sage-posted entries must have an explicit deletion lock.");
-        Assert.True(exactWhdDelete > sageLock, "The Sage lock must run before any WHD deletion.");
-        Assert.True(recoveryRecord > exactWhdDelete, "A verified-missing recovery record must follow the exact WHD deletion.");
-        Assert.True(localDelete > recoveryRecord, "The SQL recovery record must be saved before the local entry is deleted.");
-        Assert.Contains("TryAcquireAsync(entry.Id, \"Sage\")", deletion, StringComparison.Ordinal);
-        Assert.Contains("TryAcquireAsync(entry.Id, \"WHD\")", deletion, StringComparison.Ordinal);
-        Assert.Contains("was not found. It was deleted at the user's request.", deletion, StringComparison.Ordinal);
-        Assert.Contains("confirmMissingWhdTechNote: true", deletion, StringComparison.Ordinal);
-        Assert.Contains("The TechBench entry was kept", deletion, StringComparison.Ordinal);
-        Assert.Contains("permanently locked", deletion, StringComparison.Ordinal);
-        Assert.Contains("did not delete either the local entry or its WHD TechNote", deletion, StringComparison.Ordinal);
+        Assert.True(localDelete > sageLock, "Only the unposted-entry path may reach local deletion.");
+        Assert.Contains("if (entry.WhdPosted)", deletion, StringComparison.Ordinal);
+        Assert.Contains("keeps posted entries and their tracking history", deletion, StringComparison.Ordinal);
+        Assert.DoesNotContain("DeleteTechNoteAsync", deletion, StringComparison.Ordinal);
+        Assert.DoesNotContain("RecordWhdSync", deletion, StringComparison.Ordinal);
+        Assert.DoesNotContain("confirmMissingWhdTechNote: true", deletion, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InitialWhdPostIsPersistedBeforeImageUploadBegins()
+    {
+        var viewModel = ReadRepositoryFile("ViewModels", "MainWindowViewModel.cs");
+        var attemptStart = viewModel.IndexOf("var attemptStatus = result.OutcomeUncertain", StringComparison.Ordinal);
+        var methodEnd = viewModel.IndexOf("private bool CanPostWhdEntry", attemptStart, StringComparison.Ordinal);
+        var completion = viewModel.IndexOf("_repository.CompletePostingAttempt", attemptStart, StringComparison.Ordinal);
+        var upload = viewModel.IndexOf("UploadWhdImagesToTechNoteAsync", completion, StringComparison.Ordinal);
+
+        Assert.True(attemptStart >= 0 && methodEnd > attemptStart, "The posting completion branch was not found.");
+        Assert.True(completion > attemptStart, "The verified WHD post must be completed durably.");
+        Assert.True(upload > completion && upload < methodEnd, "Images must upload only after the WHD post is durable.");
     }
 
     private static string ReadRepositoryFile(params string[] parts)

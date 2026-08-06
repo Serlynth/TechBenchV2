@@ -341,14 +341,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public bool IsEditorReadOnly => !IsEditorEditable;
     public string WhdPostActionLabel => Editor switch
     {
-        { WhdPosted: true, HasPendingWhdImages: true } => "Update WHD Note + Images",
-        { WhdPosted: true } => "Update WHD Note",
+        { WhdPosted: true, HasPendingWhdImages: true } => "Attach Images to WHD",
+        { WhdPosted: true } => "Posted to WHD",
         { HasPendingWhdImages: true } => "Post Note + Images to WHD",
         _ => "Post to WHD"
     };
-    public string DeleteEntryActionLabel => Editor.WhdPosted
-        ? "Delete Entry and WHD Note..."
-        : "Delete Entry...";
+    public string DeleteEntryActionLabel => "Delete Entry...";
     public bool ShowOpenWhdAction => Editor.SelectedTicket is { Id: > 0 }
         || (Editor.UseOtherWhdTicket && IsValidWhdTicketNumber(Editor.ManualTicketNumber));
     public bool HasTodayEntries => Entries.Count > 0;
@@ -2068,6 +2066,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         PostingQueue.Clear();
         var queue = _repository.GetWorkEntries(new WorkEntryQuery { PendingAnyOnly = true })
+            .Where(static entry => entry.NeedsWhdPosting || entry.NeedsSagePosting)
             .OrderByDescending(static entry => entry.WorkDate)
             .ThenBy(static entry => entry.StartTime);
 
@@ -2152,8 +2151,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var missingNote = Entries.Count(static entry => string.IsNullOrWhiteSpace(entry.Note));
         var whdPending = Entries.Count(static entry => entry.NeedsWhdPosting);
         var sagePending = Entries.Count(static entry => entry.NeedsSagePosting);
-        var errors = Entries.Count(static entry => !string.IsNullOrWhiteSpace(entry.LastError));
-        var modifiedAfterPosting = Entries.Count(static entry => entry.ModifiedAfterPosting);
+        var errors = Entries.Count(static entry => !string.IsNullOrWhiteSpace(entry.DisplayLastError));
         var openFollowUps = Entries.Count(static entry => entry.HasFollowUp);
         var duplicates = Entries
             .GroupBy(static entry => new
@@ -2173,8 +2171,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             BuildCloseoutItem("open-follow-ups", "Open follow-ups", openFollowUps, "Notes still have a follow-up or waiting action."),
             BuildCloseoutItem("whd-pending", "WHD pending", whdPending, "Ticket notes still need WHD posting."),
             BuildCloseoutItem("sage-pending", "Sage pending", sagePending, "Entries still need Sage ticket posting."),
-            BuildCloseoutItem("errors", "Errors", errors, "Entries have posting or sync errors."),
-            BuildCloseoutItem("edited-after-posting", "Edited after posting", modifiedAfterPosting, "Entries changed after posting."),
+            BuildCloseoutItem("errors", "Errors", errors, "Entries have posting errors."),
             BuildCloseoutItem("duplicates", "Possible duplicates", duplicates, "Entries look similar enough to review.")
         };
 
@@ -2227,7 +2224,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         PostingQueue.Clear();
         foreach (var entry in entries)
         {
-            entry.IsSelectedForBatch = !string.IsNullOrWhiteSpace(entry.LastError);
+            entry.IsSelectedForBatch = !string.IsNullOrWhiteSpace(entry.DisplayLastError);
             PostingQueue.Add(entry);
         }
     }
@@ -2246,8 +2243,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "open-follow-ups" => Entries.FirstOrDefault(static candidate => candidate.HasFollowUp),
             "whd-pending" => Entries.FirstOrDefault(static candidate => candidate.NeedsWhdPosting),
             "sage-pending" => Entries.FirstOrDefault(static candidate => candidate.NeedsSagePosting),
-            "errors" => Entries.FirstOrDefault(static candidate => !string.IsNullOrWhiteSpace(candidate.LastError)),
-            "edited-after-posting" => Entries.FirstOrDefault(static candidate => candidate.ModifiedAfterPosting),
+            "errors" => Entries.FirstOrDefault(static candidate => !string.IsNullOrWhiteSpace(candidate.DisplayLastError)),
             "duplicates" => FindFirstPossibleDuplicateEntry(),
             _ => null
         };
@@ -2373,7 +2369,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return Task.CompletedTask;
         }
 
-        StatusMessage = $"{StatusMessage} This save is local to TechBench; use Post to create or update the WHD note.";
+        StatusMessage = $"{StatusMessage} This save is local to TechBench; Post adds the note to WHD once.";
         return Task.CompletedTask;
     }
 
@@ -2432,183 +2428,52 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         return savedEntry;
     }
 
-    private async Task DeleteEntryAsync(object? parameter)
+    private Task DeleteEntryAsync(object? parameter)
     {
         if (Editor.Id <= 0)
         {
-            return;
+            return Task.CompletedTask;
         }
 
         var entry = _repository.GetWorkEntry(Editor.Id);
         if (entry is null)
         {
             StatusMessage = "The work entry no longer exists.";
-            return;
+            return Task.CompletedTask;
         }
 
         if (entry.SagePosted)
         {
-            StatusMessage = "Entries posted to Sage are permanently locked. TechBench did not delete either the local entry or its WHD TechNote.";
-            return;
+            StatusMessage = "Entries posted to Sage are permanently locked and cannot be deleted.";
+            return Task.CompletedTask;
         }
 
-        var deletingVerifiedMissingWhdNote = entry.HasVerifiedMissingWhdTechNote;
-        if (entry.WhdPosted && !deletingVerifiedMissingWhdNote)
+        if (entry.WhdPosted)
         {
-            if (!TryGetTrackedWhdNote(
-                    entry.Id,
-                    out _,
-                    out var techNoteId,
-                    out _,
-                    out var trackingError))
-            {
-                StatusMessage = trackingError;
-                _dialogService.Error(
-                    "Delete WHD note",
-                    $"{trackingError}\n\nThe TechBench entry was kept, and no WHD note was deleted.");
-                return;
-            }
-
-            var ticket = ResolveWhdTicket(entry);
-            if (ticket is null || !TryResolveWhdTicketId(ticket, out var whdTicketId))
-            {
-                const string ticketError = "TechBench could not resolve the WHD ticket that owns the tracked TechNote.";
-                StatusMessage = ticketError;
-                _dialogService.Error(
-                    "Delete WHD note",
-                    $"{ticketError}\n\nThe TechBench entry was kept, and no WHD note was deleted.");
-                return;
-            }
-
-            var deleteBoth = _dialogService.Confirm(
-                "Delete TechBench entry and WHD note",
-                $"Delete this TechBench entry and its exact WHD TechNote #{techNoteId} from ticket #{whdTicketId}?\n\n"
-                + "Any images attached to that TechNote will also be removed by WHD. TechBench can restore the local entry with Undo, but it cannot restore the deleted WHD note.\n\n"
-                + "This action is never available after the entry is posted to Sage.",
-                "Delete both",
-                "Cancel");
-            if (!deleteBoth)
-            {
-                return;
-            }
-
-            await using var sageDeletionLease = await _postingCoordinator.TryAcquireAsync(entry.Id, "Sage");
-            if (sageDeletionLease is null)
-            {
-                StatusMessage = "A Sage operation is already running for this entry. Nothing was deleted.";
-                return;
-            }
-
-            await using var whdDeletionLease = await _postingCoordinator.TryAcquireAsync(entry.Id, "WHD");
-            if (whdDeletionLease is null)
-            {
-                StatusMessage = "Another WHD operation is already running for this entry. Nothing was deleted.";
-                return;
-            }
-
-            entry = _repository.GetWorkEntry(entry.Id) ?? entry;
-            if (entry.SagePosted)
-            {
-                StatusMessage = "This entry finished posting to Sage before deletion could begin. TechBench did not delete either the local entry or its WHD TechNote.";
-                return;
-            }
-
-            if (!TryGetTrackedWhdNote(
-                    entry.Id,
-                    out _,
-                    out var currentTechNoteId,
-                    out _,
-                    out var currentTrackingError)
-                || currentTechNoteId != techNoteId)
-            {
-                StatusMessage = string.IsNullOrWhiteSpace(currentTrackingError)
-                    ? "The tracked WHD TechNote changed before deletion could begin. Nothing was deleted."
-                    : currentTrackingError;
-                return;
-            }
-
-            IsEntryOperationRunning = true;
-            EntryOperationText = $"Deleting WHD TechNote #{techNoteId}...";
-            try
-            {
-                var whdDeletion = await _whdRestClient.DeleteTechNoteAsync(
-                    BuildWhdConnectionSettings(),
-                    whdTicketId,
-                    techNoteId);
-                if (!whdDeletion.Success)
-                {
-                    StatusMessage = whdDeletion.Message;
-                    _dialogService.Error(
-                        whdDeletion.OutcomeUncertain
-                            ? "WHD deletion could not be verified"
-                            : "WHD note was not deleted",
-                        $"{whdDeletion.Message}\n\nThe TechBench entry was kept so this can be retried safely.");
-                    return;
-                }
-
-                var verifiedMissingMessage = $"WHD sync pending: Web Help Desk verified that TechNote #{techNoteId} was not found. It was deleted at the user's request.";
-                RecordWhdSyncFailure(
-                    entry,
-                    verifiedMissingMessage,
-                    $"WHD-TECHNOTE-{techNoteId}",
-                    refreshAfter: false,
-                    payload: whdDeletion.Payload);
-                entry.WhdPosted = false;
-                entry.WhdPostedAt = null;
-                entry.LastError = null;
-                WorkEntryPostingStatusCalculator.Update(entry);
-                if (!DeleteLocalEntry(entry, confirmMissingWhdTechNote: true))
-                {
-                    return;
-                }
-
-                StatusMessage = $"{whdDeletion.Message} TechBench entry deleted. Local Undo is available, but it will not recreate the WHD note.";
-                return;
-            }
-            catch (Exception ex)
-            {
-                StatusMessage = $"WHD deletion did not complete safely: {ex.Message}";
-                _dialogService.Error(
-                    "Delete entry",
-                    $"{StatusMessage}\n\nThe TechBench entry was kept. If WHD removed the note before this error, use Post > Update WHD Note to verify it before deleting locally.");
-                return;
-            }
-            finally
-            {
-                EntryOperationText = string.Empty;
-                IsEntryOperationRunning = false;
-            }
+            StatusMessage = "This entry has already been posted to WHD. TechBench keeps posted entries and their tracking history; neither the local entry nor the WHD note was deleted.";
+            return Task.CompletedTask;
         }
 
         var confirmed = _dialogService.Confirm(
-            deletingVerifiedMissingWhdNote ? "Delete local entry" : "Delete entry",
-            deletingVerifiedMissingWhdNote
-                ? "TechBench verified that the tracked WHD TechNote no longer exists. Delete this local work entry and its posting history? This does not change WHD. You can undo this until another entry is deleted."
-                : "Delete this work entry? You can undo this until another entry is deleted.",
-            deletingVerifiedMissingWhdNote ? "Delete local entry" : "Delete",
+            "Delete entry",
+            "Delete this unposted work entry? You can undo this until another entry is deleted.",
+            "Delete",
             "Cancel");
         if (!confirmed)
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        if (deletingVerifiedMissingWhdNote)
-        {
-            entry.WhdPosted = false;
-            entry.WhdPostedAt = null;
-            entry.LastError = null;
-            WorkEntryPostingStatusCalculator.Update(entry);
-        }
-
-        DeleteLocalEntry(entry, deletingVerifiedMissingWhdNote);
+        DeleteLocalEntry(entry);
+        return Task.CompletedTask;
     }
 
-    private bool DeleteLocalEntry(WorkEntry entry, bool confirmMissingWhdTechNote)
+    private bool DeleteLocalEntry(WorkEntry entry)
     {
         var deletedLinks = _repository.GetWorkEntryLinks(entry.Id).ToArray();
         try
         {
-            _repository.DeleteWorkEntry(entry.Id, confirmMissingWhdTechNote);
+            _repository.DeleteWorkEntry(entry.Id, confirmMissingWhdTechNote: false);
         }
         catch (Exception ex)
         {
@@ -2913,35 +2778,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            EntryOperationText = "Verifying the exact WHD note before Sage...";
-            if (!await SynchronizeWhdEntryAsync(entry, WhdSyncIntent.PushLocal, allowConflictPrompt: true, refreshAfter: false))
-            {
-                var currentEntry = _repository.GetWorkEntry(entry.Id);
-                if (currentEntry?.SagePosted == true)
-                {
-                    StatusMessage = string.IsNullOrWhiteSpace(currentEntry.SageTicketNumber)
-                        ? "The Sage ticket is already saved and this entry is locked."
-                        : $"Sage ticket #{currentEntry.SageTicketNumber} is already saved and this entry is locked.";
-                    if (ownsOperationState)
-                    {
-                        EntryOperationText = string.Empty;
-                        IsEntryOperationRunning = false;
-                    }
-                    return;
-                }
-
-                _dialogService.Error(
-                    "Create Sage ticket",
-                    "TechBench did not start Sage because the exact WHD TechNote could not be synchronized and verified. Resolve the WHD sync message first.");
-                if (ownsOperationState)
-                {
-                    EntryOperationText = string.Empty;
-                    IsEntryOperationRunning = false;
-                }
-                return;
-            }
-
-            entry = _repository.GetWorkEntry(entry.Id) ?? entry;
             EntryOperationText = "Creating the Sage ticket...";
         }
 
@@ -2976,7 +2812,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private async Task BatchPostWhdAsync(object? parameter)
     {
         IsEntryOperationRunning = true;
-        EntryOperationText = "Synchronizing selected Sage/WHD Notes with WHD...";
+        EntryOperationText = "Posting selected Sage/WHD Notes to WHD...";
         try
         {
             var entries = GetSelectedPostingQueueEntriesForPosting()
@@ -3048,36 +2884,48 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         entry = _repository.GetWorkEntry(entry.Id) ?? entry;
         if (destination == "WHD" && entry.WhdPosted)
         {
-            var synchronized = await SynchronizeWhdEntryCoreAsync(
-                entry,
-                WhdSyncIntent.PushLocal,
-                allowConflictPrompt: confirmAlreadyPosted,
-                refreshAfter: false);
-            var finalMessage = StatusMessage;
-
-            if (synchronized && whdImagePaths is { Count: > 0 })
+            if (whdImagePaths is not { Count: > 0 })
             {
-                WhdAttachmentUploadResult uploadResult;
-                if (TryGetTrackedWhdNote(entry.Id, out _, out var techNoteId, out _, out var trackingError))
-                {
-                    uploadResult = await UploadWhdImagesToTechNoteAsync(techNoteId, whdImagePaths);
-                }
-                else
-                {
-                    uploadResult = WhdAttachmentUploadResult.Failed(trackingError, whdImagePaths);
-                }
-
-                HandleWhdImageUploadResult(uploadResult);
-                finalMessage = $"{finalMessage} {uploadResult.Message}".Trim();
+                StatusMessage = "This note is already posted to WHD. Existing WHD notes are not updated or reposted.";
+                return false;
             }
 
+            WhdAttachmentUploadResult uploadResult;
+            string? externalReference = null;
+            if (TryGetTrackedWhdNoteId(entry.Id, out var techNoteId, out var trackingError))
+            {
+                externalReference = $"WHD-TECHNOTE-{techNoteId}";
+                uploadResult = await UploadWhdImagesToTechNoteAsync(techNoteId, whdImagePaths);
+            }
+            else
+            {
+                uploadResult = WhdAttachmentUploadResult.Failed(trackingError, whdImagePaths);
+            }
+
+            HandleWhdImageUploadResult(uploadResult);
+            _repository.AddPostingLog(new PostingLog
+            {
+                WorkEntryId = entry.Id,
+                Destination = "WHD",
+                Payload = JsonSerializer.Serialize(new
+                {
+                    Action = "AttachImages",
+                    Files = whdImagePaths.Select(Path.GetFileName).ToArray()
+                }),
+                Success = uploadResult.Success,
+                Message = uploadResult.Message,
+                ExternalReference = externalReference,
+                CreatedAt = DateTime.Now
+            });
             if (refreshAfter)
             {
-                RefreshAfterWhdSync(entry.Id, refreshAfter: true);
+                RefreshAll();
+                SelectedEntry = Entries.FirstOrDefault(saved => saved.Id == entry.Id)
+                    ?? _repository.GetWorkEntry(entry.Id);
             }
 
-            StatusMessage = finalMessage;
-            return synchronized;
+            StatusMessage = uploadResult.Message;
+            return uploadResult.Success;
         }
 
         var client = entry.ClientId.HasValue ? _repository.GetClient(entry.ClientId.Value) : null;
@@ -3200,30 +3048,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 $"The {destination} operation ended unexpectedly after it began: {ex.Message} Verify the destination before retrying.");
         }
 
-        if (destination == "WHD"
-            && result.Success
-            && whdImagePaths is { Count: > 0 })
-        {
-            WhdAttachmentUploadResult uploadResult;
-            if (TryParseWhdTechNoteId(result.ExternalReference, out var techNoteId))
-            {
-                uploadResult = await UploadWhdImagesToTechNoteAsync(techNoteId, whdImagePaths);
-            }
-            else
-            {
-                uploadResult = WhdAttachmentUploadResult.Failed(
-                    "TechBench could not read the verified WHD TechNote ID needed for image attachments.",
-                    whdImagePaths);
-            }
-
-            HandleWhdImageUploadResult(uploadResult);
-            result = PostingResult.Succeeded(
-                $"{result.Message} {uploadResult.Message}".Trim(),
-                result.Payload,
-                result.ExternalReference,
-                result.MarkPosted);
-        }
-
         var attemptStatus = result.OutcomeUncertain
             ? PostingAttemptStatus.Unknown
             : result.Success ? PostingAttemptStatus.Succeeded : PostingAttemptStatus.Failed;
@@ -3273,6 +3097,41 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             result.Message,
             result.ExternalReference,
             result.MarkPosted);
+
+        if (destination == "WHD"
+            && result.Success
+            && whdImagePaths is { Count: > 0 })
+        {
+            WhdAttachmentUploadResult uploadResult;
+            if (TryParseWhdTechNoteId(result.ExternalReference, out var techNoteId))
+            {
+                uploadResult = await UploadWhdImagesToTechNoteAsync(techNoteId, whdImagePaths);
+            }
+            else
+            {
+                uploadResult = WhdAttachmentUploadResult.Failed(
+                    "TechBench could not read the verified WHD TechNote ID needed for image attachments.",
+                    whdImagePaths);
+            }
+
+            HandleWhdImageUploadResult(uploadResult);
+            _repository.AddPostingLog(new PostingLog
+            {
+                WorkEntryId = entry.Id,
+                Destination = "WHD",
+                Payload = JsonSerializer.Serialize(new
+                {
+                    Action = "AttachImages",
+                    Files = whdImagePaths.Select(Path.GetFileName).ToArray()
+                }),
+                Success = uploadResult.Success,
+                Message = uploadResult.Message,
+                ExternalReference = result.ExternalReference,
+                CreatedAt = DateTime.Now
+            });
+            StatusMessage = $"{result.Message} {uploadResult.Message}".Trim();
+        }
+
         if (refreshAfter)
         {
             RefreshAll();
@@ -3290,10 +3149,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         return parameter is WorkEntry entry
-            ? entry is { Id: > 0, HasTicket: true, SagePosted: false }
+            ? entry is { Id: > 0, HasTicket: true, WhdPosted: false, SagePosted: false }
             : (Editor.Id > 0 || (Editor.HasClientReference && IsEditorEditable))
               && !Editor.HasNoTicket
-              && !Editor.SagePosted;
+              && !Editor.SagePosted
+              && (!Editor.WhdPosted || Editor.HasPendingWhdImages);
     }
 
     private bool CanPostSageEntry(object? parameter)
@@ -3314,13 +3174,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private bool CanDeleteEditorEntry() => CanWrite
         && Editor.Id > 0
+        && !Editor.WhdPosted
         && !Editor.SagePosted
         && !IsEntryOperationRunning;
-
-    private static bool IsVerifiedMissingWhdTechNote(string? lastError) =>
-        lastError?.StartsWith("WHD sync pending:", StringComparison.OrdinalIgnoreCase) == true
-        && lastError.Contains("TechNote #", StringComparison.OrdinalIgnoreCase)
-        && lastError.Contains("was not found.", StringComparison.OrdinalIgnoreCase);
 
     private bool CanLinkSageTicket(object? parameter)
     {
@@ -4103,8 +3959,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             Editor.SagePostedAt = entry.SagePostedAt;
             Editor.SageTicketNumber = entry.SageTicketNumber;
             Editor.PostingStatus = entry.PostingStatus;
-            Editor.LastError = entry.LastError ?? string.Empty;
-            Editor.ModifiedAfterPosting = entry.ModifiedAfterPosting;
+            Editor.LastError = entry.DisplayLastError ?? string.Empty;
         });
         RaiseEditorStateProperties();
     }

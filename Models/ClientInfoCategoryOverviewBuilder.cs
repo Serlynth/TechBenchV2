@@ -30,8 +30,10 @@ public static class ClientInfoCategoryOverviewBuilder
                 BuildApplications(resources, credentials),
             ClientInfoResourceCategories.DomainsEmail =>
                 BuildDomains(resources, credentials),
-            ClientInfoResourceCategories.BackupSecurity =>
-                BuildProtection(resources, credentials),
+            ClientInfoResourceCategories.Backup =>
+                BuildBackup(resources, credentials),
+            ClientInfoResourceCategories.Security =>
+                BuildSecurity(resources, credentials),
             ClientInfoResourceCategories.VendorsServices =>
                 BuildVendors(resources, credentials),
             _ => BuildNeedsSorting(resources)
@@ -62,14 +64,16 @@ public static class ClientInfoCategoryOverviewBuilder
                         ? "Remote Access"
                         : "Other applications & cloud",
             ClientInfoResourceCategories.DomainsEmail => "Domain & AD",
-            ClientInfoResourceCategories.BackupSecurity =>
+            ClientInfoResourceCategories.Backup =>
                 IsFireDrillGroup(resource, "Veeam")
                     ? "Veeam"
-                    : IsFireDrillGroup(resource, "ESET")
-                        ? "ESET"
-                        : IsFireDrillGroup(resource, "Barracuda")
-                            ? "Barracuda"
-                            : "Other backup & security",
+                    : "Other backup",
+            ClientInfoResourceCategories.Security =>
+                IsFireDrillGroup(resource, "ESET")
+                    ? "ESET"
+                    : IsFireDrillGroup(resource, "Barracuda")
+                        ? "Barracuda"
+                        : "Other security",
             ClientInfoResourceCategories.VendorsServices => "Vendors & services",
             _ => "Sorting queue"
         };
@@ -425,11 +429,30 @@ public static class ClientInfoCategoryOverviewBuilder
         ];
     }
 
+    private static IReadOnlyList<ClientInfoCategoryOverviewSection> BuildBackup(
+        IReadOnlyList<ClientInfoResource> resources,
+        IReadOnlyList<ClientInfoCredential> credentials) =>
+        BuildProtection(
+            resources,
+            credentials,
+            ["Veeam"],
+            "Other backup");
+
+    private static IReadOnlyList<ClientInfoCategoryOverviewSection> BuildSecurity(
+        IReadOnlyList<ClientInfoResource> resources,
+        IReadOnlyList<ClientInfoCredential> credentials) =>
+        BuildProtection(
+            resources,
+            credentials,
+            ["ESET", "Barracuda"],
+            "Other security");
+
     private static IReadOnlyList<ClientInfoCategoryOverviewSection> BuildProtection(
         IReadOnlyList<ClientInfoResource> resources,
-        IReadOnlyList<ClientInfoCredential> credentials)
+        IReadOnlyList<ClientInfoCredential> credentials,
+        IReadOnlyList<string> groups,
+        string otherTitle)
     {
-        var groups = new[] { "Veeam", "ESET", "Barracuda" };
         var sections = groups.Select(group => ProtectionSection(
                 group,
                 resources.Where(resource => IsFireDrillGroup(resource, group)).ToArray(),
@@ -438,7 +461,7 @@ public static class ClientInfoCategoryOverviewBuilder
         var groupedResources = resources.Where(resource => groups.Any(group => IsFireDrillGroup(resource, group))).ToArray();
         var groupedCredentials = credentials.Where(credential => groups.Any(group => IsFireDrillGroup(credential, group))).ToArray();
         sections.Add(ProtectionSection(
-            "Other backup & security",
+            otherTitle,
             resources.Except(groupedResources).ToArray(),
             credentials.Except(groupedCredentials).ToArray()));
         return sections;
@@ -453,19 +476,36 @@ public static class ClientInfoCategoryOverviewBuilder
                 : title == "ESET"
                     ? "Endpoint protection scope, console, renewal, and access."
                     : title == "Barracuda"
-                        ? "Email security or backup scope, console, retention, and access."
-                        : "Important protection records outside the named FireDrill groups.",
+                        ? "Email security scope, console, retention, and access."
+                        : title == "Other backup"
+                            ? "Important backup records outside the named FireDrill groups."
+                            : "Important security records outside the named FireDrill groups.",
             WithAccess(
                 [
                     Values("Product / service", resources, "product_service", "product", "service"),
                     Names("Systems", resources),
-                    Values("Protected scope", resources, "protected_scope", "protected devices", "backup scope"),
+                    Values(
+                        title is "Veeam" or "Other backup"
+                            ? "Protected scope"
+                            : "Protected scope / coverage",
+                        resources,
+                        "protected_scope", "protected devices", "backup scope", "coverage"),
                     Coalesce("Console / portal",
                         Values("Console / portal", resources, "console_url", "portal url", "management url"),
                         Addresses("Console / portal", resources)),
-                    Values("Schedule", resources, "backup_schedule", "backup time", "schedule"),
+                    Values(
+                        title is "Veeam" or "Other backup"
+                            ? "Schedule"
+                            : "Policy / monitoring",
+                        resources,
+                        "backup_schedule", "backup time", "schedule", "policy", "monitoring"),
                     Values("Retention", resources, "retention", "retention period"),
-                    Values("Last restore test", resources, "last_restore_test", "restore test", "last test"),
+                    Values(
+                        title is "Veeam" or "Other backup"
+                            ? "Last restore test"
+                            : "Last review / test",
+                        resources,
+                        "last_restore_test", "restore test", "last test", "last review"),
                     Values("Renewal", resources, "renewal_date", "renewal", "expiration")
                 ],
                 credentials));
