@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Threading;
 using TechBench.Controls;
@@ -13,6 +14,9 @@ namespace TechBench;
 
 public partial class MainWindow : Window
 {
+    private const double MinimumInlineWorkEntryEditorWidth = 360;
+    private const double MaximumInlineWorkEntryEditorWidth = 1200;
+    private const double MinimumInlineWorkEntryListWidth = 320;
     private readonly WindowsNotificationService _notificationService;
     private readonly LocalPreferences _localPreferences;
     private DispatcherTimer? _previewExpiryTimer;
@@ -943,6 +947,57 @@ public partial class MainWindow : Window
             StringComparison.OrdinalIgnoreCase)
             ? WindowState.Maximized
             : WindowState.Normal;
+        ApplyInlineWorkEntryEditorWidth(
+            _localPreferences.InlineEditorPaneWidth);
+    }
+
+    private void InlineWorkEntryEditorResizeThumb_DragDelta(
+        object sender,
+        DragDeltaEventArgs e)
+    {
+        var host = ReferenceEquals(sender, ThisWeekInlineEditorResizeThumb)
+            ? ThisWeekInlineEditorHost
+            : HistoryInlineEditorHost;
+        var pane = ReferenceEquals(sender, ThisWeekInlineEditorResizeThumb)
+            ? ThisWeekInlineEditorPane
+            : HistoryInlineEditorPane;
+        var currentWidth = pane.ActualWidth > 0
+            ? pane.ActualWidth
+            : pane.Width;
+        var availableWidth = host.ActualWidth > 0
+            ? host.ActualWidth
+            : ActualWidth;
+        var maximumWidth = Math.Clamp(
+            availableWidth - MinimumInlineWorkEntryListWidth - 14,
+            MinimumInlineWorkEntryEditorWidth,
+            MaximumInlineWorkEntryEditorWidth);
+        ApplyInlineWorkEntryEditorWidth(Math.Clamp(
+            currentWidth - e.HorizontalChange,
+            MinimumInlineWorkEntryEditorWidth,
+            maximumWidth));
+        e.Handled = true;
+    }
+
+    private void InlineWorkEntryEditorResizeThumb_DragCompleted(
+        object sender,
+        DragCompletedEventArgs e)
+    {
+        _localPreferences.InlineEditorPaneWidth =
+            ThisWeekInlineEditorPane.Width;
+        SaveWindowPreferences();
+        e.Handled = true;
+    }
+
+    private void ApplyInlineWorkEntryEditorWidth(double width)
+    {
+        var normalizedWidth = double.IsFinite(width)
+            ? Math.Clamp(
+                width,
+                MinimumInlineWorkEntryEditorWidth,
+                MaximumInlineWorkEntryEditorWidth)
+            : 500;
+        ThisWeekInlineEditorPane.Width = normalizedWidth;
+        HistoryInlineEditorPane.Width = normalizedWidth;
     }
 
     private static bool IsSavedWindowVisible(
@@ -970,6 +1025,8 @@ public partial class MainWindow : Window
         _localPreferences.WindowHeight = bounds.Height;
         _localPreferences.WindowState =
             WindowState == WindowState.Maximized ? "Maximized" : "Normal";
+        _localPreferences.InlineEditorPaneWidth =
+            ThisWeekInlineEditorPane.Width;
         try
         {
             LocalPreferenceStore.Save(_localPreferences);

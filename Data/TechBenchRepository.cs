@@ -1262,7 +1262,7 @@ public sealed class TechBenchRepository : ITechBenchRepository
         throw new NotSupportedException(
             "V1 import recovery is available only in the SQL Server-backed TechBench V2 client.");
 
-    public void DeleteWorkEntry(int id, bool confirmMissingWhdTechNote = false)
+    public void DeleteWorkEntry(int id, bool allowWhdPostedLocalDelete = false)
     {
         using var connection = _connectionFactory.CreateConnection();
         connection.Open();
@@ -1273,10 +1273,14 @@ public sealed class TechBenchRepository : ITechBenchRepository
         }
 
         if (IsWhdPosted(connection, transaction, id)
-            && (!confirmMissingWhdTechNote
-                || !HasVerifiedMissingWhdTechNote(connection, transaction, id)))
+            && !allowWhdPostedLocalDelete)
         {
-            throw new InvalidOperationException("Entries synchronized to WHD cannot be deleted because their exact TechNote tracking must be preserved.");
+            throw new InvalidOperationException("A WHD-posted entry requires explicit confirmation before its TechBench copy can be deleted.");
+        }
+
+        if (HasActivePostingAttempt(connection, transaction, id))
+        {
+            throw new InvalidOperationException("A work entry cannot be deleted while an external posting attempt is active.");
         }
 
         if (_fullTextSearchAvailable)
@@ -1299,7 +1303,7 @@ public sealed class TechBenchRepository : ITechBenchRepository
         transaction.Commit();
     }
 
-    private static bool HasVerifiedMissingWhdTechNote(
+    private static bool HasActivePostingAttempt(
         SqliteConnection connection,
         SqliteTransaction transaction,
         int workEntryId)
@@ -1310,25 +1314,13 @@ public sealed class TechBenchRepository : ITechBenchRepository
             SELECT EXISTS
             (
                 SELECT 1
-                FROM WorkEntries w
-                WHERE w.Id = $id
-                  AND w.WhdPosted = 1
-                  AND w.SagePosted = 0
-                  AND LOWER(COALESCE(w.LastError, '')) LIKE 'whd sync pending:%technote #%was not found.%'
-                  AND EXISTS
-                  (
-                      SELECT 1
-                      FROM PostingLogs p
-                      WHERE p.WorkEntryId = w.Id
-                        AND p.Destination = 'WHD'
-                        AND p.Success = 0
-                        AND UPPER(COALESCE(p.ExternalReference, '')) LIKE 'WHD-TECHNOTE-%'
-                        AND LOWER(COALESCE(p.Message, '')) LIKE '%technote #%was not found.%'
-                  )
+                FROM PostingAttempts
+                WHERE WorkEntryId = $id
+                  AND Status IN ('Started', 'Unknown')
             )
             """;
         command.Parameters.AddWithValue("$id", workEntryId);
-        return Convert.ToInt32(command.ExecuteScalar()) == 1;
+        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture) == 1;
     }
 
     public IReadOnlyList<WorkEntryLink> GetWorkEntryLinks(int workEntryId)

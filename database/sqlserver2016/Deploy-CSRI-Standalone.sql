@@ -7152,7 +7152,6 @@ BEGIN
     DECLARE @IsSyncOperator bit;
     DECLARE @WhdPosted bit;
     DECLARE @SagePosted bit;
-    DECLARE @LastError nvarchar(2000);
 
     EXEC [tb_security].[EnsureCurrentUser]
         @UserSid = @UserSid OUTPUT,
@@ -7168,8 +7167,7 @@ BEGIN
 
         SELECT
             @WhdPosted = [WhdPosted],
-            @SagePosted = [SagePosted],
-            @LastError = [LastError]
+            @SagePosted = [SagePosted]
         FROM [tb_data].[WorkEntries] WITH (UPDLOCK, HOLDLOCK)
         WHERE [Id] = @Id
           AND [OwnerWindowsSid] = @UserSid
@@ -7194,23 +7192,8 @@ BEGIN
             THROW 51138, N'A work entry posted to Sage cannot be deleted.', 1;
 
         IF @WhdPosted = 1
-           AND
-           (
-               @ConfirmMissingWhdTechNote <> 1
-               OR COALESCE(@LastError, N'') NOT LIKE N'WHD sync pending:%TechNote #%was not found.%'
-               OR NOT EXISTS
-               (
-                   SELECT 1
-                   FROM [tb_ops].[PostingLogs] AS posting_log WITH (UPDLOCK, HOLDLOCK)
-                   WHERE posting_log.[WorkEntryId] = @Id
-                     AND posting_log.[OwnerWindowsSid] = @UserSid
-                     AND posting_log.[Destination] = N'WHD'
-                     AND posting_log.[Success] = 0
-                     AND COALESCE(posting_log.[ExternalReference], N'') LIKE N'WHD-TECHNOTE-%'
-                     AND posting_log.[Message] LIKE N'%TechNote #%was not found.%'
-               )
-           )
-            THROW 51140, N'Only a work entry whose tracked WHD TechNote was verified missing may be deleted after WHD posting.', 1;
+           AND @ConfirmMissingWhdTechNote <> 1
+            THROW 51140, N'A WHD-posted entry requires explicit confirmation before its TechBench copy can be deleted.', 1;
 
         IF EXISTS
         (
@@ -29082,6 +29065,163 @@ GO
 -- ============================================================================
 
 -- ============================================================================
+-- BEGIN 68-V0015-WhdLocalDeleteProcedures.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [tb_deploy].[SchemaMigrations]
+    WHERE [MigrationId] = N'SqlServer2016.EquipmentAnyDesk.0015'
+      AND [SchemaVersion] = 15
+)
+BEGIN
+    RAISERROR(N'V0015 must be installed before the WHD local-delete extension.', 16, 1);
+    RETURN;
+END;
+
+IF OBJECT_ID(N'tb_app.DeleteWorkEntry', N'P') IS NULL
+BEGIN
+    RAISERROR(N'tb_app.DeleteWorkEntry must exist before the WHD local-delete extension.', 16, 1);
+    RETURN;
+END;
+GO
+
+ALTER PROCEDURE [tb_app].[DeleteWorkEntry]
+    @Id int,
+    @ExpectedRowVersion binary(8),
+    @RequestId uniqueidentifier = NULL,
+    @ConfirmMissingWhdTechNote bit = 0
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @UserSid varbinary(85);
+    DECLARE @LoginName nvarchar(256);
+    DECLARE @DisplayName nvarchar(160);
+    DECLARE @IsTechnician bit;
+    DECLARE @IsManager bit;
+    DECLARE @IsAdmin bit;
+    DECLARE @IsSyncOperator bit;
+    DECLARE @WhdPosted bit;
+    DECLARE @SagePosted bit;
+
+    EXEC [tb_security].[EnsureCurrentUser]
+        @UserSid = @UserSid OUTPUT,
+        @LoginName = @LoginName OUTPUT,
+        @DisplayName = @DisplayName OUTPUT,
+        @IsTechnician = @IsTechnician OUTPUT,
+        @IsManager = @IsManager OUTPUT,
+        @IsAdmin = @IsAdmin OUTPUT,
+        @IsSyncOperator = @IsSyncOperator OUTPUT;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        SELECT
+            @WhdPosted = [WhdPosted],
+            @SagePosted = [SagePosted]
+        FROM [tb_data].[WorkEntries] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [Id] = @Id
+          AND [OwnerWindowsSid] = @UserSid
+          AND [RowVersion] = @ExpectedRowVersion;
+
+        IF @WhdPosted IS NULL
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM [tb_data].[WorkEntries] WHERE [Id] = @Id)
+                THROW 51132, N'The work entry no longer exists.', 1;
+            IF NOT EXISTS
+            (
+                SELECT 1
+                FROM [tb_data].[WorkEntries]
+                WHERE [Id] = @Id
+                  AND [OwnerWindowsSid] = @UserSid
+            )
+                THROW 51133, N'Only the work-entry owner may delete it.', 1;
+            THROW 51134, N'The work entry changed after it was loaded.', 1;
+        END;
+
+        IF @SagePosted = 1
+            THROW 51138, N'A work entry posted to Sage cannot be deleted.', 1;
+
+        IF @WhdPosted = 1
+           AND @ConfirmMissingWhdTechNote <> 1
+            THROW 51140, N'A WHD-posted entry requires explicit confirmation before its TechBench copy can be deleted.', 1;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM [tb_ops].[PostingAttempts] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [WorkEntryId] = @Id
+              AND [OwnerWindowsSid] = @UserSid
+              AND [Status] IN (N'Started', N'Unknown')
+        )
+        OR EXISTS
+        (
+            SELECT 1
+            FROM [tb_ops].[PostingLeases] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [WorkEntryId] = @Id
+              AND [OwnerWindowsSid] = @UserSid
+        )
+            THROW 51139, N'A work entry cannot be deleted while an external posting attempt is active.', 1;
+
+        DELETE FROM [tb_data].[WorkEntryLinks]
+        WHERE [SourceWorkEntryId] = @Id
+           OR [TargetWorkEntryId] = @Id;
+
+        DELETE FROM [tb_data].[WorkEntries]
+        WHERE [Id] = @Id
+          AND [OwnerWindowsSid] = @UserSid
+          AND [RowVersion] = @ExpectedRowVersion;
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM [tb_data].[WorkEntries] WHERE [Id] = @Id)
+                THROW 51132, N'The work entry no longer exists.', 1;
+            IF NOT EXISTS
+            (
+                SELECT 1
+                FROM [tb_data].[WorkEntries]
+                WHERE [Id] = @Id
+                  AND [OwnerWindowsSid] = @UserSid
+            )
+                THROW 51133, N'Only the work-entry owner may delete it.', 1;
+            THROW 51134, N'The work entry changed after it was loaded.', 1;
+        END;
+
+        DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @Id);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action = N'WorkEntryDeleted',
+            @EntityType = N'WorkEntry',
+            @EntityId = @AuditEntityId,
+            @RequestId = @RequestId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+GO
+
+PRINT N'Schema-15-compatible WHD local-delete extension installed.';
+GO
+
+-- ============================================================================
+-- END 68-V0015-WhdLocalDeleteProcedures.sql
+-- ============================================================================
+
+-- ============================================================================
 -- BEGIN 50-Grants.sql
 -- ============================================================================
 
@@ -30907,7 +31047,7 @@ IF CHARINDEX(
        N'@ConfirmMissingWhdTechNote <> 1',
        OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteWorkEntry'))) = 0
 BEGIN
-    PRINT N'FAIL: DeleteWorkEntry does not preserve Sage locking and explicit WHD recovery confirmation.';
+    PRINT N'FAIL: DeleteWorkEntry does not preserve Sage locking and explicit WHD local-delete confirmation.';
     SET @FailureCount += 1;
 END;
 
@@ -35208,19 +35348,15 @@ IF NOT EXISTS
       AND [system_type_id] = TYPE_ID(N'bit')
 )
 BEGIN
-    PRINT N'FAIL: DeleteWorkEntry does not require explicit missing-TechNote confirmation.';
+    PRINT N'FAIL: DeleteWorkEntry does not expose the compatible explicit WHD deletion confirmation parameter.';
     SET @FailureCount += 1;
 END;
 
 DECLARE @DeleteDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteWorkEntry', N'P'));
 IF CHARINDEX(N'@SagePosted = 1', @DeleteDefinition) = 0
    OR CHARINDEX(N'@ConfirmMissingWhdTechNote <> 1', @DeleteDefinition) = 0
-   OR CHARINDEX(N'WHD sync pending:%TechNote #%was not found.%', @DeleteDefinition) = 0
-   OR CHARINDEX(N'posting_log.[ExternalReference]', @DeleteDefinition) = 0
-   OR CHARINDEX(N'WHD-TECHNOTE-%', @DeleteDefinition) = 0
-   OR CHARINDEX(N'posting_log.[Success] = 0', @DeleteDefinition) = 0
 BEGIN
-    PRINT N'FAIL: DeleteWorkEntry does not preserve the verified missing-TechNote recovery boundary.';
+    PRINT N'FAIL: DeleteWorkEntry does not preserve the Sage lock and explicit WHD deletion boundary.';
     SET @FailureCount += 1;
 END;
 
@@ -36650,6 +36786,58 @@ GO
 
 -- ============================================================================
 -- END 108-V0015-ClientAttachmentsVerify.sql
+-- ============================================================================
+
+-- ============================================================================
+-- BEGIN 109-V0015-WhdLocalDeleteVerify.sql
+-- ============================================================================
+
+:ON ERROR EXIT
+
+USE [$(DatabaseName)];
+GO
+
+SET NOCOUNT ON;
+
+DECLARE @Failures int = 0;
+DECLARE @DeleteDefinition nvarchar(max) =
+    COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.DeleteWorkEntry', N'P')), N'');
+
+IF CHARINDEX(N'@ConfirmMissingWhdTechNote bit = 0', @DeleteDefinition) = 0
+   OR CHARINDEX(N'IF @SagePosted = 1', @DeleteDefinition) = 0
+   OR CHARINDEX(N'IF @WhdPosted = 1', @DeleteDefinition) = 0
+   OR CHARINDEX(N'@ConfirmMissingWhdTechNote <> 1', @DeleteDefinition) = 0
+BEGIN
+    PRINT N'FAIL: DeleteWorkEntry does not require explicit local-delete confirmation while preserving the Sage lock.';
+    SET @Failures += 1;
+END;
+
+IF CHARINDEX(N'WHD sync pending:%TechNote #%was not found.%', @DeleteDefinition) > 0
+   OR CHARINDEX(N'posting_log.[ExternalReference]', @DeleteDefinition) > 0
+BEGIN
+    PRINT N'FAIL: DeleteWorkEntry still depends on obsolete WHD note synchronization evidence.';
+    SET @Failures += 1;
+END;
+
+IF CHARINDEX(
+       N'FROM [tb_ops].[PostingAttempts] WITH (UPDLOCK, HOLDLOCK)',
+       @DeleteDefinition) = 0
+   OR CHARINDEX(
+       N'FROM [tb_ops].[PostingLeases] WITH (UPDLOCK, HOLDLOCK)',
+       @DeleteDefinition) = 0
+BEGIN
+    PRINT N'FAIL: DeleteWorkEntry no longer protects active external posting operations.';
+    SET @Failures += 1;
+END;
+
+IF @Failures > 0
+    THROW 52226, N'TechBench WHD local-delete verification failed.', 1;
+
+PRINT N'TechBench schema-15-compatible WHD local-delete verification passed.';
+GO
+
+-- ============================================================================
+-- END 109-V0015-WhdLocalDeleteVerify.sql
 -- ============================================================================
 
 PRINT N'TechBench deployment completed successfully on CSRI-SQL.';

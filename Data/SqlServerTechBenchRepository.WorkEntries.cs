@@ -193,12 +193,12 @@ public sealed partial class SqlServerTechBenchRepository
         }
     }
 
-    public void DeleteWorkEntry(int id, bool confirmMissingWhdTechNote = false) =>
-        DeleteWorkEntryAsync(id, confirmMissingWhdTechNote).GetAwaiter().GetResult();
+    public void DeleteWorkEntry(int id, bool allowWhdPostedLocalDelete = false) =>
+        DeleteWorkEntryAsync(id, allowWhdPostedLocalDelete).GetAwaiter().GetResult();
 
     public async Task DeleteWorkEntryAsync(
         int id,
-        bool confirmMissingWhdTechNote = false,
+        bool allowWhdPostedLocalDelete = false,
         CancellationToken cancellationToken = default)
     {
         await ExecuteNonQueryAsync(
@@ -212,7 +212,10 @@ public sealed partial class SqlServerTechBenchRepository
                         8,
                         GetTrackedRowVersion("WorkEntry", id));
                     AddGuid(command, "@RequestId", Guid.NewGuid());
-                    AddBit(command, "@ConfirmMissingWhdTechNote", confirmMissingWhdTechNote);
+                    // Keep the established SQL parameter name so existing schema-15
+                    // deployments remain callable while it represents explicit
+                    // confirmation of a TechBench-only WHD-posted deletion.
+                    AddBit(command, "@ConfirmMissingWhdTechNote", allowWhdPostedLocalDelete);
                 },
                 cancellationToken)
             .ConfigureAwait(false);

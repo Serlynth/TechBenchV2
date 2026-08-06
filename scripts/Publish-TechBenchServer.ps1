@@ -45,7 +45,7 @@ $setupPath = Join-Path $distDirectory 'TechBenchServerSetup.exe'
 $setupChecksumPath = "$setupPath.sha256"
 $numericVersion = ($Version -split '-', 2)[0]
 $serverReleaseTag = "server-v$Version"
-$releaseNotesPath = Join-Path $repoRoot "release-notes\$Version.md"
+$releaseNotesPath = Join-Path $repoRoot "release-notes\server-$Version.md"
 
 $userDotNet = Join-Path $env:USERPROFILE '.dotnet\dotnet.exe'
 $dotnet = if (Test-Path -LiteralPath $userDotNet) {

@@ -346,7 +346,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         { HasPendingWhdImages: true } => "Post Note + Images to WHD",
         _ => "Post to WHD"
     };
-    public string DeleteEntryActionLabel => "Delete Entry...";
+    public string DeleteEntryActionLabel => Editor.WhdPosted
+        ? "Delete from TechBench..."
+        : "Delete Entry...";
     public bool ShowOpenWhdAction => Editor.SelectedTicket is { Id: > 0 }
         || (Editor.UseOtherWhdTicket && IsValidWhdTicketNumber(Editor.ManualTicketNumber));
     public bool HasTodayEntries => Entries.Count > 0;
@@ -2450,7 +2452,23 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         if (entry.WhdPosted)
         {
-            StatusMessage = "This entry has already been posted to WHD. TechBench keeps posted entries and their tracking history; neither the local entry nor the WHD note was deleted.";
+            var confirmedLocalDelete = _dialogService.Confirm(
+                "Delete TechBench entry only",
+                "Delete this entry and its posting history from TechBench only?\n\n"
+                + "This never deletes or changes anything in WHD. If the WHD note still exists, it will remain there. "
+                + "Undo restores an unposted TechBench draft; it cannot recreate or reconnect the WHD note.",
+                "Delete from TechBench",
+                "Cancel");
+            if (!confirmedLocalDelete)
+            {
+                return Task.CompletedTask;
+            }
+
+            if (DeleteLocalEntry(entry, allowWhdPostedLocalDelete: true))
+            {
+                StatusMessage = "TechBench entry deleted locally. WHD was not changed. Undo restores an unposted local draft.";
+            }
+
             return Task.CompletedTask;
         }
 
@@ -2464,16 +2482,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return Task.CompletedTask;
         }
 
-        DeleteLocalEntry(entry);
+        DeleteLocalEntry(entry, allowWhdPostedLocalDelete: false);
         return Task.CompletedTask;
     }
 
-    private bool DeleteLocalEntry(WorkEntry entry)
+    private bool DeleteLocalEntry(WorkEntry entry, bool allowWhdPostedLocalDelete)
     {
         var deletedLinks = _repository.GetWorkEntryLinks(entry.Id).ToArray();
         try
         {
-            _repository.DeleteWorkEntry(entry.Id, confirmMissingWhdTechNote: false);
+            _repository.DeleteWorkEntry(entry.Id, allowWhdPostedLocalDelete);
         }
         catch (Exception ex)
         {
@@ -2504,6 +2522,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var restored = _lastDeletedEntry;
         var deletedId = restored.Id;
         restored.Id = 0;
+        restored.WhdPosted = false;
+        restored.WhdPostedAt = null;
+        restored.SagePosted = false;
+        restored.SagePostedAt = null;
+        restored.SageTicketNumber = null;
+        restored.PostingStatus = PostingStatus.Draft;
         restored.LastError = null;
         WorkEntryPostingStatusCalculator.Update(restored);
         var id = _repository.SaveWorkEntry(restored);
@@ -3174,7 +3198,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private bool CanDeleteEditorEntry() => CanWrite
         && Editor.Id > 0
-        && !Editor.WhdPosted
         && !Editor.SagePosted
         && !IsEntryOperationRunning;
 

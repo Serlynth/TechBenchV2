@@ -55,6 +55,7 @@ $orderedScripts = @(
     '62-V0015-ClientInfoBetaImportProcedures.sql'
     '64-V0015-AuthPointMfaProcedures.sql'
     '66-V0015-ClientAttachmentsProcedures.sql'
+    '68-V0015-WhdLocalDeleteProcedures.sql'
     '50-Grants.sql'
     '51-V0002-OperationalGrants.sql'
     '52-V0004-AdminSharedGrants.sql'
@@ -88,6 +89,7 @@ $orderedScripts = @(
     '106-V0015-ClientInfoBetaVerify.sql'
     '107-V0015-AuthPointMfaVerify.sql'
     '108-V0015-ClientAttachmentsVerify.sql'
+    '109-V0015-WhdLocalDeleteVerify.sql'
 )
 
 $sections = [System.Collections.Generic.List[string]]::new()
