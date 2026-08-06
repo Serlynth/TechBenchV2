@@ -80,6 +80,15 @@ IF COL_LENGTH(N'tb_client.ClientProfiles', N'ClientFolderPath') IS NULL
    OR COL_LENGTH(N'tb_client.ClientProfiles', N'LegacyClientInfoSheetPath') IS NULL
     THROW 52509,N'One or more Client Info server-link columns are missing.',1;
 
+DECLARE @RecordTypeConstraint nvarchar(max)=
+    (SELECT [definition]
+     FROM sys.check_constraints
+     WHERE [parent_object_id]=OBJECT_ID(N'tb_import.ClientInfoRecords')
+       AND [name]=N'CK_ClientInfoRecords_Type');
+IF @RecordTypeConstraint IS NULL
+   OR CHARINDEX(N'ResourceField', @RecordTypeConstraint)=0
+    THROW 52510,N'Client Info staging does not allow resource-field records.',1;
+
 IF CERT_ID(N'tb_ClientSecretCertificate') IS NULL
     THROW 52503,N'The canonical client-secret certificate is missing.',1;
 

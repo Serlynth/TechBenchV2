@@ -1764,6 +1764,35 @@ public sealed class ClientInfoBetaTests
             Assert.Contains(
                 "Password",
                 ReadHeaderRow(workbook, "Security"));
+
+            Assert.Equal(
+                $"\"{string.Join(',', ClientInfoResourceFieldDefinitions.TypeOptionsForCategory(ClientInfoResourceCategories.ConnectionInternet))}\"",
+                ReadListValidation(workbook, "Connection & Internet", "Type")
+                    .Formula1?.Text);
+            Assert.Equal(
+                "\"Dynamic,Single static,Static block\"",
+                ReadListValidation(workbook, "Connection & Internet", "IP assignment")
+                    .Formula1?.Text);
+            Assert.False(
+                ReadListValidation(workbook, "Connection & Internet", "IP assignment")
+                    .ShowErrorMessage?.Value);
+            Assert.Equal(
+                "\"Desktop,Laptop,Server,Switch,Firewall,Access Point,Printer,UPS,Phone,Other\"",
+                ReadListValidation(workbook, "Equipment", "Device Type")
+                    .Formula1?.Text);
+            Assert.Equal(
+                "\"Password,API Key,Token,PIN,Recovery Code,Other\"",
+                ReadListValidation(workbook, "Passwords", "Secret Type")
+                    .Formula1?.Text);
+            Assert.Equal(
+                4U,
+                ReadHeaderCell(workbook, "Users", "Name").StyleIndex?.Value);
+            Assert.Equal(
+                4U,
+                ReadHeaderCell(workbook, "Users", "Review Status").StyleIndex?.Value);
+            Assert.Equal(
+                4U,
+                ReadHeaderCell(workbook, "Other Info", "Item").StyleIndex?.Value);
         }
         finally
         {
@@ -2598,6 +2627,18 @@ public sealed class ClientInfoBetaTests
             imports,
             StringComparison.Ordinal);
         Assert.Contains(
+            "DROP CONSTRAINT [CK_ClientInfoRecords_Type]",
+            schema,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "N'ResourceField'",
+            schema,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CHARINDEX(N'ResourceField', @RecordTypeConstraint)=0",
+            verifier,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "SaveClientInfoResourceField",
             procedures,
             StringComparison.Ordinal);
@@ -2968,6 +3009,44 @@ public sealed class ClientInfoBetaTests
             .Elements<Cell>()
             .Select(cell => cell.InlineString?.Text?.Text ?? string.Empty)
             .ToArray();
+
+    private static Cell ReadHeaderCell(
+        SpreadsheetDocument workbook,
+        string sheetName,
+        string header) =>
+        GetWorksheetPart(workbook, sheetName)
+            .Worksheet.GetFirstChild<SheetData>()!
+            .Elements<Row>()
+            .Single(row => row.RowIndex?.Value == 1U)
+            .Elements<Cell>()
+            .Single(cell => string.Equals(
+                cell.InlineString?.Text?.Text,
+                header,
+                StringComparison.OrdinalIgnoreCase));
+
+    private static DataValidation ReadListValidation(
+        SpreadsheetDocument workbook,
+        string sheetName,
+        string header)
+    {
+        var part = GetWorksheetPart(workbook, sheetName);
+        var headerCells = part.Worksheet.GetFirstChild<SheetData>()!
+            .Elements<Row>()
+            .Single(row => row.RowIndex?.Value == 1U)
+            .Elements<Cell>()
+            .ToArray();
+        var column = Array.FindIndex(
+            headerCells,
+            cell => string.Equals(
+                cell.InlineString?.Text?.Text,
+                header,
+                StringComparison.OrdinalIgnoreCase)) + 1;
+        Assert.True(column > 0, $"Worksheet '{sheetName}' did not contain header '{header}'.");
+        var range = $"{TestColumnName(column)}2:{TestColumnName(column)}500";
+        return Assert.Single(
+            part.Worksheet.Descendants<DataValidation>(),
+            validation => validation.SequenceOfReferences?.InnerText == range);
+    }
 
     private static WorksheetPart GetWorksheetPart(
         SpreadsheetDocument workbook,
