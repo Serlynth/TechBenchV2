@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using TechBench.Services;
 
@@ -402,6 +403,9 @@ public static class ClientInfoCategoryOverviewBuilder
                     "subnet_cidr",
                     "subnet",
                     "cidr")),
+                IpAssignment(ispResources),
+                StaticIpCount(ispResources),
+                StaticIpDetails(ispResources),
                 RequiredField("Support contact", Values(
                     "Support contact",
                     ispResources,
@@ -1073,6 +1077,199 @@ public static class ClientInfoCategoryOverviewBuilder
             || type.Contains("modem", StringComparison.Ordinal)
             || type.Equals("isp", StringComparison.Ordinal);
     }
+
+    private static ClientInfoOverviewField? IpAssignment(
+        IReadOnlyList<ClientInfoResource> resources)
+    {
+        var hasBlockData = resources.Any(HasStaticBlockData);
+        var values = resources.Select(resource =>
+        {
+            var assignment = FindValue(
+                resource,
+                ["ip_assignment_type", "ip assignment", "static allocation"]);
+            if (string.IsNullOrWhiteSpace(assignment))
+            {
+                return HasStaticBlockData(resource) ? "Static block" : string.Empty;
+            }
+
+            return assignment.Contains("single", StringComparison.OrdinalIgnoreCase)
+                ? string.Empty
+                : assignment;
+        });
+        var field = Aggregate(
+            "IP assignment",
+            values,
+            resources.Select(resource => resource.Name));
+        return field ?? (hasBlockData
+            ? new ClientInfoOverviewField("IP assignment", "Static block")
+            : null);
+    }
+
+    private static ClientInfoOverviewField? StaticIpCount(
+        IReadOnlyList<ClientInfoResource> resources)
+    {
+        var blockResources = resources.Where(HasStaticBlockData).ToArray();
+        if (blockResources.Length == 0)
+        {
+            return null;
+        }
+
+        return Aggregate(
+                "Usable static IPs",
+                blockResources.Select(ResolveStaticIpCount),
+                blockResources.Select(resource => resource.Name))
+            ?? new ClientInfoOverviewField("Usable static IPs", "Not entered");
+    }
+
+    private static string ResolveStaticIpCount(ClientInfoResource resource)
+    {
+        var enteredCount = FindValue(
+            resource,
+            ["usable_static_ip_count", "usable static ips", "static count"]);
+        if (!string.IsNullOrWhiteSpace(enteredCount))
+        {
+            return enteredCount.Trim();
+        }
+
+        var addresses = ParseStaticIpAddresses(FindValue(
+            resource,
+            ["static_ip_addresses", "static ip list", "static ips"]));
+        if (addresses.Count > 0)
+        {
+            var validAddressCount = addresses
+                .Select(address => IPAddress.TryParse(address, out var parsed)
+                    ? parsed.ToString()
+                    : null)
+                .Where(address => address is not null)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count();
+            return validAddressCount > 0
+                ? validAddressCount.ToString()
+                : string.Empty;
+        }
+
+        var rangeStart = FindValue(
+            resource,
+            ["static_ip_range_start", "first usable static ip", "static range start"]);
+        var rangeEnd = FindValue(
+            resource,
+            ["static_ip_range_end", "last usable static ip", "static range end"]);
+        return TryCountIpv4Range(rangeStart, rangeEnd, out var rangeCount)
+            ? rangeCount.ToString()
+            : string.Empty;
+    }
+
+    private static ClientInfoOverviewField? StaticIpDetails(
+        IReadOnlyList<ClientInfoResource> resources)
+    {
+        var blockResources = resources.Where(HasStaticBlockData).ToArray();
+        if (blockResources.Length == 0)
+        {
+            return null;
+        }
+
+        return Aggregate(
+                "Static IPs / range",
+                blockResources.Select(ResolveStaticIpDetails),
+                blockResources.Select(resource => resource.Name))
+            ?? new ClientInfoOverviewField("Static IPs / range", "Not entered");
+    }
+
+    private static string ResolveStaticIpDetails(ClientInfoResource resource)
+    {
+        var addresses = ParseStaticIpAddresses(FindValue(
+            resource,
+            ["static_ip_addresses", "static ip list", "static ips"]));
+        if (addresses.Count > 0)
+        {
+            return string.Join(Environment.NewLine, addresses);
+        }
+
+        var rangeStart = FindValue(
+            resource,
+            ["static_ip_range_start", "first usable static ip", "static range start"])
+            .Trim();
+        var rangeEnd = FindValue(
+            resource,
+            ["static_ip_range_end", "last usable static ip", "static range end"])
+            .Trim();
+        return (rangeStart, rangeEnd) switch
+        {
+            ({ Length: > 0 } start, { Length: > 0 } end) => $"{start} – {end}",
+            ({ Length: > 0 } start, _) => start,
+            (_, { Length: > 0 } end) => end,
+            _ => string.Empty
+        };
+    }
+
+    private static bool HasStaticBlockData(ClientInfoResource resource)
+    {
+        var assignment = FindValue(
+            resource,
+            ["ip_assignment_type", "ip assignment", "static allocation"]);
+        if (!string.IsNullOrWhiteSpace(assignment))
+        {
+            return assignment.Contains("block", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return !string.IsNullOrWhiteSpace(FindValue(
+                resource,
+                ["usable_static_ip_count", "usable static ips", "static count"]))
+            || !string.IsNullOrWhiteSpace(FindValue(
+                resource,
+                ["static_ip_addresses", "static ip list", "static ips"]))
+            || !string.IsNullOrWhiteSpace(FindValue(
+                resource,
+                ["static_ip_range_start", "first usable static ip", "static range start"]))
+            || !string.IsNullOrWhiteSpace(FindValue(
+                resource,
+                ["static_ip_range_end", "last usable static ip", "static range end"]));
+    }
+
+    private static IReadOnlyList<string> ParseStaticIpAddresses(string value) =>
+        value.Split(
+                ['\r', '\n', ',', ';'],
+                StringSplitOptions.RemoveEmptyEntries
+                | StringSplitOptions.TrimEntries)
+            .Where(address => address.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    private static bool TryCountIpv4Range(
+        string rangeStart,
+        string rangeEnd,
+        out long count)
+    {
+        count = 0;
+        if (!IPAddress.TryParse(rangeStart.Trim(), out var start)
+            || !IPAddress.TryParse(rangeEnd.Trim(), out var end))
+        {
+            return false;
+        }
+
+        var startBytes = start.GetAddressBytes();
+        var endBytes = end.GetAddressBytes();
+        if (startBytes.Length != 4 || endBytes.Length != 4)
+        {
+            return false;
+        }
+
+        var startValue = ToIpv4Number(startBytes);
+        var endValue = ToIpv4Number(endBytes);
+        if (endValue < startValue)
+        {
+            return false;
+        }
+
+        count = endValue - startValue + 1;
+        return true;
+    }
+
+    private static long ToIpv4Number(IReadOnlyList<byte> bytes) =>
+        ((long)bytes[0] << 24)
+        | ((long)bytes[1] << 16)
+        | ((long)bytes[2] << 8)
+        | bytes[3];
 
     private static bool IsEmailSecurityResource(ClientInfoResource resource)
     {

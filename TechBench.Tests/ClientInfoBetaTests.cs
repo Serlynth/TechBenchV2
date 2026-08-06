@@ -261,6 +261,27 @@ public sealed class ClientInfoBetaTests
             ClientInfoResourceFieldDefinitions
                 .ForEditorCategory(ClientInfoResourceCategories.ConnectionInternet)
                 .Select(field => field.FieldLabel));
+        var connectionFields = ClientInfoResourceFieldDefinitions
+            .ForEditorCategory(ClientInfoResourceCategories.ConnectionInternet);
+        var assignmentField = Assert.Single(
+            connectionFields,
+            field => field.FieldKey == "ip_assignment_type");
+        Assert.Contains("Static block", assignmentField.Options ?? []);
+        Assert.True(assignmentField.AllowCustomValue);
+        Assert.Equal(
+            "Number",
+            Assert.Single(
+                connectionFields,
+                field => field.FieldKey == "usable_static_ip_count").ValueType);
+        Assert.True(Assert.Single(
+            connectionFields,
+            field => field.FieldKey == "static_ip_addresses").IsMultiline);
+        Assert.Contains(
+            connectionFields,
+            field => field.FieldKey == "static_ip_range_start");
+        Assert.Contains(
+            connectionFields,
+            field => field.FieldKey == "static_ip_range_end");
         Assert.Contains(
             "Email Security Service",
             ClientInfoResourceFieldDefinitions
@@ -907,6 +928,98 @@ public sealed class ClientInfoBetaTests
     }
 
     [Fact]
+    public void StaticIpBlocksUseAnExplicitListOrRangeWithoutClutteringSingleStatics()
+    {
+        static ClientInfoResource Circuit(
+            long id,
+            params (string Key, string Value)[] values) => new()
+            {
+                ResourceId = id,
+                ResourceType = ClientInfoResourceCategories.Encode(
+                    ClientInfoResourceCategories.ConnectionInternet,
+                    "Internet Circuit"),
+                Name = $"Circuit {id}",
+                Provider = "Example ISP",
+                IsActive = true,
+                Fields = values.Select((value, index) =>
+                    new ClientInfoResourceField
+                    {
+                        FieldKey = value.Key,
+                        FieldLabel = value.Key,
+                        ValueText = value.Value,
+                        SortOrder = index
+                    }).ToArray()
+            };
+
+        static IReadOnlyList<ClientInfoOverviewField> Fields(
+            ClientInfoResource resource) =>
+            Assert.Single(ClientInfoCategoryOverviewBuilder.BuildSelected(
+                ClientInfoResourceCategories.ConnectionInternet,
+                resource,
+                [])).Fields;
+
+        var listed = Fields(Circuit(
+            73,
+            ("ip_assignment_type", "Static block"),
+            ("static_ip_addresses", "not-an-ip, 203.0.113.26,\r\n203.0.113.27;203.0.113.26"),
+            ("static_ip_range_start", "203.0.113.28"),
+            ("static_ip_range_end", "203.0.113.30")));
+        Assert.Equal(
+            "Static block",
+            listed.Single(field => field.Label == "IP assignment").Value);
+        Assert.Equal(
+            "2",
+            listed.Single(field => field.Label == "Usable static IPs").Value);
+        Assert.Equal(
+            $"not-an-ip{Environment.NewLine}203.0.113.26{Environment.NewLine}203.0.113.27",
+            listed.Single(field => field.Label == "Static IPs / range").Value);
+
+        var ranged = Fields(Circuit(
+            74,
+            ("static_ip_range_start", "203.0.113.26"),
+            ("static_ip_range_end", "203.0.113.30")));
+        Assert.Equal(
+            "Static block",
+            ranged.Single(field => field.Label == "IP assignment").Value);
+        Assert.Equal(
+            "5",
+            ranged.Single(field => field.Label == "Usable static IPs").Value);
+        Assert.Equal(
+            "203.0.113.26 – 203.0.113.30",
+            ranged.Single(field => field.Label == "Static IPs / range").Value);
+
+        var partial = Fields(Circuit(
+            75,
+            ("static_ip_range_start", "not-yet-assigned")));
+        Assert.Equal(
+            "Not entered",
+            partial.Single(field => field.Label == "Usable static IPs").Value);
+        Assert.Equal(
+            "not-yet-assigned",
+            partial.Single(field => field.Label == "Static IPs / range").Value);
+
+        var single = Fields(Circuit(
+            76,
+            ("ip_assignment_type", "Single static"),
+            ("public_wan_ip", "198.51.100.44")));
+        Assert.DoesNotContain(single, field => field.Label == "IP assignment");
+        Assert.DoesNotContain(single, field => field.Label == "Usable static IPs");
+        Assert.DoesNotContain(single, field => field.Label == "Static IPs / range");
+
+        var dynamic = Fields(Circuit(
+            77,
+            ("ip_assignment_type", "Dynamic"),
+            ("usable_static_ip_count", "5"),
+            ("static_ip_range_start", "203.0.113.26"),
+            ("static_ip_range_end", "203.0.113.30")));
+        Assert.Equal(
+            "Dynamic",
+            dynamic.Single(field => field.Label == "IP assignment").Value);
+        Assert.DoesNotContain(dynamic, field => field.Label == "Usable static IPs");
+        Assert.DoesNotContain(dynamic, field => field.Label == "Static IPs / range");
+    }
+
+    [Fact]
     public void RequestedNetworkRowsStayVisibleWhenInformationIsMissing()
     {
         var wifi = Assert.Single(ClientInfoCategoryOverviewBuilder.Build(
@@ -1002,6 +1115,9 @@ public sealed class ClientInfoBetaTests
                 "Public IP",
                 "Gateway",
                 "Subnet / CIDR",
+                "IP assignment",
+                "Usable static IPs",
+                "Static IPs / range",
                 "Support contact",
                 "Support phone",
                 "Location",
@@ -1013,6 +1129,11 @@ public sealed class ClientInfoBetaTests
         Assert.Equal("DEMO-COMCAST-4821", internet[1].Value);
         Assert.Equal("DEMO-ACCOUNT-1048", internet[2].Value);
         Assert.Equal("1.25 Gbps down / 35 Mbps up", internet[4].Value);
+        Assert.Equal("203.0.113.26", internet[5].Value);
+        Assert.Equal("203.0.113.25", internet[6].Value);
+        Assert.Equal("Static block", internet[8].Value);
+        Assert.Equal("5", internet[9].Value);
+        Assert.Equal("203.0.113.26 – 203.0.113.30", internet[10].Value);
         Assert.Equal("isp-admin@example.test", internet[^1].Value);
         Assert.NotEmpty(internet[^1].Secrets);
         Assert.DoesNotContain(internet, field => field.Label == "SSL VPN port");
