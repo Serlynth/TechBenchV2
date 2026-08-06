@@ -149,9 +149,12 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("PasswordBox", editor, StringComparison.Ordinal);
         Assert.Contains("Tab = \"Details\"", viewModel, StringComparison.Ordinal);
         Assert.Contains(
-            "Tab: \"Username & password\"",
+            "Tab: \"Passwords\"",
             viewModel,
             StringComparison.Ordinal);
+        Assert.Contains("Tab: \"AD login\"", viewModel, StringComparison.Ordinal);
+        Assert.Contains("access_new_name", viewModel, StringComparison.Ordinal);
+        Assert.Contains("SaveResourceAccessEdits", viewModel, StringComparison.Ordinal);
         Assert.Contains(
             "ResourceId = savedResource.ResourceId",
             viewModel,
@@ -1582,18 +1585,27 @@ public sealed class ClientInfoBetaTests
                     "Wi-Fi",
                     "Applications & Cloud",
                     "Domains & Email",
-                    "Backup & Security",
+                    "Backup",
+                    "Security",
                     "Vendors & Services",
                     "Equipment",
                     "Passwords",
-                    "Other Info"
+                    "Other Info",
+                    "Needs Sorting"
                 ],
                 names);
+            Assert.Contains("AD Password", ReadHeaderRow(workbook, "Users"));
             Assert.Contains(
                 "Primary IP",
                 ReadHeaderRow(workbook, "Servers & Infrastructure"));
             Assert.Contains(
+                "Password / Secret",
+                ReadHeaderRow(workbook, "Servers & Infrastructure"));
+            Assert.Contains(
                 "Public / WAN IP",
+                ReadHeaderRow(workbook, "Connection & Internet"));
+            Assert.Contains(
+                "SSL VPN Port",
                 ReadHeaderRow(workbook, "Connection & Internet"));
             Assert.Contains(
                 "SSID",
@@ -1609,7 +1621,7 @@ public sealed class ClientInfoBetaTests
     }
 
     [Fact]
-    public void CombinedMigrationSheetRoutesBackupAndSecurityRowsSeparately()
+    public void CurrentMigrationSheetsKeepBackupAndSecuritySeparate()
     {
         var directory = Path.Combine(
             Path.GetTempPath(),
@@ -1621,16 +1633,24 @@ public sealed class ClientInfoBetaTests
             var path = Path.Combine(directory, "Protection Migration.xlsx");
             var service = new ClientInfoWorkbookService();
             service.CreateTemplate(path, 477, "Acme Legal");
-            AppendRow(
+            AppendRowByHeader(
                 path,
-                "Backup & Security",
-                "Veeam Backup", "Veeam", "Veeam",
-                "https://backup.example.test", "", "Active", "", "Verified");
-            AppendRow(
+                "Backup",
+                ("Type", "Veeam Backup"),
+                ("Name", "Veeam"),
+                ("Provider", "Veeam"),
+                ("Console / Portal URL", "https://backup.example.test"),
+                ("Status", "Active"),
+                ("Review Status", "Verified"));
+            AppendRowByHeader(
                 path,
-                "Backup & Security",
-                "Antivirus / EDR", "ESET Protect", "ESET",
-                "https://security.example.test", "", "Active", "", "Verified");
+                "Security",
+                ("Type", "Antivirus / EDR"),
+                ("Name", "ESET Protect"),
+                ("Provider", "ESET"),
+                ("Console / Portal URL", "https://security.example.test"),
+                ("Status", "Active"),
+                ("Review Status", "Verified"));
 
             var resources = service.Read(path).Records
                 .Where(record => record.RecordType == "Resource")
@@ -1643,6 +1663,44 @@ public sealed class ClientInfoBetaTests
             Assert.Contains(resources, record => record.PayloadJson.Contains(
                 "\"resourceType\":\"Security / Antivirus / EDR\"",
                 StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void PreviousCombinedProtectionSheetRemainsImportable()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "TechBenchClientInfoTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "Previous Protection Migration.xlsx");
+            var service = new ClientInfoWorkbookService();
+            service.CreateTemplate(path, 477, "Acme Legal");
+            ConvertGeneratedWorkbookToPreviousTemplateVersion(path);
+            AppendRow(
+                path,
+                "Backup & Security",
+                "Veeam Backup", "Veeam", "Veeam",
+                "https://backup.example.test", "", "Active", "", "Verified");
+
+            var package = service.Read(path);
+
+            Assert.Equal(
+                ClientInfoWorkbookService.PreviousTemplateVersion,
+                package.TemplateVersion);
+            Assert.Contains(
+                package.Records,
+                record => record.RecordType == "Resource"
+                    && record.PayloadJson.Contains(
+                        "\"resourceType\":\"Backup / Veeam Backup\"",
+                        StringComparison.Ordinal));
         }
         finally
         {
@@ -1670,18 +1728,31 @@ public sealed class ClientInfoBetaTests
                 "Main Office", "Office", "100 Main Street", "", "Malvern",
                 "PA", "19355", "610-555-0100", "Eastern Standard Time",
                 "Yes", "Verified");
-            AppendRow(
+            AppendRowByHeader(
                 path,
                 "Users",
-                "Jamie Rivera", "Office Manager", "ACME\\jrivera",
-                "jamie@example.test", "Yes", "Business Premium", "ACME-PC-01",
-                "610-555-0101", "", "Main Office", "Primary", "Yes", "Verified");
-            AppendRow(
+                ("Name", "Jamie Rivera"),
+                ("Role/Department", "Office Manager"),
+                ("AD Username", "ACME\\jrivera"),
+                ("Email", "jamie@example.test"),
+                ("Has Microsoft 365", "Yes"),
+                ("Microsoft 365 License", "Business Premium"),
+                ("PC Name", "ACME-PC-01"),
+                ("Phone", "610-555-0101"),
+                ("Location", "Main Office"),
+                ("Contact Type", "Primary"),
+                ("Review Status", "Verified"));
+            AppendRowByHeader(
                 path,
                 "Connection & Internet",
-                "Firewall", "WatchGuard", "WatchGuard", "https://firewall.test",
-                "", "", "", "", "Main Office", "Active", "Primary firewall",
-                "Verified");
+                ("Type", "Firewall"),
+                ("Name", "WatchGuard"),
+                ("Provider", "WatchGuard"),
+                ("Hostname / URL", "https://firewall.test"),
+                ("Location", "Main Office"),
+                ("Status", "Active"),
+                ("Notes", "Primary firewall"),
+                ("Review Status", "Verified"));
             AppendRow(
                 path,
                 "Equipment",
@@ -1701,7 +1772,7 @@ public sealed class ClientInfoBetaTests
 
             var package = service.Read(path);
 
-            Assert.Equal(7, package.Records.Count);
+            Assert.Equal(8, package.Records.Count);
             Assert.Contains(package.Records, record => record.RecordType == "Profile");
             var location = Assert.Single(
                 package.Records,
@@ -1712,9 +1783,10 @@ public sealed class ClientInfoBetaTests
             var resource = Assert.Single(
                 package.Records,
                 record => record.RecordType == "Resource");
-            var credential = Assert.Single(
-                package.Records,
-                record => record.RecordType == "Credential");
+            var credentials = package.Records
+                .Where(record => record.RecordType == "Credential")
+                .ToArray();
+            Assert.Equal(2, credentials.Length);
             Assert.Single(
                 package.Records,
                 record => record.RecordType == "Equipment");
@@ -1734,11 +1806,87 @@ public sealed class ClientInfoBetaTests
                 resourcePayload.RootElement
                     .GetProperty("resourceType")
                     .GetString());
-            Assert.Contains(resource.LocalKey, credential.PayloadJson, StringComparison.Ordinal);
+            var credential = Assert.Single(
+                credentials,
+                item => item.PayloadJson.Contains(
+                    resource.LocalKey,
+                    StringComparison.Ordinal));
             Assert.Contains(person.LocalKey, credential.PayloadJson, StringComparison.Ordinal);
             var secret = Assert.Single(package.Secrets);
             Assert.Equal(credential.LocalKey, secret.CredentialLocalKey);
             Assert.Equal("P@ss word", secret.SecretValue);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CurrentWorkbookImportsPasswordsBesideUsersAndSystems()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "TechBenchClientInfoTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "Inline Credentials.xlsx");
+            var service = new ClientInfoWorkbookService();
+            service.CreateTemplate(path, 477, "Acme Legal");
+            AppendRowByHeader(
+                path,
+                "Users",
+                ("Name", "Jamie Rivera"),
+                ("AD Username", "ACME\\jrivera"),
+                ("AD Password", "user secret"),
+                ("Review Status", "Verified"));
+            AppendRowByHeader(
+                path,
+                "Servers & Infrastructure",
+                ("Type", "UPS"),
+                ("Name", "Server Room UPS"),
+                ("Hostname / URL", "https://10.20.0.18"),
+                ("Login Name", "UPS administrator"),
+                ("Username", "apc-admin"),
+                ("Password / Secret", "ups secret"),
+                ("Review Status", "Verified"));
+
+            var package = service.Read(path);
+
+            var person = Assert.Single(
+                package.Records,
+                record => record.RecordType == "Person");
+            var resource = Assert.Single(
+                package.Records,
+                record => record.RecordType == "Resource");
+            var credentials = package.Records
+                .Where(record => record.RecordType == "Credential")
+                .ToArray();
+            Assert.Equal(2, credentials.Length);
+            Assert.Contains(
+                credentials,
+                credential => credential.PayloadJson.Contains(
+                        $"\"personKey\":\"{person.LocalKey}\"",
+                        StringComparison.Ordinal)
+                    && credential.PayloadJson.Contains(
+                        "ACME\\\\jrivera",
+                        StringComparison.Ordinal));
+            Assert.Contains(
+                credentials,
+                credential => credential.PayloadJson.Contains(
+                        $"\"resourceKey\":\"{resource.LocalKey}\"",
+                        StringComparison.Ordinal)
+                    && credential.PayloadJson.Contains(
+                        "apc-admin",
+                        StringComparison.Ordinal));
+            Assert.Equal(
+                ["ups secret", "user secret"],
+                package.Secrets
+                    .Select(secret => secret.SecretValue)
+                    .OrderBy(value => value, StringComparer.Ordinal)
+                    .ToArray());
         }
         finally
         {
@@ -1759,12 +1907,20 @@ public sealed class ClientInfoBetaTests
             var path = Path.Combine(directory, "Wi-Fi Migration.xlsx");
             var service = new ClientInfoWorkbookService();
             service.CreateTemplate(path, 477, "Acme Legal");
-            AppendRow(
+            AppendRowByHeader(
                 path,
                 "Wi-Fi",
-                "Access Point", "Lobby AP", "Ubiquiti", "https://controller.test",
-                "10.0.20.10", "Lobby Wi-Fi", "20", "WPA2", "", "Active",
-                "Main wireless access point", "Verified");
+                ("Type", "Access Point"),
+                ("Name", "Lobby AP"),
+                ("Provider", "Ubiquiti"),
+                ("Controller / URL", "https://controller.test"),
+                ("Management IP", "10.0.20.10"),
+                ("SSID", "Lobby Wi-Fi"),
+                ("VLAN", "20"),
+                ("Security", "WPA2"),
+                ("Status", "Active"),
+                ("Notes", "Main wireless access point"),
+                ("Review Status", "Verified"));
 
             var package = service.Read(path);
 
@@ -1796,12 +1952,20 @@ public sealed class ClientInfoBetaTests
             var service = new ClientInfoWorkbookService();
             service.CreateTemplate(path, 477, "Acme Legal");
             AppendHeader(path, "Servers & Infrastructure", "Custom: Rack");
-            AppendRow(
+            AppendRowByHeader(
                 path,
                 "Servers & Infrastructure",
-                "Server", "DC01", "Dell", "dc01.example.test", "10.0.0.5",
-                "10.0.0.6", "10.0.0.7; 10.0.0.0/24", "", "Active",
-                "Domain controller", "Verified", "Rack A / U12");
+                ("Type", "Server"),
+                ("Name", "DC01"),
+                ("Provider", "Dell"),
+                ("Hostname / URL", "dc01.example.test"),
+                ("Primary IP", "10.0.0.5"),
+                ("Management IP", "10.0.0.6"),
+                ("Additional IPs / Subnet", "10.0.0.7; 10.0.0.0/24"),
+                ("Status", "Active"),
+                ("Notes", "Domain controller"),
+                ("Review Status", "Verified"),
+                ("Custom: Rack", "Rack A / U12"));
 
             var package = service.Read(path);
 
@@ -2425,6 +2589,47 @@ public sealed class ClientInfoBetaTests
         part.Worksheet.Save();
     }
 
+    private static void AppendRowByHeader(
+        string path,
+        string sheetName,
+        params (string Header, string Value)[] values)
+    {
+        using var workbook = SpreadsheetDocument.Open(path, true);
+        var part = GetWorksheetPart(workbook, sheetName);
+        var sheetData = part.Worksheet.GetFirstChild<SheetData>()!;
+        var headerRow = sheetData.Elements<Row>()
+            .Single(row => row.RowIndex?.Value == 1U);
+        var columns = headerRow.Elements<Cell>()
+            .Select((cell, index) => new
+            {
+                Header = cell.InlineString?.Text?.Text ?? string.Empty,
+                Column = index + 1
+            })
+            .ToDictionary(
+                item => item.Header,
+                item => item.Column,
+                StringComparer.OrdinalIgnoreCase);
+        var rowIndex = (uint)(sheetData.Elements<Row>()
+            .Select(row => row.RowIndex?.Value ?? 0U)
+            .DefaultIfEmpty(0U)
+            .Max() + 1U);
+        var row = new Row { RowIndex = rowIndex };
+        foreach (var (header, value) in values)
+        {
+            Assert.True(columns.TryGetValue(header, out var column),
+                $"Worksheet '{sheetName}' did not contain header '{header}'.");
+            row.Append(new Cell
+            {
+                CellReference = $"{TestColumnName(column)}{rowIndex}",
+                DataType = CellValues.InlineString,
+                InlineString = new InlineString(new Text(value))
+            });
+        }
+
+        sheetData.Append(row);
+        part.Worksheet.Save();
+    }
+
     private static void AppendHeader(
         string path,
         string sheetName,
@@ -2508,6 +2713,7 @@ public sealed class ClientInfoBetaTests
             workbookPart,
             sheets,
             ClientInfoWorkbookService.FriendlyTemplateVersion);
+        ConvertSplitProtectionToLegacy(sheets);
 
         sheets.Single(sheet => sheet.Name?.Value == "Connection & Internet").Name =
             "Systems & Services";
@@ -2521,7 +2727,8 @@ public sealed class ClientInfoBetaTests
                      "Applications & Cloud",
                      "Domains & Email",
                      "Backup & Security",
-                     "Vendors & Services"
+                     "Vendors & Services",
+                     "Needs Sorting"
                  })
         {
             sheets.Single(sheet => sheet.Name?.Value == name).Remove();
@@ -2540,9 +2747,11 @@ public sealed class ClientInfoBetaTests
             workbookPart,
             sheets,
             ClientInfoWorkbookService.CategorizedTemplateVersion);
+        ConvertSplitProtectionToLegacy(sheets);
         sheets.Single(sheet => sheet.Name?.Value == "Connection & Internet").Name =
             "Network & Internet";
         sheets.Single(sheet => sheet.Name?.Value == "Wi-Fi").Remove();
+        sheets.Single(sheet => sheet.Name?.Value == "Needs Sorting").Remove();
         SetLegacyResourceHeaders(
             workbookPart,
             sheets.Where(sheet => sheet.Name?.Value is
@@ -2565,7 +2774,9 @@ public sealed class ClientInfoBetaTests
             workbookPart,
             sheets,
             ClientInfoWorkbookService.ConnectionTemplateVersion);
+        ConvertSplitProtectionToLegacy(sheets);
         sheets.Single(sheet => sheet.Name?.Value == "Wi-Fi").Remove();
+        sheets.Single(sheet => sheet.Name?.Value == "Needs Sorting").Remove();
         SetLegacyResourceHeaders(
             workbookPart,
             sheets.Where(sheet => sheet.Name?.Value is
@@ -2588,6 +2799,8 @@ public sealed class ClientInfoBetaTests
             workbookPart,
             sheets,
             ClientInfoWorkbookService.WifiTemplateVersion);
+        ConvertSplitProtectionToLegacy(sheets);
+        sheets.Single(sheet => sheet.Name?.Value == "Needs Sorting").Remove();
         var usersSheet = sheets.SingleOrDefault(sheet =>
             string.Equals(
                 sheet.Name?.Value,
@@ -2608,6 +2821,39 @@ public sealed class ClientInfoBetaTests
                 "Backup & Security" or
                 "Vendors & Services"));
         workbookPart.Workbook.Save();
+    }
+
+    private static void ConvertGeneratedWorkbookToPreviousTemplateVersion(
+        string path)
+    {
+        using var workbook = SpreadsheetDocument.Open(path, true);
+        var workbookPart = workbook.WorkbookPart!;
+        var sheets = workbookPart.Workbook.Sheets!.Elements<Sheet>().ToList();
+        SetTemplateVersion(
+            workbookPart,
+            sheets,
+            ClientInfoWorkbookService.PreviousTemplateVersion);
+        ConvertSplitProtectionToLegacy(sheets);
+        sheets.Single(sheet => sheet.Name?.Value == "Needs Sorting").Remove();
+        SetLegacyResourceHeaders(
+            workbookPart,
+            sheets.Where(sheet => sheet.Name?.Value is
+                "Servers & Infrastructure" or
+                "Connection & Internet" or
+                "Wi-Fi" or
+                "Applications & Cloud" or
+                "Domains & Email" or
+                "Backup & Security" or
+                "Vendors & Services"));
+        workbookPart.Workbook.Save();
+    }
+
+    private static void ConvertSplitProtectionToLegacy(
+        IReadOnlyList<Sheet> sheets)
+    {
+        sheets.Single(sheet => sheet.Name?.Value == "Backup").Name =
+            "Backup & Security";
+        sheets.Single(sheet => sheet.Name?.Value == "Security").Remove();
     }
 
     private static void SetTemplateVersion(

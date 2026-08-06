@@ -1227,14 +1227,16 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 new("adusername", "AD username",
                     !string.IsNullOrWhiteSpace(current?.AdUsername)
                         ? current.AdUsername
-                        : currentAdCredential?.Username ?? ""),
+                        : currentAdCredential?.Username ?? "",
+                    Tab: "AD login"),
                 new(
                     "adpassword",
                     FindCurrentPassword(currentAdCredential) is null
                         ? "AD password"
                         : "AD password (leave blank to keep stored password)",
                     "",
-                    IsSecret: true),
+                    IsSecret: true,
+                    Tab: "AD login"),
                 new("email", "Email", current?.Email ?? ""),
                 new("has365", "Has Microsoft 365", YesNo(
                         current?.HasMicrosoft365 ?? false),
@@ -1372,6 +1374,14 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             ?? ClientInfoResourceCategories.NormalizeCategory(requestedCategory);
         var standardFields = ClientInfoResourceFieldDefinitions.ForEditorCategory(
             editingCategory);
+        var linkedCredentials = current is null
+            ? Array.Empty<ClientInfoCredential>()
+            : Credentials
+                .Where(credential =>
+                    credential.ResourceId == current.ResourceId)
+                .OrderBy(credential => credential.Name)
+                .ThenBy(credential => credential.CredentialId)
+                .ToArray();
         var locationOptions = new[] { "(None)" }
             .Concat(Locations.Select(item => item.Name))
             .ToArray();
@@ -1420,29 +1430,77 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 current?.ReviewStatus ?? "Unverified",
                 Options: ReviewStatuses)
         ]);
-        if (current is null)
+        for (var index = 0; index < editorFields.Count; index++)
         {
-            for (var index = 0; index < editorFields.Count; index++)
+            editorFields[index] = editorFields[index] with
             {
-                editorFields[index] = editorFields[index] with
-                {
-                    Tab = "Details"
-                };
-            }
+                Tab = "Details"
+            };
+        }
 
+        for (var index = 0; index < linkedCredentials.Length; index++)
+        {
+            var credential = linkedCredentials[index];
+            var label = linkedCredentials.Length == 1
+                ? "Linked login"
+                : $"Linked login {index + 1}";
             editorFields.AddRange(
             [
                 new(
-                    "access_username",
-                    "Username (optional)",
-                    Tab: "Username & password"),
+                    ResourceCredentialEditorKey(credential.CredentialId, "name"),
+                    $"{label} name",
+                    credential.Name,
+                    IsRequired: true,
+                    Tab: "Passwords"),
                 new(
-                    "access_password",
-                    "Password (optional)",
+                    ResourceCredentialEditorKey(credential.CredentialId, "username"),
+                    $"{label} username",
+                    credential.Username,
+                    Tab: "Passwords"),
+                new(
+                    ResourceCredentialEditorKey(credential.CredentialId, "login_url"),
+                    $"{label} login URL",
+                    credential.LoginUrl,
+                    Tab: "Passwords"),
+                new(
+                    ResourceCredentialEditorKey(credential.CredentialId, "password"),
+                    FindCurrentPassword(credential) is null
+                        ? $"{label} password"
+                        : $"{label} password (leave blank to keep stored password)",
                     IsSecret: true,
-                    Tab: "Username & password")
+                    Tab: "Passwords")
             ]);
         }
+
+        editorFields.AddRange(
+        [
+            new(
+                "access_new_name",
+                linkedCredentials.Length == 0
+                    ? "Login name (optional)"
+                    : "New login name (optional)",
+                Tab: "Passwords"),
+            new(
+                "access_new_username",
+                linkedCredentials.Length == 0
+                    ? "Username (optional)"
+                    : "New login username (optional)",
+                Tab: "Passwords"),
+            new(
+                "access_new_login_url",
+                linkedCredentials.Length == 0
+                    ? "Login URL (optional)"
+                    : "New login URL (optional)",
+                current?.AddressOrUrl ?? "",
+                Tab: "Passwords"),
+            new(
+                "access_new_password",
+                linkedCredentials.Length == 0
+                    ? "Password (optional)"
+                    : "New login password (optional)",
+                IsSecret: true,
+                Tab: "Passwords")
+        ]);
 
         var values = ShowEditor(
             current is null ? $"Add {editingCategory}" : $"Edit {editingCategory}",
@@ -1514,17 +1572,118 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                         });
                 }
 
-                if (current is null)
-                {
-                    SaveNewResourceAccess(
-                        savedResource,
-                        editingCategory,
-                        values["access_username"],
-                        values["access_password"]);
-                }
+                SaveResourceAccessEdits(
+                    savedResource,
+                    editingCategory,
+                    linkedCredentials,
+                    values);
 
                 Refresh();
             });
+    }
+
+    private void SaveResourceAccessEdits(
+        ClientInfoResource savedResource,
+        string editingCategory,
+        IReadOnlyList<ClientInfoCredential> linkedCredentials,
+        IReadOnlyDictionary<string, string> values)
+    {
+        ClientInfoCredential? savedCredential = null;
+        try
+        {
+            foreach (var credential in linkedCredentials)
+            {
+                var nameKey = ResourceCredentialEditorKey(
+                    credential.CredentialId,
+                    "name");
+                var usernameKey = ResourceCredentialEditorKey(
+                    credential.CredentialId,
+                    "username");
+                var loginUrlKey = ResourceCredentialEditorKey(
+                    credential.CredentialId,
+                    "login_url");
+                var passwordKey = ResourceCredentialEditorKey(
+                    credential.CredentialId,
+                    "password");
+                savedCredential = _repository.SaveClientInfoCredential(
+                    credential with
+                    {
+                        ResourceId = savedResource.ResourceId,
+                        PersonId = null,
+                        Name = values[nameKey].Trim(),
+                        Username = values[usernameKey].Trim(),
+                        LoginUrl = values[loginUrlKey].Trim()
+                    });
+                var password = values[passwordKey];
+                if (!string.IsNullOrWhiteSpace(password))
+                {
+                    _repository.SetClientInfoSecret(
+                        FindCurrentPassword(credential)
+                        ?? new ClientInfoSecretSummary
+                        {
+                            CredentialId = savedCredential.CredentialId,
+                            SecretType = "Password",
+                            SecretLabel = "Password"
+                        },
+                        password,
+                        savedResource.ReviewStatus.Equals(
+                            "Verified",
+                            StringComparison.OrdinalIgnoreCase));
+                }
+            }
+
+            var newName = values["access_new_name"].Trim();
+            var newUsername = values["access_new_username"].Trim();
+            var newLoginUrl = values["access_new_login_url"].Trim();
+            var newPassword = values["access_new_password"];
+            if (!string.IsNullOrWhiteSpace(newName)
+                || !string.IsNullOrWhiteSpace(newUsername)
+                || !string.IsNullOrWhiteSpace(newPassword))
+            {
+                savedCredential = _repository.SaveClientInfoCredential(
+                    new ClientInfoCredential
+                    {
+                        ClientId = ClientId,
+                        ResourceId = savedResource.ResourceId,
+                        LocalKey = $"resource-access-{savedResource.ResourceId}-{Guid.NewGuid():N}",
+                        Name = string.IsNullOrWhiteSpace(newName)
+                            ? $"{savedResource.Name} login"
+                            : newName,
+                        Category = editingCategory,
+                        Username = newUsername,
+                        LoginUrl = string.IsNullOrWhiteSpace(newLoginUrl)
+                            ? savedResource.AddressOrUrl
+                            : newLoginUrl,
+                        Notes = $"Access for {savedResource.Name}.",
+                        IsActive = savedResource.IsActive,
+                        ReviewStatus = savedResource.ReviewStatus
+                    });
+                if (!string.IsNullOrWhiteSpace(newPassword))
+                {
+                    _repository.SetClientInfoSecret(
+                        new ClientInfoSecretSummary
+                        {
+                            CredentialId = savedCredential.CredentialId,
+                            SecretType = "Password",
+                            SecretLabel = "Password"
+                        },
+                        newPassword,
+                        savedResource.ReviewStatus.Equals(
+                            "Verified",
+                            StringComparison.OrdinalIgnoreCase));
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            throw new ClientInfoResourceAccessSaveException(
+                (savedCredential is null
+                    ? "The system or service was saved, but its linked login was not. "
+                    : "The system or service and login details were saved, but a password was not. ")
+                + "Open the same system again or use Passwords to finish the login."
+                + $"\n\nDetails: {exception.Message}",
+                exception);
+        }
     }
 
     private void SaveNewResourceAccess(
@@ -2247,6 +2406,10 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     private static string YesNo(bool value) => value ? "Yes" : "No";
     private static string StandardFieldEditorKey(string fieldKey) =>
         $"resource_field_{fieldKey}";
+    private static string ResourceCredentialEditorKey(
+        long credentialId,
+        string field) =>
+        $"resource_credential_{credentialId}_{field}";
     private static bool IsYes(string value) =>
         value.Equals("Yes", StringComparison.OrdinalIgnoreCase);
 
