@@ -5,4 +5,4 @@
 - Verifies the repaired constraint during deployment so a drifted or incomplete SQL update fails before a technician retries an import.
 - Includes the complete standalone SQL Server 2016 deployment, checksum, Sync Service package, Server Manager, and one-click server installer.
 
-Run `TechBenchServerSetup.exe` as Administrator on the shared TechBench server, or run the included standalone SQL deployment against the shared TechBench database. The schema version remains 15.
+Apply `TechBenchV2-SQLServer2016-0.6.17.sql` to the shared TechBench database in SSMS with SQLCMD Mode enabled before retrying the workbook import. `TechBenchServerSetup.exe` updates the Server Manager and Sync Service but does not execute the database deployment. The schema version remains 15.
