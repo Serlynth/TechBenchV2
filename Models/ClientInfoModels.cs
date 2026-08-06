@@ -210,16 +210,23 @@ public sealed record ClientInfoOverviewField
     public ClientInfoOverviewField(
         string label,
         string value,
-        IReadOnlyList<ClientInfoSecretSummary>? secrets = null)
+        IReadOnlyList<ClientInfoSecretSummary>? secrets = null,
+        IReadOnlyList<long>? credentialIds = null)
     {
         Label = label;
         Value = value;
         Secrets = secrets ?? [];
+        CredentialIds = credentialIds
+            ?? Secrets.Select(secret => secret.CredentialId)
+                .Distinct()
+                .ToArray();
     }
 
     public string Label { get; }
     public string Value { get; }
     public IReadOnlyList<ClientInfoSecretSummary> Secrets { get; }
+    [JsonIgnore]
+    public IReadOnlyList<long> CredentialIds { get; }
     public bool HasSecrets => Secrets.Count > 0;
 }
 
@@ -264,10 +271,6 @@ public sealed record ClientInfoCredential
     public byte[]? RowVersion { get; init; }
     public int SecretCount { get; init; }
     public IReadOnlyList<ClientInfoSecretSummary> Secrets { get; init; } = [];
-    [JsonIgnore]
-    public IReadOnlyList<ClientInfoSecretSummary> CurrentSecrets => Secrets
-        .Where(secret => secret.IsCurrent)
-        .ToArray();
     [JsonIgnore]
     public string LinkedObjectDisplay
     {

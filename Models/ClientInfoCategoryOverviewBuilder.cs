@@ -83,7 +83,37 @@ public static class ClientInfoCategoryOverviewBuilder
                 section.Title,
                 title,
                 StringComparison.OrdinalIgnoreCase))
+            .Select(section => IncludeEverySelectedCredential(
+                section,
+                credentials))
             .ToArray();
+    }
+
+    private static ClientInfoCategoryOverviewSection IncludeEverySelectedCredential(
+        ClientInfoCategoryOverviewSection section,
+        IReadOnlyList<ClientInfoCredential> credentials)
+    {
+        var fields = section.Fields
+            .Where(field => !string.Equals(
+                field.Label,
+                "More access",
+                StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var representedCredentialIds = fields
+            .SelectMany(field => field.CredentialIds)
+            .ToHashSet();
+        foreach (var credential in credentials
+                     .Where(credential => credential.IsActive)
+                     .Where(credential => !representedCredentialIds.Contains(
+                         credential.CredentialId))
+                     .OrderBy(credential => credential.Name,
+                         StringComparer.OrdinalIgnoreCase))
+        {
+            fields.Add(AccessField(credential));
+            representedCredentialIds.Add(credential.CredentialId);
+        }
+
+        return section with { Fields = fields };
     }
 
     public static ClientInfoCategoryOverviewSection BuildCloudAccounts(
@@ -600,7 +630,11 @@ public static class ClientInfoCategoryOverviewBuilder
             : secrets.Length > 0
                 ? "Password available"
                 : "Configured";
-        return new ClientInfoOverviewField(label, value, secrets);
+        return new ClientInfoOverviewField(
+            label,
+            value,
+            secrets,
+            matches.Select(credential => credential.CredentialId).ToArray());
     }
 
     private static ClientInfoOverviewField RequiredCredentialField(
@@ -636,7 +670,12 @@ public static class ClientInfoCategoryOverviewBuilder
         return new ClientInfoOverviewField(
             label,
             secrets.Length > 0 ? "Password available" : "Not entered",
-            secrets);
+            secrets,
+            credentials
+                .Where(credential => credential.IsActive)
+                .Select(credential => credential.CredentialId)
+                .Distinct()
+                .ToArray());
     }
 
     private static ClientInfoOverviewField RequiredField(
@@ -712,7 +751,11 @@ public static class ClientInfoCategoryOverviewBuilder
             var value = secrets.Length > 0
                 ? entry.Value
                 : $"{entry.Value}{Environment.NewLine}Password not entered";
-            return new ClientInfoOverviewField(entry.Label, value, secrets);
+            return new ClientInfoOverviewField(
+                entry.Label,
+                value,
+                secrets,
+                matches.Select(credential => credential.CredentialId).ToArray());
         }).Cast<ClientInfoOverviewField?>().ToArray();
     }
 
@@ -754,7 +797,8 @@ public static class ClientInfoCategoryOverviewBuilder
         return new ClientInfoOverviewField(
             string.IsNullOrWhiteSpace(credential.Name) ? "Access" : credential.Name.Trim(),
             value,
-            credential.Secrets.Where(secret => secret.IsCurrent).ToArray());
+            credential.Secrets.Where(secret => secret.IsCurrent).ToArray(),
+            [credential.CredentialId]);
     }
 
     private static ClientInfoCategoryOverviewSection Section(

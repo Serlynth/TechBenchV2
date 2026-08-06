@@ -93,11 +93,10 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("OverviewSections", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"Selected record\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding SelectedOverviewLabel}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("x:Key=\"LinkedCredentialCardTemplate\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Text=\"Passwords &amp; access\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("ItemsSource=\"{Binding SelectedCredentials}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("ItemsSource=\"{Binding CurrentSecrets}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Command=\"{Binding DataContext.EditCredentialCommand", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("x:Key=\"LinkedCredentialCardTemplate\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"Passwords &amp; access\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("ItemsSource=\"{Binding SelectedCredentials}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding Secrets}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Binding=\"{Binding LinkedObjectDisplay}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("<TabItem Header=\"Passwords\">", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("<Grid Width=\"500\" MinHeight=\"170\"", xaml, StringComparison.Ordinal);
@@ -365,6 +364,8 @@ public sealed class ClientInfoBetaTests
         var primary = Resource(401, "Primary portal");
         var secondary = Resource(402, "Secondary portal");
         var primaryLogin = Credential(501, primary.ResourceId);
+        var primarySecondLogin = Credential(506, primary.ResourceId);
+        var primaryThirdLogin = Credential(507, primary.ResourceId);
         var secondaryLogin = Credential(502, secondary.ResourceId);
         var inactiveLogin = Credential(503, primary.ResourceId, active: false);
         var unlinkedLogin = Credential(504, null);
@@ -375,13 +376,21 @@ public sealed class ClientInfoBetaTests
 
         group.Replace(
             [primary, secondary],
-            [primaryLogin, secondaryLogin, inactiveLogin, unlinkedLogin, personOnlyLogin],
+            [
+                primaryLogin,
+                primarySecondLogin,
+                primaryThirdLogin,
+                secondaryLogin,
+                inactiveLogin,
+                unlinkedLogin,
+                personOnlyLogin
+            ],
             [unlinkedLogin]);
 
         Assert.Same(primary, group.SelectedResource);
-        Assert.Same(primaryLogin, Assert.Single(group.SelectedCredentials));
-        Assert.True(group.HasSelectedCredentials);
-        Assert.Equal("1 login", group.SelectedCredentialCountLabel);
+        Assert.Equal(
+            [primaryLogin, primarySecondLogin, primaryThirdLogin],
+            group.SelectedCredentials);
         Assert.DoesNotContain(inactiveLogin, group.SelectedCredentials);
         Assert.DoesNotContain(unlinkedLogin, group.SelectedCredentials);
         Assert.DoesNotContain(personOnlyLogin, group.SelectedCredentials);
@@ -389,6 +398,15 @@ public sealed class ClientInfoBetaTests
             group.OverviewSections.SelectMany(section => section.Fields)
                 .SelectMany(field => field.Secrets),
             secret => secret.CredentialId == unlinkedLogin.CredentialId);
+        Assert.Equal(
+            [501L, 506L, 507L],
+            group.OverviewSections.SelectMany(section => section.Fields)
+                .SelectMany(field => field.CredentialIds)
+                .Distinct()
+                .OrderBy(id => id));
+        Assert.DoesNotContain(
+            group.OverviewSections.SelectMany(section => section.Fields),
+            field => field.Label == "More access");
 
         group.SelectedResource = secondary;
 

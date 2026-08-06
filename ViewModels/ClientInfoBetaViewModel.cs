@@ -2128,11 +2128,6 @@ public sealed class ClientInfoResourceGroup : ObservableObject
             OnPropertyChanged(nameof(OverviewCountLabel));
             OnPropertyChanged(nameof(HasOverviewSections));
         };
-        SelectedCredentials.CollectionChanged += (_, _) =>
-        {
-            OnPropertyChanged(nameof(SelectedCredentialCountLabel));
-            OnPropertyChanged(nameof(HasSelectedCredentials));
-        };
     }
 
     public string CategoryName { get; }
@@ -2142,13 +2137,9 @@ public sealed class ClientInfoResourceGroup : ObservableObject
         : $"{Resources.Count} records";
     public bool HasResources => Resources.Count > 0;
     public bool HasOverviewSections => OverviewSections.Count > 0;
-    public bool HasSelectedCredentials => SelectedCredentials.Count > 0;
     public string OverviewCountLabel => OverviewSections.Count == 1
         ? "1 important summary"
         : $"{OverviewSections.Count} important summaries";
-    public string SelectedCredentialCountLabel => SelectedCredentials.Count == 1
-        ? "1 login"
-        : $"{SelectedCredentials.Count} logins";
     public string SelectedOverviewLabel => SelectedResource?.Name
         ?? "Select a record from the full list";
     public ClientInfoResource? SelectedResource
