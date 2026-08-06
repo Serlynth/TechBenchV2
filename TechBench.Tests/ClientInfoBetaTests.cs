@@ -10,6 +10,27 @@ namespace TechBench.Tests;
 public sealed class ClientInfoBetaTests
 {
     [Fact]
+    public void Microsoft365LicenseCatalogUsesOnlyCsriSoldLicenses()
+    {
+        Assert.Equal(
+            [
+                "Microsoft 365 Business Basic",
+                "Microsoft 365 Business Standard",
+                "Microsoft 365 Business Premium",
+                "Exchange Online Plan 1",
+                "Exchange Online Plan 2"
+            ],
+            Microsoft365LicenseCatalog.All);
+        Assert.Equal(
+            Microsoft365LicenseCatalog.BusinessPremium,
+            Microsoft365LicenseCatalog.Normalize("Business Premium"));
+        Assert.Equal(
+            Microsoft365LicenseCatalog.ExchangeOnlinePlan1,
+            Microsoft365LicenseCatalog.Normalize("Exchange Online P1"));
+        Assert.Empty(Microsoft365LicenseCatalog.Normalize("Office 365 E3"));
+    }
+
+    [Fact]
     public void DemoClientIsCompleteDeterministicAndClearlyIsolated()
     {
         var demo = ClientInfoDemoData.Create();
@@ -160,6 +181,14 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("IsBoolean: true", viewModel, StringComparison.Ordinal);
         Assert.Contains(
             "VisibleWhenKey: \"m365sameasad\"",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Options: Microsoft365LicenseCatalog.All",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "AllowBlankSelection: true",
             viewModel,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -1629,6 +1658,22 @@ public sealed class ClientInfoBetaTests
             Assert.Contains(
                 "Microsoft 365 Password",
                 ReadHeaderRow(workbook, "Users"));
+            var usersSheet = workbook.WorkbookPart.Workbook.Sheets!
+                .Elements<DocumentFormat.OpenXml.Spreadsheet.Sheet>()
+                .Single(sheet => string.Equals(
+                    sheet.Name?.Value,
+                    "Users",
+                    StringComparison.Ordinal));
+            var usersPart = (WorksheetPart)workbook.WorkbookPart.GetPartById(
+                usersSheet.Id!.Value!);
+            var licenseValidation = Assert.Single(
+                usersPart.Worksheet.Descendants<DataValidation>(),
+                validation => validation.SequenceOfReferences?.InnerText
+                    == "G2:G500");
+            Assert.Equal(
+                $"\"{string.Join(',', Microsoft365LicenseCatalog.All)}\"",
+                licenseValidation.Formula1?.Text);
+            Assert.True(licenseValidation.ShowErrorMessage?.Value);
             Assert.Contains(
                 "Primary IP",
                 ReadHeaderRow(workbook, "Servers & Infrastructure"));
