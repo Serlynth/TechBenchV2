@@ -742,6 +742,29 @@ public sealed class WhdRestClientTests
     }
 
     [Fact]
+    public async Task ReadsBackTechNoteIdFromWhdMobileNoteTextWhenPostResponseHasNoId()
+    {
+        var handler = new RecordingHandler(request => request.Method == HttpMethod.Post
+            ? Json(HttpStatusCode.OK, "{}")
+            : Json(HttpStatusCode.OK, """
+                [{"id":987,"mobileNoteText":"Investigated the issue.","workTime":"15"}]
+                """));
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.PostTicketNoteAsync(
+            ExplicitSettings(),
+            101,
+            "Investigated the issue.",
+            15,
+            new DateTime(2026, 7, 20, 13, 30, 0, DateTimeKind.Utc));
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("WHD-TECHNOTE-987", result.ExternalReference);
+        Assert.Equal(2, handler.RequestCount);
+    }
+
+    [Fact]
     public async Task VerifiesExactNoteAfterPostResponseTimesOut()
     {
         var handler = new RecordingHandler(request =>
@@ -848,6 +871,38 @@ public sealed class WhdRestClientTests
     }
 
     [Fact]
+    public async Task GetsTheExactTrackedTechNoteFromWhdMobileNoteText()
+    {
+        var handler = new RecordingHandler(_ => Json(HttpStatusCode.OK, """
+            [{"id":987,"mobileNoteText":"Current note.","workTime":"15"}]
+            """));
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetTechNoteAsync(ExplicitSettings(), 101, 987);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("Current note.", result.NoteText);
+        Assert.Equal(15, result.DurationMinutes);
+    }
+
+    [Fact]
+    public async Task ExactTechNoteLookupFailsClosedWhenWhdOmitsBothTextRepresentations()
+    {
+        var handler = new RecordingHandler(_ => Json(HttpStatusCode.OK, """
+            [{"id":987,"workTime":"15"}]
+            """));
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.GetTechNoteAsync(ExplicitSettings(), 101, 987);
+
+        Assert.False(result.Success);
+        Assert.False(result.IsNotFound);
+        Assert.Contains("without readable note text", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task TicketNotesRouteNotFoundIsNotConclusiveProofThatTheExactNoteIsMissing()
     {
         var handler = new RecordingHandler(_ => Json(HttpStatusCode.NotFound, "Route not found."));
@@ -934,6 +989,53 @@ public sealed class WhdRestClientTests
         Assert.Equal("WHD-TECHNOTE-987", result.ExternalReference);
         Assert.Equal(2, handler.Requests.Count);
         Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task TechNoteUpdateVerificationAcceptsWhdMobileNoteText()
+    {
+        var handler = new RecordingHandler(request => request.Method == HttpMethod.Put
+            ? Json(HttpStatusCode.OK, "{}")
+            : Json(HttpStatusCode.OK, """
+                [{"id":987,"mobileNoteText":"<p>Line one<br>Line two &amp; more</p>","workTime":"15"}]
+                """));
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.UpdateTechNoteAsync(
+            ExplicitSettings(),
+            101,
+            987,
+            "Line one\nLine two & more");
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("WHD-TECHNOTE-987", result.ExternalReference);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task TechNoteVerificationRequestsFreshWhdData()
+    {
+        var handler = new RecordingHandler(request => request.Method == HttpMethod.Put
+            ? Json(HttpStatusCode.OK, "{}")
+            : Json(HttpStatusCode.OK, """
+                [{"id":987,"mobileNoteText":"Updated work note.","workTime":"15"}]
+                """));
+        using var httpClient = new HttpClient(handler);
+        var client = new WhdRestClient(httpClient);
+
+        var result = await client.UpdateTechNoteAsync(
+            ExplicitSettings(),
+            101,
+            987,
+            "Updated work note.");
+
+        Assert.True(result.Success, result.Message);
+        var verificationRequest = Assert.Single(handler.Requests, request => request.Method == HttpMethod.Get);
+        Assert.Contains("no-cache", verificationRequest.CacheControl, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no-store", verificationRequest.CacheControl, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no-cache", verificationRequest.Pragma, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1460,12 +1562,16 @@ public sealed class WhdRestClientTests
                 ? string.Join("; ", cookies)
                 : string.Empty;
             var contentType = request.Content?.Headers.ContentType?.ToString() ?? string.Empty;
+            var cacheControl = request.Headers.CacheControl?.ToString() ?? string.Empty;
+            var pragma = string.Join(",", request.Headers.Pragma.Select(value => value.ToString()));
             Requests.Add(new RecordedRequest(
                 request.Method,
                 request.RequestUri,
                 body,
                 cookieHeader,
-                contentType));
+                contentType,
+                cacheControl,
+                pragma));
             var response = responseFactory(request);
             response.RequestMessage ??= request;
             return response;
@@ -1477,5 +1583,7 @@ public sealed class WhdRestClientTests
         Uri? Uri,
         string Body,
         string CookieHeader,
-        string ContentType);
+        string ContentType,
+        string CacheControl,
+        string Pragma);
 }
