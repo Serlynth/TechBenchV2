@@ -29,6 +29,26 @@ public sealed class ClientInfoWorkbookService
         "Unverified", "Verified", "AcceptedUnverified", "NeedsReview", "Rejected"
     ];
 
+    private static readonly string[] LocationTypeOptions =
+    [
+        "Headquarters", "Office", "Branch Office", "Warehouse", "Remote Site", "Other"
+    ];
+
+    private static readonly string[] ContactTypeOptions =
+    [
+        "Primary Contact", "Site Contact", "Technical Contact", "Billing Contact", "End User", "Other"
+    ];
+
+    private static readonly string[] EquipmentTypeOptions =
+    [
+        "Desktop", "Laptop", "Server", "Switch", "Firewall", "Access Point", "Printer", "UPS", "Phone", "Other"
+    ];
+
+    private static readonly string[] SecretTypeOptions =
+    [
+        "Password", "API Key", "Token", "PIN", "Recovery Code", "Other"
+    ];
+
     public void CreateTemplate(string path, int clientId, string clientName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -62,7 +82,8 @@ public sealed class ClientInfoWorkbookService
                 ["Summary", ""],
                 ["Review Status", "Verified"],
                 ["Important", "Do not change the internal client ID or reuse this workbook for another client."],
-                ["Workbook security", "Passwords are visible as plain text in this workbook until import. Keep the file secured and remove the completed copy after Client Information is promoted."]
+                ["Workbook security", "Passwords are visible as plain text in this workbook until import. Keep the file secured and remove the completed copy after Client Information is promoted."],
+                ["Required fields", "Amber headers are required for every row you use: Name (or Item on Other Info) and Review Status. Other fields are optional. If Microsoft 365 does not reuse AD, enter its separate username and password."]
             ],
             headerRow: 0,
             columnWidths: [28, 78],
@@ -99,7 +120,8 @@ public sealed class ClientInfoWorkbookService
             "Servers & Infrastructure",
             [ResourceHeaders(ClientInfoResourceCategories.ServersInfrastructure)],
             columnWidths: ResourceColumnWidths(
-                ClientInfoResourceCategories.ServersInfrastructure));
+                ClientInfoResourceCategories.ServersInfrastructure),
+            resourceCategory: ClientInfoResourceCategories.ServersInfrastructure);
         AddSheet(
             workbookPart,
             sheets,
@@ -107,14 +129,16 @@ public sealed class ClientInfoWorkbookService
             "Connection & Internet",
             [ResourceHeaders(ClientInfoResourceCategories.ConnectionInternet)],
             columnWidths: ResourceColumnWidths(
-                ClientInfoResourceCategories.ConnectionInternet));
+                ClientInfoResourceCategories.ConnectionInternet),
+            resourceCategory: ClientInfoResourceCategories.ConnectionInternet);
         AddSheet(
             workbookPart,
             sheets,
             ref sheetId,
             "Wi-Fi",
             [ResourceHeaders(ClientInfoResourceCategories.Wifi)],
-            columnWidths: ResourceColumnWidths(ClientInfoResourceCategories.Wifi));
+            columnWidths: ResourceColumnWidths(ClientInfoResourceCategories.Wifi),
+            resourceCategory: ClientInfoResourceCategories.Wifi);
         AddSheet(
             workbookPart,
             sheets,
@@ -122,7 +146,8 @@ public sealed class ClientInfoWorkbookService
             "Applications & Cloud",
             [ResourceHeaders(ClientInfoResourceCategories.ApplicationsCloud)],
             columnWidths: ResourceColumnWidths(
-                ClientInfoResourceCategories.ApplicationsCloud));
+                ClientInfoResourceCategories.ApplicationsCloud),
+            resourceCategory: ClientInfoResourceCategories.ApplicationsCloud);
         AddSheet(
             workbookPart,
             sheets,
@@ -130,21 +155,24 @@ public sealed class ClientInfoWorkbookService
             "Domains & Email",
             [ResourceHeaders(ClientInfoResourceCategories.DomainsEmail)],
             columnWidths: ResourceColumnWidths(
-                ClientInfoResourceCategories.DomainsEmail));
+                ClientInfoResourceCategories.DomainsEmail),
+            resourceCategory: ClientInfoResourceCategories.DomainsEmail);
         AddSheet(
             workbookPart,
             sheets,
             ref sheetId,
             "Backup",
             [ResourceHeaders(ClientInfoResourceCategories.Backup)],
-            columnWidths: ResourceColumnWidths(ClientInfoResourceCategories.Backup));
+            columnWidths: ResourceColumnWidths(ClientInfoResourceCategories.Backup),
+            resourceCategory: ClientInfoResourceCategories.Backup);
         AddSheet(
             workbookPart,
             sheets,
             ref sheetId,
             "Security",
             [ResourceHeaders(ClientInfoResourceCategories.Security)],
-            columnWidths: ResourceColumnWidths(ClientInfoResourceCategories.Security));
+            columnWidths: ResourceColumnWidths(ClientInfoResourceCategories.Security),
+            resourceCategory: ClientInfoResourceCategories.Security);
         AddSheet(
             workbookPart,
             sheets,
@@ -152,7 +180,8 @@ public sealed class ClientInfoWorkbookService
             "Vendors & Services",
             [ResourceHeaders(ClientInfoResourceCategories.VendorsServices)],
             columnWidths: ResourceColumnWidths(
-                ClientInfoResourceCategories.VendorsServices));
+                ClientInfoResourceCategories.VendorsServices),
+            resourceCategory: ClientInfoResourceCategories.VendorsServices);
         AddSheet(
             workbookPart,
             sheets,
@@ -191,7 +220,8 @@ public sealed class ClientInfoWorkbookService
             "Needs Sorting",
             [ResourceHeaders(ClientInfoResourceCategories.NeedsSorting)],
             columnWidths: ResourceColumnWidths(
-                ClientInfoResourceCategories.NeedsSorting));
+                ClientInfoResourceCategories.NeedsSorting),
+            resourceCategory: ClientInfoResourceCategories.NeedsSorting);
         workbookPart.Workbook.Save();
     }
 
@@ -1822,7 +1852,8 @@ public sealed class ClientInfoWorkbookService
         IReadOnlyList<string[]> rows,
         int headerRow = 1,
         IReadOnlyList<double>? columnWidths = null,
-        bool formatFirstRowAsTitle = false)
+        bool formatFirstRowAsTitle = false,
+        string? resourceCategory = null)
     {
         var part = workbookPart.AddNewPart<WorksheetPart>();
         var sheetData = new SheetData();
@@ -1880,6 +1911,8 @@ public sealed class ClientInfoWorkbookService
                                     ? 120D
                                     : formatFirstRowAsTitle && rowIndex is 10 or 11
                                         ? 42D
+                                        : formatFirstRowAsTitle && rowIndex == 12
+                                            ? 58D
                                         : 24D,
                 CustomHeight = true
             };
@@ -1887,8 +1920,9 @@ public sealed class ClientInfoWorkbookService
                  columnIndex < rows[rowIndex].Length;
                  columnIndex++)
             {
+                var header = rows[rowIndex][columnIndex];
                 var styleIndex = rowIndex + 1 == headerRow
-                    ? 1U
+                    ? IsRequiredHeader(name, header) ? 4U : 1U
                     : formatFirstRowAsTitle && rowIndex == 0
                         ? 2U
                         : headerRow == 0 && columnIndex == 0
@@ -1952,6 +1986,46 @@ public sealed class ClientInfoWorkbookService
                 rows[0],
                 "Microsoft 365 Uses AD Login",
                 "Yes,No");
+            AppendListValidation(
+                worksheet,
+                rows[0],
+                "Location Type",
+                string.Join(',', LocationTypeOptions));
+            AppendListValidation(
+                worksheet,
+                rows[0],
+                "Contact Type",
+                string.Join(',', ContactTypeOptions));
+            AppendListValidation(
+                worksheet,
+                rows[0],
+                "Device Type",
+                string.Join(',', EquipmentTypeOptions));
+            AppendListValidation(
+                worksheet,
+                rows[0],
+                "Secret Type",
+                string.Join(',', SecretTypeOptions));
+            if (!string.IsNullOrWhiteSpace(resourceCategory))
+            {
+                AppendListValidation(
+                    worksheet,
+                    rows[0],
+                    "Type",
+                    string.Join(',', ClientInfoResourceFieldDefinitions
+                        .TypeOptionsForCategory(resourceCategory)));
+                foreach (var definition in ClientInfoResourceFieldDefinitions
+                             .ForEditorCategory(resourceCategory)
+                             .Where(definition => definition.Options is { Count: > 0 }))
+                {
+                    AppendListValidation(
+                        worksheet,
+                        rows[0],
+                        definition.FieldLabel,
+                        string.Join(',', definition.Options!),
+                        definition.AllowCustomValue);
+                }
+            }
         }
 
         part.Worksheet = worksheet;
@@ -1968,7 +2042,8 @@ public sealed class ClientInfoWorkbookService
         Worksheet worksheet,
         IReadOnlyList<string> headers,
         string header,
-        string values)
+        string values,
+        bool allowCustomValue = false)
     {
         var index = -1;
         for (var position = 0; position < headers.Count; position++)
@@ -2000,7 +2075,7 @@ public sealed class ClientInfoWorkbookService
         {
             Type = DataValidationValues.List,
             AllowBlank = true,
-            ShowErrorMessage = true,
+            ShowErrorMessage = !allowCustomValue,
             ErrorTitle = "Choose a listed value",
             Error = $"Use one of: {values}",
             SequenceOfReferences = new ListValue<StringValue>
@@ -2011,6 +2086,15 @@ public sealed class ClientInfoWorkbookService
         });
         validations.Count = (uint)validations.ChildElements.Count;
     }
+
+    private static bool IsRequiredHeader(string sheetName, string header) =>
+        string.Equals(header, "Review Status", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(header, "Name", StringComparison.OrdinalIgnoreCase)
+        || (string.Equals(
+                sheetName,
+                "Other Info",
+                StringComparison.OrdinalIgnoreCase)
+            && string.Equals(header, "Item", StringComparison.OrdinalIgnoreCase));
 
     private static Stylesheet CreateStylesheet() => new(
         new Fonts(
@@ -2057,6 +2141,11 @@ public sealed class ClientInfoWorkbookService
             }),
             new Fill(new PatternFill(
                 new ForegroundColor { Rgb = "FFDCE6F1" })
+            {
+                PatternType = PatternValues.Solid
+            }),
+            new Fill(new PatternFill(
+                new ForegroundColor { Rgb = "FFFFC857" })
             {
                 PatternType = PatternValues.Solid
             })),
@@ -2123,6 +2212,22 @@ public sealed class ClientInfoWorkbookService
                 {
                     Horizontal = HorizontalAlignmentValues.Left,
                     Vertical = VerticalAlignmentValues.Top,
+                    WrapText = true
+                },
+                ApplyAlignment = true
+            },
+            new CellFormat
+            {
+                FontId = 3,
+                FillId = 4,
+                BorderId = 1,
+                ApplyFont = true,
+                ApplyFill = true,
+                ApplyBorder = true,
+                Alignment = new Alignment
+                {
+                    Horizontal = HorizontalAlignmentValues.Left,
+                    Vertical = VerticalAlignmentValues.Center,
                     WrapText = true
                 },
                 ApplyAlignment = true

@@ -4417,13 +4417,30 @@ BEGIN TRY
                 UNIQUE ([BatchId], [RecordType], [LocalKey]),
             CONSTRAINT [CK_ClientInfoRecords_Type]
                 CHECK ([RecordType] IN
-                    (N'Profile', N'Location', N'Person', N'Resource', N'Credential', N'Fact', N'Equipment')),
+                    (N'Profile', N'Location', N'Person', N'Resource', N'ResourceField', N'Credential', N'Fact', N'Equipment')),
             CONSTRAINT [CK_ClientInfoRecords_Payload]
                 CHECK (ISJSON([PayloadJson]) = 1),
             CONSTRAINT [CK_ClientInfoRecords_ReviewStatus]
                 CHECK ([ReviewStatus] IN
                     (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview', N'Rejected'))
         );
+    END;
+
+    -- ResourceField staging was added after the original schema-15 table was
+    -- deployed. Repair the constraint on existing databases as well as new
+    -- installs so the additive Client Info extension remains installer-safe.
+    IF OBJECT_ID(N'tb_import.ClientInfoRecords', N'U') IS NOT NULL
+    BEGIN
+        IF OBJECT_ID(N'tb_import.CK_ClientInfoRecords_Type', N'C') IS NOT NULL
+            ALTER TABLE [tb_import].[ClientInfoRecords]
+                DROP CONSTRAINT [CK_ClientInfoRecords_Type];
+
+        ALTER TABLE [tb_import].[ClientInfoRecords] WITH CHECK
+            ADD CONSTRAINT [CK_ClientInfoRecords_Type]
+            CHECK ([RecordType] IN
+                (N'Profile', N'Location', N'Person', N'Resource', N'ResourceField', N'Credential', N'Fact', N'Equipment'));
+        ALTER TABLE [tb_import].[ClientInfoRecords]
+            CHECK CONSTRAINT [CK_ClientInfoRecords_Type];
     END;
 
     IF OBJECT_ID(N'tb_import.ClientInfoSecrets', N'U') IS NULL
@@ -36557,6 +36574,15 @@ IF COL_LENGTH(N'tb_client.People', N'AdUsername') IS NULL
 IF COL_LENGTH(N'tb_client.ClientProfiles', N'ClientFolderPath') IS NULL
    OR COL_LENGTH(N'tb_client.ClientProfiles', N'LegacyClientInfoSheetPath') IS NULL
     THROW 52509,N'One or more Client Info server-link columns are missing.',1;
+
+DECLARE @RecordTypeConstraint nvarchar(max)=
+    (SELECT [definition]
+     FROM sys.check_constraints
+     WHERE [parent_object_id]=OBJECT_ID(N'tb_import.ClientInfoRecords')
+       AND [name]=N'CK_ClientInfoRecords_Type');
+IF @RecordTypeConstraint IS NULL
+   OR CHARINDEX(N'ResourceField', @RecordTypeConstraint)=0
+    THROW 52510,N'Client Info staging does not allow resource-field records.',1;
 
 IF CERT_ID(N'tb_ClientSecretCertificate') IS NULL
     THROW 52503,N'The canonical client-secret certificate is missing.',1;
