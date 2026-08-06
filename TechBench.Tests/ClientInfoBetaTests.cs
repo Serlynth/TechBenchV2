@@ -2690,6 +2690,22 @@ public sealed class ClientInfoBetaTests
             "CHARINDEX(N'ResourceField', @RecordTypeConstraint)=0",
             verifier,
             StringComparison.Ordinal);
+        foreach (var valueType in new[] { "N'Phone'", "N'Email'" })
+        {
+            Assert.Contains(valueType, schema, StringComparison.Ordinal);
+            Assert.Contains(valueType, procedures, StringComparison.Ordinal);
+            Assert.Contains(valueType, imports, StringComparison.Ordinal);
+        }
+        Assert.Contains(
+            "Client Info does not support phone and email field types.",
+            verifier,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Supported types are Text, Number, Boolean, Date, URL, IP address, Phone, and Email.",
+            imports,
+            StringComparison.Ordinal);
+        Assert.Contains("[SourceSheet]", imports, StringComparison.Ordinal);
+        Assert.Contains("[SourceRow]", imports, StringComparison.Ordinal);
         Assert.Contains(
             "SaveClientInfoResourceField",
             procedures,

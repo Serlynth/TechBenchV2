@@ -1166,7 +1166,7 @@ BEGIN
     SET @FieldLabel=NULLIF(LTRIM(RTRIM(@FieldLabel)),N'');
     IF @FieldKey IS NULL OR @FieldLabel IS NULL
         THROW 52355,N'Resource field key and label are required.',1;
-    IF @ValueType NOT IN (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress')
+    IF @ValueType NOT IN (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress',N'Phone',N'Email')
         THROW 52355,N'The resource field value type is invalid.',1;
     IF NOT EXISTS (SELECT 1 FROM [tb_client].[Resources] WHERE [ResourceId]=@ResourceId)
         THROW 52356,N'The resource for this field no longer exists.',1;
@@ -1300,7 +1300,7 @@ BEGIN
     SET @LocalKey=NULLIF(LTRIM(RTRIM(@LocalKey)),N'');
     IF @SectionName IS NULL OR @FieldLabel IS NULL
         THROW 52360,N'Fact section and label are required.',1;
-    IF @ValueType NOT IN (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress')
+    IF @ValueType NOT IN (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress',N'Phone',N'Email')
         THROW 52361,N'The fact value type is invalid.',1;
     IF @ReviewStatus NOT IN
         (N'Unverified',N'Verified',N'AcceptedUnverified',N'NeedsReview')

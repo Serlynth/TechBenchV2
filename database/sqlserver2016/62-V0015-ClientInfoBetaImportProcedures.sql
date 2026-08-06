@@ -358,7 +358,13 @@ BEGIN
         INSERT INTO [tb_import].[ClientInfoIssues]
             ([BatchId],[ImportRecordId],[Severity],[IssueCode],[Message])
         SELECT [BatchId],[ImportRecordId],N'Error',N'RESOURCE_FIELD_INVALID',
-            N'This resource field requires a parent resource, field key, field label, and valid value type.'
+            N'Resource field "'
+            + COALESCE(NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.fieldLabel'))),N''),N'(unnamed)')
+            + N'" on '
+            + COALESCE(NULLIF(LTRIM(RTRIM([SourceSheet])),N''),N'the workbook')
+            + CASE WHEN [SourceRow] IS NULL THEN N''
+                   ELSE N' row ' + CONVERT(nvarchar(20),[SourceRow]) END
+            + N' requires a parent resource, field key, field label, and valid value type. Supported types are Text, Number, Boolean, Date, URL, IP address, Phone, and Email.'
         FROM [tb_import].[ClientInfoRecords]
         WHERE [BatchId]=@BatchId AND [RecordType]=N'ResourceField'
           AND
@@ -367,7 +373,7 @@ BEGIN
               OR NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.fieldKey'))),N'') IS NULL
               OR NULLIF(LTRIM(RTRIM(JSON_VALUE([PayloadJson],N'$.fieldLabel'))),N'') IS NULL
               OR JSON_VALUE([PayloadJson],N'$.valueType') NOT IN
-                  (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress')
+                  (N'Text',N'Number',N'Boolean',N'Date',N'Url',N'IpAddress',N'Phone',N'Email')
           );
 
         INSERT INTO [tb_import].[ClientInfoIssues]

@@ -91,6 +91,24 @@ IF @RecordTypeConstraint IS NULL
    OR CHARINDEX(N'ResourceField', @RecordTypeConstraint)=0
     THROW 52510,N'Client Info staging does not allow resource-field records.',1;
 
+DECLARE @ResourceFieldTypeConstraint nvarchar(max)=
+    (SELECT [definition]
+     FROM sys.check_constraints
+     WHERE [parent_object_id]=OBJECT_ID(N'tb_client.ResourceFields')
+       AND [name]=N'CK_ClientResourceFields_Type');
+DECLARE @FactTypeConstraint nvarchar(max)=
+    (SELECT [definition]
+     FROM sys.check_constraints
+     WHERE [parent_object_id]=OBJECT_ID(N'tb_client.ClientFacts')
+       AND [name]=N'CK_ClientFacts_Type');
+IF @ResourceFieldTypeConstraint IS NULL
+   OR CHARINDEX(N'Phone', @ResourceFieldTypeConstraint)=0
+   OR CHARINDEX(N'Email', @ResourceFieldTypeConstraint)=0
+   OR @FactTypeConstraint IS NULL
+   OR CHARINDEX(N'Phone', @FactTypeConstraint)=0
+   OR CHARINDEX(N'Email', @FactTypeConstraint)=0
+    THROW 52513,N'Client Info does not support phone and email field types.',1;
+
 IF CERT_ID(N'tb_ClientSecretCertificate') IS NULL
     THROW 52503,N'The canonical client-secret certificate is missing.',1;
 

@@ -353,8 +353,25 @@ BEGIN TRY
                 CHECK (LEN(LTRIM(RTRIM([FieldLabel]))) > 0),
             CONSTRAINT [CK_ClientResourceFields_Type]
                 CHECK ([ValueType] IN
-                    (N'Text', N'Number', N'Boolean', N'Date', N'Url', N'IpAddress'))
+                    (N'Text', N'Number', N'Boolean', N'Date', N'Url', N'IpAddress', N'Phone', N'Email'))
         );
+    END;
+
+    -- Phone and email are first-class workbook field types. Repair the
+    -- original schema-15 constraint on existing databases as well as new
+    -- installs so generated Support Phone and Support Email columns validate.
+    IF OBJECT_ID(N'tb_client.ResourceFields', N'U') IS NOT NULL
+    BEGIN
+        IF OBJECT_ID(N'tb_client.CK_ClientResourceFields_Type', N'C') IS NOT NULL
+            ALTER TABLE [tb_client].[ResourceFields]
+                DROP CONSTRAINT [CK_ClientResourceFields_Type];
+
+        ALTER TABLE [tb_client].[ResourceFields] WITH CHECK
+            ADD CONSTRAINT [CK_ClientResourceFields_Type]
+            CHECK ([ValueType] IN
+                (N'Text', N'Number', N'Boolean', N'Date', N'Url', N'IpAddress', N'Phone', N'Email'));
+        ALTER TABLE [tb_client].[ResourceFields]
+            CHECK CONSTRAINT [CK_ClientResourceFields_Type];
     END;
 
     IF OBJECT_ID(N'tb_client.Credentials', N'U') IS NULL
@@ -491,7 +508,7 @@ BEGIN TRY
                 CHECK (LEN(LTRIM(RTRIM([FieldLabel]))) > 0),
             CONSTRAINT [CK_ClientFacts_Type]
                 CHECK ([ValueType] IN
-                    (N'Text', N'Number', N'Boolean', N'Date', N'Url', N'IpAddress')),
+                    (N'Text', N'Number', N'Boolean', N'Date', N'Url', N'IpAddress', N'Phone', N'Email')),
             CONSTRAINT [CK_ClientFacts_ReviewStatus]
                 CHECK ([ReviewStatus] IN
                     (N'Unverified', N'Verified', N'AcceptedUnverified', N'NeedsReview'))
@@ -504,6 +521,20 @@ BEGIN TRY
         CREATE UNIQUE INDEX [UX_ClientFacts_LocalKey]
             ON [tb_client].[ClientFacts]([ClientId], [LocalKey])
             WHERE [LocalKey] IS NOT NULL;
+    END;
+
+    IF OBJECT_ID(N'tb_client.ClientFacts', N'U') IS NOT NULL
+    BEGIN
+        IF OBJECT_ID(N'tb_client.CK_ClientFacts_Type', N'C') IS NOT NULL
+            ALTER TABLE [tb_client].[ClientFacts]
+                DROP CONSTRAINT [CK_ClientFacts_Type];
+
+        ALTER TABLE [tb_client].[ClientFacts] WITH CHECK
+            ADD CONSTRAINT [CK_ClientFacts_Type]
+            CHECK ([ValueType] IN
+                (N'Text', N'Number', N'Boolean', N'Date', N'Url', N'IpAddress', N'Phone', N'Email'));
+        ALTER TABLE [tb_client].[ClientFacts]
+            CHECK CONSTRAINT [CK_ClientFacts_Type];
     END;
 
     IF OBJECT_ID(N'tb_client.SourceDocuments', N'U') IS NULL
