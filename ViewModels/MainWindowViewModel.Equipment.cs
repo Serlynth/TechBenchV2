@@ -86,6 +86,7 @@ public sealed partial class MainWindowViewModel
 
     public AsyncRelayCommand RefreshEquipmentBoardCommand { get; private set; } = null!;
     public AsyncRelayCommand ImportEquipmentBuildSheetCommand { get; private set; } = null!;
+    public RelayCommand SaveEquipmentBuildSheetTemplateCommand { get; private set; } = null!;
     public RelayCommand NewEquipmentCommand { get; private set; } = null!;
     public AsyncRelayCommand SaveEquipmentCommand { get; private set; } = null!;
     public AsyncRelayCommand ArchiveEquipmentCommand { get; private set; } = null!;
@@ -155,6 +156,7 @@ public sealed partial class MainWindowViewModel
             {
                 RefreshEquipmentBoardCommand?.RaiseCanExecuteChanged();
                 ImportEquipmentBuildSheetCommand?.RaiseCanExecuteChanged();
+                SaveEquipmentBuildSheetTemplateCommand?.RaiseCanExecuteChanged();
                 NewEquipmentCommand?.RaiseCanExecuteChanged();
                 SaveEquipmentCommand?.RaiseCanExecuteChanged();
                 ArchiveEquipmentCommand?.RaiseCanExecuteChanged();
@@ -490,6 +492,9 @@ public sealed partial class MainWindowViewModel
             _ => CanAccessEquipmentBoard && !IsEquipmentBoardBusy);
         ImportEquipmentBuildSheetCommand = new AsyncRelayCommand(
             _ => ImportEquipmentBuildSheetAsync(),
+            _ => CanEditEquipmentRecords());
+        SaveEquipmentBuildSheetTemplateCommand = new RelayCommand(
+            _ => SaveEquipmentBuildSheetTemplate(),
             _ => CanEditEquipmentRecords());
         NewEquipmentCommand = new RelayCommand(
             _ => BeginNewEquipment(),
@@ -1055,6 +1060,52 @@ public sealed partial class MainWindowViewModel
         }
     }
 
+    private void SaveEquipmentBuildSheetTemplate()
+    {
+        const string templateFileName = "TechBench-Inventory-Build-Sheet.xlsx";
+        var sourcePath = Path.Combine(
+            AppContext.BaseDirectory,
+            "Assets",
+            templateFileName);
+        if (!File.Exists(sourcePath))
+        {
+            _dialogService.Error(
+                "Build sheet template",
+                "The Inventory build sheet template is missing from this TechBench installation.");
+            return;
+        }
+
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Save the TechBench Inventory build sheet",
+            FileName = templateFileName,
+            DefaultExt = ".xlsx",
+            Filter = "Excel workbook (*.xlsx)|*.xlsx",
+            AddExtension = true,
+            OverwritePrompt = true
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            File.Copy(sourcePath, dialog.FileName, overwrite: true);
+            EquipmentBoardStatus =
+                $"Saved the Inventory build sheet template to {dialog.FileName}.";
+        }
+        catch (Exception ex) when (
+            ex is IOException
+                or UnauthorizedAccessException
+                or NotSupportedException
+                or ArgumentException)
+        {
+            EquipmentBoardStatus = $"Build sheet template save failed: {ex.Message}";
+            _dialogService.Error("Build sheet template", EquipmentBoardStatus);
+        }
+    }
+
     internal void ApplyEquipmentBuildSheetImport(
         EquipmentBuildSheetImport import)
     {
@@ -1069,7 +1120,12 @@ public sealed partial class MainWindowViewModel
             : import.MachineName;
         EquipmentSerialNumber = import.SerialNumber;
         EquipmentPartNumber = import.PartNumber;
+        EquipmentAssetTag = import.AssetTag;
+        EquipmentManufacturer = import.Manufacturer;
         EquipmentModel = import.Model;
+        EquipmentIpAddress = import.IpAddress;
+        EquipmentAnyDeskNumber = import.AnyDeskNumber;
+        EquipmentAnyDeskPassword = import.AnyDeskPassword;
 
         var warnings = new List<string>();
         var client = EquipmentBuildSheetImporter.FindClient(

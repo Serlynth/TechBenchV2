@@ -91,6 +91,63 @@ public sealed class EquipmentBuildSheetImporterTests
     }
 
     [Fact]
+    public void CurrentInventoryTemplateFieldsMapToTheEquipmentEditor()
+    {
+        IReadOnlyList<string>[] rows =
+        [
+            ["Customer / Client", "Marrone & O'Rourke"],
+            ["End User", "Licia Marrone"],
+            ["Email Address", "licia@marroneorourke.com"],
+            ["Machine Name", "MO-2026-LM"],
+            ["Device Type", "Notebook"],
+            ["Manufacturer", "HP"],
+            ["Model", "EliteBook 660 G11"],
+            ["Part Number", "A1BC2UT"],
+            ["Serial Number", "5CD6231QB3"],
+            ["Asset Tag", "TB-0242"],
+            ["IP Address", "192.0.2.42"],
+            ["AnyDesk Number", "123 456 789"],
+            ["AnyDesk Password", "temporary-password"]
+        ];
+
+        var import = EquipmentBuildSheetImporter.ParseRows(
+            rows,
+            "TechBench-Inventory-Build-Sheet.xlsx");
+
+        Assert.Equal("Marrone & O'Rourke", import.Customer);
+        Assert.Equal("Licia Marrone", import.EndUser);
+        Assert.Equal("licia@marroneorourke.com", import.EmailAddress);
+        Assert.Equal("MO-2026-LM", import.MachineName);
+        Assert.Equal("Laptop", import.DeviceType);
+        Assert.Equal("HP", import.Manufacturer);
+        Assert.Equal("EliteBook 660 G11", import.Model);
+        Assert.Equal("A1BC2UT", import.PartNumber);
+        Assert.Equal("5CD6231QB3", import.SerialNumber);
+        Assert.Equal("TB-0242", import.AssetTag);
+        Assert.Equal("192.0.2.42", import.IpAddress);
+        Assert.Equal("123 456 789", import.AnyDeskNumber);
+        Assert.Equal("temporary-password", import.AnyDeskPassword);
+    }
+
+    [Fact]
+    public void BundledCurrentTemplateDoesNotImportGuidanceAsEquipmentData()
+    {
+        var templatePath = FindRepositoryFile(
+            Path.Combine("Assets", "TechBench-Inventory-Build-Sheet.xlsx"));
+
+        var import = new EquipmentBuildSheetImporter().Read(templatePath);
+
+        Assert.Equal("Desktop", import.DeviceType);
+        Assert.Equal(string.Empty, import.Customer);
+        Assert.Equal(string.Empty, import.EndUser);
+        Assert.Equal(string.Empty, import.MachineName);
+        Assert.Equal(string.Empty, import.AssetTag);
+        Assert.Equal(string.Empty, import.Manufacturer);
+        Assert.Equal(string.Empty, import.Model);
+        Assert.Equal(string.Empty, import.AnyDeskPassword);
+    }
+
+    [Fact]
     public void ClientAndUserMatchingStaysInsideTheImportedCustomer()
     {
         var selectedClient = new InventoryClient
@@ -339,9 +396,25 @@ public sealed class EquipmentBuildSheetImporterTests
         Assert.Contains(
             "Command=\"{Binding ImportEquipmentBuildSheetCommand}\"",
             mainWindowXaml);
+        Assert.Contains("Content=\"Build sheet template\"", mainWindowXaml);
+        Assert.Contains(
+            "Command=\"{Binding SaveEquipmentBuildSheetTemplateCommand}\"",
+            mainWindowXaml);
+
+        var project = ReadRepositoryFile("TechBench.csproj");
+        Assert.Contains(
+            "Assets\\TechBench-Inventory-Build-Sheet.xlsx",
+            project,
+            StringComparison.Ordinal);
+        Assert.Contains("CopyToPublishDirectory", project, StringComparison.Ordinal);
     }
 
     private static string ReadRepositoryFile(string relativePath)
+    {
+        return File.ReadAllText(FindRepositoryFile(relativePath));
+    }
+
+    private static string FindRepositoryFile(string relativePath)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null
@@ -353,7 +426,7 @@ public sealed class EquipmentBuildSheetImporterTests
         }
 
         Assert.NotNull(directory);
-        return File.ReadAllText(Path.Combine(directory.FullName, relativePath));
+        return Path.Combine(directory.FullName, relativePath);
     }
 
     private static void WriteSampleWorkbook(string fileName)

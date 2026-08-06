@@ -17,7 +17,12 @@ public sealed record EquipmentBuildSheetImport(
     string PartNumber,
     string Model,
     string DeviceType,
-    string SourceFileName);
+    string SourceFileName,
+    string AssetTag = "",
+    string Manufacturer = "",
+    string IpAddress = "",
+    string AnyDeskNumber = "",
+    string AnyDeskPassword = "");
 
 public sealed class EquipmentBuildSheetImporter
 {
@@ -38,7 +43,7 @@ public sealed class EquipmentBuildSheetImporter
     ];
 
     private static readonly Regex FieldPattern = new(
-        @"^\s*(?<label>customer(?:\s+name)?|machine\s+name|machine|s\s*/?\s*n|serial\s+number|end\s+user|email\s+address)\s*(?:(?:[:\-–—])\s*(?<value>.*))?\s*$",
+        @"^\s*(?<label>customer\s*/\s*client|customer(?:\s+name)?|client(?:\s+name)?|machine\s+name|pc\s+name|machine|device\s+type|manufacturer|model|part\s+number|asset\s+tag|ip(?:\s+address)?|anydesk\s+(?:number|id|address|password)|s\s*/?\s*n|serial\s+number|end\s+user|user|email(?:\s+address)?)\s*(?:(?:[:\-–—])\s*(?<value>.*))?\s*$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
         | RegexOptions.CultureInvariant);
 
@@ -82,9 +87,16 @@ public sealed class EquipmentBuildSheetImporter
     {
         ArgumentNullException.ThrowIfNull(rows);
 
+        var materializedRows = rows.ToList();
+        var isCurrentInventoryTemplate = materializedRows.Any(
+            static row => row.Any(
+                static cell => string.Equals(
+                    Clean(cell),
+                    "TechBench Inventory Build Sheet",
+                    StringComparison.OrdinalIgnoreCase)));
         var values = new Dictionary<string, string>(
             StringComparer.OrdinalIgnoreCase);
-        foreach (var row in rows)
+        foreach (var row in materializedRows)
         {
             for (var column = 0; column < row.Count; column++)
             {
@@ -104,7 +116,9 @@ public sealed class EquipmentBuildSheetImporter
                 var value = Clean(match.Groups["value"].Value);
                 if (value.Length == 0)
                 {
-                    value = FindNextValue(row, column + 1);
+                    value = isCurrentInventoryTemplate
+                        ? FindImmediateValue(row, column + 1)
+                        : FindNextValue(row, column + 1);
                 }
 
                 if (value.Length > 0)
@@ -117,7 +131,7 @@ public sealed class EquipmentBuildSheetImporter
         if (values.Count == 0)
         {
             throw new InvalidDataException(
-                "No Customer, Machine, Machine Name, S/N, End User, or Email Address fields were found.");
+                "No supported TechBench Inventory or PC Configuration fields were found.");
         }
 
         var customer = Get(values, "customer");
@@ -126,8 +140,12 @@ public sealed class EquipmentBuildSheetImporter
         var serialNumber = Get(values, "serialnumber");
         var endUser = Get(values, "enduser");
         var emailAddress = Get(values, "emailaddress");
-        var (partNumber, model) = SplitMachine(machine);
-        var deviceType = InferDeviceType(machine);
+        var (legacyPartNumber, legacyModel) = SplitMachine(machine);
+        var partNumber = FirstValue(Get(values, "partnumber"), legacyPartNumber);
+        var model = FirstValue(Get(values, "model"), legacyModel);
+        var deviceType = NormalizeDeviceType(
+            Get(values, "devicetype"),
+            $"{machine} {model}");
 
         return new EquipmentBuildSheetImport(
             customer,
@@ -139,7 +157,12 @@ public sealed class EquipmentBuildSheetImporter
             partNumber,
             model,
             deviceType,
-            Clean(sourceFileName));
+            Clean(sourceFileName),
+            Get(values, "assettag"),
+            Get(values, "manufacturer"),
+            Get(values, "ipaddress"),
+            Get(values, "anydesknumber"),
+            Get(values, "anydeskpassword"));
     }
 
     internal static InventoryClient? FindClient(
@@ -279,6 +302,21 @@ public sealed class EquipmentBuildSheetImporter
         return string.Empty;
     }
 
+    private static string FindImmediateValue(
+        IReadOnlyList<string> row,
+        int valueColumn)
+    {
+        if (valueColumn >= row.Count)
+        {
+            return string.Empty;
+        }
+
+        var candidate = Clean(row[valueColumn]);
+        return FieldPattern.IsMatch(candidate)
+            ? string.Empty
+            : candidate;
+    }
+
     private static (string PartNumber, string Model) SplitMachine(
         string machine)
     {
@@ -312,17 +350,48 @@ public sealed class EquipmentBuildSheetImporter
             : "Desktop";
     }
 
+    private static string NormalizeDeviceType(
+        string value,
+        string inferenceSource)
+    {
+        var normalized = NormalizeIdentity(value);
+        return normalized switch
+        {
+            "desktop" or "pc" or "workstation" => "Desktop",
+            "laptop" or "notebook" => "Laptop",
+            "server" => "Server",
+            "switch" => "Switch",
+            "firewall" => "Firewall",
+            "accesspoint" or "ap" => "Access Point",
+            "printer" or "mfp" => "Printer",
+            "ups" => "UPS",
+            "phone" => "Phone",
+            "other" => "Other",
+            _ => InferDeviceType(inferenceSource)
+        };
+    }
+
     private static string NormalizeLabel(string value)
     {
         var normalized = NormalizeIdentity(value);
         return normalized switch
         {
-            "customer" or "customername" => "customer",
-            "machinename" => "machinename",
+            "customer" or "customername" or "customerclient"
+                or "client" or "clientname" => "customer",
+            "machinename" or "pcname" => "machinename",
             "machine" => "machine",
+            "devicetype" => "devicetype",
+            "manufacturer" => "manufacturer",
+            "model" => "model",
+            "partnumber" => "partnumber",
+            "assettag" => "assettag",
+            "ip" or "ipaddress" => "ipaddress",
+            "anydesknumber" or "anydeskid" or "anydeskaddress"
+                => "anydesknumber",
+            "anydeskpassword" => "anydeskpassword",
             "sn" or "serial" or "serialnumber" => "serialnumber",
-            "enduser" => "enduser",
-            "emailaddress" => "emailaddress",
+            "enduser" or "user" => "enduser",
+            "email" or "emailaddress" => "emailaddress",
             _ => normalized
         };
     }
@@ -525,6 +594,14 @@ public sealed class EquipmentBuildSheetImporter
             "customer" => "Customer",
             "machine" => "Machine",
             "machinename" => "Machine Name",
+            "devicetype" => "Device Type",
+            "manufacturer" => "Manufacturer",
+            "model" => "Model",
+            "partnumber" => "Part Number",
+            "assettag" => "Asset Tag",
+            "ipaddress" => "IP Address",
+            "anydesknumber" => "AnyDesk Number",
+            "anydeskpassword" => "AnyDesk Password",
             "serialnumber" => "S/N",
             "enduser" => "End User",
             "emailaddress" => "Email Address",
@@ -535,6 +612,10 @@ public sealed class EquipmentBuildSheetImporter
         IReadOnlyDictionary<string, string> values,
         string key) =>
         values.TryGetValue(key, out var value) ? value : string.Empty;
+
+    private static string FirstValue(params string[] values) =>
+        values.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value))
+        ?? string.Empty;
 
     private static string Clean(string? value) =>
         string.IsNullOrWhiteSpace(value)
