@@ -25,6 +25,7 @@ public sealed record ClientInfoEditField(
     bool IsSecret = false,
     IReadOnlyList<string>? Options = null,
     bool AllowCustomValue = false,
+    bool AllowBlankSelection = false,
     string Tab = "",
     bool IsBoolean = false,
     string VisibleWhenKey = "",
@@ -227,7 +228,9 @@ public sealed class ClientInfoRecordEditorWindow : Window
                         value,
                         field.Value,
                         StringComparison.OrdinalIgnoreCase))
-                    ?? (field.AllowCustomValue ? null : field.Options[0]),
+                    ?? (field.AllowCustomValue || field.AllowBlankSelection
+                        ? null
+                        : field.Options[0]),
                 Text = field.AllowCustomValue ? field.Value : string.Empty,
                 MinHeight = 34
             };

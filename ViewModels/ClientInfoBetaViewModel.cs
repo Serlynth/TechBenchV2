@@ -1254,7 +1254,12 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                         current?.HasMicrosoft365 ?? false),
                     Options: BooleanOptions),
                 new("license", "Microsoft 365 license",
-                    current?.Microsoft365License ?? ""),
+                    Microsoft365LicenseCatalog.Normalize(
+                        current?.Microsoft365License),
+                    Options: Microsoft365LicenseCatalog.All,
+                    AllowBlankSelection: true,
+                    VisibleWhenKey: "has365",
+                    VisibleWhenValue: "Yes"),
                 new(
                     "m365sameasad",
                     "Microsoft 365 and AD use the same login",

@@ -1827,6 +1827,11 @@ public sealed class ClientInfoWorkbookService
             AppendListValidation(
                 worksheet,
                 rows[0],
+                "Microsoft 365 License",
+                string.Join(',', Microsoft365LicenseCatalog.All));
+            AppendListValidation(
+                worksheet,
+                rows[0],
                 "Microsoft 365 Uses AD Login",
                 "Yes,No");
         }
