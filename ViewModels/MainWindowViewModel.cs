@@ -2453,11 +2453,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         if (entry.WhdPosted)
         {
             var confirmedLocalDelete = _dialogService.Confirm(
-                "Delete TechBench entry only",
-                "Delete this entry and its posting history from TechBench only?\n\n"
-                + "This never deletes or changes anything in WHD. If the WHD note still exists, it will remain there. "
+                "Delete TechBench copy",
+                "Only continue if you already deleted this note in WHD.\n\n"
+                + "TechBench will delete this entry and its posting history locally only. "
+                + "This never deletes or changes anything in WHD. "
                 + "Undo restores an unposted TechBench draft; it cannot recreate or reconnect the WHD note.",
-                "Delete from TechBench",
+                "I deleted it - Delete",
                 "Cancel");
             if (!confirmedLocalDelete)
             {

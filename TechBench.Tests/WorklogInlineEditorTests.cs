@@ -206,7 +206,8 @@ public sealed class WorklogInlineEditorTests
         Assert.True(sageLock >= 0, "Sage-posted entries must have an explicit deletion lock.");
         Assert.True(whdBranch > sageLock, "The Sage lock must be checked before WHD-posted local deletion.");
         Assert.True(localDelete > whdBranch, "WHD-posted local deletion must require its explicit branch.");
-        Assert.Contains("Delete TechBench entry only", deletion, StringComparison.Ordinal);
+        Assert.Contains("Only continue if you already deleted this note in WHD", deletion, StringComparison.Ordinal);
+        Assert.Contains("I deleted it - Delete", deletion, StringComparison.Ordinal);
         Assert.Contains("This never deletes or changes anything in WHD", deletion, StringComparison.Ordinal);
         Assert.Contains("Undo restores an unposted TechBench draft", deletion, StringComparison.Ordinal);
         Assert.DoesNotContain("DeleteTechNoteAsync", deletion, StringComparison.Ordinal);

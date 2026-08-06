@@ -125,6 +125,30 @@ public sealed class SqlServerTechBenchRepositoryContractTests
     }
 
     [Fact]
+    public void ConfirmedWhdLocalDeleteSupportsLegacyServerProcedureWithoutCallingWhd()
+    {
+        var source = File.ReadAllText(FindRepositoryFile(
+            "Data",
+            "SqlServerTechBenchRepository.WorkEntries.cs"));
+
+        Assert.Contains("ex.Number == 51140", source, StringComparison.Ordinal);
+        Assert.Contains(
+            "PrepareLegacyWhdLocalDeleteConfirmationAsync",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "The user confirmed that it was already removed in WHD",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Entries posted to Sage are permanently locked and cannot be deleted",
+            source,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("WhdRestClient", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("DeleteTechNote", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ClientSearchProviderUsesRepositoryRowVersionTracker()
     {
         var constructor = Assert.Single(
