@@ -55,15 +55,21 @@ public static class ClientInfoCategoryOverviewBuilder
                     : MatchesTerms(resource, "ups")
                         ? "UPS"
                         : "Core infrastructure",
-            ClientInfoResourceCategories.ConnectionInternet => "Connection",
+            ClientInfoResourceCategories.ConnectionInternet =>
+                IsInternetCircuit(resource)
+                    ? "Internet & circuits"
+                    : "Connection",
             ClientInfoResourceCategories.Wifi => "WiFi",
             ClientInfoResourceCategories.ApplicationsCloud =>
-                IsFireDrillGroup(resource, "Microsoft 365")
-                    ? "Microsoft 365"
-                    : IsFireDrillGroup(resource, "Remote Access")
-                        ? "Remote Access"
+                IsRemoteAccessResource(resource)
+                    ? "Remote Access"
+                    : IsMicrosoft365Resource(resource)
+                        ? "Microsoft 365"
                         : "Other applications & cloud",
-            ClientInfoResourceCategories.DomainsEmail => "Domain & AD",
+            ClientInfoResourceCategories.DomainsEmail =>
+                IsEmailSecurityResource(resource)
+                    ? "Email Security"
+                    : "Domain & AD",
             ClientInfoResourceCategories.Backup =>
                 IsFireDrillGroup(resource, "Veeam")
                     ? "Veeam"
@@ -71,9 +77,7 @@ public static class ClientInfoCategoryOverviewBuilder
             ClientInfoResourceCategories.Security =>
                 IsFireDrillGroup(resource, "ESET")
                     ? "ESET"
-                    : IsFireDrillGroup(resource, "Barracuda")
-                        ? "Barracuda"
-                        : "Other security",
+                    : "Other security",
             ClientInfoResourceCategories.VendorsServices => "Vendors & services",
             _ => "Sorting queue"
         };
@@ -285,15 +289,34 @@ public static class ClientInfoCategoryOverviewBuilder
         IReadOnlyList<ClientInfoResource> resources,
         IReadOnlyList<ClientInfoCredential> credentials)
     {
-        var status = MatchingCredentials(credentials, ["status"]);
+        var ispResources = resources
+            .Where(IsInternetCircuit)
+            .ToArray();
+        var ispResourceIds = ispResources
+            .Select(resource => resource.ResourceId)
+            .ToHashSet();
+        var ispCredentials = credentials
+            .Where(credential =>
+                credential.ResourceId.HasValue
+                    ? ispResourceIds.Contains(credential.ResourceId.Value)
+                    : MatchesTerms(
+                        credential,
+                        "internet provider",
+                        "isp portal",
+                        "comcast",
+                        "verizon"))
+            .ToArray();
+        var connectionResources = resources.Except(ispResources).ToArray();
+        var connectionCredentials = credentials.Except(ispCredentials).ToArray();
+        var status = MatchingCredentials(connectionCredentials, ["status"]);
         var admin = MatchingCredentials(
-            credentials,
+            connectionCredentials,
             ["watchguard admin", "firebox admin", "firewall admin", "admin password", "admin"],
             ["status", "firebox db", "firebox database", "csriadmin", "authpoint", "ssl vpn", "sslvpn", "cloud", "ad auth", "active directory"]);
         var fireboxDatabase = MatchingCredentials(
-            credentials,
+            connectionCredentials,
             ["firebox db", "firebox database", "firebox-db"]);
-        var csriAdminAuthPoint = credentials
+        var csriAdminAuthPoint = connectionCredentials
             .Where(credential => credential.IsActive)
             .Where(credential =>
                 ContainsCredentialTerm(credential, "csriadmin")
@@ -301,26 +324,27 @@ public static class ClientInfoCategoryOverviewBuilder
                     && ContainsCredentialTerm(credential, "authpoint")))
             .ToArray();
         var authPoint = MatchingCredentials(
-            credentials,
+            connectionCredentials,
             ["authpoint user", "authpoint"],
             ["csriadmin"]);
         var sslVpn = MatchingCredentials(
-            credentials,
+            connectionCredentials,
             ["ssl vpn", "sslvpn"]);
         var watchGuardCloud = MatchingCredentials(
-            credentials,
+            connectionCredentials,
             ["watchguard cloud", "cloud user", "cloud password"]);
         var watchGuardAd = MatchingCredentials(
-            credentials,
+            connectionCredentials,
             ["watchguard ad auth", "ad auth", "ad user", "ad password", "active directory auth"],
             ["authpoint"]);
 
-        return
-        [
-            Section("Connection", "The connection details technicians use most often.",
-                RequiredField("External IP", Values("External IP", resources, "public_wan_ip", "external ip", "firebox ip", "wan ip", "public ip")),
-                RequiredField("SSL VPN port", Values("SSL VPN port", resources, "ssl_vpn_port", "ssl vpn port", "sslvpn port", "vpn port")),
-                RequiredField("Model", Values("Model", resources, "device_model", "model", "firebox model", "firewall model")),
+        var sections = new List<ClientInfoCategoryOverviewSection>();
+        if (connectionResources.Length > 0 || resources.Count == 0)
+        {
+            sections.Add(Section("Connection", "The connection details technicians use most often.",
+                RequiredField("External IP", Values("External IP", connectionResources, "public_wan_ip", "external ip", "firebox ip", "wan ip", "public ip")),
+                RequiredField("SSL VPN port", Values("SSL VPN port", connectionResources, "ssl_vpn_port", "ssl vpn port", "sslvpn port", "vpn port")),
+                RequiredField("Model", Values("Model", connectionResources, "device_model", "model", "firebox model", "firewall model")),
                 RequiredCredentialField("Status password", status),
                 RequiredCredentialField("Admin password", admin),
                 fireboxDatabase.Length > 0
@@ -329,8 +353,78 @@ public static class ClientInfoCategoryOverviewBuilder
                 RequiredCredentialField("AuthPoint user", authPoint),
                 RequiredCredentialField("SSL VPN password", sslVpn),
                 RequiredCredentialField("WatchGuard Cloud user / password", watchGuardCloud),
-                RequiredCredentialField("WatchGuard AD auth user / password", watchGuardAd))
-        ];
+                RequiredCredentialField("WatchGuard AD auth user / password", watchGuardAd)));
+        }
+
+        if (ispResources.Length > 0)
+        {
+            sections.Add(Section(
+                "Internet & circuits",
+                string.Empty,
+                RequiredField("Provider", Coalesce(
+                    "Provider",
+                    Providers("Provider", ispResources),
+                    Values("Provider", ispResources, "isp_provider", "isp", "carrier"))),
+                RequiredField("Circuit ID", Values(
+                    "Circuit ID",
+                    ispResources,
+                    "circuit_id",
+                    "account number",
+                    "circuit number")),
+                RequiredField("Account number", Values(
+                    "Account number",
+                    ispResources,
+                    "account_number",
+                    "customer number",
+                    "billing account")),
+                RequiredField("Service type", Values(
+                    "Service type",
+                    ispResources,
+                    "service_type",
+                    "service plan",
+                    "circuit type")),
+                RequiredField("Bandwidth", Values(
+                    "Bandwidth",
+                    ispResources,
+                    "bandwidth",
+                    "speed",
+                    "service speed")),
+                RequiredField("Public IP", Values(
+                    "Public IP",
+                    ispResources,
+                    "public_wan_ip",
+                    "public ip",
+                    "static ip")),
+                RequiredField("Gateway", Values("Gateway", ispResources, "gateway")),
+                RequiredField("Subnet / CIDR", Values(
+                    "Subnet / CIDR",
+                    ispResources,
+                    "subnet_cidr",
+                    "subnet",
+                    "cidr")),
+                RequiredField("Support contact", Values(
+                    "Support contact",
+                    ispResources,
+                    "support_contact",
+                    "support name",
+                    "account representative")),
+                RequiredField("Support phone", Values(
+                    "Support phone",
+                    ispResources,
+                    "support_phone",
+                    "support number")),
+                RequiredField("Location", Aggregate(
+                    "Location",
+                    ispResources.Select(resource => resource.LocationName))),
+                RequiredField("Status", Aggregate(
+                    "Status",
+                    ispResources.Select(resource => resource.Status))),
+                RequiredCredentialField(
+                    "Account username / password",
+                    ispCredentials)));
+        }
+
+        return sections;
     }
 
     private static IReadOnlyList<ClientInfoCategoryOverviewSection> BuildWifi(
@@ -386,10 +480,18 @@ public static class ClientInfoCategoryOverviewBuilder
         IReadOnlyList<ClientInfoResource> resources,
         IReadOnlyList<ClientInfoCredential> credentials)
     {
-        var microsoftResources = resources.Where(resource => IsFireDrillGroup(resource, "Microsoft 365")).ToArray();
-        var microsoftCredentials = credentials.Where(credential => IsFireDrillGroup(credential, "Microsoft 365")).ToArray();
-        var remoteResources = resources.Where(resource => IsFireDrillGroup(resource, "Remote Access")).ToArray();
-        var remoteCredentials = credentials.Where(credential => IsFireDrillGroup(credential, "Remote Access")).ToArray();
+        var remoteResources = resources.Where(IsRemoteAccessResource).ToArray();
+        var microsoftResources = resources
+            .Except(remoteResources)
+            .Where(IsMicrosoft365Resource)
+            .ToArray();
+        var remoteCredentials = credentials
+            .Where(credential => IsFireDrillGroup(credential, "Remote Access"))
+            .ToArray();
+        var microsoftCredentials = credentials
+            .Except(remoteCredentials)
+            .Where(credential => IsFireDrillGroup(credential, "Microsoft 365"))
+            .ToArray();
         var otherResources = resources.Except(microsoftResources).Except(remoteResources).ToArray();
         var otherCredentials = credentials.Except(microsoftCredentials).Except(remoteCredentials).ToArray();
 
@@ -398,10 +500,7 @@ public static class ClientInfoCategoryOverviewBuilder
             Section("Microsoft 365", "Tenant and administrative access.",
                 WithAccess(
                     [
-                        Values("Tenant / instance", microsoftResources, "tenant_instance", "tenant name", "tenant id", "onmicrosoft"),
-                        Coalesce("Admin portal",
-                            Values("Admin portal", microsoftResources, "admin_portal", "portal url", "console url"),
-                            Addresses("Admin portal", microsoftResources))
+                        Values("Tenant / instance", microsoftResources, "tenant_instance", "tenant name", "tenant id", "onmicrosoft")
                     ],
                     microsoftCredentials)),
             Section("Remote Access", "RustDesk, ScreenConnect, ConnectWise, Splashtop, and TeamViewer references.",
@@ -411,8 +510,7 @@ public static class ClientInfoCategoryOverviewBuilder
                         Providers("Provider", remoteResources),
                         Addresses("Portal / URL", remoteResources),
                         Values("Tenant / instance", remoteResources, "tenant_instance", "instance", "site name"),
-                        Values("Version", remoteResources, "version"),
-                        Values("Support", remoteResources, "support_contact", "support")
+                        Values("Version", remoteResources, "version")
                     ],
                     remoteCredentials)),
             Section("Other applications & cloud", "Important canonical application records outside the named FireDrill groups.",
@@ -421,7 +519,6 @@ public static class ClientInfoCategoryOverviewBuilder
                         Names("Services", otherResources),
                         Providers("Provider", otherResources),
                         Values("Tenant / instance", otherResources, "tenant_instance", "instance"),
-                        Values("Admin portal", otherResources, "admin_portal", "portal url"),
                         Values("Version / plan", otherResources, "version", "plan"),
                         Values("Renewal", otherResources, "renewal_date", "renewal")
                     ],
@@ -433,30 +530,92 @@ public static class ClientInfoCategoryOverviewBuilder
         IReadOnlyList<ClientInfoResource> resources,
         IReadOnlyList<ClientInfoCredential> credentials)
     {
-        var activeDirectoryResources = resources.Where(resource =>
+        var emailSecurityResources = resources
+            .Where(IsEmailSecurityResource)
+            .ToArray();
+        var emailSecurityResourceIds = emailSecurityResources
+            .Select(resource => resource.ResourceId)
+            .ToHashSet();
+        var emailSecurityCredentials = credentials
+            .Where(credential =>
+                credential.ResourceId.HasValue
+                    ? emailSecurityResourceIds.Contains(credential.ResourceId.Value)
+                    : MatchesTerms(
+                        credential,
+                        "barracuda",
+                        "email security",
+                        "spam filter"))
+            .ToArray();
+        var domainResources = resources.Except(emailSecurityResources).ToArray();
+        var activeDirectoryResources = domainResources.Where(resource =>
                 MatchesTerms(resource, "active directory", "domain controller", "directory service")
                 || !string.IsNullOrWhiteSpace(FindValue(
                     resource,
                     ["ad_domain", "active_directory_domain", "local_domain"])))
             .ToArray();
-        var emailDomainResources = resources.Except(activeDirectoryResources).ToArray();
+        var emailDomainResources = domainResources.Except(activeDirectoryResources).ToArray();
         var domainAdministrators = MatchingCredentials(
-            credentials,
+            credentials.Except(emailSecurityCredentials).ToArray(),
             ["domain admin", "active directory admin", "ad admin"]);
 
-        return
-        [
+        var sections = new List<ClientInfoCategoryOverviewSection>
+        {
             Section("Domain & AD", "The domain names and administrative access technicians use most often.",
                 RequiredField("AD domain", Coalesce(
                     "AD domain",
-                    Values("AD domain", resources, "ad_domain", "active_directory_domain", "local_domain"),
+                    Values("AD domain", domainResources, "ad_domain", "active_directory_domain", "local_domain"),
                     Values("AD domain", activeDirectoryResources, "domain_name", "domain"))),
                 RequiredField("Email domain", Coalesce(
                     "Email domain",
-                    Values("Email domain", resources, "email_domain", "primary_email_domain", "mail_domain"),
+                    Values("Email domain", domainResources, "email_domain", "primary_email_domain", "mail_domain"),
                     Values("Email domain", emailDomainResources, "domain_name", "domain"))),
                 RequiredCredentialField("Domain admin username / password", domainAdministrators))
-        ];
+        };
+        if (emailSecurityResources.Length > 0)
+        {
+            sections.Add(Section(
+                "Email Security",
+                string.Empty,
+                RequiredField("Provider", Providers("Provider", emailSecurityResources)),
+                RequiredField("Protected domain", Values(
+                    "Protected domain",
+                    emailSecurityResources,
+                    "domain_name",
+                    "email domain")),
+                RequiredField("Service", Values(
+                    "Service",
+                    emailSecurityResources,
+                    "product_service",
+                    "mail_provider",
+                    "service")),
+                RequiredField("Protected mailboxes", Values(
+                    "Protected mailboxes",
+                    emailSecurityResources,
+                    "tenant_name",
+                    "protected_scope",
+                    "coverage")),
+                RequiredField("Message retention", Values(
+                    "Message retention",
+                    emailSecurityResources,
+                    "retention",
+                    "message retention")),
+                RequiredField("Filtering / monitoring", Values(
+                    "Filtering / monitoring",
+                    emailSecurityResources,
+                    "backup_schedule",
+                    "policy",
+                    "monitoring")),
+                RequiredField("Renewal", Values(
+                    "Renewal",
+                    emailSecurityResources,
+                    "expiration_date",
+                    "renewal_date")),
+                RequiredCredentialField(
+                    "Admin username / password",
+                    emailSecurityCredentials)));
+        }
+
+        return sections;
     }
 
     private static IReadOnlyList<ClientInfoCategoryOverviewSection> BuildBackup(
@@ -474,7 +633,7 @@ public static class ClientInfoCategoryOverviewBuilder
         BuildProtection(
             resources,
             credentials,
-            ["ESET", "Barracuda"],
+            ["ESET"],
             "Other security");
 
     private static IReadOnlyList<ClientInfoCategoryOverviewSection> BuildProtection(
@@ -903,6 +1062,58 @@ public static class ClientInfoCategoryOverviewBuilder
             }
         ]);
         return group.Count == 0 ? "Other" : group[0].Name;
+    }
+
+    private static bool IsInternetCircuit(ClientInfoResource resource)
+    {
+        var type = Normalize(resource.TypeLabel);
+        return type.Contains("internetcircuit", StringComparison.Ordinal)
+            || type.Contains("internetprovider", StringComparison.Ordinal)
+            || type.Contains("broadband", StringComparison.Ordinal)
+            || type.Contains("modem", StringComparison.Ordinal)
+            || type.Equals("isp", StringComparison.Ordinal);
+    }
+
+    private static bool IsEmailSecurityResource(ClientInfoResource resource)
+    {
+        var identity = $"{resource.Name} {resource.TypeLabel} {resource.Provider}";
+        return new[]
+        {
+            "email security",
+            "mail security",
+            "spam filter",
+            "spam filtering",
+            "email gateway",
+            "mail gateway"
+        }.Any(term => identity.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsRemoteAccessResource(ClientInfoResource resource)
+    {
+        var identity = $"{resource.Name} {resource.TypeLabel} {resource.Provider} {resource.AddressOrUrl}";
+        return new[]
+        {
+            "remote access",
+            "rustdesk",
+            "screenconnect",
+            "connectwise control",
+            "splashtop",
+            "teamviewer"
+        }.Any(term => identity.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsMicrosoft365Resource(ClientInfoResource resource)
+    {
+        var identity = $"{resource.Name} {resource.TypeLabel} {resource.Provider} {resource.AddressOrUrl} "
+            + FindValue(resource, ["tenant_instance", "tenant name", "tenant id"]);
+        return new[]
+        {
+            "microsoft 365",
+            "office 365",
+            "m365",
+            "onmicrosoft.com",
+            "admin.microsoft.com"
+        }.Any(term => identity.Contains(term, StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool MatchesTerms(ClientInfoResource resource, params string[] terms) =>

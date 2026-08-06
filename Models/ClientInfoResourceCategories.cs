@@ -49,6 +49,10 @@ public static class ClientInfoResourceCategories
         {
             normalizedCategory = Wifi;
         }
+        else if (IsEmailSecurity(normalizedType.ToLowerInvariant()))
+        {
+            normalizedCategory = DomainsEmail;
+        }
         if (normalizedCategory == NeedsSorting)
         {
             return string.IsNullOrWhiteSpace(normalizedType)
@@ -81,6 +85,11 @@ public static class ClientInfoResourceCategories
         if (IsWifi(lower))
         {
             return Wifi;
+        }
+
+        if (IsEmailSecurity(lower))
+        {
+            return DomainsEmail;
         }
 
         foreach (var category in All.Where(
@@ -116,10 +125,12 @@ public static class ClientInfoResourceCategories
                 legacyProtectionPrefix,
                 StringComparison.OrdinalIgnoreCase))
         {
-            return ClassifyProtection(
-                    value[legacyProtectionPrefix.Length..]
-                        .Trim()
-                        .ToLowerInvariant())
+            var legacyType = value[legacyProtectionPrefix.Length..]
+                .Trim()
+                .ToLowerInvariant();
+            return (IsEmailSecurity(legacyType)
+                    ? DomainsEmail
+                    : ClassifyProtection(legacyType))
                 ?? NeedsSorting;
         }
 
@@ -241,6 +252,11 @@ public static class ClientInfoResourceCategories
             return ConnectionInternet;
         }
 
+        if (IsEmailSecurity(protectionLower))
+        {
+            return DomainsEmail;
+        }
+
         if (ClassifyProtection(protectionLower) is { } protectionCategory)
         {
             return protectionCategory;
@@ -298,4 +314,16 @@ public static class ClientInfoResourceCategories
             "access point",
             "wlan",
             "ssid");
+
+    private static bool IsEmailSecurity(string value) =>
+        ContainsAny(
+            value,
+            "email security",
+            "mail security",
+            "spam filter",
+            "spam filtering",
+            "mail filter",
+            "email filter",
+            "email gateway",
+            "mail gateway");
 }

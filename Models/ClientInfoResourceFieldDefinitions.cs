@@ -43,7 +43,11 @@ public static class ClientInfoResourceFieldDefinitions
                 new("serial_number", "Serial Number", "Text", 70, ShowInGrid: false),
                 new("firmware_version", "Firmware Version", "Text", 80, ShowInGrid: false),
                 new("isp_provider", "ISP / Provider", "Text", 90, ShowInGrid: false),
-                new("support_phone", "Support Phone", "Phone", 100, ShowInGrid: false)
+                new("support_phone", "Support Phone", "Phone", 100, ShowInGrid: false),
+                new("account_number", "Account Number", "Text", 110, ShowInGrid: false),
+                new("service_type", "Service Type", "Text", 120, ShowInGrid: false),
+                new("bandwidth", "Bandwidth", "Text", 130, ShowInGrid: false),
+                new("support_contact", "Support Contact", "Text", 140, ShowInGrid: false)
             ],
             [ClientInfoResourceCategories.Wifi] =
             [
@@ -59,11 +63,8 @@ public static class ClientInfoResourceFieldDefinitions
             [
                 new("tenant_instance", "Tenant / Instance", "Text", 10),
                 new("hosting_type", "Hosting Type", "Text", 20),
-                new("primary_ip", "Primary IP", "IpAddress", 30),
-                new("admin_portal", "Admin Portal", "Url", 40, ShowInGrid: false),
-                new("version", "Version", "Text", 50, ShowInGrid: false),
-                new("support_contact", "Support Contact", "Text", 60, ShowInGrid: false),
-                new("renewal_date", "Renewal Date", "Date", 70, ShowInGrid: false)
+                new("version", "Version", "Text", 30, ShowInGrid: false),
+                new("renewal_date", "Renewal Date", "Date", 40, ShowInGrid: false)
             ],
             [ClientInfoResourceCategories.DomainsEmail] =
             [
@@ -72,7 +73,16 @@ public static class ClientInfoResourceFieldDefinitions
                 new("dns_provider", "DNS Provider", "Text", 30),
                 new("mail_provider", "Mail Provider", "Text", 40, ShowInGrid: false),
                 new("tenant_name", "Tenant Name", "Text", 50, ShowInGrid: false),
-                new("expiration_date", "Expiration Date", "Date", 60, ShowInGrid: false)
+                new("expiration_date", "Expiration Date", "Date", 60, ShowInGrid: false),
+                // Email-security records historically lived under Security. Reuse
+                // those keys so moved records remain editable without migration.
+                new("product_service", "Email Security Service", "Text", 70, ShowInGrid: false),
+                new("protected_scope", "Protected Domains / Mailboxes", "Text", 80, ShowInGrid: false),
+                new("console_url", "Email Security Console", "Url", 90, ShowInGrid: false),
+                new("retention", "Message Retention", "Text", 100, ShowInGrid: false),
+                new("backup_schedule", "Filtering / Monitoring Policy", "Text", 110, ShowInGrid: false),
+                new("last_restore_test", "Last Review / Test", "Date", 120, ShowInGrid: false),
+                new("renewal_date", "Renewal Date", "Date", 130, ShowInGrid: false)
             ],
             [ClientInfoResourceCategories.Backup] =
             [
@@ -153,11 +163,11 @@ public static class ClientInfoResourceFieldDefinitions
             [ClientInfoResourceCategories.ApplicationsCloud] =
                 ["Microsoft 365 Tenant", "Line-of-Business Application", "Cloud Service", "Hosted Application", "License", "Other"],
             [ClientInfoResourceCategories.DomainsEmail] =
-                ["Domain", "DNS Hosting", "Email Tenant", "Registrar", "SSL Certificate", "Other"],
+                ["Domain", "DNS Hosting", "Email Tenant", "Email Security / Spam Filtering", "Registrar", "SSL Certificate", "Other"],
             [ClientInfoResourceCategories.Backup] =
                 ["Veeam Backup", "Backup Appliance", "Cloud Backup", "Microsoft 365 Backup", "Disaster Recovery", "Other"],
             [ClientInfoResourceCategories.Security] =
-                ["Antivirus / EDR", "MFA", "Spam Filtering", "SOC / SIEM", "Security Service", "Other"],
+                ["Antivirus / EDR", "MFA", "SOC / SIEM", "Security Service", "Other"],
             [ClientInfoResourceCategories.VendorsServices] =
                 ["Internet Provider", "Phone / VoIP Provider", "Copier Provider", "Software Vendor", "Support Contract", "Managed Service", "Other"],
             [ClientInfoResourceCategories.NeedsSorting] = ["Other", "Unknown"]
@@ -204,7 +214,18 @@ public static class ClientInfoResourceFieldDefinitions
         ForEditorCategory(category).Any(field => string.Equals(
             field.FieldKey,
             fieldKey,
-            StringComparison.OrdinalIgnoreCase));
+            StringComparison.OrdinalIgnoreCase))
+        || IsRetiredField(category, fieldKey);
+
+    public static bool IsRetiredField(string? category, string? fieldKey) =>
+        string.Equals(
+            category,
+            ClientInfoResourceCategories.ApplicationsCloud,
+            StringComparison.OrdinalIgnoreCase)
+        && fieldKey is not null
+        && (fieldKey.Equals("primary_ip", StringComparison.OrdinalIgnoreCase)
+            || fieldKey.Equals("admin_portal", StringComparison.OrdinalIgnoreCase)
+            || fieldKey.Equals("support_contact", StringComparison.OrdinalIgnoreCase));
 
     public static string CustomFieldKey(string label)
     {

@@ -21,10 +21,10 @@ public sealed class ClientInfoBetaTests
         Assert.Equal("Demo Client", demo.Snapshot.Profile.ClientName);
         Assert.Equal(2, demo.Snapshot.Locations.Count);
         Assert.Equal(3, demo.Snapshot.People.Count);
-        Assert.Equal(14, demo.Snapshot.Resources.Count);
-        Assert.Equal(21, demo.Snapshot.Credentials.Count);
-        Assert.Equal(21, demo.Summary.CredentialCount);
-        Assert.Equal(21, demo.SecretValues.Count);
+        Assert.Equal(15, demo.Snapshot.Resources.Count);
+        Assert.Equal(22, demo.Snapshot.Credentials.Count);
+        Assert.Equal(22, demo.Summary.CredentialCount);
+        Assert.Equal(22, demo.SecretValues.Count);
         Assert.Equal(3, demo.Equipment.Count);
         Assert.Equal(
             ClientInfoResourceCategories.All,
@@ -243,6 +243,50 @@ public sealed class ClientInfoBetaTests
             "Antivirus / EDR",
             ClientInfoResourceFieldDefinitions.TypeOptionsForCategory(
                 ClientInfoResourceCategories.Security));
+        Assert.Contains(
+            "Email Security / Spam Filtering",
+            ClientInfoResourceFieldDefinitions.TypeOptionsForCategory(
+                ClientInfoResourceCategories.DomainsEmail));
+        Assert.DoesNotContain(
+            "Spam Filtering",
+            ClientInfoResourceFieldDefinitions.TypeOptionsForCategory(
+                ClientInfoResourceCategories.Security));
+        Assert.Contains(
+            "Account Number",
+            ClientInfoResourceFieldDefinitions
+                .ForEditorCategory(ClientInfoResourceCategories.ConnectionInternet)
+                .Select(field => field.FieldLabel));
+        Assert.Contains(
+            "Bandwidth",
+            ClientInfoResourceFieldDefinitions
+                .ForEditorCategory(ClientInfoResourceCategories.ConnectionInternet)
+                .Select(field => field.FieldLabel));
+        Assert.Contains(
+            "Email Security Service",
+            ClientInfoResourceFieldDefinitions
+                .ForEditorCategory(ClientInfoResourceCategories.DomainsEmail)
+                .Select(field => field.FieldLabel));
+        var applicationFields = ClientInfoResourceFieldDefinitions
+            .ForEditorCategory(ClientInfoResourceCategories.ApplicationsCloud)
+            .Select(field => field.FieldKey)
+            .ToArray();
+        Assert.DoesNotContain("primary_ip", applicationFields);
+        Assert.DoesNotContain("admin_portal", applicationFields);
+        Assert.DoesNotContain("support_contact", applicationFields);
+        Assert.True(ClientInfoResourceFieldDefinitions.IsStandardField(
+            ClientInfoResourceCategories.ApplicationsCloud,
+            "primary_ip"));
+        Assert.True(ClientInfoResourceFieldDefinitions.IsStandardField(
+            ClientInfoResourceCategories.ApplicationsCloud,
+            "admin_portal"));
+        Assert.True(ClientInfoResourceFieldDefinitions.IsStandardField(
+            ClientInfoResourceCategories.ApplicationsCloud,
+            "support_contact"));
+        Assert.Equal(
+            "Domains & Email / Spam Filtering",
+            ClientInfoResourceCategories.Encode(
+                ClientInfoResourceCategories.Security,
+                "Spam Filtering"));
 
         var xaml = Read("ClientInfoBetaWindow.xaml");
         var viewModel = Read("ViewModels", "ClientInfoBetaViewModel.cs");
@@ -801,6 +845,68 @@ public sealed class ClientInfoBetaTests
     }
 
     [Fact]
+    public void ExplicitResourceLinksKeepCredentialsOnTheCorrectConnectionCard()
+    {
+        ClientInfoResource Resource(long id, string type, string name) => new()
+        {
+            ResourceId = id,
+            ResourceType = ClientInfoResourceCategories.Encode(
+                ClientInfoResourceCategories.ConnectionInternet,
+                type),
+            Name = name,
+            Provider = type == "Internet Circuit" ? "Comcast Business" : "WatchGuard",
+            IsActive = true
+        };
+        ClientInfoCredential Credential(long id, long resourceId, string name) => new()
+        {
+            CredentialId = id,
+            ResourceId = resourceId,
+            Name = name,
+            Username = $"user-{id}",
+            IsActive = true,
+            Secrets =
+            [
+                new ClientInfoSecretSummary
+                {
+                    SecretId = id * 10,
+                    CredentialId = id,
+                    SecretType = "Password",
+                    SecretLabel = "Password",
+                    IsCurrent = true
+                }
+            ]
+        };
+
+        var sections = ClientInfoCategoryOverviewBuilder.Build(
+            ClientInfoResourceCategories.ConnectionInternet,
+            [
+                Resource(71, "WatchGuard Firewall", "Main WatchGuard"),
+                Resource(72, "Internet Circuit", "Primary Comcast Circuit")
+            ],
+            [
+                Credential(701, 71, "Comcast-managed WatchGuard Admin"),
+                Credential(702, 72, "WatchGuard Comcast ISP Portal")
+            ]);
+
+        var connection = Assert.Single(
+            sections,
+            section => section.Title == "Connection");
+        var internet = Assert.Single(
+            sections,
+            section => section.Title == "Internet & circuits");
+        Assert.Contains(
+            connection.Fields.Single(field => field.Label == "Admin password").CredentialIds,
+            id => id == 701);
+        Assert.DoesNotContain(
+            connection.Fields.SelectMany(field => field.CredentialIds),
+            id => id == 702);
+        Assert.Equal(
+            [702L],
+            internet.Fields.Single(field =>
+                field.Label == "Account username / password").CredentialIds);
+    }
+
+    [Fact]
     public void RequestedNetworkRowsStayVisibleWhenInformationIsMissing()
     {
         var wifi = Assert.Single(ClientInfoCategoryOverviewBuilder.Build(
@@ -860,10 +966,13 @@ public sealed class ClientInfoBetaTests
         var connectionCredentials = demo.Snapshot.Credentials.Where(credential =>
             credential.ResourceId.HasValue
             && connectionResourceIds.Contains(credential.ResourceId.Value)).ToArray();
-        var connection = Assert.Single(ClientInfoCategoryOverviewBuilder.Build(
+        var connectionSections = ClientInfoCategoryOverviewBuilder.Build(
             ClientInfoResourceCategories.ConnectionInternet,
             connectionResources,
-            connectionCredentials)).Fields;
+            connectionCredentials);
+        var connection = Assert.Single(
+            connectionSections,
+            section => section.Title == "Connection").Fields;
         Assert.Equal(
             [
                 "External IP",
@@ -880,8 +989,46 @@ public sealed class ClientInfoBetaTests
             connection.Select(field => field.Label));
         Assert.Equal("443", connection[1].Value);
         Assert.All(connection.Skip(3), field => Assert.NotEmpty(field.Secrets));
+        var internet = Assert.Single(
+            connectionSections,
+            section => section.Title == "Internet & circuits").Fields;
+        Assert.Equal(
+            [
+                "Provider",
+                "Circuit ID",
+                "Account number",
+                "Service type",
+                "Bandwidth",
+                "Public IP",
+                "Gateway",
+                "Subnet / CIDR",
+                "Support contact",
+                "Support phone",
+                "Location",
+                "Status",
+                "Account username / password"
+            ],
+            internet.Select(field => field.Label));
+        Assert.Equal("Comcast Business", internet[0].Value);
+        Assert.Equal("DEMO-COMCAST-4821", internet[1].Value);
+        Assert.Equal("DEMO-ACCOUNT-1048", internet[2].Value);
+        Assert.Equal("1.25 Gbps down / 35 Mbps up", internet[4].Value);
+        Assert.Equal("isp-admin@example.test", internet[^1].Value);
+        Assert.NotEmpty(internet[^1].Secrets);
+        Assert.DoesNotContain(internet, field => field.Label == "SSL VPN port");
+
+        var ispResource = Assert.Single(
+            connectionResources,
+            resource => resource.TypeLabel == "Internet Circuit");
+        var selectedIsp = Assert.Single(ClientInfoCategoryOverviewBuilder.BuildSelected(
+            ClientInfoResourceCategories.ConnectionInternet,
+            ispResource,
+            connectionCredentials.Where(credential =>
+                credential.ResourceId == ispResource.ResourceId).ToArray()));
+        Assert.Equal("Internet & circuits", selectedIsp.Title);
+        Assert.Equal(internet.Select(field => field.Label), selectedIsp.Fields.Select(field => field.Label));
         Assert.All(
-            wifi.Concat(connection).SelectMany(field => field.Secrets),
+            wifi.Concat(connection).Concat(internet).SelectMany(field => field.Secrets),
             secret => Assert.True(demo.SecretValues.ContainsKey(secret.SecretId)));
     }
 
@@ -904,9 +1051,12 @@ public sealed class ClientInfoBetaTests
                 }).ToArray()
             };
 
-        var microsoft = ClientInfoCategoryOverviewBuilder.Build(
+        var applications = ClientInfoCategoryOverviewBuilder.Build(
             ClientInfoResourceCategories.ApplicationsCloud,
-            [Resource(ClientInfoResourceCategories.ApplicationsCloud, "Microsoft 365", ("tenant_instance", "example.onmicrosoft.com"), ("plan", "Business Premium"), ("support_contact", "Support"), ("renewal_date", "2030-01-01"))],
+            [
+                Resource(ClientInfoResourceCategories.ApplicationsCloud, "Microsoft 365", ("tenant_instance", "example.onmicrosoft.com"), ("primary_ip", "198.51.100.12"), ("admin_portal", "https://admin.example.test"), ("plan", "Business Premium"), ("support_contact", "Support"), ("renewal_date", "2030-01-01")),
+                Resource(ClientInfoResourceCategories.ApplicationsCloud, "ScreenConnect Remote Access", ("tenant_instance", "example"), ("primary_ip", "198.51.100.44"), ("admin_portal", "https://remote.example.test"), ("version", "25"), ("support_contact", "Help Desk"))
+            ],
             []);
         var domain = ClientInfoCategoryOverviewBuilder.Build(
             ClientInfoResourceCategories.DomainsEmail,
@@ -937,8 +1087,15 @@ public sealed class ClientInfoBetaTests
                 }
             ]);
 
-        var microsoftFields = Assert.Single(microsoft, section => section.Title == "Microsoft 365").Fields;
-        Assert.Equal(["Tenant / instance", "Admin portal"], microsoftFields.Select(field => field.Label));
+        var microsoftFields = Assert.Single(applications, section => section.Title == "Microsoft 365").Fields;
+        Assert.Equal(["Tenant / instance"], microsoftFields.Select(field => field.Label));
+        var remoteFields = Assert.Single(applications, section => section.Title == "Remote Access").Fields;
+        Assert.Equal(
+            ["Services", "Portal / URL", "Tenant / instance", "Version"],
+            remoteFields.Select(field => field.Label));
+        Assert.DoesNotContain(
+            applications.SelectMany(section => section.Fields),
+            field => field.Label is "Admin portal" or "Primary IP" or "Support");
         var domainFields = Assert.Single(domain).Fields;
         Assert.Equal(
             ["AD domain", "Email domain", "Domain admin username / password"],
@@ -950,6 +1107,42 @@ public sealed class ClientInfoBetaTests
         Assert.DoesNotContain(
             domainFields,
             field => field.Value.Contains("https://", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BarracudaMailProviderDoesNotTurnAnEmailDomainIntoAnEmailSecurityObject()
+    {
+        ClientInfoResource Resource(long id, string type, string name) => new()
+        {
+            ResourceId = id,
+            ResourceType = ClientInfoResourceCategories.Encode(
+                ClientInfoResourceCategories.DomainsEmail,
+                type),
+            Name = name,
+            Provider = "Barracuda",
+            IsActive = true,
+            Fields =
+            [
+                new ClientInfoResourceField
+                {
+                    FieldKey = "mail_provider",
+                    FieldLabel = "Mail Provider",
+                    ValueText = "Barracuda"
+                }
+            ]
+        };
+
+        var emailDomain = Assert.Single(ClientInfoCategoryOverviewBuilder.BuildSelected(
+            ClientInfoResourceCategories.DomainsEmail,
+            Resource(81, "Email Tenant", "Primary Email Domain"),
+            []));
+        var emailSecurity = Assert.Single(ClientInfoCategoryOverviewBuilder.BuildSelected(
+            ClientInfoResourceCategories.DomainsEmail,
+            Resource(82, "Email Security / Spam Filtering", "Barracuda Email Security"),
+            []));
+
+        Assert.Equal("Domain & AD", emailDomain.Title);
+        Assert.Equal("Email Security", emailSecurity.Title);
     }
 
     [Fact]
@@ -1020,11 +1213,39 @@ public sealed class ClientInfoBetaTests
         Assert.Equal(["WiFi"], Titles(ClientInfoResourceCategories.Wifi));
         Assert.Contains("Microsoft 365", Titles(ClientInfoResourceCategories.ApplicationsCloud));
         Assert.Contains("Remote Access", Titles(ClientInfoResourceCategories.ApplicationsCloud));
-        Assert.Equal(["Domain & AD"], Titles(ClientInfoResourceCategories.DomainsEmail));
+        Assert.Equal(
+            ["Domain & AD", "Email Security"],
+            Titles(ClientInfoResourceCategories.DomainsEmail));
         Assert.Contains("Veeam", Titles(ClientInfoResourceCategories.Backup));
         Assert.DoesNotContain("ESET", Titles(ClientInfoResourceCategories.Backup));
         Assert.Contains("ESET", Titles(ClientInfoResourceCategories.Security));
-        Assert.Contains("Barracuda", Titles(ClientInfoResourceCategories.Security));
+        Assert.DoesNotContain("Barracuda", Titles(ClientInfoResourceCategories.Security));
+        var barracuda = Assert.Single(
+            demo.Resources,
+            resource => resource.Name == "Barracuda Email Security");
+        Assert.Equal(ClientInfoResourceCategories.DomainsEmail, barracuda.Category);
+        var barracudaOverview = Assert.Single(
+            ClientInfoCategoryOverviewBuilder.BuildSelected(
+                ClientInfoResourceCategories.DomainsEmail,
+                barracuda,
+                demo.Credentials.Where(credential =>
+                    credential.ResourceId == barracuda.ResourceId).ToArray()));
+        Assert.Equal("Email Security", barracudaOverview.Title);
+        Assert.Equal(
+            [
+                "Provider",
+                "Protected domain",
+                "Service",
+                "Protected mailboxes",
+                "Message retention",
+                "Filtering / monitoring",
+                "Renewal",
+                "Admin username / password"
+            ],
+            barracudaOverview.Fields.Select(field => field.Label));
+        Assert.Equal("Barracuda", barracudaOverview.Fields[0].Value);
+        Assert.Equal("mail-admin@example.test", barracudaOverview.Fields[^1].Value);
+        Assert.NotEmpty(barracudaOverview.Fields[^1].Secrets);
 
         var builder = Read("Models", "ClientInfoCategoryOverviewBuilder.cs");
         Assert.Contains("CredentialFieldGrouper.Group", builder, StringComparison.Ordinal);
@@ -1178,6 +1399,8 @@ public sealed class ClientInfoBetaTests
     [InlineData("Wireless", "Aruba Central", ClientInfoResourceCategories.Wifi)]
     [InlineData("Veeam", "Backup Console", ClientInfoResourceCategories.Backup)]
     [InlineData("ESET", "Endpoint Security", ClientInfoResourceCategories.Security)]
+    [InlineData("Email Security", "Barracuda Admin", ClientInfoResourceCategories.DomainsEmail)]
+    [InlineData("Barracuda", "Barracuda Admin", ClientInfoResourceCategories.Security)]
     [InlineData("Backup & Security", "Veeam Admin", ClientInfoResourceCategories.Backup)]
     [InlineData("Backup & Security", "ESET Admin", ClientInfoResourceCategories.Security)]
     [InlineData("Active Directory", "Domain Admin", ClientInfoResourceCategories.DomainsEmail)]
@@ -1493,7 +1716,11 @@ public sealed class ClientInfoBetaTests
     [InlineData("Barracuda Backup", "Backup")]
     [InlineData("Backup & Security / Veeam Backup", "Backup")]
     [InlineData("Antivirus / EDR", "Security")]
-    [InlineData("Barracuda Email Security", "Security")]
+    [InlineData("Barracuda Email Security", "Domains & Email")]
+    [InlineData("Barracuda WAF", "Security")]
+    [InlineData("Spam Filtering", "Domains & Email")]
+    [InlineData("Security / Spam Filtering", "Domains & Email")]
+    [InlineData("Backup & Security / Spam Filtering", "Domains & Email")]
     [InlineData("CrowdStrike", "Security")]
     [InlineData("Backup & Security / Antivirus / EDR", "Security")]
     [InlineData("Backup & Security", "Needs Sorting")]

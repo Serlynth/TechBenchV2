@@ -20,8 +20,8 @@ public static class ClientInfoDemoData
         IsLive = false,
         LocationCount = 2,
         PersonCount = 3,
-        ResourceCount = 14,
-        CredentialCount = 21,
+        ResourceCount = 15,
+        CredentialCount = 22,
         IsDemo = true
     };
 
@@ -90,7 +90,9 @@ public static class ClientInfoDemoData
             Resource(-110, ClientInfoResourceCategories.ServersInfrastructure, "Server Room UPS", "UPS", "APC", "https://10.20.0.18", "Main Office", -1,
                 new Dictionary<string, string> { ["primary_ip"]="10.20.0.18", ["management_ip"]="10.20.0.18", ["role_purpose"]="Power protection for server rack", ["operating_system"]="APC Network Management Card", ["manufacturer_model"]="APC Smart-UPS 2200", ["serial_number"]="UPS-DEMO-01", ["additional_ips_subnet"]="Rack A · 208V · 42 minute runtime" }),
             Resource(-102, ClientInfoResourceCategories.ConnectionInternet, "Main WatchGuard", "WatchGuard Firewall", "WatchGuard", "https://10.20.0.1", "Main Office", -1,
-                new Dictionary<string, string> { ["public_wan_ip"]="203.0.113.24", ["ssl_vpn_port"]="443", ["gateway"]="203.0.113.1", ["subnet_cidr"]="203.0.113.24/29", ["circuit_id"]="FIBER-DEMO-4821", ["device_model"]="Firebox M390", ["serial_number"]="WG-DEMO-390", ["firmware_version"]="Fireware 12.10.4", ["isp_provider"]="Example Fiber", ["support_phone"]="800-555-0140" }),
+                new Dictionary<string, string> { ["public_wan_ip"]="203.0.113.24", ["ssl_vpn_port"]="443", ["gateway"]="203.0.113.1", ["subnet_cidr"]="203.0.113.24/29", ["circuit_id"]="DEMO-COMCAST-4821", ["device_model"]="Firebox M390", ["serial_number"]="WG-DEMO-390", ["firmware_version"]="Fireware 12.10.4", ["isp_provider"]="Comcast Business", ["support_phone"]="800-555-0188", ["account_number"]="", ["service_type"]="", ["bandwidth"]="", ["support_contact"]="" }),
+            Resource(-115, ClientInfoResourceCategories.ConnectionInternet, "Comcast Business Internet", "Internet Circuit", "Comcast Business", "https://business.comcast.com/account", "Main Office", -1,
+                new Dictionary<string, string> { ["public_wan_ip"]="203.0.113.24", ["ssl_vpn_port"]="", ["gateway"]="203.0.113.1", ["subnet_cidr"]="203.0.113.24/29", ["circuit_id"]="DEMO-COMCAST-4821", ["device_model"]="Comcast Business Gateway", ["serial_number"]="DEMO-CBR-1001", ["firmware_version"]="", ["isp_provider"]="Comcast Business", ["support_phone"]="800-555-0188", ["account_number"]="DEMO-ACCOUNT-1048", ["service_type"]="Comcast Business Internet", ["bandwidth"]="1.25 Gbps down / 35 Mbps up", ["support_contact"]="Comcast Business Support" }),
             Resource(-103, ClientInfoResourceCategories.Wifi, "Corporate Wireless", "Wireless Network / SSID", "Aruba", "https://aruba-central.example.test", "Main Office", -1,
                 new Dictionary<string, string> { ["management_ip"]="10.20.0.20", ["ssid"]="DemoClient-Staff", ["vlan"]="20", ["wireless_security"]="WPA3 Enterprise", ["controller_name"]="Aruba Central", ["guest_ssid"]="DemoClient-Guest", ["coverage_notes"]="Office and conference rooms; warehouse uses a separate AP group." }),
             Resource(-104, ClientInfoResourceCategories.ApplicationsCloud, "Microsoft 365", "Microsoft 365 Tenant", "Microsoft", "https://admin.microsoft.com", "Main Office", -1,
@@ -98,17 +100,17 @@ public static class ClientInfoDemoData
             Resource(-111, ClientInfoResourceCategories.ApplicationsCloud, "ScreenConnect Remote Access", "Hosted Application", "ConnectWise", "https://remote.example.test", "Main Office", -1,
                 new Dictionary<string, string> { ["tenant_instance"]="demo-client", ["hosting_type"]="Cloud / SaaS", ["primary_ip"]="198.51.100.44", ["admin_portal"]="https://remote.example.test", ["version"]="ScreenConnect 25", ["support_contact"]="CSRI Help Desk", ["renewal_date"]="2027-04-01" }),
             Resource(-105, ClientInfoResourceCategories.DomainsEmail, "Primary Domain", "Domain", "Example Registrar", "https://example.test", "Main Office", -1,
-                new Dictionary<string, string> { ["domain_name"]="example.test", ["registrar"]="Example Registrar", ["dns_provider"]="Cloudflare", ["mail_provider"]="Microsoft 365", ["tenant_name"]="democlient.onmicrosoft.com", ["expiration_date"]="2027-06-30" }),
+                new Dictionary<string, string> { ["domain_name"]="example.test", ["registrar"]="Example Registrar", ["dns_provider"]="Cloudflare", ["mail_provider"]="Microsoft 365", ["tenant_name"]="democlient.onmicrosoft.com", ["expiration_date"]="2027-06-30", ["product_service"]="", ["protected_scope"]="", ["console_url"]="", ["retention"]="", ["backup_schedule"]="", ["last_restore_test"]="", ["renewal_date"]="" }),
             Resource(-112, ClientInfoResourceCategories.DomainsEmail, "Active Directory", "Domain", "Microsoft", "https://dc01.example.test", "Main Office", -1,
-                new Dictionary<string, string> { ["domain_name"]="DEMOCLIENT.local", ["registrar"]="Internal Active Directory", ["dns_provider"]="DC01 and DC02", ["mail_provider"]="Microsoft 365", ["tenant_name"]="DEMOCLIENT", ["expiration_date"]="Not applicable" }),
+                new Dictionary<string, string> { ["domain_name"]="DEMOCLIENT.local", ["registrar"]="Internal Active Directory", ["dns_provider"]="DC01 and DC02", ["mail_provider"]="Microsoft 365", ["tenant_name"]="DEMOCLIENT", ["expiration_date"]="Not applicable", ["product_service"]="", ["protected_scope"]="", ["console_url"]="", ["retention"]="", ["backup_schedule"]="", ["last_restore_test"]="", ["renewal_date"]="" }),
             Resource(-106, ClientInfoResourceCategories.Backup, "Veeam Backup", "Veeam Backup", "Veeam", "https://backup-console.example.test", "Main Office", -1,
                 new Dictionary<string, string> { ["product_service"]="Veeam Backup & Replication", ["protected_scope"]="All servers and Microsoft 365", ["console_url"]="https://backup-console.example.test", ["retention"]="30 daily · 12 monthly", ["backup_schedule"]="Nightly at 10:00 PM", ["last_restore_test"]="2026-07-15", ["renewal_date"]="2027-03-01" }),
             Resource(-113, ClientInfoResourceCategories.Security, "ESET Protect", "Antivirus / EDR", "ESET", "https://eset.example.test", "Main Office", -1,
                 new Dictionary<string, string> { ["product_service"]="ESET Protect Advanced", ["protected_scope"]="42 endpoints and 4 servers", ["console_url"]="https://eset.example.test", ["retention"]="90 days of detections", ["backup_schedule"]="Continuous policy enforcement", ["last_restore_test"]="2026-07-20", ["renewal_date"]="2027-05-15" }),
-            Resource(-114, ClientInfoResourceCategories.Security, "Barracuda Email Security", "Spam Filtering", "Barracuda", "https://login.barracudanetworks.com", "Main Office", -1,
-                new Dictionary<string, string> { ["product_service"]="Barracuda Email Security Gateway", ["protected_scope"]="All Microsoft 365 mailboxes", ["console_url"]="https://login.barracudanetworks.com", ["retention"]="30-day message log", ["backup_schedule"]="Continuous mail filtering", ["last_restore_test"]="2026-07-21", ["renewal_date"]="2027-02-28" }),
-            Resource(-107, ClientInfoResourceCategories.VendorsServices, "Example Fiber Support", "Internet Provider", "Example Fiber", "https://support.example.test", "Main Office", -1,
-                new Dictionary<string, string> { ["account_number"]="ACCT-DEMO-1048", ["primary_contact"]="Business Support", ["support_phone"]="800-555-0140", ["support_email"]="support@example.test", ["portal_url"]="https://support.example.test", ["contract_expiration"]="2028-01-31" }),
+            Resource(-114, ClientInfoResourceCategories.DomainsEmail, "Barracuda Email Security", "Email Security / Spam Filtering", "Barracuda", "https://login.barracudanetworks.com", "Main Office", -1,
+                new Dictionary<string, string> { ["domain_name"]="example.test", ["registrar"]="", ["dns_provider"]="", ["mail_provider"]="Barracuda Email Security Gateway", ["tenant_name"]="All Microsoft 365 mailboxes", ["expiration_date"]="2027-02-28", ["product_service"]="Barracuda Email Security Gateway", ["protected_scope"]="All Microsoft 365 mailboxes", ["console_url"]="https://login.barracudanetworks.com", ["retention"]="30-day message log", ["backup_schedule"]="Continuous mail filtering", ["last_restore_test"]="2026-07-21", ["renewal_date"]="2027-02-28" }),
+            Resource(-107, ClientInfoResourceCategories.VendorsServices, "Comcast Business Support", "Internet Provider", "Comcast Business", "https://business.comcast.com/support", "Main Office", -1,
+                new Dictionary<string, string> { ["account_number"]="DEMO-COMCAST-4821", ["primary_contact"]="Business Support", ["support_phone"]="800-555-0188", ["support_email"]="support@example.test", ["portal_url"]="https://business.comcast.com/support", ["contract_expiration"]="2028-01-31" }),
             Resource(-108, ClientInfoResourceCategories.NeedsSorting, "Legacy Monitoring Note", "Unknown", "Legacy Vendor", "https://monitoring.example.test", "Warehouse", -2, new Dictionary<string, string>())
         };
 
@@ -143,6 +145,7 @@ public static class ClientInfoDemoData
             DemoCredential(-214, -102, "SSLVPN Password", "WatchGuard", "", "", "Demo-SSLVPN!2026"),
             DemoCredential(-215, -102, "WatchGuard Cloud", "WatchGuard", "cloud-admin@example.test", "https://cloud.watchguard.com", "Demo-WG-Cloud!2026"),
             DemoCredential(-216, -102, "WatchGuard AD Auth", "WatchGuard", "DEMOCLIENT\\wg-auth", "", "Demo-WG-AD!2026"),
+            DemoCredential(-222, -115, "Comcast Business Portal", "Internet Provider", "isp-admin@example.test", "https://business.comcast.com/account", "Demo-Comcast!2026"),
             DemoCredential(-202, -103, "Wireless Admin", "Wi-Fi", "network-admin@example.test", "https://aruba-central.example.test", "Demo-WiFi-Admin!2026"),
             DemoCredential(-217, -103, "DemoClient-Staff SSID Password", "Wireless", "", "", "Demo-Staff-WiFi!2026"),
             DemoCredential(-218, -103, "DemoClient-Guest SSID Password", "Wireless", "", "", "Demo-Guest-WiFi!2026"),
