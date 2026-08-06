@@ -201,7 +201,46 @@ public sealed partial class SqlServerTechBenchRepository
         bool allowWhdPostedLocalDelete = false,
         CancellationToken cancellationToken = default)
     {
-        await ExecuteNonQueryAsync(
+        try
+        {
+            await ExecuteDeleteWorkEntryAsync(
+                    id,
+                    allowWhdPostedLocalDelete,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (SqlException ex) when (
+            allowWhdPostedLocalDelete
+            && ex.Number == 51140
+            && ex.Message.Contains(
+                "verified missing",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            // Server packages installed before 0.6.16 gave this compatible
+            // parameter a stricter meaning: they also required a failed WHD
+            // verification log. The UI confirmation is now authoritative
+            // because WHD note verification proved unreliable. Record that
+            // user-confirmed removal in the legacy shape, then retry locally.
+            await PrepareLegacyWhdLocalDeleteConfirmationAsync(
+                    id,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            await ExecuteDeleteWorkEntryAsync(
+                    id,
+                    allowWhdPostedLocalDelete: true,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        _rowVersions.TryRemove(BuildRowVersionKey("WorkEntry", id), out _);
+        _rowVersions.TryRemove(BuildRowVersionKey("PersonalNote", id), out _);
+    }
+
+    private Task ExecuteDeleteWorkEntryAsync(
+        int id,
+        bool allowWhdPostedLocalDelete,
+        CancellationToken cancellationToken) =>
+        ExecuteNonQueryAsync(
                 Procedures.DeleteWorkEntry,
                 command =>
                 {
@@ -217,10 +256,57 @@ public sealed partial class SqlServerTechBenchRepository
                     // confirmation of a TechBench-only WHD-posted deletion.
                     AddBit(command, "@ConfirmMissingWhdTechNote", allowWhdPostedLocalDelete);
                 },
+                cancellationToken);
+
+    private async Task PrepareLegacyWhdLocalDeleteConfirmationAsync(
+        int id,
+        CancellationToken cancellationToken)
+    {
+        var entry = await GetWorkEntryAsync(id, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The work entry no longer exists.");
+        if (entry.SagePosted)
+        {
+            throw new InvalidOperationException(
+                "Entries posted to Sage are permanently locked and cannot be deleted.");
+        }
+
+        if (!entry.WhdPosted)
+        {
+            return;
+        }
+
+        const string externalReferencePrefix = "WHD-TECHNOTE-";
+        var verifiedLog = await GetLatestVerifiedWhdPostingLogAsync(id, cancellationToken)
+            .ConfigureAwait(false);
+        var externalReference = verifiedLog?.ExternalReference;
+        if (string.IsNullOrWhiteSpace(externalReference)
+            || !externalReference.StartsWith(
+                externalReferencePrefix,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            externalReference = $"{externalReferencePrefix}USER-CONFIRMED-{id}";
+        }
+
+        var techNoteReference = externalReference[externalReferencePrefix.Length..];
+        var compatibilityMessage =
+            $"WHD sync pending: TechNote #{techNoteReference} was not found. "
+            + "The user confirmed that it was already removed in WHD before deleting the TechBench copy.";
+
+        entry.LastError = compatibilityMessage;
+        await SaveWorkEntryAsync(entry, cancellationToken).ConfigureAwait(false);
+        await AddPostingLogAsync(
+                new PostingLog
+                {
+                    WorkEntryId = id,
+                    Destination = "WHD",
+                    Payload = "User-confirmed WHD removal for TechBench-only deletion compatibility.",
+                    Success = false,
+                    Message = compatibilityMessage,
+                    ExternalReference = externalReference,
+                    CreatedAt = DateTime.Now
+                },
                 cancellationToken)
             .ConfigureAwait(false);
-        _rowVersions.TryRemove(BuildRowVersionKey("WorkEntry", id), out _);
-        _rowVersions.TryRemove(BuildRowVersionKey("PersonalNote", id), out _);
     }
 
     public IReadOnlyList<WorkEntryLink> GetWorkEntryLinks(int workEntryId) =>
