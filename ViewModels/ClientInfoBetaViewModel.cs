@@ -555,6 +555,10 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             LegacyClientInfoSheetPath =
                 snapshot.Profile.LegacyClientInfoSheetPath;
             ReviewStatus = snapshot.Profile.ReviewStatus;
+            var displayCredentials = AddCredentialDisplayLinks(
+                snapshot.Credentials,
+                snapshot.Resources,
+                snapshot.People);
             Replace(Locations, snapshot.Locations);
             Replace(
                 People,
@@ -562,7 +566,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 {
                     AdCredential = FindUserAdCredential(
                         person,
-                        snapshot.Credentials)
+                        displayCredentials)
                 }));
             Replace(Resources, snapshot.Resources);
             Replace(
@@ -576,7 +580,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                     item => item.EquipmentId == selectedEquipmentId.Value)
                     ?? Equipment.FirstOrDefault()
                 : Equipment.FirstOrDefault();
-            Replace(Credentials, snapshot.Credentials);
+            Replace(Credentials, displayCredentials);
             RefreshResourceGroups();
             Replace(Facts, snapshot.Facts);
             Replace(ImportBatches, snapshot.ImportBatches);
@@ -602,6 +606,34 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         {
             ShowError("Client Info could not be loaded", exception);
         }
+    }
+
+    internal static IReadOnlyList<ClientInfoCredential> AddCredentialDisplayLinks(
+        IReadOnlyList<ClientInfoCredential> credentials,
+        IReadOnlyList<ClientInfoResource> resources,
+        IReadOnlyList<ClientInfoPerson> people)
+    {
+        var resourceNames = resources
+            .GroupBy(resource => resource.ResourceId)
+            .ToDictionary(group => group.Key, group => group.First().Name);
+        var personNames = people
+            .GroupBy(person => person.PersonId)
+            .ToDictionary(group => group.Key, group => group.First().DisplayName);
+        return credentials.Select(credential => credential with
+        {
+            LinkedResourceName = credential.ResourceId.HasValue
+                && resourceNames.TryGetValue(
+                    credential.ResourceId.Value,
+                    out var resourceName)
+                    ? resourceName
+                    : string.Empty,
+            LinkedPersonName = credential.PersonId.HasValue
+                && personNames.TryGetValue(
+                    credential.PersonId.Value,
+                    out var personName)
+                    ? personName
+                    : string.Empty
+        }).ToArray();
     }
 
     private void RefreshAttachments()
@@ -1542,6 +1574,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             var standaloneCredentials = Credentials.Where(credential =>
                     (!credential.ResourceId.HasValue
                      || !allResourceIds.Contains(credential.ResourceId.Value))
+                    && !credential.PersonId.HasValue
                     && string.Equals(
                         ClientInfoResourceCategories.ClassifyCredential(credential),
                         group.CategoryName,
@@ -2095,6 +2128,11 @@ public sealed class ClientInfoResourceGroup : ObservableObject
             OnPropertyChanged(nameof(OverviewCountLabel));
             OnPropertyChanged(nameof(HasOverviewSections));
         };
+        SelectedCredentials.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(SelectedCredentialCountLabel));
+            OnPropertyChanged(nameof(HasSelectedCredentials));
+        };
     }
 
     public string CategoryName { get; }
@@ -2104,9 +2142,13 @@ public sealed class ClientInfoResourceGroup : ObservableObject
         : $"{Resources.Count} records";
     public bool HasResources => Resources.Count > 0;
     public bool HasOverviewSections => OverviewSections.Count > 0;
+    public bool HasSelectedCredentials => SelectedCredentials.Count > 0;
     public string OverviewCountLabel => OverviewSections.Count == 1
         ? "1 important summary"
         : $"{OverviewSections.Count} important summaries";
+    public string SelectedCredentialCountLabel => SelectedCredentials.Count == 1
+        ? "1 login"
+        : $"{SelectedCredentials.Count} logins";
     public string SelectedOverviewLabel => SelectedResource?.Name
         ?? "Select a record from the full list";
     public ClientInfoResource? SelectedResource
@@ -2123,6 +2165,7 @@ public sealed class ClientInfoResourceGroup : ObservableObject
     }
     public ObservableCollection<ClientInfoResource> Resources { get; } = [];
     public ObservableCollection<ClientInfoCategoryOverviewSection> OverviewSections { get; } = [];
+    public ObservableCollection<ClientInfoCredential> SelectedCredentials { get; } = [];
     public IReadOnlyList<ClientInfoCategoryOverviewSection> AllOverviewSections { get; private set; } = [];
 
     public void Replace(
@@ -2139,6 +2182,7 @@ public sealed class ClientInfoResourceGroup : ObservableObject
         OnPropertyChanged(nameof(SelectedOverviewLabel));
         Resources.Clear();
         OverviewSections.Clear();
+        SelectedCredentials.Clear();
         foreach (var resource in resourceArray)
         {
             Resources.Add(resource);
@@ -2171,72 +2215,27 @@ public sealed class ClientInfoResourceGroup : ObservableObject
     private void RefreshSelectedOverview()
     {
         OverviewSections.Clear();
+        SelectedCredentials.Clear();
         if (SelectedResource is null)
         {
             return;
         }
 
-        var credentials = CredentialsForSelectedResource(SelectedResource);
+        foreach (var credential in _overviewCredentials
+                     .Where(credential => credential.IsActive
+                         && credential.ResourceId == SelectedResource.ResourceId)
+                     .OrderBy(credential => credential.Name,
+                         StringComparer.OrdinalIgnoreCase))
+        {
+            SelectedCredentials.Add(credential);
+        }
+
         foreach (var section in ClientInfoCategoryOverviewBuilder.BuildSelected(
                      CategoryName,
                      SelectedResource,
-                     credentials))
+                     SelectedCredentials.ToArray()))
         {
             OverviewSections.Add(section);
         }
-    }
-
-    private ClientInfoCredential[] CredentialsForSelectedResource(
-        ClientInfoResource resource)
-    {
-        var linked = _overviewCredentials
-            .Where(credential => credential.ResourceId == resource.ResourceId)
-            .ToArray();
-        var matchedStandalone = Resources.Count == 1
-            ? _standaloneCredentials
-            : _standaloneCredentials
-                .Where(credential => CredentialMatchesResource(
-                    credential,
-                    resource))
-                .ToArray();
-        return linked
-            .Concat(matchedStandalone)
-            .GroupBy(credential => credential.CredentialId)
-            .Select(group => group.First())
-            .ToArray();
-    }
-
-    private static bool CredentialMatchesResource(
-        ClientInfoCredential credential,
-        ClientInfoResource resource)
-    {
-        var credentialText = string.Join(
-            " ",
-            credential.Name,
-            credential.Category,
-            credential.Username,
-            credential.LoginUrl);
-        var resourceTerms = new[]
-        {
-            resource.Name,
-            resource.TypeLabel,
-            resource.Provider
-        }
-            .Where(term => !string.IsNullOrWhiteSpace(term))
-            .Select(term => term.Trim())
-            .Where(term => term.Length >= 3);
-        if (resourceTerms.Any(term => credentialText.Contains(
-                term,
-                StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
-        return Uri.TryCreate(resource.AddressOrUrl, UriKind.Absolute, out var resourceUri)
-            && Uri.TryCreate(credential.LoginUrl, UriKind.Absolute, out var credentialUri)
-            && string.Equals(
-                resourceUri.Host,
-                credentialUri.Host,
-                StringComparison.OrdinalIgnoreCase);
     }
 }
