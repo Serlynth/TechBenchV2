@@ -268,17 +268,16 @@ BEGIN
         N'SHA2_256',
         CONVERT(varbinary(max),
             N'ClientImportSecret|' + CONVERT(nvarchar(30),@ImportSecretId)));
-    OPEN SYMMETRIC KEY [tb_ClientSecretKey]
-        DECRYPTION BY CERTIFICATE [tb_ClientSecretCertificate];
+    DECLARE @EncryptedValue varbinary(max);
+    EXEC [tb_security].[EncryptClientSecretValue]
+        @SecretValue=@SecretValue,
+        @Authenticator=@Authenticator,
+        @EncryptedValue=@EncryptedValue OUTPUT;
     UPDATE [tb_import].[ClientInfoSecrets]
-    SET [ValueEncrypted]=EncryptByKey(
-            Key_GUID(N'tb_ClientSecretKey'),
-            CONVERT(varbinary(max),@SecretValue),
-            1,@Authenticator),
+    SET [ValueEncrypted]=@EncryptedValue,
         [ComparisonStatus]=N'NotCompared',
         [Resolution]=NULL
     WHERE [ImportSecretId]=@ImportSecretId;
-    CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
 
     IF EXISTS
         (SELECT 1 FROM [tb_import].[ClientInfoSecrets]

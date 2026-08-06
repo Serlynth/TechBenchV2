@@ -1464,6 +1464,45 @@ BEGIN
 END;
 GO
 
+IF OBJECT_ID(N'tb_security.EncryptClientSecretValue', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_security].[EncryptClientSecretValue];
+GO
+
+CREATE PROCEDURE [tb_security].[EncryptClientSecretValue]
+    @SecretValue nvarchar(max),
+    @Authenticator varbinary(32),
+    @EncryptedValue varbinary(max) OUTPUT
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF NULLIF(@SecretValue,N'') IS NULL OR @Authenticator IS NULL
+        THROW 52385,N'The client secret could not be encrypted.',1;
+
+    BEGIN TRY
+        OPEN SYMMETRIC KEY [tb_ClientSecretKey]
+            DECRYPTION BY CERTIFICATE [tb_ClientSecretCertificate];
+        SET @EncryptedValue=EncryptByKey(
+            Key_GUID(N'tb_ClientSecretKey'),
+            CONVERT(varbinary(max),@SecretValue),
+            1,
+            @Authenticator);
+        CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+    END TRY
+    BEGIN CATCH
+        IF EXISTS
+            (SELECT 1 FROM sys.openkeys WHERE [key_name]=N'tb_ClientSecretKey')
+            CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
+        THROW;
+    END CATCH;
+
+    IF @EncryptedValue IS NULL OR DATALENGTH(@EncryptedValue)=0
+        THROW 52385,N'The client secret could not be encrypted.',1;
+END;
+GO
+
 IF OBJECT_ID(N'tb_app.SetClientCredentialSecret', N'P') IS NOT NULL
     DROP PROCEDURE [tb_app].[SetClientCredentialSecret];
 GO
@@ -1538,19 +1577,16 @@ BEGIN
             N'SHA2_256',
             CONVERT(varbinary(max),
                 N'ClientSecret|' + CONVERT(nvarchar(30),@SecretId)));
-
-        OPEN SYMMETRIC KEY [tb_ClientSecretKey]
-            DECRYPTION BY CERTIFICATE [tb_ClientSecretCertificate];
+        DECLARE @EncryptedValue varbinary(max);
+        EXEC [tb_security].[EncryptClientSecretValue]
+            @SecretValue=@SecretValue,
+            @Authenticator=@Authenticator,
+            @EncryptedValue=@EncryptedValue OUTPUT;
         UPDATE [tb_client].[CredentialSecrets]
-        SET [ValueEncrypted]=EncryptByKey(
-                Key_GUID(N'tb_ClientSecretKey'),
-                CONVERT(varbinary(max),@SecretValue),
-                1,
-                @Authenticator),
+        SET [ValueEncrypted]=@EncryptedValue,
             [UpdatedByWindowsSid]=@ActorSid,
             [UpdatedAtUtc]=@NowUtc
         WHERE [SecretId]=@SecretId;
-        CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
 
         IF EXISTS
         (
@@ -1568,9 +1604,6 @@ BEGIN
         COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH
-        IF EXISTS
-            (SELECT 1 FROM sys.openkeys WHERE [key_name]=N'tb_ClientSecretKey')
-            CLOSE SYMMETRIC KEY [tb_ClientSecretKey];
         IF XACT_STATE()<>0 ROLLBACK TRANSACTION;
         THROW;
     END CATCH;
