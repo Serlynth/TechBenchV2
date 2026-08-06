@@ -93,6 +93,14 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("OverviewSections", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"Selected record\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding SelectedOverviewLabel}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Key=\"LinkedCredentialCardTemplate\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"Passwords &amp; access\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding SelectedCredentials}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding CurrentSecrets}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Command=\"{Binding DataContext.EditCredentialCommand", xaml, StringComparison.Ordinal);
+        Assert.Contains("Binding=\"{Binding LinkedObjectDisplay}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<TabItem Header=\"Passwords\">", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<Grid Width=\"500\" MinHeight=\"170\"", xaml, StringComparison.Ordinal);
         Assert.True(
             xaml.IndexOf("Header=\"Needs Sorting\"", StringComparison.Ordinal)
             > xaml.IndexOf("Header=\"Other Information\"", StringComparison.Ordinal));
@@ -316,6 +324,110 @@ public sealed class ClientInfoBetaTests
                 .Fields.Single(field => field.Label == "External IP").Value);
         Assert.Equal(completeExternalIps, Assert.Single(group.AllOverviewSections)
             .Fields.Single(field => field.Label == "External IP").Value);
+    }
+
+    [Fact]
+    public void ObjectPasswordsFollowOnlyTheExplicitlyLinkedSelectedRecord()
+    {
+        ClientInfoResource Resource(long id, string name) => new()
+        {
+            ResourceId = id,
+            ResourceType = ClientInfoResourceCategories.Encode(
+                ClientInfoResourceCategories.ApplicationsCloud,
+                "Cloud Application"),
+            Name = name
+        };
+
+        ClientInfoCredential Credential(
+            long id,
+            long? resourceId,
+            bool active = true,
+            long? personId = null) => new()
+        {
+            CredentialId = id,
+            ResourceId = resourceId,
+            PersonId = personId,
+            Name = $"Login {id}",
+            Category = "Applications & Cloud",
+            IsActive = active,
+            Secrets =
+            [
+                new ClientInfoSecretSummary
+                {
+                    SecretId = id * 10,
+                    CredentialId = id,
+                    SecretLabel = "Password",
+                    IsCurrent = true
+                }
+            ]
+        };
+
+        var primary = Resource(401, "Primary portal");
+        var secondary = Resource(402, "Secondary portal");
+        var primaryLogin = Credential(501, primary.ResourceId);
+        var secondaryLogin = Credential(502, secondary.ResourceId);
+        var inactiveLogin = Credential(503, primary.ResourceId, active: false);
+        var unlinkedLogin = Credential(504, null);
+        var personOnlyLogin = Credential(505, null, personId: 77);
+        var group = new ClientInfoResourceGroup(
+            ClientInfoResourceCategories.ApplicationsCloud,
+            "Applications");
+
+        group.Replace(
+            [primary, secondary],
+            [primaryLogin, secondaryLogin, inactiveLogin, unlinkedLogin, personOnlyLogin],
+            [unlinkedLogin]);
+
+        Assert.Same(primary, group.SelectedResource);
+        Assert.Same(primaryLogin, Assert.Single(group.SelectedCredentials));
+        Assert.True(group.HasSelectedCredentials);
+        Assert.Equal("1 login", group.SelectedCredentialCountLabel);
+        Assert.DoesNotContain(inactiveLogin, group.SelectedCredentials);
+        Assert.DoesNotContain(unlinkedLogin, group.SelectedCredentials);
+        Assert.DoesNotContain(personOnlyLogin, group.SelectedCredentials);
+        Assert.DoesNotContain(
+            group.OverviewSections.SelectMany(section => section.Fields)
+                .SelectMany(field => field.Secrets),
+            secret => secret.CredentialId == unlinkedLogin.CredentialId);
+
+        group.SelectedResource = secondary;
+
+        Assert.Same(secondaryLogin, Assert.Single(group.SelectedCredentials));
+        Assert.Same(
+            secondaryLogin.Secrets[0],
+            Assert.Single(group.SelectedCredentials).Secrets[0]);
+    }
+
+    [Fact]
+    public void MasterPasswordRowsIdentifyTheirLinkedSystemOrUser()
+    {
+        var systemCredential = new ClientInfoCredential
+        {
+            CredentialId = 601,
+            ResourceId = 701,
+            Name = "Firewall admin"
+        };
+        var userCredential = new ClientInfoCredential
+        {
+            CredentialId = 602,
+            PersonId = 801,
+            Name = "User AD"
+        };
+        var unlinkedCredential = new ClientInfoCredential
+        {
+            CredentialId = 603,
+            Name = "Legacy login"
+        };
+
+        var decorated = ClientInfoBetaViewModel.AddCredentialDisplayLinks(
+            [systemCredential, userCredential, unlinkedCredential],
+            [new ClientInfoResource { ResourceId = 701, Name = "Main Firebox" }],
+            [new ClientInfoPerson { PersonId = 801, DisplayName = "Alex Morgan" }]);
+
+        Assert.Equal("Main Firebox", decorated[0].LinkedObjectDisplay);
+        Assert.Equal("Alex Morgan", decorated[1].LinkedObjectDisplay);
+        Assert.Equal("(Unlinked)", decorated[2].LinkedObjectDisplay);
+        Assert.Same(systemCredential.Secrets, decorated[0].Secrets);
     }
 
     [Fact]

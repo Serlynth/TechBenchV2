@@ -247,6 +247,10 @@ public sealed record ClientInfoCredential
     public int ClientId { get; init; }
     public long? ResourceId { get; init; }
     public long? PersonId { get; init; }
+    [JsonIgnore]
+    public string LinkedResourceName { get; init; } = string.Empty;
+    [JsonIgnore]
+    public string LinkedPersonName { get; init; } = string.Empty;
     public string LocalKey { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;
     public string Category { get; init; } = string.Empty;
@@ -260,6 +264,24 @@ public sealed record ClientInfoCredential
     public byte[]? RowVersion { get; init; }
     public int SecretCount { get; init; }
     public IReadOnlyList<ClientInfoSecretSummary> Secrets { get; init; } = [];
+    [JsonIgnore]
+    public IReadOnlyList<ClientInfoSecretSummary> CurrentSecrets => Secrets
+        .Where(secret => secret.IsCurrent)
+        .ToArray();
+    [JsonIgnore]
+    public string LinkedObjectDisplay
+    {
+        get
+        {
+            var targets = new[] { LinkedResourceName, LinkedPersonName }
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            return targets.Length == 0
+                ? "(Unlinked)"
+                : string.Join(" / ", targets);
+        }
+    }
 }
 
 public sealed class ClientInfoSecretSummary : INotifyPropertyChanged
