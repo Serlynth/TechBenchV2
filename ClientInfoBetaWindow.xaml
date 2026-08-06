@@ -889,6 +889,34 @@
                                 <DataGridTextColumn Header="365 License"
                                                     Binding="{Binding Microsoft365License}"
                                                     MinWidth="175" />
+                                <DataGridCheckBoxColumn Header="365 uses AD login"
+                                                        Binding="{Binding Microsoft365UsesAdLogin}"
+                                                        MinWidth="125" />
+                                <DataGridTextColumn Header="365 Username"
+                                                    Binding="{Binding Microsoft365Username}"
+                                                    MinWidth="190" />
+                                <DataGridTemplateColumn Header="365 Password"
+                                                        MinWidth="265">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <WrapPanel VerticalAlignment="Center">
+                                                <TextBox Text="{Binding Microsoft365Password.InlineDisplayValue, Mode=OneWay, TargetNullValue=Uses AD login}"
+                                                         Style="{StaticResource SelectableValueStyle}"
+                                                         MinWidth="82"
+                                                         Margin="0,0,5,0" />
+                                                <Button Content="{Binding Microsoft365Password.InlineRevealLabel, TargetNullValue=Reveal}"
+                                                        Command="{Binding DataContext.RevealSecretCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding Microsoft365Password}"
+                                                        Padding="7,2"
+                                                        Margin="0,0,5,0" />
+                                                <Button Content="Copy"
+                                                        Command="{Binding DataContext.CopySecretCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding Microsoft365Password}"
+                                                        Padding="7,2" />
+                                            </WrapPanel>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
                                 <DataGridTextColumn Header="PC Name"
                                                     Binding="{Binding PcName}"
                                                     MinWidth="145" />

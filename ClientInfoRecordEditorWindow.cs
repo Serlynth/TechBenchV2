@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using TechBench.Models;
 using Button = System.Windows.Controls.Button;
+using CheckBox = System.Windows.Controls.CheckBox;
 using ComboBox = System.Windows.Controls.ComboBox;
 using Control = System.Windows.Controls.Control;
 using Grid = System.Windows.Controls.Grid;
@@ -24,13 +25,18 @@ public sealed record ClientInfoEditField(
     bool IsSecret = false,
     IReadOnlyList<string>? Options = null,
     bool AllowCustomValue = false,
-    string Tab = "");
+    string Tab = "",
+    bool IsBoolean = false,
+    string VisibleWhenKey = "",
+    string VisibleWhenValue = "");
 
 public sealed class ClientInfoRecordEditorWindow : Window
 {
     private readonly Dictionary<string, Control> _editors =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TabItem> _editorTabs =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, FrameworkElement> _fieldContainers =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly IReadOnlyList<ClientInfoEditField> _fields;
 
@@ -59,6 +65,7 @@ public sealed class ClientInfoRecordEditorWindow : Window
             Height = GridLength.Auto
         });
         root.Children.Add(CreateEditorContent(description));
+        HookConditionalVisibility();
 
         var buttons = new StackPanel
         {
@@ -169,7 +176,8 @@ public sealed class ClientInfoRecordEditorWindow : Window
         };
         foreach (var field in fields)
         {
-            panel.Children.Add(new TextBlock
+            var fieldPanel = new StackPanel();
+            fieldPanel.Children.Add(new TextBlock
             {
                 Text = field.IsRequired
                     ? $"{field.Label} *"
@@ -179,8 +187,10 @@ public sealed class ClientInfoRecordEditorWindow : Window
             });
             var editor = CreateEditor(field);
             editor.Margin = new Thickness(0, 0, 0, 15);
-            panel.Children.Add(editor);
+            fieldPanel.Children.Add(editor);
+            panel.Children.Add(fieldPanel);
             _editors[field.Key] = editor;
+            _fieldContainers[field.Key] = fieldPanel;
         }
 
         return new ScrollViewer
@@ -192,6 +202,20 @@ public sealed class ClientInfoRecordEditorWindow : Window
 
     private static Control CreateEditor(ClientInfoEditField field)
     {
+        if (field.IsBoolean)
+        {
+            return new CheckBox
+            {
+                IsChecked = string.Equals(
+                    field.Value,
+                    "Yes",
+                    StringComparison.OrdinalIgnoreCase),
+                Content = "Use the AD username and password",
+                MinHeight = 34,
+                VerticalContentAlignment = VerticalAlignment.Center
+            };
+        }
+
         if (field.Options is { Count: > 0 })
         {
             var combo = new ComboBox
@@ -235,6 +259,68 @@ public sealed class ClientInfoRecordEditorWindow : Window
         };
     }
 
+    private void HookConditionalVisibility()
+    {
+        foreach (var editor in _editors.Values)
+        {
+            switch (editor)
+            {
+                case ComboBox comboBox:
+                    comboBox.SelectionChanged += (_, _) =>
+                        RefreshConditionalVisibility();
+                    comboBox.AddHandler(
+                        TextBox.TextChangedEvent,
+                        new TextChangedEventHandler((_, _) =>
+                            RefreshConditionalVisibility()));
+                    break;
+                case TextBox textBox:
+                    textBox.TextChanged += (_, _) =>
+                        RefreshConditionalVisibility();
+                    break;
+                case PasswordBox passwordBox:
+                    passwordBox.PasswordChanged += (_, _) =>
+                        RefreshConditionalVisibility();
+                    break;
+                case CheckBox checkBox:
+                    checkBox.Checked += (_, _) =>
+                        RefreshConditionalVisibility();
+                    checkBox.Unchecked += (_, _) =>
+                        RefreshConditionalVisibility();
+                    break;
+            }
+        }
+
+        RefreshConditionalVisibility();
+    }
+
+    private void RefreshConditionalVisibility()
+    {
+        foreach (var field in _fields)
+        {
+            if (!_fieldContainers.TryGetValue(field.Key, out var container))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(field.VisibleWhenKey))
+            {
+                container.Visibility = Visibility.Visible;
+                continue;
+            }
+
+            var isVisible = _editors.TryGetValue(
+                    field.VisibleWhenKey,
+                    out var controllingEditor)
+                && string.Equals(
+                    ReadValue(controllingEditor),
+                    field.VisibleWhenValue,
+                    StringComparison.OrdinalIgnoreCase);
+            container.Visibility = isVisible
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+    }
+
     private void Save_Click(object sender, RoutedEventArgs e)
     {
         var values = _fields.ToDictionary(
@@ -270,6 +356,7 @@ public sealed class ClientInfoRecordEditorWindow : Window
             ComboBox comboBox => comboBox.IsEditable
                 ? comboBox.Text
                 : comboBox.SelectedItem?.ToString() ?? "",
+            CheckBox checkBox => checkBox.IsChecked == true ? "Yes" : "No",
             _ => ""
         };
 }

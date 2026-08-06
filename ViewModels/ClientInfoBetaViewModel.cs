@@ -20,6 +20,8 @@ namespace TechBench.ViewModels;
 public sealed class ClientInfoBetaViewModel : ObservableObject
 {
     private const string UserAdCredentialCategory = "Active Directory User";
+    private const string UserMicrosoft365CredentialCategory =
+        "Microsoft 365 User";
     private static readonly string[] ReviewStatuses =
     [
         "Unverified", "Verified", "AcceptedUnverified", "NeedsReview"
@@ -565,6 +567,9 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 snapshot.People.Select(person => person with
                 {
                     AdCredential = FindUserAdCredential(
+                        person,
+                        displayCredentials),
+                    Microsoft365Credential = FindUserMicrosoft365Credential(
                         person,
                         displayCredentials)
                 }));
@@ -1214,6 +1219,13 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     {
         var currentAdCredential = current?.AdCredential
             ?? (current is null ? null : FindUserAdCredential(current, Credentials));
+        var currentMicrosoft365Credential = current?.Microsoft365Credential
+            ?? (current is null
+                ? null
+                : FindUserMicrosoft365Credential(current, Credentials));
+        var microsoft365UsesAdLogin =
+            currentMicrosoft365Credential is null
+            || !currentMicrosoft365Credential.IsActive;
         var locationOptions = new[] { "(None)" }
             .Concat(Locations.Select(item => item.Name))
             .ToArray();
@@ -1243,6 +1255,32 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                     Options: BooleanOptions),
                 new("license", "Microsoft 365 license",
                     current?.Microsoft365License ?? ""),
+                new(
+                    "m365sameasad",
+                    "Microsoft 365 and AD use the same login",
+                    YesNo(microsoft365UsesAdLogin),
+                    Tab: "Microsoft 365 login",
+                    IsBoolean: true),
+                new(
+                    "m365username",
+                    "Microsoft 365 username",
+                    !string.IsNullOrWhiteSpace(
+                        currentMicrosoft365Credential?.Username)
+                        ? currentMicrosoft365Credential.Username
+                        : current?.Email ?? "",
+                    Tab: "Microsoft 365 login",
+                    VisibleWhenKey: "m365sameasad",
+                    VisibleWhenValue: "No"),
+                new(
+                    "m365password",
+                    FindCurrentPassword(currentMicrosoft365Credential) is null
+                        ? "Microsoft 365 password"
+                        : "Microsoft 365 password (leave blank to keep stored password)",
+                    "",
+                    IsSecret: true,
+                    Tab: "Microsoft 365 login",
+                    VisibleWhenKey: "m365sameasad",
+                    VisibleWhenValue: "No"),
                 new("pcname", "PC name", current?.PcName ?? ""),
                 new("phone", "Phone", current?.Phone ?? ""),
                 new("mobile", "Mobile phone", current?.MobilePhone ?? ""),
@@ -1294,6 +1332,12 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                     saved,
                     currentAdCredential,
                     values["adpassword"]);
+                SaveUserMicrosoft365Credential(
+                    saved,
+                    currentMicrosoft365Credential,
+                    IsYes(values["m365sameasad"]),
+                    values["m365username"],
+                    values["m365password"]);
                 Refresh();
             });
     }
@@ -1357,6 +1401,82 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             && credential.Category.Contains(
                 "Active Directory",
                 StringComparison.OrdinalIgnoreCase));
+
+    private void SaveUserMicrosoft365Credential(
+        ClientInfoPerson user,
+        ClientInfoCredential? currentCredential,
+        bool usesAdLogin,
+        string username,
+        string password)
+    {
+        if (!user.HasMicrosoft365 || usesAdLogin)
+        {
+            if (currentCredential is not null && currentCredential.IsActive)
+            {
+                _repository.SaveClientInfoCredential(currentCredential with
+                {
+                    Name = $"{user.DisplayName} Microsoft 365 account",
+                    IsActive = false,
+                    ReviewStatus = user.ReviewStatus
+                });
+            }
+
+            return;
+        }
+
+        var savedCredential = _repository.SaveClientInfoCredential(
+            (currentCredential ?? new ClientInfoCredential
+            {
+                ClientId = ClientId,
+                LocalKey = $"user-m365-{user.PersonId}"
+            }) with
+            {
+                PersonId = user.PersonId,
+                ResourceId = null,
+                Name = $"{user.DisplayName} Microsoft 365 account",
+                Category = UserMicrosoft365CredentialCategory,
+                Username = string.IsNullOrWhiteSpace(username)
+                    ? user.Email
+                    : username.Trim(),
+                LoginUrl = "https://www.office.com",
+                Notes = "Separate Microsoft 365 sign-in for this client user.",
+                IsActive = user.IsActive,
+                ReviewStatus = user.ReviewStatus
+            });
+
+        if (!string.IsNullOrWhiteSpace(password))
+        {
+            _repository.SetClientInfoSecret(
+                FindCurrentPassword(currentCredential) ?? new ClientInfoSecretSummary
+                {
+                    CredentialId = savedCredential.CredentialId,
+                    SecretType = "Password",
+                    SecretLabel = "Microsoft 365 password"
+                },
+                password,
+                user.ReviewStatus.Equals(
+                    "Verified",
+                    StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    private static ClientInfoCredential? FindUserMicrosoft365Credential(
+        ClientInfoPerson user,
+        IEnumerable<ClientInfoCredential> credentials) =>
+        credentials
+            .Where(credential => credential.PersonId == user.PersonId)
+            .Where(credential => credential.Category.Equals(
+                UserMicrosoft365CredentialCategory,
+                StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(credential => credential.IsActive)
+            .FirstOrDefault()
+        ?? credentials
+            .Where(credential => credential.PersonId == user.PersonId)
+            .Where(credential => credential.Category.Contains(
+                "Microsoft 365",
+                StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(credential => credential.IsActive)
+            .FirstOrDefault();
 
     private static ClientInfoSecretSummary? FindCurrentPassword(
         ClientInfoCredential? credential) => credential?.Secrets

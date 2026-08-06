@@ -153,6 +153,23 @@ public sealed class ClientInfoBetaTests
             viewModel,
             StringComparison.Ordinal);
         Assert.Contains("Tab: \"AD login\"", viewModel, StringComparison.Ordinal);
+        Assert.Contains(
+            "Tab: \"Microsoft 365 login\"",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains("IsBoolean: true", viewModel, StringComparison.Ordinal);
+        Assert.Contains(
+            "VisibleWhenKey: \"m365sameasad\"",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "SaveUserMicrosoft365Credential",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "RefreshConditionalVisibility",
+            editor,
+            StringComparison.Ordinal);
         Assert.Contains("access_new_name", viewModel, StringComparison.Ordinal);
         Assert.Contains("SaveResourceAccessEdits", viewModel, StringComparison.Ordinal);
         Assert.Contains(
@@ -375,6 +392,11 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("Header=\"AD Password\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"Microsoft 365\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"365 License\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"365 uses AD login\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"365 Username\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"365 Password\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Microsoft365UsesAdLogin", xaml, StringComparison.Ordinal);
+        Assert.Contains("Microsoft365Password", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"PC Name\"", xaml, StringComparison.Ordinal);
         Assert.Contains("PART_RightHeaderGripper", xaml, StringComparison.Ordinal);
         Assert.Contains("ScrollViewer.HorizontalScrollBarVisibility\" Value=\"Auto", xaml, StringComparison.Ordinal);
@@ -1596,6 +1618,15 @@ public sealed class ClientInfoBetaTests
                 names);
             Assert.Contains("AD Password", ReadHeaderRow(workbook, "Users"));
             Assert.Contains(
+                "Microsoft 365 Uses AD Login",
+                ReadHeaderRow(workbook, "Users"));
+            Assert.Contains(
+                "Microsoft 365 Username",
+                ReadHeaderRow(workbook, "Users"));
+            Assert.Contains(
+                "Microsoft 365 Password",
+                ReadHeaderRow(workbook, "Users"));
+            Assert.Contains(
                 "Primary IP",
                 ReadHeaderRow(workbook, "Servers & Infrastructure"));
             Assert.Contains(
@@ -1841,6 +1872,11 @@ public sealed class ClientInfoBetaTests
                 ("Name", "Jamie Rivera"),
                 ("AD Username", "ACME\\jrivera"),
                 ("AD Password", "user secret"),
+                ("Email", "jamie@example.test"),
+                ("Has Microsoft 365", "Yes"),
+                ("Microsoft 365 Uses AD Login", "No"),
+                ("Microsoft 365 Username", "jamie.365@example.test"),
+                ("Microsoft 365 Password", "m365 secret"),
                 ("Review Status", "Verified"));
             AppendRowByHeader(
                 path,
@@ -1864,7 +1900,7 @@ public sealed class ClientInfoBetaTests
             var credentials = package.Records
                 .Where(record => record.RecordType == "Credential")
                 .ToArray();
-            Assert.Equal(2, credentials.Length);
+            Assert.Equal(3, credentials.Length);
             Assert.Contains(
                 credentials,
                 credential => credential.PayloadJson.Contains(
@@ -1876,17 +1912,71 @@ public sealed class ClientInfoBetaTests
             Assert.Contains(
                 credentials,
                 credential => credential.PayloadJson.Contains(
+                        $"\"personKey\":\"{person.LocalKey}\"",
+                        StringComparison.Ordinal)
+                    && credential.PayloadJson.Contains(
+                        "jamie.365@example.test",
+                        StringComparison.Ordinal)
+                    && credential.PayloadJson.Contains(
+                        "Microsoft 365 User",
+                        StringComparison.Ordinal));
+            Assert.Contains(
+                credentials,
+                credential => credential.PayloadJson.Contains(
                         $"\"resourceKey\":\"{resource.LocalKey}\"",
                         StringComparison.Ordinal)
                     && credential.PayloadJson.Contains(
                         "apc-admin",
                         StringComparison.Ordinal));
             Assert.Equal(
-                ["ups secret", "user secret"],
+                ["m365 secret", "ups secret", "user secret"],
                 package.Secrets
                     .Select(secret => secret.SecretValue)
                     .OrderBy(value => value, StringComparer.Ordinal)
                     .ToArray());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CurrentWorkbookReusesAdLoginWhenMicrosoft365SyncIsYes()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "TechBenchClientInfoTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "Synced Microsoft 365 Login.xlsx");
+            var service = new ClientInfoWorkbookService();
+            service.CreateTemplate(path, 477, "Acme Legal");
+            AppendRowByHeader(
+                path,
+                "Users",
+                ("Name", "Jamie Rivera"),
+                ("AD Username", "ACME\\jrivera"),
+                ("AD Password", "ad secret"),
+                ("Has Microsoft 365", "Yes"),
+                ("Microsoft 365 Uses AD Login", "Yes"),
+                ("Microsoft 365 Username", "ignored@example.test"),
+                ("Microsoft 365 Password", "ignored secret"),
+                ("Review Status", "Verified"));
+
+            var package = service.Read(path);
+            var credential = Assert.Single(
+                package.Records,
+                record => record.RecordType == "Credential");
+
+            Assert.Contains(
+                "Active Directory User",
+                credential.PayloadJson,
+                StringComparison.Ordinal);
+            var secret = Assert.Single(package.Secrets);
+            Assert.Equal("ad secret", secret.SecretValue);
         }
         finally
         {

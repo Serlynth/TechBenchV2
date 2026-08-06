@@ -13,7 +13,8 @@ namespace TechBench.Services;
 
 public sealed class ClientInfoWorkbookService
 {
-    public const string TemplateVersion = "TB-CI-8";
+    public const string TemplateVersion = "TB-CI-9";
+    public const string InlineCredentialsTemplateVersion = "TB-CI-8";
     public const string PreviousTemplateVersion = "TB-CI-7";
     public const string ResourceFieldsTemplateVersion = "TB-CI-6";
     public const string WifiTemplateVersion = "TB-CI-5";
@@ -52,7 +53,7 @@ public sealed class ClientInfoWorkbookService
                 ["TechBench Client Info Migration Workbook", ""],
                 ["What to do", "Copy cleaned information into the matching category tabs. Use the category-specific IP and network columns. You may add optional columns whose headings begin with 'Custom:' for unusual client-specific details."],
                 ["Review each row", "Choose Verified, Keep as-is, Needs review, or Do not import. A workbook cannot be approved while a populated row is blank or still Needs review."],
-                ["Passwords", "Enter the primary username and password beside its user or system. Use Passwords for additional logins or credentials that are not tied to one row. All secrets are encrypted when imported and are never written to import logs."],
+                ["Passwords", "Enter the primary username and password beside its user or system. For Microsoft 365 users, choose whether the AD login is reused; when it is not, enter the separate Microsoft 365 username and password. Use Passwords for additional logins or credentials that are not tied to one row. All secrets are encrypted when imported and are never written to import logs."],
                 ["Template Version", TemplateVersion],
                 ["Workbook ID", Guid.NewGuid().ToString("D")],
                 ["Internal Client ID", clientId.ToString(CultureInfo.InvariantCulture)],
@@ -83,11 +84,13 @@ public sealed class ClientInfoWorkbookService
             "Users",
             [
                 ["Name", "Role/Department", "AD Username", "AD Password", "Email",
-                 "Has Microsoft 365", "Microsoft 365 License", "PC Name",
+                 "Has Microsoft 365", "Microsoft 365 License",
+                 "Microsoft 365 Uses AD Login", "Microsoft 365 Username",
+                 "Microsoft 365 Password", "PC Name",
                  "Phone", "Mobile Phone", "Location", "Contact Type",
                  "Is Primary", "Review Status"]
             ],
-            columnWidths: [26, 24, 24, 28, 32, 18, 26, 20, 18, 18, 22, 20, 12, 22]);
+            columnWidths: [26, 24, 24, 28, 32, 18, 26, 24, 30, 30, 20, 18, 18, 22, 20, 12, 22]);
         AddSheet(
             workbookPart,
             sheets,
@@ -205,6 +208,10 @@ public sealed class ClientInfoWorkbookService
         if (!string.Equals(version, TemplateVersion, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(
                 version,
+                InlineCredentialsTemplateVersion,
+                StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(
+                version,
                 PreviousTemplateVersion,
                 StringComparison.OrdinalIgnoreCase)
             && !string.Equals(
@@ -233,7 +240,7 @@ public sealed class ClientInfoWorkbookService
                 StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException(
-                $"Template version '{version}' is not supported. Expected {TemplateVersion}, {PreviousTemplateVersion}, {ResourceFieldsTemplateVersion}, {WifiTemplateVersion}, {ConnectionTemplateVersion}, {CategorizedTemplateVersion}, {FriendlyTemplateVersion}, or {LegacyTemplateVersion}.");
+                $"Template version '{version}' is not supported. Expected {TemplateVersion}, {InlineCredentialsTemplateVersion}, {PreviousTemplateVersion}, {ResourceFieldsTemplateVersion}, {WifiTemplateVersion}, {ConnectionTemplateVersion}, {CategorizedTemplateVersion}, {FriendlyTemplateVersion}, or {LegacyTemplateVersion}.");
         }
 
         if (!Guid.TryParse(GetRequired(info, "Workbook ID"), out var workbookId))
@@ -273,6 +280,10 @@ public sealed class ClientInfoWorkbookService
                 StringComparison.OrdinalIgnoreCase)
             || string.Equals(
                 version,
+                InlineCredentialsTemplateVersion,
+                StringComparison.OrdinalIgnoreCase)
+            || string.Equals(
+                version,
                 PreviousTemplateVersion,
                 StringComparison.OrdinalIgnoreCase)
             || string.Equals(
@@ -293,6 +304,14 @@ public sealed class ClientInfoWorkbookService
                 StringComparison.OrdinalIgnoreCase))
         {
             var hasInlineCredentials = string.Equals(
+                    version,
+                    TemplateVersion,
+                    StringComparison.OrdinalIgnoreCase)
+                || string.Equals(
+                    version,
+                    InlineCredentialsTemplateVersion,
+                    StringComparison.OrdinalIgnoreCase);
+            var hasSeparateMicrosoft365Credentials = string.Equals(
                 version,
                 TemplateVersion,
                 StringComparison.OrdinalIgnoreCase);
@@ -300,6 +319,10 @@ public sealed class ClientInfoWorkbookService
             var hasWifiSheet = string.Equals(
                     version,
                     TemplateVersion,
+                    StringComparison.OrdinalIgnoreCase)
+                || string.Equals(
+                    version,
+                    InlineCredentialsTemplateVersion,
                     StringComparison.OrdinalIgnoreCase)
                 || string.Equals(
                     version,
@@ -326,7 +349,8 @@ public sealed class ClientInfoWorkbookService
                 GetUsersSheet(tables),
                 records,
                 locationKeys,
-                hasInlineCredentials ? secrets : null);
+                hasInlineCredentials ? secrets : null,
+                hasSeparateMicrosoft365Credentials);
             var resourceKeys = new Dictionary<string, string?>(
                 StringComparer.OrdinalIgnoreCase);
             ParseSimpleResources(
@@ -569,7 +593,8 @@ public sealed class ClientInfoWorkbookService
         IReadOnlyList<string[]> rows,
         ICollection<ClientInfoImportRecord> records,
         IReadOnlyDictionary<string, string?> locationKeys,
-        ICollection<ClientInfoImportSecret>? secrets = null)
+        ICollection<ClientInfoImportSecret>? secrets = null,
+        bool parseSeparateMicrosoft365Credentials = false)
     {
         var keys = new Dictionary<string, string?>(
             StringComparer.OrdinalIgnoreCase);
@@ -630,6 +655,18 @@ public sealed class ClientInfoWorkbookService
                     reviewStatus,
                     records,
                     secrets);
+                if (parseSeparateMicrosoft365Credentials)
+                {
+                    ParseInlineMicrosoft365Credential(
+                        row.Values,
+                        row.Headers,
+                        row.RowNumber,
+                        name,
+                        localKey,
+                        reviewStatus,
+                        records,
+                        secrets);
+                }
             }
         }
 
@@ -682,6 +719,67 @@ public sealed class ClientInfoWorkbookService
                 credentialLocalKey,
                 "Password",
                 "AD password",
+                password));
+        }
+    }
+
+    private static void ParseInlineMicrosoft365Credential(
+        string[] values,
+        string[] headers,
+        int rowNumber,
+        string userName,
+        string personLocalKey,
+        string reviewStatus,
+        ICollection<ClientInfoImportRecord> records,
+        ICollection<ClientInfoImportSecret> secrets)
+    {
+        var hasMicrosoft365 = ParseBoolean(Value(
+            values,
+            headers,
+            "Has Microsoft 365"));
+        var usesAdLogin = ParseBoolean(
+            Value(values, headers, "Microsoft 365 Uses AD Login"),
+            fallback: true);
+        if (!hasMicrosoft365 || usesAdLogin)
+        {
+            return;
+        }
+
+        var username = Value(values, headers, "Microsoft 365 Username");
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            username = Value(values, headers, "Email");
+        }
+
+        var password = Value(
+            values,
+            headers,
+            "Microsoft 365 Password",
+            preserveWhitespace: true);
+        var credentialLocalKey = $"user-m365-credential-{rowNumber}";
+        records.Add(new ClientInfoImportRecord(
+            "Credential",
+            credentialLocalKey,
+            null,
+            JsonSerializer.Serialize(new
+            {
+                resourceKey = (string?)null,
+                personKey = personLocalKey,
+                name = $"{userName} Microsoft 365 account",
+                category = "Microsoft 365 User",
+                username,
+                loginUrl = "https://www.office.com",
+                notes = "Separate Microsoft 365 sign-in for this client user."
+            }),
+            "Users",
+            rowNumber,
+            reviewStatus));
+        if (!string.IsNullOrEmpty(password))
+        {
+            secrets.Add(new ClientInfoImportSecret(
+                credentialLocalKey,
+                "Password",
+                "Microsoft 365 password",
                 password));
         }
     }
@@ -1661,8 +1759,10 @@ public sealed class ClientInfoWorkbookService
                             : formatFirstRowAsTitle && rowIndex == 2
                                 ? 52D
                                 : formatFirstRowAsTitle && rowIndex == 3
-                                    ? 42D
-                        : 24D,
+                                    ? 74D
+                                    : formatFirstRowAsTitle && rowIndex is 10 or 11
+                                        ? 42D
+                                        : 24D,
                 CustomHeight = true
             };
             for (var columnIndex = 0;
@@ -1718,6 +1818,16 @@ public sealed class ClientInfoWorkbookService
                 worksheet,
                 rows[0],
                 "Is Primary",
+                "Yes,No");
+            AppendListValidation(
+                worksheet,
+                rows[0],
+                "Has Microsoft 365",
+                "Yes,No");
+            AppendListValidation(
+                worksheet,
+                rows[0],
+                "Microsoft 365 Uses AD Login",
                 "Yes,No");
         }
 
