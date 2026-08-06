@@ -162,6 +162,8 @@ public sealed record ClientInfoPerson
     [JsonIgnore]
     public ClientInfoCredential? AdCredential { get; init; }
     [JsonIgnore]
+    public ClientInfoCredential? Microsoft365Credential { get; init; }
+    [JsonIgnore]
     public string AdUsernameDisplay => !string.IsNullOrWhiteSpace(AdUsername)
         ? AdUsername
         : AdCredential?.Username ?? string.Empty;
@@ -170,6 +172,21 @@ public sealed record ClientInfoPerson
         .FirstOrDefault(secret => secret.IsCurrent
             && secret.SecretType.Equals("Password", StringComparison.OrdinalIgnoreCase))
         ?? AdCredential?.Secrets.FirstOrDefault(secret => secret.IsCurrent);
+    [JsonIgnore]
+    public bool Microsoft365UsesAdLogin =>
+        Microsoft365Credential is null || !Microsoft365Credential.IsActive;
+    [JsonIgnore]
+    public string Microsoft365Username => Microsoft365Credential?.Username
+        ?? string.Empty;
+    [JsonIgnore]
+    public ClientInfoSecretSummary? Microsoft365Password =>
+        Microsoft365Credential?.Secrets
+            .FirstOrDefault(secret => secret.IsCurrent
+                && secret.SecretType.Equals(
+                    "Password",
+                    StringComparison.OrdinalIgnoreCase))
+        ?? Microsoft365Credential?.Secrets.FirstOrDefault(
+            secret => secret.IsCurrent);
 }
 
 public sealed record ClientInfoResource
