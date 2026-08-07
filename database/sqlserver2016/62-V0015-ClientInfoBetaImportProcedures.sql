@@ -624,7 +624,11 @@ BEGIN
                 1,
                 CONVERT(
                     nvarchar(64),
-                    HASHBYTES(N'SHA2_256',credential.[ClientKey]),
+                    HASHBYTES(
+                        N'SHA2_256',
+                        CONVERT(
+                            varbinary(max),
+                            credential.[ClientKey]+N'|'+field.[FieldKey])),
                     2)) AS [ValuePlain]
         ) decrypted
         WHERE credential.[IsCurrent]=1
@@ -693,6 +697,19 @@ BEGIN
         FROM [tb_import].[ClientInfoSecrets] secret
         WHERE secret.[BatchId]=@BatchId;
 
+        DECLARE @HasFireDrillClient bit =
+            CASE WHEN EXISTS
+            (
+                SELECT 1
+                FROM [tb_data].[FireDrillCredentials] credential
+                WHERE credential.[IsCurrent]=1
+                  AND
+                  (
+                      LTRIM(RTRIM(credential.[ClientName]))=LTRIM(RTRIM(@ClientName))
+                      OR LTRIM(RTRIM(credential.[ClientName]))=LTRIM(RTRIM(COALESCE(@WhdLocationName,N'')))
+                      OR LTRIM(RTRIM(credential.[ClientName]))=LTRIM(RTRIM(COALESCE(@SageCustomerName,N'')))
+                  )
+            ) THEN 1 ELSE 0 END;
         DECLARE @HasFireDrillValues bit =
             CASE WHEN EXISTS(SELECT 1 FROM #FireDrillHashes)
                 THEN 1 ELSE 0 END;
@@ -701,7 +718,8 @@ BEGIN
             [ComparisonStatus]=
                 CASE
                     WHEN workbook_value.[ValueHash] IS NULL THEN N'NotComparable'
-                    WHEN @HasFireDrillValues=0 THEN N'WorkbookOnly'
+                    WHEN @HasFireDrillClient=0 THEN N'WorkbookOnly'
+                    WHEN @HasFireDrillValues=0 THEN N'NotComparable'
                     WHEN EXISTS
                     (
                         SELECT 1
@@ -720,16 +738,26 @@ BEGIN
         WHERE [BatchId]=@BatchId
           AND [IssueCode] IN
               (N'FIREDRILL_MISMATCH',N'WORKBOOK_ONLY_SECRET',
-               N'FIREDRILL_ONLY_SECRET',N'SECRET_NOT_COMPARABLE');
+               N'FIREDRILL_ONLY_SECRET',N'SECRET_NOT_COMPARABLE',
+               N'FIREDRILL_VALUES_UNAVAILABLE');
 
         INSERT INTO [tb_import].[ClientInfoIssues]
             ([BatchId],[Severity],[IssueCode],[Message])
         SELECT @BatchId,N'Warning',N'SECRET_NOT_COMPARABLE',
             CONVERT(nvarchar(20),COUNT(*))
-            +N' workbook secret(s) could not be decrypted for optional FireDrill comparison. Import review can continue.'
-        FROM [tb_import].[ClientInfoSecrets]
-        WHERE [BatchId]=@BatchId AND [ComparisonStatus]=N'NotComparable'
+            +N' workbook secret(s) could not be decrypted for comparison. Import review can continue.'
+        FROM [tb_import].[ClientInfoSecrets] secret
+        INNER JOIN #WorkbookHashes workbook_value
+            ON workbook_value.[ImportSecretId]=secret.[ImportSecretId]
+        WHERE secret.[BatchId]=@BatchId
+          AND workbook_value.[ValueHash] IS NULL
         HAVING COUNT(*)>0;
+
+        INSERT INTO [tb_import].[ClientInfoIssues]
+            ([BatchId],[Severity],[IssueCode],[Message])
+        SELECT @BatchId,N'Warning',N'FIREDRILL_VALUES_UNAVAILABLE',
+            N'The FireDrill client name matched, but none of its stored values could be compared. Import review can continue.'
+        WHERE @HasFireDrillClient=1 AND @HasFireDrillValues=0;
 
         INSERT INTO [tb_import].[ClientInfoIssues]
             ([BatchId],[Severity],[IssueCode],[Message])

@@ -2682,6 +2682,22 @@ public sealed class ClientInfoBetaTests
             compareBody,
             StringComparison.Ordinal);
         Assert.Contains(
+            "credential.[ClientKey]+N'|'+field.[FieldKey]",
+            compareBody,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "DECLARE @HasFireDrillClient bit",
+            compareBody,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "WHEN @HasFireDrillClient=0 THEN N'WorkbookOnly'",
+            compareBody,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "The FireDrill client name matched, but none of its stored values could be compared.",
+            compareBody,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "WHEN workbook_value.[ValueHash] IS NULL THEN N'NotComparable'",
             compareBody,
             StringComparison.Ordinal);
