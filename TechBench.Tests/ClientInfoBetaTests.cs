@@ -349,6 +349,51 @@ public sealed class ClientInfoBetaTests
     }
 
     [Fact]
+    public void OtherInformationUsesControlledValueTypesAndRejectedSaveKeepsValues()
+    {
+        var viewModel = Read("ViewModels", "ClientInfoBetaViewModel.cs");
+        var editor = Read("ClientInfoRecordEditorWindow.cs");
+        var procedures = Read(
+            "database",
+            "sqlserver2016",
+            "61-V0015-ClientInfoBetaProcedures.sql");
+        IReadOnlyDictionary<string, string>? attemptedValues = null;
+        var enteredValues = new Dictionary<string, string>
+        {
+            ["section"] = "Vendor details",
+            ["label"] = "Account number",
+            ["value"] = "ABC-123",
+            ["type"] = "Text"
+        };
+
+        var accepted = ClientInfoRecordEditorWindow.TrySaveValues(
+            values =>
+            {
+                attemptedValues = values;
+                return false;
+            },
+            enteredValues);
+
+        Assert.False(accepted);
+        Assert.Same(enteredValues, attemptedValues);
+        Assert.Equal("ABC-123", attemptedValues!["value"]);
+        Assert.Contains("Options: FactValueTypes", viewModel, StringComparison.Ordinal);
+        foreach (var valueType in new[]
+                 {
+                     "Text", "Number", "Boolean", "Date", "Url", "IpAddress", "Phone", "Email"
+                 })
+        {
+            Assert.Contains($"\"{valueType}\"", viewModel, StringComparison.Ordinal);
+            Assert.Contains($"N'{valueType}'", procedures, StringComparison.Ordinal);
+        }
+
+        Assert.True(
+            editor.IndexOf("if (!TrySaveValues(_trySave, values))", StringComparison.Ordinal)
+            < editor.IndexOf("DialogResult = true", StringComparison.Ordinal),
+            "The editor must invoke the save callback before closing the dialog.");
+    }
+
+    [Fact]
     public void ClientProfileWindowsDoNotStayAboveTheMainWorkspace()
     {
         var mainWindow = Read("MainWindow.xaml.cs");
@@ -557,7 +602,8 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("Header=\"AD Username\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"AD Password\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"Microsoft 365\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Header=\"365 License\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"License\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Binding=\"{Binding Microsoft365LicenseDisplay}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"365 uses AD login\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"365 Username\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"365 Password\"", xaml, StringComparison.Ordinal);
@@ -3176,6 +3222,112 @@ public sealed class ClientInfoBetaTests
             "[SourceSystem] = N'Sage'",
             canonical,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LegacyCanonicalBackfillAuditsAsTheRegisteredServiceActor()
+    {
+        var canonical = Read(
+            "database",
+            "sqlserver2016",
+            "61-V0015-ClientInfoBetaProcedures.sql");
+        var start = canonical.IndexOf(
+            "/* One-time/idempotent reconciliation",
+            StringComparison.Ordinal);
+        var end = canonical.IndexOf(
+            "IF OBJECT_ID(N'tb_client.MergeSourceClientIntoCanonical'",
+            start,
+            StringComparison.Ordinal);
+
+        Assert.True(start >= 0 && end > start);
+        var backfill = canonical[start..end];
+        Assert.Contains(
+            "INSERT INTO [tb_audit].[AuditEvents]",
+            backfill,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "@LegacyMatchActorSid, @LegacyMatchActorLoginName",
+            backfill,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "[tb_security].[WriteAuditEvent]",
+            backfill,
+            StringComparison.Ordinal);
+        Assert.Contains("BEGIN TRANSACTION", backfill, StringComparison.Ordinal);
+        Assert.Contains("COMMIT TRANSACTION", backfill, StringComparison.Ordinal);
+        Assert.Contains("ROLLBACK TRANSACTION", backfill, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SqlServer2016WideSnapshotKeysPreserveLengthWithoutClusteredKeyWarnings()
+    {
+        var schema = Read(
+            "database",
+            "sqlserver2016",
+            "25-V0006-WhdServerSyncSchema.sql");
+        var legacySync = Read(
+            "database",
+            "sqlserver2016",
+            "44-V0002-SyncImportProcedures.sql");
+        var whdSync = Read(
+            "database",
+            "sqlserver2016",
+            "48-V0006-WhdServerSyncProcedures.sql");
+        var equipment = Read(
+            "database",
+            "sqlserver2016",
+            "54-V0014-EquipmentBoardProcedures.sql");
+
+        Assert.True(
+            schema.Split(
+                "PRIMARY KEY NONCLUSTERED ([ExternalId])",
+                StringSplitOptions.None).Length - 1 >= 4,
+            "Fresh installs and reruns must both create SQL Server 2016-safe WHD keys.");
+        Assert.Contains("[ExternalId] nvarchar(500) NOT NULL", schema, StringComparison.Ordinal);
+        Assert.DoesNotContain("[ExternalId] nvarchar(450)", schema, StringComparison.Ordinal);
+        Assert.Contains(
+            "nvarchar(500) NOT NULL PRIMARY KEY NONCLUSTERED",
+            legacySync,
+            StringComparison.Ordinal);
+        Assert.True(
+            whdSync.Split(
+                "nvarchar(500) NOT NULL PRIMARY KEY NONCLUSTERED",
+                StringSplitOptions.None).Length - 1 >= 3);
+        Assert.True(
+            equipment.Split(
+                "nvarchar(500) NOT NULL PRIMARY KEY NONCLUSTERED",
+                StringSplitOptions.None).Length - 1 >= 3);
+        Assert.Contains(
+            "PRIMARY KEY NONCLUSTERED ([AccountSourceKey], [FieldKey])",
+            equipment,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StandalonePreservesCapabilityUpgradeOrderBeforeSchema15Finalization()
+    {
+        var builderPath = Path.Combine(
+            RepositoryRoot(),
+            "scripts",
+            "Build-StandaloneSqlDeployment.ps1");
+        var builder = File.ReadAllText(builderPath);
+        var work = builder.IndexOf("41-V0002-WorkProcedures.sql", StringComparison.Ordinal);
+        var shared = builder.IndexOf("42-V0002-SharedProcedures.sql", StringComparison.Ordinal);
+        var automatic = builder.IndexOf(
+            "49-V0007-ServerOwnedSageAndAdminPreviewProcedures.sql",
+            StringComparison.Ordinal);
+        var equipment = builder.IndexOf(
+            "54-V0014-EquipmentBoardProcedures.sql",
+            StringComparison.Ordinal);
+        var canonical = builder.IndexOf("61-V0015-ClientInfoBetaProcedures.sql", StringComparison.Ordinal);
+
+        Assert.True(
+            work >= 0
+            && shared > work
+            && automatic > shared
+            && equipment > automatic
+            && canonical > equipment,
+            "Schema 15 must finalize capabilities after the earlier procedure layers create and extend them.");
     }
 
     [Fact]

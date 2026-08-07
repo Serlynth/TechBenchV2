@@ -478,13 +478,15 @@ GO
 /* One-time/idempotent reconciliation for client pairs matched before the
    canonical TechBench profile existed. Future automatic and Admin matches
    call EnsureLiveClientInfo directly. */
-DECLARE @LegacyMatchActorSid varbinary(85) =
-(
-    SELECT [WindowsSid]
-    FROM [tb_security].[Users]
-    WHERE [LoginName] = N'$(SyncServicePrincipal)'
-);
+DECLARE @LegacyMatchActorSid varbinary(85);
+DECLARE @LegacyMatchActorLoginName nvarchar(256);
+SELECT
+    @LegacyMatchActorSid = [WindowsSid],
+    @LegacyMatchActorLoginName = [LoginName]
+FROM [tb_security].[Users]
+WHERE [LoginName] = N'$(SyncServicePrincipal)';
 IF @LegacyMatchActorSid IS NULL
+   OR NULLIF(LTRIM(RTRIM(@LegacyMatchActorLoginName)), N'') IS NULL
     THROW 52319, N'The configured sync service principal has no TechBench service actor for canonical client reconciliation.', 1;
 
 DECLARE @LegacyMatchedClientId int;
@@ -528,12 +530,23 @@ BEGIN
 
         DECLARE @LegacyMatchEntityId nvarchar(120) =
             CONVERT(nvarchar(120), @LegacyMatchedClientId);
-        EXEC [tb_security].[WriteAuditEvent]
-            @Action = N'LegacyMatchedClientPromoted',
-            @EntityType = N'Client',
-            @EntityId = @LegacyMatchEntityId,
-            @RequestId = NULL,
-            @DataJson = N'{"isLive":true,"reviewStatus":"Unverified"}';
+        /* This is a deployment-time reconciliation, so ORIGINAL_LOGIN() is
+           the installer rather than the registered application actor used
+           by WriteAuditEvent. Persist the audit with the validated sync
+           service identity inside the same transaction as the promotion. */
+        INSERT INTO [tb_audit].[AuditEvents]
+        (
+            [ActorWindowsSid], [ActorLoginName], [Action], [EntityType],
+            [EntityId], [RequestId], [DataJson], [OccurredAtUtc]
+        )
+        VALUES
+        (
+            @LegacyMatchActorSid, @LegacyMatchActorLoginName,
+            N'LegacyMatchedClientPromoted', N'Client',
+            @LegacyMatchEntityId, NEWID(),
+            N'{"isLive":true,"reviewStatus":"Unverified"}',
+            SYSUTCDATETIME()
+        );
 
         COMMIT TRANSACTION;
     END TRY

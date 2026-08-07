@@ -246,7 +246,7 @@ BEGIN
 
     DECLARE @Snapshot TABLE
     (
-        [ExternalId] nvarchar(500) NOT NULL PRIMARY KEY,
+        [ExternalId] nvarchar(500) NOT NULL PRIMARY KEY NONCLUSTERED,
         [Name] nvarchar(240) NOT NULL,
         [LocationName] nvarchar(240) NULL,
         [ContactName] nvarchar(240) NULL,
@@ -329,7 +329,7 @@ BEGIN
 
             DECLARE @StaleWhdLocationIds TABLE
             (
-                [ExternalId] nvarchar(500) NOT NULL PRIMARY KEY
+                [ExternalId] nvarchar(500) NOT NULL PRIMARY KEY NONCLUSTERED
             );
 
             SELECT @ExistingWhdLocationCount = COUNT(*)
@@ -559,7 +559,7 @@ BEGIN
 
         DECLARE @NewClients TABLE
         (
-            [ExternalId] nvarchar(500) NOT NULL PRIMARY KEY,
+            [ExternalId] nvarchar(500) NOT NULL PRIMARY KEY NONCLUSTERED,
             [ClientId] int NOT NULL
         );
 

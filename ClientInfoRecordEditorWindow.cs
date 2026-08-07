@@ -33,6 +33,7 @@ public sealed record ClientInfoEditField(
 
 public sealed class ClientInfoRecordEditorWindow : Window
 {
+    private readonly Func<IReadOnlyDictionary<string, string>, bool>? _trySave;
     private readonly Dictionary<string, Control> _editors =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TabItem> _editorTabs =
@@ -44,9 +45,11 @@ public sealed class ClientInfoRecordEditorWindow : Window
     public ClientInfoRecordEditorWindow(
         string title,
         IReadOnlyList<ClientInfoEditField> fields,
-        string? description = null)
+        string? description = null,
+        Func<IReadOnlyDictionary<string, string>, bool>? trySave = null)
     {
         _fields = fields;
+        _trySave = trySave;
         Title = title;
         Icon = new System.Windows.Media.Imaging.BitmapImage(
             new Uri("pack://application:,,,/Assets/csri-techbench-icon.ico"));
@@ -348,8 +351,18 @@ public sealed class ClientInfoRecordEditorWindow : Window
         }
 
         Values = values;
+        if (!TrySaveValues(_trySave, values))
+        {
+            return;
+        }
+
         DialogResult = true;
     }
+
+    internal static bool TrySaveValues(
+        Func<IReadOnlyDictionary<string, string>, bool>? trySave,
+        IReadOnlyDictionary<string, string> values) =>
+        trySave?.Invoke(values) ?? true;
 
     private static string ReadValue(Control control) =>
         control switch

@@ -316,7 +316,7 @@ BEGIN TRY
                 CONSTRAINT [DF_WhdClientIdentityHistory_Updated]
                 DEFAULT (SYSUTCDATETIME()),
             CONSTRAINT [PK_WhdClientIdentityHistory]
-                PRIMARY KEY CLUSTERED ([ExternalId]),
+                PRIMARY KEY NONCLUSTERED ([ExternalId]),
             CONSTRAINT [FK_WhdClientIdentityHistory_Client]
                 FOREIGN KEY ([ClientId]) REFERENCES [tb_data].[Clients]([Id])
                 ON DELETE CASCADE,
@@ -324,6 +324,31 @@ BEGIN TRY
                 FOREIGN KEY ([UpdatedByWindowsSid])
                 REFERENCES [tb_security].[Users]([WindowsSid])
         );
+    END;
+
+    /* SQL Server 2016 limits clustered keys to 900 bytes. ExternalId keeps
+       its established nvarchar(500) contract, while the 1,000-byte key uses
+       the SQL Server 2016 nonclustered-key limit instead. Upgrade databases
+       that received the original clustered definition before a later batch
+       stopped the deployment. */
+    IF EXISTS
+    (
+        SELECT 1
+        FROM sys.key_constraints AS key_constraint
+        INNER JOIN sys.indexes AS key_index
+            ON key_index.[object_id] = key_constraint.[parent_object_id]
+           AND key_index.[index_id] = key_constraint.[unique_index_id]
+        WHERE key_constraint.[parent_object_id]
+                = OBJECT_ID(N'tb_sync.WhdClientIdentityHistory', N'U')
+          AND key_constraint.[name] = N'PK_WhdClientIdentityHistory'
+          AND key_index.[type_desc] = N'CLUSTERED'
+    )
+    BEGIN
+        ALTER TABLE [tb_sync].[WhdClientIdentityHistory]
+            DROP CONSTRAINT [PK_WhdClientIdentityHistory];
+        ALTER TABLE [tb_sync].[WhdClientIdentityHistory]
+            ADD CONSTRAINT [PK_WhdClientIdentityHistory]
+                PRIMARY KEY NONCLUSTERED ([ExternalId]);
     END;
 
     IF NOT EXISTS
@@ -355,7 +380,7 @@ BEGIN TRY
                 CONSTRAINT [DF_WhdPendingClientRemovals_Updated]
                 DEFAULT (SYSUTCDATETIME()),
             CONSTRAINT [PK_WhdPendingClientRemovals]
-                PRIMARY KEY CLUSTERED ([ExternalId]),
+                PRIMARY KEY NONCLUSTERED ([ExternalId]),
             CONSTRAINT [CK_WhdPendingClientRemovals_Counts]
                 CHECK
                 (
@@ -368,6 +393,26 @@ BEGIN TRY
                 FOREIGN KEY ([UpdatedByWindowsSid])
                 REFERENCES [tb_security].[Users]([WindowsSid])
         );
+    END;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM sys.key_constraints AS key_constraint
+        INNER JOIN sys.indexes AS key_index
+            ON key_index.[object_id] = key_constraint.[parent_object_id]
+           AND key_index.[index_id] = key_constraint.[unique_index_id]
+        WHERE key_constraint.[parent_object_id]
+                = OBJECT_ID(N'tb_sync.WhdPendingClientRemovals', N'U')
+          AND key_constraint.[name] = N'PK_WhdPendingClientRemovals'
+          AND key_index.[type_desc] = N'CLUSTERED'
+    )
+    BEGIN
+        ALTER TABLE [tb_sync].[WhdPendingClientRemovals]
+            DROP CONSTRAINT [PK_WhdPendingClientRemovals];
+        ALTER TABLE [tb_sync].[WhdPendingClientRemovals]
+            ADD CONSTRAINT [PK_WhdPendingClientRemovals]
+                PRIMARY KEY NONCLUSTERED ([ExternalId]);
     END;
 
     IF NOT EXISTS (SELECT 1 FROM [tb_sync].[WhdSyncHealth] WHERE [HealthId] = 1)

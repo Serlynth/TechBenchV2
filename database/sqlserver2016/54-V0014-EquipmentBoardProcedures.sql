@@ -973,7 +973,7 @@ BEGIN
 
     CREATE TABLE #People
     (
-        [SourceKey] nvarchar(500) NOT NULL PRIMARY KEY,
+        [SourceKey] nvarchar(500) NOT NULL PRIMARY KEY NONCLUSTERED,
         [ClientName] nvarchar(240) NOT NULL,
         [DisplayName] nvarchar(240) NOT NULL,
         [RoleDepartment] nvarchar(240) NULL,
@@ -1070,7 +1070,7 @@ BEGIN
 
     CREATE TABLE #Accounts
     (
-        [SourceKey] nvarchar(500) NOT NULL PRIMARY KEY,
+        [SourceKey] nvarchar(500) NOT NULL PRIMARY KEY NONCLUSTERED,
         [PersonSourceKey] nvarchar(500) NOT NULL,
         [AccountSystem] nvarchar(240) NOT NULL,
         [RowHash] binary(32) NULL,
@@ -1112,7 +1112,7 @@ BEGIN
         [SortOrder] int NOT NULL,
         [FieldValue] nvarchar(3000) NULL,
         CONSTRAINT [PK_CredentialsClientUserFields]
-            PRIMARY KEY ([AccountSourceKey], [FieldKey]),
+            PRIMARY KEY NONCLUSTERED ([AccountSourceKey], [FieldKey]),
         CONSTRAINT [UQ_CredentialsClientUserFieldOrder]
             UNIQUE ([AccountSourceKey], [SortOrder])
     );
@@ -1233,7 +1233,7 @@ BEGIN
 
         CREATE TABLE #ChangedAccounts
         (
-            [SourceKey] nvarchar(500) NOT NULL PRIMARY KEY
+            [SourceKey] nvarchar(500) NOT NULL PRIMARY KEY NONCLUSTERED
         );
 
         INSERT INTO #ChangedAccounts([SourceKey])

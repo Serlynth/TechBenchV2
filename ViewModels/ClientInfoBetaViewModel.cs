@@ -33,6 +33,10 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     ];
 
     private static readonly string[] BooleanOptions = ["Yes", "No"];
+    private static readonly string[] FactValueTypes =
+    [
+        "Text", "Number", "Boolean", "Date", "Url", "IpAddress", "Phone", "Email"
+    ];
     private static readonly string[] AttachmentCategories =
     [
         "Photos", "Documents", "Hardware", "Location", "Diagram", "Other"
@@ -145,6 +149,10 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         CopySecretCommand = new RelayCommand(
             item => CopySecret(item as ClientInfoSecretSummary),
             item => CanRevealSecrets && item is ClientInfoSecretSummary);
+        CopyLoginUrlCommand = new RelayCommand(
+            item => CopyLoginUrl(item as ClientInfoCredential),
+            item => item is ClientInfoCredential credential
+                && !string.IsNullOrWhiteSpace(credential.LoginUrl));
         CreateTemplateCommand = new RelayCommand(_ => CreateTemplate());
         ImportWorkbookCommand = new RelayCommand(
             _ => ImportWorkbook(),
@@ -556,6 +564,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     public RelayCommand ReplaceSecretCommand { get; }
     public RelayCommand RevealSecretCommand { get; }
     public RelayCommand CopySecretCommand { get; }
+    public RelayCommand CopyLoginUrlCommand { get; }
     public RelayCommand CreateTemplateCommand { get; }
     public RelayCommand ImportWorkbookCommand { get; }
     public RelayCommand ReloadImportCommand { get; }
@@ -2289,43 +2298,49 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 
     private void EditFact(ClientInfoFact? current)
     {
-        var values = ShowEditor(
+        _ = ShowEditor(
             current is null ? "Add other information" : "Edit other information",
             [
                 new("section", "Section", current?.SectionName ?? "Other", true),
                 new("label", "Field label", current?.FieldLabel ?? "", true),
                 new("value", "Value", current?.ValueText ?? "", IsMultiline: true),
-                new("type", "Value type", current?.ValueType ?? "Text"),
+                new("type", "Value type", current?.ValueType ?? "Text",
+                    Options: FactValueTypes),
                 new("sort", "Sort order", (current?.SortOrder ?? 0).ToString()),
                 new("active", "Active", YesNo(current?.IsActive ?? true),
                     Options: BooleanOptions),
                 new("review", "Review status", current?.ReviewStatus ?? "Unverified",
                     Options: ReviewStatuses)
-            ]);
-        if (values is null)
-        {
-            return;
-        }
-
-        _ = int.TryParse(values["sort"], out var sortOrder);
-        ExecuteSave(
-            "other information",
-            () =>
+            ],
+            trySave: values =>
             {
-                _repository.SaveClientInfoFact((current ?? new ClientInfoFact
+                if (!int.TryParse(values["sort"], out var sortOrder))
                 {
-                    ClientId = ClientId
-                }) with
-                {
-                    SectionName = values["section"],
-                    FieldLabel = values["label"],
-                    ValueText = values["value"],
-                    ValueType = values["type"],
-                    SortOrder = sortOrder,
-                    IsActive = IsYes(values["active"]),
-                    ReviewStatus = values["review"]
-                });
-                Refresh();
+                    _dialogs.Error(
+                        "Invalid sort order",
+                        "Sort order must be a whole number.");
+                    return false;
+                }
+
+                return ExecuteSave(
+                    "other information",
+                    () =>
+                    {
+                        _repository.SaveClientInfoFact((current ?? new ClientInfoFact
+                        {
+                            ClientId = ClientId
+                        }) with
+                        {
+                            SectionName = values["section"],
+                            FieldLabel = values["label"],
+                            ValueText = values["value"],
+                            ValueType = values["type"],
+                            SortOrder = sortOrder,
+                            IsActive = IsYes(values["active"]),
+                            ReviewStatus = values["review"]
+                        });
+                        Refresh();
+                    });
             });
     }
 
@@ -2747,21 +2762,27 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     private IReadOnlyDictionary<string, string>? ShowEditor(
         string title,
         IReadOnlyList<ClientInfoEditField> fields,
-        string? description = null)
+        string? description = null,
+        Func<IReadOnlyDictionary<string, string>, bool>? trySave = null)
     {
-        var editor = new ClientInfoRecordEditorWindow(title, fields, description)
+        var editor = new ClientInfoRecordEditorWindow(
+            title,
+            fields,
+            description,
+            trySave)
         {
             Owner = FindOwner()
         };
         return editor.ShowDialog() == true ? editor.Values : null;
     }
 
-    private void ExecuteSave(string recordName, Action action)
+    private bool ExecuteSave(string recordName, Action action)
     {
         try
         {
             action();
             StatusMessage = $"{recordName} saved.";
+            return true;
         }
         catch (SqlException exception) when (IsConcurrencyConflict(exception))
         {
@@ -2770,6 +2791,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 "Another editor saved first",
                 $"The {recordName} changed on another workstation. "
                 + "The latest SQL version has been loaded; review it and try again.");
+            return false;
         }
         catch (ClientInfoResourceAccessSaveException exception)
         {
@@ -2778,10 +2800,31 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             _dialogs.Error(
                 "System saved; login could not be completed",
                 exception.Message);
+            return false;
         }
         catch (Exception exception)
         {
             ShowError($"{recordName} could not be saved", exception);
+            return false;
+        }
+    }
+
+    private void CopyLoginUrl(ClientInfoCredential? credential)
+    {
+        var loginUrl = credential?.LoginUrl.Trim();
+        if (string.IsNullOrWhiteSpace(loginUrl))
+        {
+            return;
+        }
+
+        try
+        {
+            WpfClipboard.SetText(loginUrl);
+            StatusMessage = $"Copied the login URL for {credential!.Name}.";
+        }
+        catch (Exception exception)
+        {
+            ShowError("Login URL could not be copied", exception);
         }
     }
 
