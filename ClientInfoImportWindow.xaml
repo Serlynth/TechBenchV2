@@ -346,7 +346,7 @@
                                     <Button Content="Approve Reviewed Workbook"
                                             Command="{Binding ApproveImportCommand}"
                                             Margin="0,0,8,8" />
-                                    <Button Content="Add to Client Information"
+                                    <Button Content="Make Live"
                                             Command="{Binding PromoteImportCommand}"
                                             Style="{StaticResource PrimaryButtonStyle}"
                                             Margin="0,0,0,8" />

@@ -28,6 +28,8 @@ public sealed class LocalPreferenceStoreTests
             created.PeopleLocationsSplitRatio = 0.38;
             created.LocationGridColumnWidths = [140, 110, 260];
             created.PeopleGridColumnWidths = [160, 150, 240];
+            created.AccessGridColumnWidths = [280, 170, 250];
+            created.AccessDetailsPaneWidth = 410;
             created.LastBenchModule = "AdminBench";
             created.TechBenchWorkspace = "Inventory";
             created.AdminBenchWorkspace = "Admin Center";
@@ -74,6 +76,8 @@ public sealed class LocalPreferenceStoreTests
             Assert.Equal(0.38, loaded.PeopleLocationsSplitRatio);
             Assert.Equal([140, 110, 260], loaded.LocationGridColumnWidths);
             Assert.Equal([160, 150, 240], loaded.PeopleGridColumnWidths);
+            Assert.Equal([280, 170, 250], loaded.AccessGridColumnWidths);
+            Assert.Equal(410, loaded.AccessDetailsPaneWidth);
             Assert.Equal("AdminBench", loaded.LastBenchModule);
             Assert.Equal("Inventory", loaded.TechBenchWorkspace);
             Assert.Equal("Admin Center", loaded.AdminBenchWorkspace);
@@ -170,6 +174,8 @@ public sealed class LocalPreferenceStoreTests
                 PeopleLocationsSplitRatio = 5,
                 LocationGridColumnWidths = [20, 120, double.NaN, 1700],
                 PeopleGridColumnWidths = [160, 220],
+                AccessGridColumnWidths = [35, 280, double.NaN, 1800],
+                AccessDetailsPaneWidth = 900,
                 LastBenchModule = "unexpected",
                 TechBenchWorkspace = "   ",
                 AdminBenchWorkspace = new string('x', 121),
@@ -201,6 +207,8 @@ public sealed class LocalPreferenceStoreTests
             Assert.Equal(0.8, loaded.PeopleLocationsSplitRatio);
             Assert.Equal([120], loaded.LocationGridColumnWidths);
             Assert.Equal([160, 220], loaded.PeopleGridColumnWidths);
+            Assert.Equal([280], loaded.AccessGridColumnWidths);
+            Assert.Equal(720, loaded.AccessDetailsPaneWidth);
             Assert.Equal("TechBench", loaded.LastBenchModule);
             Assert.Equal("Today", loaded.TechBenchWorkspace);
             Assert.Equal("Client Match", loaded.AdminBenchWorkspace);

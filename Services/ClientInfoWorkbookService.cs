@@ -86,7 +86,7 @@ public sealed class ClientInfoWorkbookService
                 ["TechBench Client Info Migration Workbook", ""],
                 ["What to do", "Copy cleaned information into the matching category tabs. The FireDrill tab uses this client's current FireDrill column names; copy existing FireDrill values there instead of renaming them or entering the same value twice. Use the category-specific tabs for new information and object-linked logins. You may add optional columns whose headings begin with 'Custom:' for unusual client-specific details."],
                 ["Review each row", "Choose Verified, Keep as-is, Needs review, or Do not import. A workbook cannot be approved while a populated row is blank or still Needs review."],
-                ["Passwords", "Enter the primary username and password beside each application, security product, server, service, or other system. Firewall rows provide separate Status and Admin logins. For Microsoft 365 users, choose whether the AD login is reused; when it is not, enter the separate Microsoft 365 username and password. Use Passwords for additional logins or credentials that are not tied to one row. Imported credentials stay linked to their item and also appear in the master Passwords section. All secrets are encrypted when imported and are never written to import logs."],
+                ["Passwords", "Enter the primary username and password beside each application, security product, server, service, or other system. Firewall rows provide separate Status and Admin logins. For Microsoft 365 users, choose whether Azure Sync is enabled; when it is not, enter the separate Microsoft 365 username and password. Use Passwords for additional logins or credentials that are not tied to one row. Imported credentials stay linked to their item and also appear in the master Passwords section. All secrets are encrypted when imported and are never written to import logs."],
                 ["Template Version", TemplateVersion],
                 ["Workbook ID", Guid.NewGuid().ToString("D")],
                 ["Internal Client ID", clientId.ToString(CultureInfo.InvariantCulture)],
@@ -119,7 +119,7 @@ public sealed class ClientInfoWorkbookService
             [
                 ["Name", "Role/Department", "AD Username", "AD Password", "Email",
                  "Has Microsoft 365", "Microsoft 365 License",
-                 "Microsoft 365 Uses AD Login", "Microsoft 365 Username",
+                 "Azure Sync", "Microsoft 365 Username",
                  "Microsoft 365 Password", "PC Name",
                  "Phone", "Mobile Phone", "Location", "Contact Type",
                  "Is Primary", "Review Status"]
@@ -567,7 +567,8 @@ public sealed class ClientInfoWorkbookService
                 ParseFireDrillCredentials(
                     GetSheet(tables, "FireDrill"),
                     records,
-                    secrets);
+                    secrets,
+                    resourceKeys);
             }
         }
         else if (string.Equals(
@@ -845,7 +846,11 @@ public sealed class ClientInfoWorkbookService
             headers,
             "Has Microsoft 365"));
         var usesAdLogin = ParseBoolean(
-            Value(values, headers, "Microsoft 365 Uses AD Login"),
+            ValueAny(
+                values,
+                headers,
+                "Azure Sync",
+                "Microsoft 365 Uses AD Login"),
             fallback: true);
         if (!hasMicrosoft365 || usesAdLogin)
         {
@@ -1360,12 +1365,21 @@ public sealed class ClientInfoWorkbookService
     private static void ParseFireDrillCredentials(
         IReadOnlyList<string[]> rows,
         ICollection<ClientInfoImportRecord> records,
-        ICollection<ClientInfoImportSecret> secrets)
+        ICollection<ClientInfoImportSecret> secrets,
+        IDictionary<string, string?> resourceKeys)
     {
         foreach (var row in DataRows(rows))
         {
             var reviewStatus = NormalizeReviewStatus(
                 Value(row.Values, row.Headers, "Review Status"));
+            var structuredWifiFields = ParseFireDrillWifi(
+                row.Headers,
+                row.Values,
+                row.RowNumber,
+                reviewStatus,
+                records,
+                secrets,
+                resourceKeys);
             for (var index = 0;
                  index < row.Headers.Length && index < row.Values.Length;
                  index++)
@@ -1377,6 +1391,7 @@ public sealed class ClientInfoWorkbookService
                         "Review Status",
                         StringComparison.OrdinalIgnoreCase)
                     || label.Equals("Client", StringComparison.OrdinalIgnoreCase)
+                    || structuredWifiFields.Contains(index)
                     || string.IsNullOrWhiteSpace(value))
                 {
                     continue;
@@ -1406,6 +1421,232 @@ public sealed class ClientInfoWorkbookService
                     label,
                     value));
             }
+        }
+    }
+
+    private static HashSet<int> ParseFireDrillWifi(
+        string[] headers,
+        string[] values,
+        int rowNumber,
+        string reviewStatus,
+        ICollection<ClientInfoImportRecord> records,
+        ICollection<ClientInfoImportSecret> secrets,
+        IDictionary<string, string?> resourceKeys)
+    {
+        var handled = new HashSet<int>();
+        var managementUrl = string.Empty;
+        var managementIp = string.Empty;
+        var adminUsername = string.Empty;
+        var adminPassword = string.Empty;
+        var employeeSsid = string.Empty;
+        var employeePassword = string.Empty;
+        var guestSsid = string.Empty;
+        var guestPassword = string.Empty;
+
+        for (var index = 0; index < headers.Length && index < values.Length; index++)
+        {
+            var label = headers[index].Trim();
+            var value = values[index].Trim();
+            if (string.IsNullOrWhiteSpace(label)
+                || string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            var normalized = label.ToLowerInvariant()
+                .Replace("wi-fi", "wifi", StringComparison.Ordinal)
+                .Replace("wireless", "wifi", StringComparison.Ordinal);
+            if (!normalized.Contains("wifi", StringComparison.Ordinal)
+                && !normalized.Contains("ssid", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (normalized.Contains("management", StringComparison.Ordinal)
+                && normalized.Contains("url", StringComparison.Ordinal))
+            {
+                managementUrl = value;
+            }
+            else if (normalized.Contains("management", StringComparison.Ordinal)
+                     && (normalized.Contains(" ip", StringComparison.Ordinal)
+                         || normalized.EndsWith("ip", StringComparison.Ordinal)))
+            {
+                managementIp = value;
+            }
+            else if (normalized.Contains("admin", StringComparison.Ordinal)
+                     && IsPasswordLabel(normalized))
+            {
+                adminPassword = value;
+            }
+            else if (normalized.Contains("admin", StringComparison.Ordinal)
+                     && (normalized.Contains("user", StringComparison.Ordinal)
+                         || normalized.EndsWith("admin", StringComparison.Ordinal)))
+            {
+                adminUsername = value;
+            }
+            else if ((normalized.Contains("employee", StringComparison.Ordinal)
+                      || normalized.Contains("staff", StringComparison.Ordinal))
+                     && normalized.Contains("ssid", StringComparison.Ordinal))
+            {
+                employeeSsid = value;
+            }
+            else if ((normalized.Contains("employee", StringComparison.Ordinal)
+                      || normalized.Contains("staff", StringComparison.Ordinal))
+                     && IsPasswordLabel(normalized))
+            {
+                employeePassword = value;
+            }
+            else if (normalized.Contains("guest", StringComparison.Ordinal)
+                     && normalized.Contains("ssid", StringComparison.Ordinal))
+            {
+                guestSsid = value;
+            }
+            else if (normalized.Contains("guest", StringComparison.Ordinal)
+                     && IsPasswordLabel(normalized))
+            {
+                guestPassword = value;
+            }
+            else if (normalized.Contains("ssid", StringComparison.Ordinal)
+                     && !IsPasswordLabel(normalized))
+            {
+                employeeSsid = value;
+            }
+            else
+            {
+                continue;
+            }
+
+            handled.Add(index);
+        }
+
+        if (handled.Count == 0)
+        {
+            return handled;
+        }
+
+        var resourceLocalKey = $"firedrill-wifi-{rowNumber}";
+        const string resourceName = "Primary Wi-Fi";
+        AddFriendlyLookup(resourceKeys, resourceName, resourceLocalKey);
+        records.Add(new ClientInfoImportRecord(
+            "Resource",
+            resourceLocalKey,
+            null,
+            JsonSerializer.Serialize(new
+            {
+                locationKey = (string?)null,
+                resourceType = ClientInfoResourceCategories.Encode(
+                    ClientInfoResourceCategories.Wifi,
+                    "Wireless Network / SSID"),
+                name = resourceName,
+                provider = "",
+                addressOrUrl = managementUrl,
+                status = "",
+                notes = "Imported from the matching FireDrill wireless fields.",
+                isActive = true
+            }),
+            "FireDrill",
+            rowNumber,
+            reviewStatus));
+
+        AddFireDrillWifiField(records, rowNumber, resourceLocalKey,
+            "management_ip", "Management IP", managementIp,
+            "IpAddress", 10, reviewStatus);
+        AddFireDrillWifiField(records, rowNumber, resourceLocalKey,
+            "ssid", "SSID", employeeSsid, "Text", 20, reviewStatus);
+        AddFireDrillWifiField(records, rowNumber, resourceLocalKey,
+            "guest_ssid", "Guest SSID", guestSsid,
+            "Text", 60, reviewStatus);
+
+        AddFireDrillWifiCredential(records, secrets, rowNumber,
+            resourceLocalKey, "admin", "Wireless Admin", adminUsername,
+            managementUrl, adminPassword, reviewStatus);
+        AddFireDrillWifiCredential(records, secrets, rowNumber,
+            resourceLocalKey, "employee",
+            string.IsNullOrWhiteSpace(employeeSsid)
+                ? "Employee Wi-Fi"
+                : $"{employeeSsid} Wi-Fi",
+            employeeSsid, "", employeePassword, reviewStatus);
+        AddFireDrillWifiCredential(records, secrets, rowNumber,
+            resourceLocalKey, "guest",
+            string.IsNullOrWhiteSpace(guestSsid)
+                ? "Guest Wi-Fi"
+                : $"{guestSsid} Wi-Fi",
+            guestSsid, "", guestPassword, reviewStatus);
+
+        return handled;
+    }
+
+    private static bool IsPasswordLabel(string normalizedLabel) =>
+        normalizedLabel.Contains("password", StringComparison.Ordinal)
+        || normalizedLabel.Contains("pass", StringComparison.Ordinal)
+        || normalizedLabel.EndsWith(" pw", StringComparison.Ordinal)
+        || normalizedLabel.EndsWith("pwd", StringComparison.Ordinal);
+
+    private static void AddFireDrillWifiField(
+        ICollection<ClientInfoImportRecord> records,
+        int rowNumber,
+        string resourceLocalKey,
+        string fieldKey,
+        string fieldLabel,
+        string value,
+        string valueType,
+        int sortOrder,
+        string reviewStatus)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        AddResourceFieldRecord(records, "FireDrill", rowNumber,
+            "firedrill-wifi", resourceLocalKey, fieldKey, fieldLabel,
+            value, valueType, sortOrder, reviewStatus);
+    }
+
+    private static void AddFireDrillWifiCredential(
+        ICollection<ClientInfoImportRecord> records,
+        ICollection<ClientInfoImportSecret> secrets,
+        int rowNumber,
+        string resourceLocalKey,
+        string suffix,
+        string name,
+        string username,
+        string loginUrl,
+        string password,
+        string reviewStatus)
+    {
+        if (string.IsNullOrWhiteSpace(username)
+            && string.IsNullOrWhiteSpace(loginUrl)
+            && string.IsNullOrEmpty(password))
+        {
+            return;
+        }
+
+        var localKey = $"firedrill-wifi-credential-{suffix}-{rowNumber}";
+        records.Add(new ClientInfoImportRecord(
+            "Credential",
+            localKey,
+            null,
+            JsonSerializer.Serialize(new
+            {
+                resourceKey = resourceLocalKey,
+                personKey = (string?)null,
+                name,
+                category = ClientInfoResourceCategories.Wifi,
+                username,
+                loginUrl,
+                notes = "Imported from the matching FireDrill wireless fields."
+            }),
+            "FireDrill",
+            rowNumber,
+            reviewStatus));
+        if (!string.IsNullOrEmpty(password))
+        {
+            secrets.Add(new ClientInfoImportSecret(
+                localKey,
+                "Password",
+                "Password",
+                password));
         }
     }
 
@@ -2179,7 +2420,7 @@ public sealed class ClientInfoWorkbookService
             AppendListValidation(
                 worksheet,
                 rows[0],
-                "Microsoft 365 Uses AD Login",
+                "Azure Sync",
                 "Yes,No");
             AppendListValidation(
                 worksheet,

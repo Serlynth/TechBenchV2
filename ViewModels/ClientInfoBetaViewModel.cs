@@ -254,6 +254,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         : Profile.IsLive
         ? "Client Information is live"
         : $"Client Information draft - {Profile.DisplayStatus}";
+    public bool IsLive => Profile.IsLive;
+    public bool ShowReviewWorkflow => !Profile.IsLive;
     public bool CanEdit => !IsDemo && _currentUser.CanWrite;
     public bool IsProfileReadOnly => !CanEdit;
     public bool CanRevealSecrets => IsDemo || !_currentUser.IsReadOnlyPreview;
@@ -284,6 +286,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             OnPropertyChanged(nameof(InternalClientIdLabel));
             OnPropertyChanged(nameof(CutoverLabel));
             OnPropertyChanged(nameof(ClientInfoStatusLabel));
+            OnPropertyChanged(nameof(IsLive));
+            OnPropertyChanged(nameof(ShowReviewWorkflow));
         }
     }
 
@@ -472,9 +476,12 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             if (SetProperty(ref _selectedPerson, value))
             {
                 EditPersonCommand.RaiseCanExecuteChanged();
+                OnPropertyChanged(nameof(HasSelectedPerson));
             }
         }
     }
+
+    public bool HasSelectedPerson => SelectedPerson is not null;
 
     public ClientInfoResource? SelectedResource
     {
@@ -1208,25 +1215,26 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 
     private void EditLocation(ClientInfoLocation? current)
     {
+        var editorFields = new List<ClientInfoEditField>
+        {
+            new("name", "Name", current?.Name ?? "", true),
+            new("type", "Location type", current?.LocationType ?? ""),
+            new("address1", "Address 1", current?.Address1 ?? ""),
+            new("address2", "Address 2", current?.Address2 ?? ""),
+            new("city", "City", current?.City ?? ""),
+            new("state", "State / province", current?.StateProvince ?? ""),
+            new("postal", "Postal code", current?.PostalCode ?? ""),
+            new("phone", "Main phone", current?.MainPhone ?? ""),
+            new("timezone", "Time zone ID", current?.TimeZoneId ?? ""),
+            new("primary", "Primary location", YesNo(current?.IsPrimary ?? false),
+                Options: BooleanOptions),
+            new("active", "Active", YesNo(current?.IsActive ?? true),
+                Options: BooleanOptions)
+        };
+        AddReviewEditorField(editorFields, current?.ReviewStatus);
         var values = ShowEditor(
             current is null ? "Add location" : "Edit location",
-            [
-                new("name", "Name", current?.Name ?? "", true),
-                new("type", "Location type", current?.LocationType ?? ""),
-                new("address1", "Address 1", current?.Address1 ?? ""),
-                new("address2", "Address 2", current?.Address2 ?? ""),
-                new("city", "City", current?.City ?? ""),
-                new("state", "State / province", current?.StateProvince ?? ""),
-                new("postal", "Postal code", current?.PostalCode ?? ""),
-                new("phone", "Main phone", current?.MainPhone ?? ""),
-                new("timezone", "Time zone ID", current?.TimeZoneId ?? ""),
-                new("primary", "Primary location", YesNo(current?.IsPrimary ?? false),
-                    Options: BooleanOptions),
-                new("active", "Active", YesNo(current?.IsActive ?? true),
-                    Options: BooleanOptions),
-                new("review", "Review status", current?.ReviewStatus ?? "Unverified",
-                    Options: ReviewStatuses)
-            ]);
+            editorFields);
         if (values is null)
         {
             return;
@@ -1252,7 +1260,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                     TimeZoneId = values["timezone"],
                     IsPrimary = IsYes(values["primary"]),
                     IsActive = IsYes(values["active"]),
-                    ReviewStatus = values["review"]
+                    ReviewStatus = ReviewStatusForSave(current?.ReviewStatus, values)
                 });
                 Refresh();
             });
@@ -1272,9 +1280,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         var locationOptions = new[] { "(None)" }
             .Concat(Locations.Select(item => item.Name))
             .ToArray();
-        var values = ShowEditor(
-            current is null ? "Add user" : "Edit user",
-            [
+        var editorFields = new List<ClientInfoEditField>
+        {
                 new("name", "Display name", current?.DisplayName ?? "", true),
                 new("location", "Location", current?.LocationName ?? "(None)",
                     Options: locationOptions),
@@ -1305,7 +1312,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                     VisibleWhenValue: "Yes"),
                 new(
                     "m365sameasad",
-                    "Microsoft 365 and AD use the same login",
+                    "Azure Sync",
                     YesNo(microsoft365UsesAdLogin),
                     Tab: "Microsoft 365 login",
                     IsBoolean: true),
@@ -1336,10 +1343,12 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 new("primary", "Primary contact", YesNo(current?.IsPrimary ?? false),
                     Options: BooleanOptions),
                 new("active", "Active", YesNo(current?.IsActive ?? true),
-                    Options: BooleanOptions),
-                new("review", "Review status", current?.ReviewStatus ?? "Unverified",
-                    Options: ReviewStatuses)
-            ]);
+                    Options: BooleanOptions)
+        };
+        AddReviewEditorField(editorFields, current?.ReviewStatus);
+        var values = ShowEditor(
+            current is null ? "Add user" : "Edit user",
+            editorFields);
         if (values is null)
         {
             return;
@@ -1374,7 +1383,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                     ContactType = values["type"],
                     IsPrimary = IsYes(values["primary"]),
                     IsActive = IsYes(values["active"]),
-                    ReviewStatus = values["review"]
+                    ReviewStatus = ReviewStatusForSave(current?.ReviewStatus, values)
                 });
                 SaveUserAdCredential(
                     saved,
@@ -1619,13 +1628,9 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 "active",
                 "Active",
                 YesNo(current?.IsActive ?? true),
-                Options: BooleanOptions),
-            new(
-                "review",
-                "Review status",
-                current?.ReviewStatus ?? "Unverified",
-                Options: ReviewStatuses)
+                Options: BooleanOptions)
         ]);
+        AddReviewEditorField(editorFields, current?.ReviewStatus);
         for (var index = 0; index < editorFields.Count; index++)
         {
             editorFields[index] = editorFields[index] with
@@ -1724,7 +1729,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                     Status = values["status"],
                     Notes = values["notes"],
                     IsActive = IsYes(values["active"]),
-                    ReviewStatus = values["review"]
+                    ReviewStatus = ReviewStatusForSave(current?.ReviewStatus, values)
                 });
                 foreach (var definition in standardFields)
                 {
@@ -2244,9 +2249,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             item.ResourceId == current?.ResourceId)?.Name ?? "(None)";
         var currentPerson = People.FirstOrDefault(item =>
             item.PersonId == current?.PersonId)?.DisplayName ?? "(None)";
-        var values = ShowEditor(
-            current is null ? "Add credential" : "Edit credential",
-            [
+        var editorFields = new List<ClientInfoEditField>
+        {
                 new("name", "Name", current?.Name ?? "", true),
                 new("category", "Category", current?.Category ?? ""),
                 new("resource", "System / service", currentResource,
@@ -2256,10 +2260,12 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 new("url", "Login URL", current?.LoginUrl ?? ""),
                 new("notes", "Notes", current?.Notes ?? "", IsMultiline: true),
                 new("active", "Active", YesNo(current?.IsActive ?? true),
-                    Options: BooleanOptions),
-                new("review", "Review status", current?.ReviewStatus ?? "Unverified",
-                    Options: ReviewStatuses)
-            ]);
+                    Options: BooleanOptions)
+        };
+        AddReviewEditorField(editorFields, current?.ReviewStatus);
+        var values = ShowEditor(
+            current is null ? "Add credential" : "Edit credential",
+            editorFields);
         if (values is null)
         {
             return;
@@ -2290,7 +2296,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                     LoginUrl = values["url"],
                     Notes = values["notes"],
                     IsActive = IsYes(values["active"]),
-                    ReviewStatus = values["review"]
+                    ReviewStatus = ReviewStatusForSave(current?.ReviewStatus, values)
                 });
                 Refresh();
             });
@@ -2298,20 +2304,21 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 
     private void EditFact(ClientInfoFact? current)
     {
+        var editorFields = new List<ClientInfoEditField>
+        {
+            new("section", "Section", current?.SectionName ?? "Other", true),
+            new("label", "Field label", current?.FieldLabel ?? "", true),
+            new("value", "Value", current?.ValueText ?? "", IsMultiline: true),
+            new("type", "Value type", current?.ValueType ?? "Text",
+                Options: FactValueTypes),
+            new("sort", "Sort order", (current?.SortOrder ?? 0).ToString()),
+            new("active", "Active", YesNo(current?.IsActive ?? true),
+                Options: BooleanOptions)
+        };
+        AddReviewEditorField(editorFields, current?.ReviewStatus);
         _ = ShowEditor(
             current is null ? "Add other information" : "Edit other information",
-            [
-                new("section", "Section", current?.SectionName ?? "Other", true),
-                new("label", "Field label", current?.FieldLabel ?? "", true),
-                new("value", "Value", current?.ValueText ?? "", IsMultiline: true),
-                new("type", "Value type", current?.ValueType ?? "Text",
-                    Options: FactValueTypes),
-                new("sort", "Sort order", (current?.SortOrder ?? 0).ToString()),
-                new("active", "Active", YesNo(current?.IsActive ?? true),
-                    Options: BooleanOptions),
-                new("review", "Review status", current?.ReviewStatus ?? "Unverified",
-                    Options: ReviewStatuses)
-            ],
+            editorFields,
             trySave: values =>
             {
                 if (!int.TryParse(values["sort"], out var sortOrder))
@@ -2337,7 +2344,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                             ValueType = values["type"],
                             SortOrder = sortOrder,
                             IsActive = IsYes(values["active"]),
-                            ReviewStatus = values["review"]
+                            ReviewStatus = ReviewStatusForSave(current?.ReviewStatus, values)
                         });
                         Refresh();
                     });
@@ -2724,7 +2731,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         {
             SelectedImportBatch = _repository.ApproveClientInfoImport(
                 SelectedImportBatch);
-            StatusMessage = "Workbook approved and ready to add to Client Information.";
+            StatusMessage = "Workbook approved and ready to make Client Information live.";
         }
         catch (Exception exception)
         {
@@ -2737,9 +2744,9 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     {
         if (SelectedImportBatch is null
             || !_dialogs.Confirm(
-                "Add workbook to Client Information",
-                "Add this approved workbook to the client's SQL information? FireDrill remains unchanged during the beta.",
-                "Add to Client Information",
+                "Make Client Information live",
+                "Make this approved workbook the client's live Client Information? FireDrill remains unchanged.",
+                "Make Live",
                 "Cancel"))
         {
             return;
@@ -2750,7 +2757,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             _repository.PromoteClientInfoImport(SelectedImportBatch);
             Refresh();
             StatusMessage =
-                "Complete. Client Information now contains the reviewed workbook data.";
+                "Complete. The reviewed workbook is now live Client Information.";
         }
         catch (Exception exception)
         {
@@ -2758,6 +2765,31 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             ReloadSelectedImport();
         }
     }
+
+    private void AddReviewEditorField(
+        ICollection<ClientInfoEditField> fields,
+        string? currentReviewStatus)
+    {
+        if (!ShowReviewWorkflow)
+        {
+            return;
+        }
+
+        fields.Add(new ClientInfoEditField(
+            "review",
+            "Review status",
+            currentReviewStatus ?? "Unverified",
+            Options: ReviewStatuses));
+    }
+
+    private string ReviewStatusForSave(
+        string? currentReviewStatus,
+        IReadOnlyDictionary<string, string> values) =>
+        ShowReviewWorkflow
+            ? values["review"]
+            : string.IsNullOrWhiteSpace(currentReviewStatus)
+                ? "Verified"
+                : currentReviewStatus;
 
     private IReadOnlyDictionary<string, string>? ShowEditor(
         string title,
@@ -2923,7 +2955,9 @@ public sealed class ClientInfoResourceGroup : ObservableObject
         ? "1 important summary"
         : $"{OverviewSections.Count} important summaries";
     public string SelectedOverviewLabel => SelectedResource?.Name
-        ?? "Select a record from the full list";
+        ?? (_standaloneCredentials.Length > 0
+            ? "Imported access information"
+            : "Select a record from the full list");
     public ClientInfoResource? SelectedResource
     {
         get => _selectedResource;
@@ -2991,6 +3025,13 @@ public sealed class ClientInfoResourceGroup : ObservableObject
         SelectedCredentials.Clear();
         if (SelectedResource is null)
         {
+            foreach (var section in ClientInfoCategoryOverviewBuilder.Build(
+                         CategoryName,
+                         [],
+                         _standaloneCredentials))
+            {
+                OverviewSections.Add(section);
+            }
             return;
         }
 

@@ -183,6 +183,10 @@ public sealed record ClientInfoPerson
     public bool Microsoft365UsesAdLogin =>
         Microsoft365Credential is null || !Microsoft365Credential.IsActive;
     [JsonIgnore]
+    public bool AzureSyncEnabled => Microsoft365UsesAdLogin;
+    [JsonIgnore]
+    public string AzureSyncLabel => AzureSyncEnabled ? "Yes" : "No";
+    [JsonIgnore]
     public string Microsoft365Username => Microsoft365Credential?.Username
         ?? string.Empty;
     [JsonIgnore]

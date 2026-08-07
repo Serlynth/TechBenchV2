@@ -608,11 +608,11 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("Header=\"Microsoft 365\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"License\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Binding=\"{Binding Microsoft365LicenseDisplay}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Header=\"365 uses AD login\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Azure Sync\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"365 Username\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"365 Password\"", xaml, StringComparison.Ordinal);
         Assert.Contains(
-            "Binding=\"{Binding Microsoft365UsesAdLogin, Mode=OneWay}\"",
+            "Binding=\"{Binding AzureSyncEnabled, Mode=OneWay}\"",
             xaml,
             StringComparison.Ordinal);
         Assert.Contains("Microsoft365Password", xaml, StringComparison.Ordinal);
@@ -1824,6 +1824,63 @@ public sealed class ClientInfoBetaTests
     }
 
     [Fact]
+    public void LegacyStandaloneWirelessImportsRemainVisibleOnTheWifiTab()
+    {
+        var credentials = new[]
+        {
+            new ClientInfoCredential
+            {
+                CredentialId = 1,
+                Category = ClientInfoResourceCategories.Wifi,
+                Name = "Wireless Employee SSID",
+                IsActive = true,
+                Secrets =
+                [
+                    new ClientInfoSecretSummary
+                    {
+                        SecretId = 11,
+                        CredentialId = 1,
+                        SecretType = "Password",
+                        SecretLabel = "Wireless Employee SSID",
+                        IsCurrent = true
+                    }
+                ]
+            },
+            new ClientInfoCredential
+            {
+                CredentialId = 2,
+                Category = ClientInfoResourceCategories.Wifi,
+                Name = "Wireless Employee Password",
+                IsActive = true,
+                Secrets =
+                [
+                    new ClientInfoSecretSummary
+                    {
+                        SecretId = 12,
+                        CredentialId = 2,
+                        SecretType = "Password",
+                        SecretLabel = "Wireless Employee Password",
+                        IsCurrent = true
+                    }
+                ]
+            }
+        };
+
+        var section = Assert.Single(ClientInfoCategoryOverviewBuilder.Build(
+            ClientInfoResourceCategories.Wifi,
+            [],
+            credentials));
+
+        Assert.Equal("Imported Wi-Fi information", section.Title);
+        Assert.Contains(section.Fields,
+            field => field.Label == "Wireless Employee SSID"
+                     && field.Secrets.Any(secret => secret.SecretId == 11));
+        Assert.Contains(section.Fields,
+            field => field.Label == "Wireless Employee Password"
+                     && field.Secrets.Any(secret => secret.SecretId == 12));
+    }
+
+    [Fact]
     public void GeneratedWorkbookRoundTripsTheInternalClientIdentity()
     {
         var directory = Path.Combine(
@@ -1884,7 +1941,7 @@ public sealed class ClientInfoBetaTests
                 ReadHeaderRow(workbook, "FireDrill"));
             Assert.Contains("AD Password", ReadHeaderRow(workbook, "Users"));
             Assert.Contains(
-                "Microsoft 365 Uses AD Login",
+            "Azure Sync",
                 ReadHeaderRow(workbook, "Users"));
             Assert.Contains(
                 "Microsoft 365 Username",
@@ -2061,6 +2118,98 @@ public sealed class ClientInfoBetaTests
             Assert.All(
                 fireDrillCredentials,
                 record => Assert.Equal("Verified", record.ReviewStatus));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void FireDrillWirelessFieldsCreateLinkedWifiRecordsInsteadOfStandaloneSecrets()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "TechBenchClientInfoTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "Wireless FireDrill.xlsx");
+            var service = new ClientInfoWorkbookService();
+            service.CreateTemplate(
+                path,
+                735,
+                "Marrone & O'Rourke",
+                [
+                    "Wireless Management URL", "Wireless Management IP",
+                    "Wireless Admin", "Wireless Admin Password",
+                    "Wireless Employee SSID", "Wireless Employee Pass",
+                    "Wireless Guest SSID", "Wireless Guest Password"
+                ]);
+            AppendRowByHeader(
+                path,
+                "FireDrill",
+                ("Wireless Management URL", "https://wifi.example.test"),
+                ("Wireless Management IP", "192.0.2.20"),
+                ("Wireless Admin", "wifi-admin"),
+                ("Wireless Admin Password", "admin-secret"),
+                ("Wireless Employee SSID", "Marrone-Staff"),
+                ("Wireless Employee Pass", "staff-secret"),
+                ("Wireless Guest SSID", "Marrone-Guest"),
+                ("Wireless Guest Password", "guest-secret"),
+                ("Review Status", "Verified"));
+
+            var package = service.Read(path);
+            var resource = Assert.Single(package.Records, record =>
+                record.RecordType == "Resource"
+                && record.LocalKey == "firedrill-wifi-2");
+            using (var payload = JsonDocument.Parse(resource.PayloadJson))
+            {
+                Assert.StartsWith(
+                    ClientInfoResourceCategories.Wifi,
+                    payload.RootElement.GetProperty("resourceType").GetString(),
+                    StringComparison.Ordinal);
+                Assert.Equal(
+                    "https://wifi.example.test",
+                    payload.RootElement.GetProperty("addressOrUrl").GetString());
+            }
+
+            var fields = package.Records
+                .Where(record => record.RecordType == "ResourceField"
+                                 && record.ParentLocalKey == resource.LocalKey)
+                .Select(record => JsonDocument.Parse(record.PayloadJson)
+                    .RootElement.GetProperty("fieldKey").GetString())
+                .ToArray();
+            Assert.Contains("management_ip", fields);
+            Assert.Contains("ssid", fields);
+            Assert.Contains("guest_ssid", fields);
+
+            var credentials = package.Records
+                .Where(record => record.RecordType == "Credential"
+                                 && record.SourceSheet == "FireDrill")
+                .ToArray();
+            Assert.Equal(3, credentials.Length);
+            Assert.All(credentials, record =>
+            {
+                using var payload = JsonDocument.Parse(record.PayloadJson);
+                Assert.Equal(
+                    resource.LocalKey,
+                    payload.RootElement.GetProperty("resourceKey").GetString());
+                Assert.Equal(
+                    ClientInfoResourceCategories.Wifi,
+                    payload.RootElement.GetProperty("category").GetString());
+            });
+            Assert.Equal(
+                ["admin-secret", "guest-secret", "staff-secret"],
+                package.Secrets
+                    .Select(secret => secret.SecretValue)
+                    .OrderBy(value => value, StringComparer.Ordinal)
+                    .ToArray());
+            Assert.DoesNotContain(
+                package.Secrets,
+                secret => secret.SecretValue.Contains("Marrone-", StringComparison.Ordinal)
+                          || secret.SecretValue.StartsWith("https://", StringComparison.Ordinal));
         }
         finally
         {
@@ -2341,7 +2490,7 @@ public sealed class ClientInfoBetaTests
                 ("AD Password", "user secret"),
                 ("Email", "jamie@example.test"),
                 ("Has Microsoft 365", "Yes"),
-                ("Microsoft 365 Uses AD Login", "No"),
+                ("Azure Sync", "No"),
                 ("Microsoft 365 Username", "jamie.365@example.test"),
                 ("Microsoft 365 Password", "m365 secret"),
                 ("Review Status", "Verified"));
@@ -2529,7 +2678,7 @@ public sealed class ClientInfoBetaTests
                 ("AD Username", "ACME\\jrivera"),
                 ("AD Password", "ad secret"),
                 ("Has Microsoft 365", "Yes"),
-                ("Microsoft 365 Uses AD Login", "Yes"),
+                ("Azure Sync", "Yes"),
                 ("Microsoft 365 Username", "ignored@example.test"),
                 ("Microsoft 365 Password", "ignored secret"),
                 ("Review Status", "Verified"));
@@ -3623,7 +3772,7 @@ public sealed class ClientInfoBetaTests
             importWindow,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Content=\"Add to Client Information\"",
+            "Content=\"Make Live\"",
             importWindow,
             StringComparison.Ordinal);
         Assert.Contains(

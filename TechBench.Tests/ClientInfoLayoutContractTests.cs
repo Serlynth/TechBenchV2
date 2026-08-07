@@ -76,6 +76,51 @@ public sealed class ClientInfoLayoutContractTests
         Assert.Equal(
             usersGrid.IndexOf("Header=\"Name\"", StringComparison.Ordinal),
             firstHeader);
+        Assert.Contains(
+            "Text=\"{Binding SelectedPerson.DisplayName, Mode=OneWay}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains("TextWrapping=\"Wrap\"", usersGrid + xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Azure Sync\"", usersGrid, StringComparison.Ordinal);
+        Assert.DoesNotContain("365 uses AD login", xaml, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PasswordListUsesReadableResizableRememberedColumns()
+    {
+        var xaml = Read("ClientInfoBetaWindow.xaml");
+        var codeBehind = Read("ClientInfoBetaWindow.xaml.cs");
+        var preferences = Read("Services", "LocalPreferenceStore.cs");
+
+        Assert.Contains("x:Name=\"CredentialsDataGrid\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"CredentialDetailsColumn\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("FrozenColumnCount=\"1\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<GridSplitter Grid.Column=\"1\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Width=\"280\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AccessGridColumnWidths", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("AccessDetailsPaneWidth", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("AccessGridColumnWidths", preferences, StringComparison.Ordinal);
+        Assert.Contains("AccessDetailsPaneWidth", preferences, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LiveClientInformationHidesReviewControlsAndUsesMakeLiveWorkflow()
+    {
+        var xaml = Read("ClientInfoBetaWindow.xaml");
+        var importXaml = Read("ClientInfoImportWindow.xaml");
+        var codeBehind = Read("ClientInfoBetaWindow.xaml.cs");
+        var resourceGrid = Read("Controls", "ClientInfoResourceDataGrid.cs");
+        var viewModel = Read("ViewModels", "ClientInfoBetaViewModel.cs");
+
+        Assert.Contains("ShowReviewWorkflow", xaml, StringComparison.Ordinal);
+        Assert.Contains("LocationsReviewColumn.Visibility", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("PeopleReviewColumn.Visibility", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("CredentialsReviewColumn.Visibility", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("FactsReviewColumn.Visibility", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("ShowReviewColumn", resourceGrid, StringComparison.Ordinal);
+        Assert.Contains("if (ShowReviewColumn)", resourceGrid, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Make Live\"", importXaml, StringComparison.Ordinal);
+        Assert.Contains("Make Client Information live", viewModel, StringComparison.Ordinal);
     }
 
     [Fact]
