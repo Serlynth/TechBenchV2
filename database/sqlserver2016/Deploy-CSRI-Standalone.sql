@@ -10039,19 +10039,10 @@ BEGIN
         IF @@ROWCOUNT = 0
             THROW 51273, N'The source client changed during the merge.', 1;
 
-        IF EXISTS
-        (
-            SELECT 1 FROM [tb_data].[ClientExternalIdentities]
-            WHERE [ClientId]=@WhdClientId AND [SourceSystem]=N'WHD'
-        )
-        AND EXISTS
-        (
-            SELECT 1 FROM [tb_data].[ClientExternalIdentities]
-            WHERE [ClientId]=@WhdClientId AND [SourceSystem]=N'Sage'
-        )
-            EXEC [tb_client].[EnsureLiveClientInfo]
-                @ClientId=@WhdClientId,
-                @ActorWindowsSid=@UserSid;
+        /* Matching source identities does not complete the Client Information
+           lifecycle. The merged client remains source-only until an approved
+           workbook is promoted or an Admin explicitly creates it as a manual
+           Client Information client. */
 
         DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @WhdClientId);
         EXEC [tb_security].[WriteAuditEvent]
@@ -22274,9 +22265,9 @@ BEGIN
         IF @@ROWCOUNT <> 1
             THROW 51971, N'The Sage client changed during automatic matching.', 1;
 
-        EXEC [tb_client].[EnsureLiveClientInfo]
-            @ClientId=@WhdClientId,
-            @ActorWindowsSid=@ActorSid;
+        /* Matching WHD and Sage identities is not a Client Information
+           promotion. The surviving client remains source-only until its
+           workbook is promoted or it is explicitly created manually. */
 
         DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @WhdClientId);
         EXEC [tb_security].[WriteAuditEvent]
@@ -25783,17 +25774,21 @@ IF OBJECT_ID(N'tb_client.EnsureLiveClientInfo', N'P') IS NOT NULL
     DROP PROCEDURE [tb_client].[EnsureLiveClientInfo];
 GO
 
-/* A WHD/Sage pair that has no pre-existing TechBench profile becomes a live,
-   manually maintainable Client Information record immediately. Existing
-   profiles are never promoted or otherwise changed here: an in-progress
-   workbook migration keeps its own review/cutover lifecycle. */
+/* Only direct Admin creation may use this helper. Source matching is identity
+   reconciliation and must never make Client Information Live or complete its
+   cutover lifecycle. Workbook promotion has its own reviewed path in V0015. */
 CREATE PROCEDURE [tb_client].[EnsureLiveClientInfo]
     @ClientId int,
-    @ActorWindowsSid varbinary(85)
+    @ActorWindowsSid varbinary(85),
+    @LifecycleReason nvarchar(40)
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    SET @LifecycleReason = NULLIF(LTRIM(RTRIM(@LifecycleReason)), N'');
+    IF @LifecycleReason IS NULL OR @LifecycleReason <> N'ManualNewClient'
+        THROW 52317, N'Only direct manual client creation may initialize Live Client Information.', 1;
 
     IF NOT EXISTS
     (
@@ -25804,14 +25799,27 @@ BEGIN
         THROW 52303, N'The client no longer exists.', 1;
 
     DECLARE @NowUtc datetime2(3) = SYSUTCDATETIME();
-    DECLARE @CreatedProfile bit = 0;
+    DECLARE @ExistingIsLive bit;
+    DECLARE @ExistingCutoverState nvarchar(24);
+    DECLARE @ExistingActiveBatchId uniqueidentifier;
 
-    IF NOT EXISTS
-    (
-        SELECT 1
-        FROM [tb_client].[ClientProfiles] WITH (UPDLOCK, HOLDLOCK)
-        WHERE [ClientId] = @ClientId
-    )
+    SELECT @ExistingIsLive = [IsLive]
+    FROM [tb_client].[ClientProfiles] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [ClientId] = @ClientId;
+
+    SELECT
+        @ExistingCutoverState = [State],
+        @ExistingActiveBatchId = [ActiveBatchId]
+    FROM [tb_ops].[ClientInfoCutovers] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [ClientId] = @ClientId;
+
+    IF @ExistingIsLive = 1
+        THROW 52318, N'The client already has Live Client Information.', 1;
+    IF @ExistingActiveBatchId IS NOT NULL
+       OR (@ExistingCutoverState IS NOT NULL AND @ExistingCutoverState <> N'NotStarted')
+        THROW 52318, N'Finish or discard the client workbook migration before creating it manually.', 1;
+
+    IF @ExistingIsLive IS NULL
     BEGIN
         INSERT INTO [tb_client].[ClientProfiles]
         (
@@ -25829,16 +25837,16 @@ BEGIN
             @ActorWindowsSid, @ActorWindowsSid,
             @NowUtc, @NowUtc
         );
-        SET @CreatedProfile = 1;
     END;
+    ELSE
+        UPDATE [tb_client].[ClientProfiles]
+        SET
+            [IsLive] = 1,
+            [UpdatedByWindowsSid] = @ActorWindowsSid,
+            [UpdatedAtUtc] = @NowUtc
+        WHERE [ClientId] = @ClientId;
 
-    IF @CreatedProfile = 1
-       AND NOT EXISTS
-       (
-           SELECT 1
-           FROM [tb_ops].[ClientInfoCutovers] WITH (UPDLOCK, HOLDLOCK)
-           WHERE [ClientId] = @ClientId
-       )
+    IF @ExistingCutoverState IS NULL
     BEGIN
         INSERT INTO [tb_ops].[ClientInfoCutovers]
         (
@@ -25853,95 +25861,149 @@ BEGIN
             @ActorWindowsSid, @NowUtc
         );
     END;
+    ELSE
+        UPDATE [tb_ops].[ClientInfoCutovers]
+        SET
+            [State] = N'Complete',
+            [LiveAtUtc] = COALESCE([LiveAtUtc], @NowUtc),
+            [HypercareEndsAtUtc] = NULL,
+            [CompletedAtUtc] = COALESCE([CompletedAtUtc], @NowUtc),
+            [UpdatedByWindowsSid] = @ActorWindowsSid,
+            [UpdatedAtUtc] = @NowUtc
+        WHERE [ClientId] = @ClientId;
 END;
 GO
 
-/* One-time/idempotent reconciliation for client pairs matched before the
-   canonical TechBench profile existed. Future automatic and Admin matches
-   call EnsureLiveClientInfo directly. */
-DECLARE @LegacyMatchActorSid varbinary(85);
-DECLARE @LegacyMatchActorLoginName nvarchar(256);
-SELECT
-    @LegacyMatchActorSid = [WindowsSid],
-    @LegacyMatchActorLoginName = [LoginName]
-FROM [tb_security].[Users]
-WHERE [LoginName] = N'$(SyncServicePrincipal)';
-IF @LegacyMatchActorSid IS NULL
-   OR NULLIF(LTRIM(RTRIM(@LegacyMatchActorLoginName)), N'') IS NULL
-    THROW 52319, N'The configured sync service principal has no TechBench service actor for canonical client reconciliation.', 1;
+/* Server 0.6.26/0.6.27 incorrectly treated source matching as completion of
+   the Client Information lifecycle. Repair only profiles whose committed
+   audit trail proves they were activated by a match, while excluding every
+   completed workbook promotion and direct manual-client creation. Keep the
+   profile and its entire information graph so no technician-entered data is
+   deleted; only the false Live/cutover state is corrected. */
+DECLARE @LifecycleCorrectionCandidates TABLE
+(
+    [ClientId] int NOT NULL PRIMARY KEY CLUSTERED,
+    [PreviousCutoverState] nvarchar(24) NULL
+);
 
-DECLARE @LegacyMatchedClientId int;
-DECLARE legacy_matched_client_cursor CURSOR LOCAL FAST_FORWARD FOR
-    SELECT client.[Id]
-    FROM [tb_data].[Clients] AS client
-    WHERE client.[IsActive] = 1
-      AND NOT EXISTS
-      (
-          SELECT 1 FROM [tb_client].[ClientProfiles] AS profile
-          WHERE profile.[ClientId] = client.[Id]
-      )
-      AND NOT EXISTS
-      (
-          SELECT 1 FROM [tb_ops].[ClientInfoCutovers] AS cutover
-          WHERE cutover.[ClientId] = client.[Id]
-      )
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    INSERT INTO @LifecycleCorrectionCandidates
+        ([ClientId], [PreviousCutoverState])
+    SELECT profile.[ClientId], cutover.[State]
+    FROM [tb_client].[ClientProfiles] AS profile WITH (UPDLOCK, HOLDLOCK)
+    LEFT JOIN [tb_ops].[ClientInfoCutovers] AS cutover WITH (UPDLOCK, HOLDLOCK)
+        ON cutover.[ClientId] = profile.[ClientId]
+    WHERE profile.[IsLive] = 1
       AND EXISTS
       (
-          SELECT 1 FROM [tb_data].[ClientExternalIdentities] AS whd_identity
-          WHERE whd_identity.[ClientId] = client.[Id]
-            AND whd_identity.[SourceSystem] = N'WHD'
+          SELECT 1
+          FROM [tb_audit].[AuditEvents] AS match_audit
+          WHERE match_audit.[EntityType] = N'Client'
+            AND TRY_CONVERT(int, match_audit.[EntityId]) = profile.[ClientId]
+            AND match_audit.[Action] IN
+                (N'LegacyMatchedClientPromoted', N'ClientAutoMatched', N'ClientMerged')
       )
-      AND EXISTS
+      AND NOT EXISTS
       (
-          SELECT 1 FROM [tb_data].[ClientExternalIdentities] AS sage_identity
-          WHERE sage_identity.[ClientId] = client.[Id]
-            AND sage_identity.[SourceSystem] = N'Sage'
+          SELECT 1
+          FROM [tb_import].[ClientInfoBatches] AS promoted_batch
+          WHERE promoted_batch.[ClientId] = profile.[ClientId]
+            AND
+            (
+                promoted_batch.[State] = N'Promoted'
+                OR promoted_batch.[PromotedAtUtc] IS NOT NULL
+            )
+      )
+      AND NOT EXISTS
+      (
+          SELECT 1
+          FROM [tb_audit].[AuditEvents] AS manual_audit
+          WHERE manual_audit.[EntityType] = N'Client'
+            AND TRY_CONVERT(int, manual_audit.[EntityId]) = profile.[ClientId]
+            AND manual_audit.[Action] IN
+                (N'ManualClientInfoCreated', N'ManualClientInfoPromoted')
       );
 
-OPEN legacy_matched_client_cursor;
-FETCH NEXT FROM legacy_matched_client_cursor INTO @LegacyMatchedClientId;
-WHILE @@FETCH_STATUS = 0
-BEGIN
-    BEGIN TRY
-        BEGIN TRANSACTION;
+    IF EXISTS (SELECT 1 FROM @LifecycleCorrectionCandidates)
+    BEGIN
+        DECLARE @LifecycleCorrectionActorSid varbinary(85);
+        DECLARE @LifecycleCorrectionActorLoginName nvarchar(256);
+        DECLARE @LifecycleCorrectionAtUtc datetime2(3) = SYSUTCDATETIME();
 
-        EXEC [tb_client].[EnsureLiveClientInfo]
-            @ClientId = @LegacyMatchedClientId,
-            @ActorWindowsSid = @LegacyMatchActorSid;
+        SELECT
+            @LifecycleCorrectionActorSid = [WindowsSid],
+            @LifecycleCorrectionActorLoginName = [LoginName]
+        FROM [tb_security].[Users] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [LoginName] = N'$(SyncServicePrincipal)';
 
-        DECLARE @LegacyMatchEntityId nvarchar(120) =
-            CONVERT(nvarchar(120), @LegacyMatchedClientId);
-        /* This is a deployment-time reconciliation, so ORIGINAL_LOGIN() is
-           the installer rather than the registered application actor used
-           by WriteAuditEvent. Persist the audit with the validated sync
-           service identity inside the same transaction as the promotion. */
+        IF @LifecycleCorrectionActorSid IS NULL
+           OR NULLIF(LTRIM(RTRIM(@LifecycleCorrectionActorLoginName)), N'') IS NULL
+            THROW 52319, N'The configured sync service principal has no TechBench service actor for Client Information lifecycle correction.', 1;
+
+        UPDATE profile
+        SET
+            [IsLive] = 0,
+            [UpdatedByWindowsSid] = @LifecycleCorrectionActorSid,
+            [UpdatedAtUtc] = @LifecycleCorrectionAtUtc
+        FROM [tb_client].[ClientProfiles] AS profile
+        INNER JOIN @LifecycleCorrectionCandidates AS candidate
+            ON candidate.[ClientId] = profile.[ClientId];
+
+        UPDATE cutover
+        SET
+            [ActiveBatchId] =
+                CASE
+                    WHEN active_batch.[State] IN
+                        (N'Draft', N'Parsed', N'Validated', N'InReview',
+                         N'ValidationFailed', N'Approved')
+                        THEN cutover.[ActiveBatchId]
+                    ELSE NULL
+                END,
+            [State] =
+                CASE
+                    WHEN active_batch.[State] = N'Approved' THEN N'Ready'
+                    WHEN active_batch.[State] IN
+                        (N'Draft', N'Parsed', N'Validated', N'InReview',
+                         N'ValidationFailed')
+                        THEN N'Staging'
+                    ELSE N'NotStarted'
+                END,
+            [LiveAtUtc] = NULL,
+            [HypercareEndsAtUtc] = NULL,
+            [CompletedAtUtc] = NULL,
+            [UpdatedByWindowsSid] = @LifecycleCorrectionActorSid,
+            [UpdatedAtUtc] = @LifecycleCorrectionAtUtc
+        FROM [tb_ops].[ClientInfoCutovers] AS cutover
+        INNER JOIN @LifecycleCorrectionCandidates AS candidate
+            ON candidate.[ClientId] = cutover.[ClientId]
+        LEFT JOIN [tb_import].[ClientInfoBatches] AS active_batch
+            ON active_batch.[BatchId] = cutover.[ActiveBatchId];
+
         INSERT INTO [tb_audit].[AuditEvents]
         (
             [ActorWindowsSid], [ActorLoginName], [Action], [EntityType],
             [EntityId], [RequestId], [DataJson], [OccurredAtUtc]
         )
-        VALUES
-        (
-            @LegacyMatchActorSid, @LegacyMatchActorLoginName,
-            N'LegacyMatchedClientPromoted', N'Client',
-            @LegacyMatchEntityId, NEWID(),
-            N'{"isLive":true,"reviewStatus":"Unverified"}',
-            SYSUTCDATETIME()
-        );
+        SELECT
+            @LifecycleCorrectionActorSid,
+            @LifecycleCorrectionActorLoginName,
+            N'ClientInfoMatchLifecycleCorrected',
+            N'Client',
+            CONVERT(nvarchar(120), candidate.[ClientId]),
+            NEWID(),
+            N'{"previousIsLive":true,"correctedIsLive":false,"dataPreserved":true}',
+            @LifecycleCorrectionAtUtc
+        FROM @LifecycleCorrectionCandidates AS candidate;
+    END;
 
-        COMMIT TRANSACTION;
-    END TRY
-    BEGIN CATCH
-        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
-        CLOSE legacy_matched_client_cursor;
-        DEALLOCATE legacy_matched_client_cursor;
-        THROW;
-    END CATCH;
-
-    FETCH NEXT FROM legacy_matched_client_cursor INTO @LegacyMatchedClientId;
-END;
-CLOSE legacy_matched_client_cursor;
-DEALLOCATE legacy_matched_client_cursor;
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
 GO
 
 IF OBJECT_ID(N'tb_client.MergeSourceClientIntoCanonical', N'P') IS NOT NULL
@@ -26347,18 +26409,27 @@ BEGIN
                 SELECT 1
                 FROM [tb_client].[ClientProfiles] AS profile WITH (UPDLOCK, HOLDLOCK)
                 WHERE profile.[ClientId] = @ClientId
+                  AND profile.[IsLive] = 1
             )
-            OR EXISTS
+                THROW 52313, N'An active client with this exact name already exists with Live Client Information. Open the existing client or use Client Match.', 1;
+
+            IF EXISTS
             (
                 SELECT 1
                 FROM [tb_ops].[ClientInfoCutovers] AS cutover WITH (UPDLOCK, HOLDLOCK)
                 WHERE cutover.[ClientId] = @ClientId
+                  AND
+                  (
+                      cutover.[ActiveBatchId] IS NOT NULL
+                      OR cutover.[State] <> N'NotStarted'
+                  )
             )
-                THROW 52313, N'An active client with this exact name already exists. Open the existing client or use Client Match.', 1;
+                THROW 52313, N'Finish or discard the client workbook migration before creating this client manually.', 1;
 
             EXEC [tb_client].[EnsureLiveClientInfo]
                 @ClientId = @ClientId,
-                @ActorWindowsSid = @ActorSid;
+                @ActorWindowsSid = @ActorSid,
+                @LifecycleReason = N'ManualNewClient';
 
             UPDATE [tb_data].[Clients]
             SET [Name] = @Name,
@@ -38705,12 +38776,26 @@ IF CHARINDEX(N'[ClientInfoBetaAvailable]', @Capabilities) = 0
 
 DECLARE @ManualClientCreation nvarchar(max)=
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminCreateManualClientInfoClient'));
+DECLARE @ManualLiveInitialization nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_client.EnsureLiveClientInfo'));
+DECLARE @WorkbookPromotion nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.PromoteClientInfoImport'));
 IF @ManualClientCreation IS NULL
    OR CHARINDEX(N'IS_ROLEMEMBER(N''tb_role_admin'')', @ManualClientCreation) = 0
    OR CHARINDEX(N'N''Manual''', @ManualClientCreation) = 0
    OR CHARINDEX(N'[IsLive]', @ManualClientCreation) = 0
    OR CHARINDEX(N'N''Complete''', @ManualClientCreation) = 0
+   OR CHARINDEX(N'@LifecycleReason = N''ManualNewClient''', @ManualClientCreation) = 0
    OR CHARINDEX(N'[tb_security].[WriteAuditEvent]', @ManualClientCreation) = 0
+   OR @ManualLiveInitialization IS NULL
+   OR CHARINDEX(N'@LifecycleReason <> N''ManualNewClient''', @ManualLiveInitialization) = 0
+   OR CHARINDEX(N'@ExistingIsLive = 1', @ManualLiveInitialization) = 0
+   OR CHARINDEX(N'@ExistingCutoverState <> N''NotStarted''', @ManualLiveInitialization) = 0
+   OR CHARINDEX(N'UPDATE [tb_client].[ClientProfiles]', @ManualLiveInitialization) = 0
+   OR CHARINDEX(N'UPDATE [tb_ops].[ClientInfoCutovers]', @ManualLiveInitialization) = 0
+   OR @WorkbookPromotion IS NULL
+   OR CHARINDEX(N'SET [IsLive]=1', @WorkbookPromotion) = 0
+   OR CHARINDEX(N'SET [State]=N''Complete''', @WorkbookPromotion) = 0
     THROW 52515,N'Manual client creation is not admin-only, live, complete, and audited.',1;
 
 IF NOT EXISTS
@@ -38761,6 +38846,10 @@ IF @MergeManual NOT LIKE N'%ReparentClientGraph%'
    OR @MergeCanonicalSource NOT LIKE N'%ReparentClientGraph%'
     THROW 52506,N'Every client merge path must reparent the canonical Client Info graph.',1;
 
+IF CHARINDEX(N'EnsureLiveClientInfo', @MergeManual) > 0
+   OR CHARINDEX(N'EnsureLiveClientInfo', @MergeAuto) > 0
+    THROW 52521,N'WHD/Sage matching still promotes Client Information to Live.',1;
+
 IF @MergeManual NOT LIKE N'%ClientInfoCutovers%'
    OR @MergeManual NOT LIKE N'%Finish or discard the client workbook migration before linking it.%'
    OR @MergeAuto NOT LIKE N'%ClientInfoCutovers%'
@@ -38790,6 +38879,43 @@ IF EXISTS
       AND permission.[state] IN (N'G',N'W')
 )
     THROW 52507,N'Ordinary users received direct secret-table permission.',1;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM [tb_client].[ClientProfiles] AS profile
+    WHERE profile.[IsLive] = 1
+      AND EXISTS
+      (
+          SELECT 1
+          FROM [tb_audit].[AuditEvents] AS match_audit
+          WHERE match_audit.[EntityType] = N'Client'
+            AND TRY_CONVERT(int, match_audit.[EntityId]) = profile.[ClientId]
+            AND match_audit.[Action] IN
+                (N'LegacyMatchedClientPromoted', N'ClientAutoMatched', N'ClientMerged')
+      )
+      AND NOT EXISTS
+      (
+          SELECT 1
+          FROM [tb_import].[ClientInfoBatches] AS promoted_batch
+          WHERE promoted_batch.[ClientId] = profile.[ClientId]
+            AND
+            (
+                promoted_batch.[State] = N'Promoted'
+                OR promoted_batch.[PromotedAtUtc] IS NOT NULL
+            )
+      )
+      AND NOT EXISTS
+      (
+          SELECT 1
+          FROM [tb_audit].[AuditEvents] AS manual_audit
+          WHERE manual_audit.[EntityType] = N'Client'
+            AND TRY_CONVERT(int, manual_audit.[EntityId]) = profile.[ClientId]
+            AND manual_audit.[Action] IN
+                (N'ManualClientInfoCreated', N'ManualClientInfoPromoted')
+      )
+)
+    THROW 52522,N'One or more source-matched clients remain incorrectly Live without a completed import or direct manual creation.',1;
 
 PRINT N'PASS: Client Info beta schema-15 compatibility and security verified.';
 GO

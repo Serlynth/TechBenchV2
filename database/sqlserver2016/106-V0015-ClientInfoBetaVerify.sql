@@ -172,12 +172,26 @@ IF CHARINDEX(N'[ClientInfoBetaAvailable]', @Capabilities) = 0
 
 DECLARE @ManualClientCreation nvarchar(max)=
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminCreateManualClientInfoClient'));
+DECLARE @ManualLiveInitialization nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_client.EnsureLiveClientInfo'));
+DECLARE @WorkbookPromotion nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.PromoteClientInfoImport'));
 IF @ManualClientCreation IS NULL
    OR CHARINDEX(N'IS_ROLEMEMBER(N''tb_role_admin'')', @ManualClientCreation) = 0
    OR CHARINDEX(N'N''Manual''', @ManualClientCreation) = 0
    OR CHARINDEX(N'[IsLive]', @ManualClientCreation) = 0
    OR CHARINDEX(N'N''Complete''', @ManualClientCreation) = 0
+   OR CHARINDEX(N'@LifecycleReason = N''ManualNewClient''', @ManualClientCreation) = 0
    OR CHARINDEX(N'[tb_security].[WriteAuditEvent]', @ManualClientCreation) = 0
+   OR @ManualLiveInitialization IS NULL
+   OR CHARINDEX(N'@LifecycleReason <> N''ManualNewClient''', @ManualLiveInitialization) = 0
+   OR CHARINDEX(N'@ExistingIsLive = 1', @ManualLiveInitialization) = 0
+   OR CHARINDEX(N'@ExistingCutoverState <> N''NotStarted''', @ManualLiveInitialization) = 0
+   OR CHARINDEX(N'UPDATE [tb_client].[ClientProfiles]', @ManualLiveInitialization) = 0
+   OR CHARINDEX(N'UPDATE [tb_ops].[ClientInfoCutovers]', @ManualLiveInitialization) = 0
+   OR @WorkbookPromotion IS NULL
+   OR CHARINDEX(N'SET [IsLive]=1', @WorkbookPromotion) = 0
+   OR CHARINDEX(N'SET [State]=N''Complete''', @WorkbookPromotion) = 0
     THROW 52515,N'Manual client creation is not admin-only, live, complete, and audited.',1;
 
 IF NOT EXISTS
@@ -228,6 +242,10 @@ IF @MergeManual NOT LIKE N'%ReparentClientGraph%'
    OR @MergeCanonicalSource NOT LIKE N'%ReparentClientGraph%'
     THROW 52506,N'Every client merge path must reparent the canonical Client Info graph.',1;
 
+IF CHARINDEX(N'EnsureLiveClientInfo', @MergeManual) > 0
+   OR CHARINDEX(N'EnsureLiveClientInfo', @MergeAuto) > 0
+    THROW 52521,N'WHD/Sage matching still promotes Client Information to Live.',1;
+
 IF @MergeManual NOT LIKE N'%ClientInfoCutovers%'
    OR @MergeManual NOT LIKE N'%Finish or discard the client workbook migration before linking it.%'
    OR @MergeAuto NOT LIKE N'%ClientInfoCutovers%'
@@ -257,6 +275,43 @@ IF EXISTS
       AND permission.[state] IN (N'G',N'W')
 )
     THROW 52507,N'Ordinary users received direct secret-table permission.',1;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM [tb_client].[ClientProfiles] AS profile
+    WHERE profile.[IsLive] = 1
+      AND EXISTS
+      (
+          SELECT 1
+          FROM [tb_audit].[AuditEvents] AS match_audit
+          WHERE match_audit.[EntityType] = N'Client'
+            AND TRY_CONVERT(int, match_audit.[EntityId]) = profile.[ClientId]
+            AND match_audit.[Action] IN
+                (N'LegacyMatchedClientPromoted', N'ClientAutoMatched', N'ClientMerged')
+      )
+      AND NOT EXISTS
+      (
+          SELECT 1
+          FROM [tb_import].[ClientInfoBatches] AS promoted_batch
+          WHERE promoted_batch.[ClientId] = profile.[ClientId]
+            AND
+            (
+                promoted_batch.[State] = N'Promoted'
+                OR promoted_batch.[PromotedAtUtc] IS NOT NULL
+            )
+      )
+      AND NOT EXISTS
+      (
+          SELECT 1
+          FROM [tb_audit].[AuditEvents] AS manual_audit
+          WHERE manual_audit.[EntityType] = N'Client'
+            AND TRY_CONVERT(int, manual_audit.[EntityId]) = profile.[ClientId]
+            AND manual_audit.[Action] IN
+                (N'ManualClientInfoCreated', N'ManualClientInfoPromoted')
+      )
+)
+    THROW 52522,N'One or more source-matched clients remain incorrectly Live without a completed import or direct manual creation.',1;
 
 PRINT N'PASS: Client Info beta schema-15 compatibility and security verified.';
 GO

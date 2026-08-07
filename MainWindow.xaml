@@ -2262,7 +2262,7 @@
                                     </Grid.ColumnDefinitions>
                                     <StackPanel>
                                         <TextBlock Text="Client Match" Style="{StaticResource SectionHeadingStyle}" />
-                                        <TextBlock Text="Choose the live TechBench client to keep, then link its WHD location and Sage customer. The internal TechBench ID and name remain canonical."
+                                        <TextBlock Text="Choose the live TechBench client to keep, then link its WHD location and Sage customer. If no live client exists, match the WHD and Sage source records first; the result remains Needs review until its workbook is promoted. The internal TechBench ID and name remain canonical."
                                                    Style="{StaticResource MutedTextStyle}"
                                                    Margin="0,0,0,10" />
                                     </StackPanel>
@@ -2345,7 +2345,7 @@
                                                     HorizontalAlignment="Left"
                                                     Padding="8,3"
                                                     Margin="0,5,0,0"
-                                                    ToolTip="Clear the canonical target so a new live client can be created from one WHD-only and one Sage-only record." />
+                                                    ToolTip="Clear the live target to match one WHD-only and one Sage-only source record. The result requires workbook import before it is Live." />
                                             <TextBlock Text="{Binding ClientMatchSuggestionText}"
                                                        Style="{StaticResource MutedTextStyle}"
                                                        TextWrapping="Wrap"
@@ -2358,7 +2358,7 @@
                                                       DisplayMemberPath="WhdLocationLabel"
                                                       IsTextSearchEnabled="True"
                                                       IsEnabled="{Binding CanChooseWhdMatchSource}"
-                                                      ToolTip="Choose the WHD-only record that belongs to this live TechBench client." />
+                                                      ToolTip="Choose the WHD-only record to link to the selected live TechBench client, or pair it with a Sage-only record when no live client exists." />
                                         </StackPanel>
                                         <StackPanel Grid.Column="4">
                                             <TextBlock Text="Unmatched Sage customer" Style="{StaticResource FieldLabelStyle}" />
@@ -2367,7 +2367,7 @@
                                                       DisplayMemberPath="SageCustomerLabel"
                                                       IsTextSearchEnabled="True"
                                                       IsEnabled="{Binding CanChooseSageMatchSource}"
-                                                      ToolTip="Choose the Sage-only record that belongs to this live TechBench client." />
+                                                      ToolTip="Choose the Sage-only record to link to the selected live TechBench client, or pair it with a WHD-only record when no live client exists." />
                                         </StackPanel>
                                         <StackPanel Grid.Column="5"
                                                     Margin="12,20,0,0"
@@ -2376,11 +2376,11 @@
                                                     Command="{Binding LinkClientSourcesCommand}"
                                                     Style="{StaticResource PrimaryButtonStyle}"
                                                     MinWidth="170" />
-                                            <Button Content="Create live client"
+                                            <Button Content="Match WHD + Sage"
                                                     Command="{Binding CreateCanonicalClientFromSourcesCommand}"
                                                     MinWidth="170"
                                                     Margin="0,6,0,0"
-                                                    ToolTip="When no live TechBench client exists, combine the selected WHD-only and Sage-only records into one live client." />
+                                                    ToolTip="Combine the selected WHD-only and Sage-only records into one Needs review client. Workbook import is required before it becomes Live." />
                                         </StackPanel>
                                     </Grid>
                                 </Border>
