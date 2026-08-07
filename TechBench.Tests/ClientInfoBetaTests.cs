@@ -1,5 +1,6 @@
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
+using System.Text.Json;
 using TechBench.Data;
 using TechBench.Models;
 using TechBench.Services;
@@ -1682,6 +1683,7 @@ public sealed class ClientInfoBetaTests
                     "Start Here",
                     "Locations",
                     "Users",
+                    "FireDrill",
                     "Servers & Infrastructure",
                     "Connection & Internet",
                     "Wi-Fi",
@@ -1696,6 +1698,14 @@ public sealed class ClientInfoBetaTests
                     "Needs Sorting"
                 ],
                 names);
+            Assert.Equal(
+                [
+                    "Firebox IP", "Status", "Admin", "csriadmin",
+                    "*if enabled -Firebox-DB\\csri", "Authpoint User",
+                    "sslvpnpassword", "AD Auth User", "AD Password", "RustPW",
+                    "Review Status"
+                ],
+                ReadHeaderRow(workbook, "FireDrill"));
             Assert.Contains("AD Password", ReadHeaderRow(workbook, "Users"));
             Assert.Contains(
                 "Microsoft 365 Uses AD Login",
@@ -1793,6 +1803,138 @@ public sealed class ClientInfoBetaTests
             Assert.Equal(
                 4U,
                 ReadHeaderCell(workbook, "Other Info", "Item").StyleIndex?.Value);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void GeneratedWorkbookUsesCurrentFireDrillFieldLabelsAndImportsTheirValues()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "TechBenchClientInfoTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "FireDrill Migration.xlsx");
+            var service = new ClientInfoWorkbookService();
+            service.CreateTemplate(
+                path,
+                477,
+                "Acme Legal",
+                [
+                    "Firebox IP", "Status", "Admin", "Barracuda Password",
+                    "ILO Host 1 PW", "Custom Future Field", "Admin"
+                ]);
+
+            using (var workbook = SpreadsheetDocument.Open(path, false))
+            {
+                Assert.Equal(
+                    [
+                        "Firebox IP", "Status", "Admin", "Barracuda Password",
+                        "ILO Host 1 PW", "Custom Future Field", "Review Status"
+                    ],
+                    ReadHeaderRow(workbook, "FireDrill"));
+            }
+
+            AppendRowByHeader(
+                path,
+                "FireDrill",
+                ("Firebox IP", "203.0.113.24"),
+                ("Status", "status-secret"),
+                ("Barracuda Password", "barracuda-secret"),
+                ("ILO Host 1 PW", "ilo-secret"),
+                ("Custom Future Field", "future-secret"),
+                ("Review Status", "Verified"));
+
+            var package = service.Read(path);
+            var fireDrillCredentials = package.Records
+                .Where(record => record.RecordType == "Credential"
+                                 && record.SourceSheet == "FireDrill")
+                .ToArray();
+
+            Assert.Equal(5, fireDrillCredentials.Length);
+            Assert.Equal(
+                [
+                    "203.0.113.24", "barracuda-secret", "future-secret",
+                    "ilo-secret", "status-secret"
+                ],
+                package.Secrets
+                    .Select(secret => secret.SecretValue)
+                    .OrderBy(value => value, StringComparer.Ordinal)
+                    .ToArray());
+            Assert.Contains(
+                fireDrillCredentials,
+                record => JsonDocument.Parse(record.PayloadJson)
+                    .RootElement.GetProperty("category").GetString()
+                    == ClientInfoResourceCategories.ConnectionInternet);
+            Assert.Contains(
+                fireDrillCredentials,
+                record => JsonDocument.Parse(record.PayloadJson)
+                    .RootElement.GetProperty("category").GetString()
+                    == ClientInfoResourceCategories.DomainsEmail);
+            Assert.Contains(
+                fireDrillCredentials,
+                record => JsonDocument.Parse(record.PayloadJson)
+                    .RootElement.GetProperty("category").GetString()
+                    == ClientInfoResourceCategories.ServersInfrastructure);
+            Assert.All(
+                fireDrillCredentials,
+                record => Assert.Equal("Verified", record.ReviewStatus));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void PreviousFireDrillTransferTemplateVersionRemainsImportable()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "TechBenchClientInfoTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "Previous Migration.xlsx");
+            var service = new ClientInfoWorkbookService();
+            service.CreateTemplate(path, 477, "Acme Legal");
+            using (var workbook = SpreadsheetDocument.Open(path, true))
+            {
+                var workbookPart = workbook.WorkbookPart!;
+                var sheets = workbookPart.Workbook.Sheets!
+                    .Elements<Sheet>()
+                    .ToList();
+                SetTemplateVersion(
+                    workbookPart,
+                    sheets,
+                    ClientInfoWorkbookService.FireDrillTransferTemplateVersion);
+                workbookPart.Workbook.Save();
+            }
+            AppendRowByHeader(
+                path,
+                "Applications & Cloud",
+                ("Type", "Microsoft 365 Tenant"),
+                ("Name", "Microsoft 365"),
+                ("Review Status", "Verified"));
+
+            var package = service.Read(path);
+
+            Assert.Equal(
+                ClientInfoWorkbookService.FireDrillTransferTemplateVersion,
+                package.TemplateVersion);
+            Assert.Contains(
+                package.Records,
+                record => record.RecordType == "Resource"
+                          && record.PayloadJson.Contains(
+                              "Microsoft 365",
+                              StringComparison.Ordinal));
         }
         finally
         {

@@ -2475,13 +2475,44 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 
         try
         {
-            _workbooks.CreateTemplate(dialog.FileName, ClientId, ClientName);
+            var fireDrillFieldLabels = FindFireDrillFieldLabels();
+            _workbooks.CreateTemplate(
+                dialog.FileName,
+                ClientId,
+                ClientName,
+                fireDrillFieldLabels);
             StatusMessage =
-                $"Created the migration workbook for internal client ID {ClientId}. Copy the cleaned client information into it, then return here to import it.";
+                $"Created the migration workbook for internal client ID {ClientId}. The FireDrill tab contains {(fireDrillFieldLabels.Count > 0 ? fireDrillFieldLabels.Count : 10)} matching credential column(s). Copy the cleaned client information into it, then return here to import it.";
         }
         catch (Exception exception)
         {
             ShowError("Template could not be created", exception);
+        }
+    }
+
+    private IReadOnlyList<string> FindFireDrillFieldLabels()
+    {
+        try
+        {
+            var matches = _repository.SearchFireDrillCredentials(ClientName);
+            var match = matches.FirstOrDefault(item => string.Equals(
+                            item.ClientName.Trim(),
+                            ClientName.Trim(),
+                            StringComparison.OrdinalIgnoreCase))
+                        ?? (matches.Count == 1 ? matches[0] : null);
+            return match?.Fields
+                       .OrderBy(field => field.SortOrder)
+                       .Select(field => field.Label)
+                       .Where(label => !string.IsNullOrWhiteSpace(label))
+                       .Distinct(StringComparer.OrdinalIgnoreCase)
+                       .ToArray()
+                   ?? [];
+        }
+        catch
+        {
+            // Workbook creation remains available when FireDrill is unavailable;
+            // the service supplies the exact legacy FireDrill columns instead.
+            return [];
         }
     }
 
