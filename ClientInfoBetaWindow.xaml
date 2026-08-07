@@ -850,6 +850,7 @@
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"
                                   CanUserAddRows="False"
+                                  FrozenColumnCount="1"
                                   ClipboardCopyMode="IncludeHeader"
                                   MouseDoubleClick="Users_DoubleClick">
                             <DataGrid.Columns>

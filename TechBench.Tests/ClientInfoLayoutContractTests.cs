@@ -47,6 +47,38 @@ public sealed class ClientInfoLayoutContractTests
     }
 
     [Fact]
+    public void UsersGridKeepsTheNameColumnVisibleWhileScrollingHorizontally()
+    {
+        var xaml = Read("ClientInfoBetaWindow.xaml");
+        var usersGridStart = xaml.IndexOf(
+            "x:Name=\"PeopleDataGrid\"",
+            StringComparison.Ordinal);
+        var usersColumnsEnd = xaml.IndexOf(
+            "</DataGrid.Columns>",
+            usersGridStart,
+            StringComparison.Ordinal);
+
+        Assert.True(usersGridStart >= 0);
+        Assert.True(usersColumnsEnd > usersGridStart);
+
+        var usersGrid = xaml[usersGridStart..usersColumnsEnd];
+        var columnsStart = usersGrid.IndexOf(
+            "<DataGrid.Columns>",
+            StringComparison.Ordinal);
+        Assert.True(columnsStart >= 0);
+
+        var firstHeader = usersGrid.IndexOf(
+            "Header=\"",
+            columnsStart,
+            StringComparison.Ordinal);
+
+        Assert.Contains("FrozenColumnCount=\"1\"", usersGrid, StringComparison.Ordinal);
+        Assert.Equal(
+            usersGrid.IndexOf("Header=\"Name\"", StringComparison.Ordinal),
+            firstHeader);
+    }
+
+    [Fact]
     public void ResourceSelectedRecordAreaAndDenseHeadersRemainReadable()
     {
         var xaml = Read("ClientInfoBetaWindow.xaml");
