@@ -156,6 +156,10 @@ if (-not [string]::IsNullOrWhiteSpace($outputDirectory))
 
 $utf8WithBom = [System.Text.UTF8Encoding]::new($true)
 $content = [string]::Join("`r`n`r`n", $sections) + "`r`n"
+$content = [System.Text.RegularExpressions.Regex]::Replace(
+    $content,
+    "`r`n|`r|`n",
+    "`r`n")
 [System.IO.File]::WriteAllText($OutputPath, $content, $utf8WithBom)
 
 Write-Output $OutputPath
