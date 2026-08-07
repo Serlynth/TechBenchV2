@@ -239,13 +239,13 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     public bool IsDemo => _demoData is not null;
     public string InternalClientIdLabel => IsDemo ? "Local demo · not stored" : $"Internal client ID {ClientId}";
     public string CutoverLabel => Profile.IsLive
-        ? $"Canonical SQL is live · {Profile.CutoverState}"
-        : $"Migration workspace · {Profile.CutoverState}";
+        ? "Live"
+        : $"Migration workspace · {Profile.DisplayStatus}";
     public string ClientInfoStatusLabel => IsDemo
         ? "Read-only example data"
         : Profile.IsLive
-        ? $"Client Information is live - {Profile.CutoverState}"
-        : $"Client Information draft - {Profile.CutoverState}";
+        ? "Client Information is live"
+        : $"Client Information draft - {Profile.DisplayStatus}";
     public bool CanEdit => !IsDemo && _currentUser.CanWrite;
     public bool IsProfileReadOnly => !CanEdit;
     public bool CanRevealSecrets => IsDemo || !_currentUser.IsReadOnlyPreview;

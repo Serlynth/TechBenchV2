@@ -3078,10 +3078,10 @@
                                                                TextTrimming="CharacterEllipsis" />
                                                 </StackPanel>
                                                 <StackPanel Grid.Column="4" VerticalAlignment="Center">
-                                                    <TextBlock Text="CUTOVER"
+                                                    <TextBlock Text="STATUS"
                                                                Style="{StaticResource FieldLabelStyle}"
                                                                Margin="0,0,0,2" />
-                                                    <TextBlock Text="{Binding CutoverState}"
+                                                    <TextBlock Text="{Binding DisplayStatus}"
                                                                Foreground="{DynamicResource SecondaryTextBrush}"
                                                                TextTrimming="CharacterEllipsis" />
                                                 </StackPanel>
@@ -3289,7 +3289,7 @@
                                                     <TextBlock Text="MIGRATION STATUS"
                                                                Style="{StaticResource FieldLabelStyle}"
                                                                Margin="0,0,0,2" />
-                                                    <TextBlock Text="{Binding CutoverState}"
+                                                    <TextBlock Text="{Binding DisplayStatus}"
                                                                Foreground="{DynamicResource SecondaryTextBrush}"
                                                                TextTrimming="CharacterEllipsis" />
                                                 </StackPanel>

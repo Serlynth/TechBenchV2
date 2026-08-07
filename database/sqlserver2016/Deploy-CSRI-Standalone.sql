@@ -27808,8 +27808,8 @@ BEGIN
             [PromotedAtUtc]=@NowUtc,[UpdatedAtUtc]=@NowUtc
         WHERE [BatchId]=@BatchId;
         UPDATE [tb_ops].[ClientInfoCutovers]
-        SET [State]=N'Hypercare',[LiveAtUtc]=COALESCE([LiveAtUtc],@NowUtc),
-            [HypercareEndsAtUtc]=DATEADD(day,5,@NowUtc),
+        SET [State]=N'Complete',[LiveAtUtc]=COALESCE([LiveAtUtc],@NowUtc),
+            [HypercareEndsAtUtc]=NULL,
             [UpdatedByWindowsSid]=@ActorSid,[UpdatedAtUtc]=@NowUtc
         WHERE [ClientId]=@ClientId;
 

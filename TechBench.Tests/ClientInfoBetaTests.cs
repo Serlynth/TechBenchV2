@@ -11,6 +11,30 @@ namespace TechBench.Tests;
 public sealed class ClientInfoBetaTests
 {
     [Fact]
+    public void LiveClientStatusDoesNotExposeLegacyHypercareStage()
+    {
+        var summary = new ClientInfoClientSummary
+        {
+            IsLive = true,
+            CutoverState = "Hypercare"
+        };
+        var profile = new ClientInfoProfile
+        {
+            IsLive = true,
+            CutoverState = "Hypercare"
+        };
+        var staging = new ClientInfoClientSummary
+        {
+            IsLive = false,
+            CutoverState = "Staging"
+        };
+
+        Assert.Equal("Live", summary.DisplayStatus);
+        Assert.Equal("Live", profile.DisplayStatus);
+        Assert.Equal("Staging", staging.DisplayStatus);
+    }
+
+    [Fact]
     public void Microsoft365LicenseCatalogUsesOnlyCsriSoldLicenses()
     {
         Assert.Equal(
@@ -2765,6 +2789,14 @@ public sealed class ClientInfoBetaTests
         Assert.Equal(15, SqlServerConnectionFactory.SupportedSchemaVersion);
         Assert.Contains(
             "CompareClientInfoImportToFireDrill",
+            imports,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "SET [State]=N'Complete'",
+            imports,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "SET [State]=N'Hypercare'",
             imports,
             StringComparison.Ordinal);
         var encryptStart = procedures.IndexOf(
