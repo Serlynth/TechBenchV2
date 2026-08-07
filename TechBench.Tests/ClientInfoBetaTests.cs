@@ -35,6 +35,108 @@ public sealed class ClientInfoBetaTests
     }
 
     [Fact]
+    public void NewManualClientIsCreatedLiveWithoutAWorkbookImport()
+    {
+        var procedures = Read(
+            "database",
+            "sqlserver2016",
+            "61-V0015-ClientInfoBetaProcedures.sql");
+        var grants = Read(
+            "database",
+            "sqlserver2016",
+            "63-V0015-ClientInfoBetaGrants.sql");
+        var verifier = Read(
+            "database",
+            "sqlserver2016",
+            "106-V0015-ClientInfoBetaVerify.sql");
+        var repository = Read(
+            "Data",
+            "SqlServerTechBenchRepository.ClientInfo.cs");
+        var sharedRepository = Read(
+            "Data",
+            "SqlServerTechBenchRepository.cs");
+        var workspace = Read(
+            "ViewModels",
+            "MainWindowViewModel.ClientInfoBeta.cs");
+        var mainWindow = Read("MainWindow.xaml");
+        var mainWindowCode = Read("MainWindow.xaml.cs");
+
+        var procedureStart = procedures.IndexOf(
+            "CREATE PROCEDURE [tb_app].[AdminCreateManualClientInfoClient]",
+            StringComparison.Ordinal);
+        var procedureEnd = procedures.IndexOf(
+            "\nGO",
+            procedureStart,
+            StringComparison.Ordinal);
+        Assert.True(procedureStart >= 0 && procedureEnd > procedureStart);
+        var procedure = procedures[procedureStart..procedureEnd];
+
+        Assert.Contains("BEGIN TRANSACTION", procedure, StringComparison.Ordinal);
+        Assert.Contains("IS_ROLEMEMBER(N'tb_role_admin')", procedure, StringComparison.Ordinal);
+        Assert.Contains("@Name, N'Manual'", procedure, StringComparison.Ordinal);
+        Assert.Contains("N'Unmatched'", procedure, StringComparison.Ordinal);
+        Assert.Contains("N'Unverified', 1", procedure, StringComparison.Ordinal);
+        Assert.Contains("@ClientId, NULL, N'Complete'", procedure, StringComparison.Ordinal);
+        Assert.Contains("[LiveAtUtc]", procedure, StringComparison.Ordinal);
+        Assert.Contains("[CompletedAtUtc]", procedure, StringComparison.Ordinal);
+        Assert.Contains("ManualClientInfoCreated", procedure, StringComparison.Ordinal);
+        Assert.Contains("[tb_security].[WriteAuditEvent]", procedure, StringComparison.Ordinal);
+        Assert.Contains("exact name already exists", procedure, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "GRANT EXECUTE ON OBJECT::[tb_app].[AdminCreateManualClientInfoClient]\n    TO [tb_role_admin]",
+            grants.Replace("\r\n", "\n"),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "[tb_app].[AdminCreateManualClientInfoClient]\n    TO [tb_role_user]",
+            grants.Replace("\r\n", "\n"),
+            StringComparison.Ordinal);
+        Assert.Contains("AdminCreateManualClientInfoClient", verifier, StringComparison.Ordinal);
+        Assert.Contains("ManualClientInfoCreationAvailable", verifier, StringComparison.Ordinal);
+
+        Assert.Contains("CreateManualClientInfoClient", repository, StringComparison.Ordinal);
+        Assert.Contains("@RequestId", repository, StringComparison.Ordinal);
+        Assert.Contains(
+            "ManualClientInfoCreationAvailable",
+            sharedRepository,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ManualClientInfoCreation: false",
+            sharedRepository,
+            StringComparison.Ordinal);
+
+        Assert.Contains("Content=\"+ New client\"", mainWindow, StringComparison.Ordinal);
+        Assert.Contains(
+            "IsEnabled=\"{Binding CanCreateClientInfoClient}\"",
+            mainWindow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CreateManualClientInfoClient_Click",
+            mainWindowCode,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "OpenClientInfoBetaWindow(created)",
+            mainWindowCode,
+            StringComparison.Ordinal);
+        Assert.Contains("_currentUser.CanManageClients", workspace, StringComparison.Ordinal);
+        Assert.Contains(
+            "if (!isImportWorkspace || !client.IsLive)",
+            workspace,
+            StringComparison.Ordinal);
+
+        var created = new ClientInfoClientSummary
+        {
+            ClientId = 42,
+            ClientName = "New Client",
+            IsActive = true,
+            ReviewStatus = "Unverified",
+            CutoverState = "Complete",
+            IsLive = true
+        };
+        Assert.Equal("Live", created.DisplayStatus);
+        Assert.Equal("Unverified", created.ReviewStatus);
+    }
+
+    [Fact]
     public void Microsoft365LicenseCatalogUsesOnlyCsriSoldLicenses()
     {
         Assert.Equal(

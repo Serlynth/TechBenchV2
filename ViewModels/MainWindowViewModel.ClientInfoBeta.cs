@@ -19,6 +19,17 @@ public sealed partial class MainWindowViewModel
     public bool ClientInfoWorkspaceAvailable =>
         _repository.ClientInfoBetaAvailable;
 
+    public bool ShowCreateClientInfoClient => _currentUser.CanManageClients;
+
+    public bool CanCreateClientInfoClient =>
+        ShowCreateClientInfoClient
+        && _repository.ManualClientInfoCreationAvailable;
+
+    public string CreateClientInfoClientToolTip =>
+        CanCreateClientInfoClient
+            ? "Create a live client for manual entry. Sage and WHD can be matched later."
+            : "Install the current stable TechBench Server package to create live clients manually.";
+
     public bool HasClientInfoClients => ClientInfoClients.Count > 0;
 
     public bool IsClientInfoResultsEmpty =>
@@ -93,10 +104,16 @@ public sealed partial class MainWindowViewModel
                 ClientInfoClients.Add(ClientInfoDemoData.Summary);
             }
 
+            var isImportWorkspace = CurrentSection.Equals(
+                ClientInfoImportWorkspaceSection,
+                StringComparison.Ordinal);
             foreach (var client in _repository.SearchClientInfoClients(
                          ClientInfoSearchText))
             {
-                ClientInfoClients.Add(client);
+                if (!isImportWorkspace || !client.IsLive)
+                {
+                    ClientInfoClients.Add(client);
+                }
             }
 
             SelectedClientInfoClient = selectedClientId.HasValue
@@ -132,6 +149,37 @@ public sealed partial class MainWindowViewModel
 
     internal void RefreshClientInfoWorkspace() =>
         RefreshClientInfoClients();
+
+    internal ClientInfoClientSummary CreateManualClientInfoClient(
+        string clientName)
+    {
+        if (!_currentUser.CanManageClients)
+        {
+            throw new InvalidOperationException(
+                "Only a TechBench Admin may create a shared client.");
+        }
+
+        if (!_repository.ManualClientInfoCreationAvailable)
+        {
+            throw new InvalidOperationException(
+                "Install the current stable TechBench Server package, restart TechBench, and try again.");
+        }
+
+        var normalizedName = clientName.Trim();
+        if (normalizedName.Length == 0)
+        {
+            throw new InvalidOperationException("Client name is required.");
+        }
+
+        var created = _repository.CreateManualClientInfoClient(normalizedName);
+        ClientInfoSearchText = created.ClientName;
+        RefreshClientInfoClients();
+        SelectedClientInfoClient = ClientInfoClients.FirstOrDefault(
+            client => client.ClientId == created.ClientId) ?? created;
+        StatusMessage =
+            $"Created {created.ClientName} as a live Client Information record.";
+        return SelectedClientInfoClient;
+    }
 
     internal ClientInfoBetaViewModel CreateCanonicalClientInfoProfile(
         ClientInfoClientSummary summary)

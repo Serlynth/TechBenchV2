@@ -40,6 +40,7 @@ FROM
         (N'tb_import.ClientInfoPromotionMap',N'U'),
         (N'tb_ops.ClientInfoCutovers',N'U'),
         (N'tb_app.SearchClientInfoClients',N'P'),
+        (N'tb_app.AdminCreateManualClientInfoClient',N'P'),
         (N'tb_app.GetClientInfoSnapshot',N'P'),
         (N'tb_app.SaveClientInfoProfile',N'P'),
         (N'tb_app.SaveClientInfoLocation',N'P'),
@@ -162,8 +163,32 @@ IF @CompareClientInfoDefinition IS NULL
 DECLARE @Capabilities nvarchar(max)=
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetRepositoryCapabilities'));
 IF CHARINDEX(N'[ClientInfoBetaAvailable]', @Capabilities) = 0
+   OR CHARINDEX(N'[ManualClientInfoCreationAvailable]', @Capabilities) = 0
    OR CHARINDEX(N'CONVERT(int, 15) AS [SchemaVersion]', @Capabilities) = 0
     THROW 52505,N'Repository capabilities do not expose the schema-15-compatible Client Info beta.',1;
+
+DECLARE @ManualClientCreation nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminCreateManualClientInfoClient'));
+IF @ManualClientCreation IS NULL
+   OR CHARINDEX(N'IS_ROLEMEMBER(N''tb_role_admin'')', @ManualClientCreation) = 0
+   OR CHARINDEX(N'N''Manual''', @ManualClientCreation) = 0
+   OR CHARINDEX(N'[IsLive]', @ManualClientCreation) = 0
+   OR CHARINDEX(N'N''Complete''', @ManualClientCreation) = 0
+   OR CHARINDEX(N'[tb_security].[WriteAuditEvent]', @ManualClientCreation) = 0
+    THROW 52515,N'Manual client creation is not admin-only, live, complete, and audited.',1;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions AS permission
+    WHERE permission.[grantee_principal_id] =
+            DATABASE_PRINCIPAL_ID(N'tb_role_admin')
+      AND permission.[major_id] =
+            OBJECT_ID(N'tb_app.AdminCreateManualClientInfoClient')
+      AND permission.[permission_name] = N'EXECUTE'
+      AND permission.[state] IN (N'G',N'W')
+)
+    THROW 52516,N'The Admin role cannot create live manual clients.',1;
 
 DECLARE @MergeManual nvarchar(max)=
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminMergeClients'));

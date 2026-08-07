@@ -33,6 +33,7 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
     private bool _fullTextSearchAvailable;
     private bool _equipmentBoardAvailable;
     private bool _clientInfoBetaAvailable;
+    private bool _manualClientInfoCreationAvailable;
 
     public SqlServerTechBenchRepository(
         SqlServerConnectionFactory connectionFactory,
@@ -52,6 +53,8 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
     public bool FullTextSearchAvailable => _fullTextSearchAvailable;
     public bool EquipmentBoardAvailable => _equipmentBoardAvailable;
     public bool ClientInfoBetaAvailable => _clientInfoBetaAvailable;
+    public bool ManualClientInfoCreationAvailable =>
+        _manualClientInfoCreationAvailable;
 
     public static class Procedures
     {
@@ -101,6 +104,8 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         public const string SearchFireDrillCredentials = "[tb_app].[SearchFireDrillCredentials]";
         public const string RevealFireDrillCredential = "[tb_app].[RevealFireDrillCredential]";
         public const string SearchClientInfoClients = "[tb_app].[SearchClientInfoClients]";
+        public const string CreateManualClientInfoClient =
+            "[tb_app].[AdminCreateManualClientInfoClient]";
         public const string GetClientInfoSnapshot = "[tb_app].[GetClientInfoSnapshot]";
         public const string GetClientAttachmentStorageConfiguration =
             "[tb_app].[GetClientAttachmentStorageConfiguration]";
@@ -256,19 +261,25 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
                             return (
                                 FullText: false,
                                 Equipment: false,
-                                ClientInfo: false);
+                                ClientInfo: false,
+                                ManualClientInfoCreation: false);
                         }
 
                         return (
                             FullText: GetBoolean(reader, "FullTextSearchAvailable"),
                             Equipment: GetBoolean(reader, "EquipmentBoardAvailable"),
-                            ClientInfo: GetBoolean(reader, "ClientInfoBetaAvailable"));
+                            ClientInfo: GetBoolean(reader, "ClientInfoBetaAvailable"),
+                            ManualClientInfoCreation: GetBoolean(
+                                reader,
+                                "ManualClientInfoCreationAvailable"));
                     },
                     cancellationToken)
                 .ConfigureAwait(false);
             _fullTextSearchAvailable = capabilities.FullText;
             _equipmentBoardAvailable = capabilities.Equipment;
             _clientInfoBetaAvailable = capabilities.ClientInfo;
+            _manualClientInfoCreationAvailable =
+                capabilities.ManualClientInfoCreation;
         }
         catch (SqlException ex) when (ex.Number == 2812)
         {
@@ -276,6 +287,7 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
             _fullTextSearchAvailable = false;
             _equipmentBoardAvailable = false;
             _clientInfoBetaAvailable = false;
+            _manualClientInfoCreationAvailable = false;
         }
     }
 

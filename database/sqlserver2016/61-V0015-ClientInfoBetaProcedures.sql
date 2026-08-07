@@ -34,7 +34,8 @@ BEGIN
         CONVERT(bit, 1) AS [SupportsAdminUserPreview],
         CONVERT(bit, 1) AS [SupportsFireDrillCredentials],
         CONVERT(bit, 1) AS [EquipmentBoardAvailable],
-        CONVERT(bit, 1) AS [ClientInfoBetaAvailable];
+        CONVERT(bit, 1) AS [ClientInfoBetaAvailable],
+        CONVERT(bit, 1) AS [ManualClientInfoCreationAvailable];
 END;
 GO
 
@@ -382,6 +383,147 @@ BEGIN
             WHERE [ClientId] = @SourceClientId;
     END;
 
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminCreateManualClientInfoClient', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminCreateManualClientInfoClient];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminCreateManualClientInfoClient]
+    @Name nvarchar(240),
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 52311, N'Only a current TechBench Admin may create a shared client.', 1;
+
+    SET @Name = NULLIF(LTRIM(RTRIM(@Name)), N'');
+    SET @RequestId = COALESCE(@RequestId, NEWID());
+
+    IF @Name IS NULL
+        THROW 52312, N'Client name is required.', 1;
+    IF LEN(@Name) > 240
+        THROW 52312, N'Client name exceeds 240 characters.', 1;
+
+    DECLARE @NowUtc datetime2(3) = SYSUTCDATETIME();
+    DECLARE @ClientId int;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[Clients] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [IsActive] = 1
+              AND LOWER(LTRIM(RTRIM([Name]))) = LOWER(@Name)
+        )
+            THROW 52313, N'An active client with this exact name already exists. Open the existing client or use Client Match.', 1;
+
+        INSERT INTO [tb_data].[Clients]
+        (
+            [Name], [Source], [ExternalId], [IsActive], [LastSyncedAtUtc],
+            [WhdLocationName], [WhdContactName], [SageCustomerId],
+            [SageCustomerName], [SageContactName], [SageTelephone],
+            [MatchStatus], [CreatedByWindowsSid], [UpdatedByWindowsSid],
+            [CreatedAtUtc], [UpdatedAtUtc]
+        )
+        VALUES
+        (
+            @Name, N'Manual', NULL, 1, NULL,
+            NULL, NULL, NULL,
+            NULL, NULL, NULL,
+            N'Unmatched', @ActorSid, @ActorSid,
+            @NowUtc, @NowUtc
+        );
+
+        SET @ClientId = CONVERT(int, SCOPE_IDENTITY());
+
+        INSERT INTO [tb_client].[ClientProfiles]
+        (
+            [ClientId], [Summary], [ClientFolderPath],
+            [LegacyClientInfoSheetPath], [ReviewStatus], [IsLive],
+            [LastVerifiedAtUtc], [LastVerifiedByWindowsSid],
+            [CreatedByWindowsSid], [UpdatedByWindowsSid],
+            [CreatedAtUtc], [UpdatedAtUtc]
+        )
+        VALUES
+        (
+            @ClientId, NULL, NULL,
+            NULL, N'Unverified', 1,
+            NULL, NULL,
+            @ActorSid, @ActorSid,
+            @NowUtc, @NowUtc
+        );
+
+        INSERT INTO [tb_ops].[ClientInfoCutovers]
+        (
+            [ClientId], [ActiveBatchId], [State], [LegacyFrozenAtUtc],
+            [LiveAtUtc], [HypercareEndsAtUtc], [CompletedAtUtc],
+            [UpdatedByWindowsSid], [UpdatedAtUtc]
+        )
+        VALUES
+        (
+            @ClientId, NULL, N'Complete', NULL,
+            @NowUtc, NULL, @NowUtc,
+            @ActorSid, @NowUtc
+        );
+
+        DECLARE @AuditEntityId nvarchar(120) =
+            CONVERT(nvarchar(120), @ClientId);
+        DECLARE @AuditData nvarchar(max) =
+        (
+            SELECT
+                @Name AS [name],
+                N'Manual' AS [source],
+                CONVERT(bit, 1) AS [isLive],
+                N'Complete' AS [cutoverState]
+            FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+        );
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'ManualClientInfoCreated',
+            @EntityType=N'Client',
+            @EntityId=@AuditEntityId,
+            @RequestId=@RequestId,
+            @DataJson=@AuditData;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT
+        client.[Id] AS [ClientId],
+        client.[Name] AS [ClientName],
+        client.[IsActive],
+        profile.[ReviewStatus],
+        cutover.[State] AS [CutoverState],
+        profile.[IsLive],
+        profile.[UpdatedAtUtc],
+        profile.[RowVersion],
+        CONVERT(bigint, 0) AS [LocationCount],
+        CONVERT(bigint, 0) AS [PersonCount],
+        CONVERT(bigint, 0) AS [ResourceCount],
+        CONVERT(bigint, 0) AS [CredentialCount]
+    FROM [tb_data].[Clients] AS client
+    INNER JOIN [tb_client].[ClientProfiles] AS profile
+        ON profile.[ClientId] = client.[Id]
+    INNER JOIN [tb_ops].[ClientInfoCutovers] AS cutover
+        ON cutover.[ClientId] = client.[Id]
+    WHERE client.[Id] = @ClientId;
 END;
 GO
 

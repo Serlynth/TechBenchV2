@@ -30,6 +30,31 @@ public sealed partial class SqlServerTechBenchRepository
             CancellationToken.None).GetAwaiter().GetResult();
     }
 
+    public ClientInfoClientSummary CreateManualClientInfoClient(
+        string clientName)
+    {
+        if (!ManualClientInfoCreationAvailable)
+        {
+            throw new NotSupportedException(
+                "Creating a live manual client requires the current TechBench Server package.");
+        }
+
+        return QueryAsync(
+            Procedures.CreateManualClientInfoClient,
+            command =>
+            {
+                AddRequiredText(command, "@Name", 240, clientName);
+                AddGuid(command, "@RequestId", Guid.NewGuid());
+            },
+            (reader, token) => ReadSingleAsync(
+                reader,
+                token,
+                ReadClientInfoClientSummary),
+            CancellationToken.None).GetAwaiter().GetResult()
+            ?? throw new InvalidOperationException(
+                "SQL Server did not return the new live client.");
+    }
+
     public ClientInfoSnapshot? GetClientInfoSnapshot(int clientId)
     {
         if (!ClientInfoBetaAvailable || clientId <= 0)
