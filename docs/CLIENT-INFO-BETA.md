@@ -94,6 +94,21 @@ either direction without a manual reinstall.
    access events appear in the audit trail.
 10. Leave FireDrill sync enabled throughout beta testing.
 
+## Creating a new client without an import
+
+For a brand-new client whose information will be entered manually, an admin
+opens **CLIENTS > Client Information** and chooses **+ New client**. Enter the
+client name once. TechBench creates the shared internal client ID and a blank
+Client Information profile as **Live** immediately, then opens the normal
+editor for Locations, Users, equipment, systems, credentials, attachments,
+and the other client sections.
+
+The new profile begins with review status **Unverified** because no technician
+has reviewed the manually entered details yet. It does not appear in Workbook
+Imports and never needs a migration workbook. Sage and Web Help Desk identities
+can be matched later through Client Match without changing the retained
+internal client ID or the manually entered Client Information.
+
 The current workbook format is `TB-CI-9`. It intentionally hides technical row
 keys, uses ordinary worksheet labels, separates Backup from Security, and
 includes all current category-specific fields. Every resource sheet accepts

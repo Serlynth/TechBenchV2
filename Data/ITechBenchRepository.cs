@@ -17,6 +17,8 @@ public interface ITechBenchRepository
 
     bool ClientInfoBetaAvailable => false;
 
+    bool ManualClientInfoCreationAvailable => false;
+
     void Initialize();
 
     IReadOnlyList<Client> GetClients(bool includeInactive = false, string? searchTerm = null);
@@ -131,6 +133,10 @@ public interface ITechBenchRepository
     IReadOnlyList<ClientInfoClientSummary> SearchClientInfoClients(
         string? searchTerm = null,
         bool includeInactive = false) => [];
+
+    ClientInfoClientSummary CreateManualClientInfoClient(string clientName) =>
+        throw new NotSupportedException(
+            "Creating a live manual client requires the current shared SQL Server package.");
 
     ClientInfoSnapshot? GetClientInfoSnapshot(int clientId) => null;
 

@@ -581,6 +581,41 @@ public partial class MainWindow : Window
         }
     }
 
+    private void CreateManualClientInfoClient_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var clientName = AppDialogWindow.Prompt(
+            "Create live client",
+            "Enter the new client's name. TechBench will create a live Client Information record ready for manual entry. You can match it to Sage and Web Help Desk later.",
+            owner: this,
+            confirmText: "Create client");
+        if (clientName is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var created = viewModel.CreateManualClientInfoClient(clientName);
+            OpenClientInfoBetaWindow(created);
+        }
+        catch (Exception exception)
+        {
+            AppDialogWindow.Error(
+                "Client could not be created",
+                exception.Message,
+                this);
+        }
+
+        e.Handled = true;
+    }
+
     private void OpenClientInfoBetaWindow(
         ClientInfoClientSummary summary)
     {

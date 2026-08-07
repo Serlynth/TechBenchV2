@@ -86,6 +86,12 @@ public sealed class SqlServerTechBenchRepositoryContractTests
                 .Select(field => (string)field.GetRawConstantValue()!)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Count());
+
+        Assert.Equal(
+            "[tb_app].[AdminCreateManualClientInfoClient]",
+            SqlServerTechBenchRepository.Procedures.CreateManualClientInfoClient);
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
+            nameof(ITechBenchRepository.CreateManualClientInfoClient)));
     }
 
     [Fact]
