@@ -500,6 +500,23 @@ public static class ClientInfoCategoryOverviewBuilder
         var activeCredentials = credentials
             .Where(credential => credential.IsActive)
             .ToArray();
+        if (resources.Count == 0 && activeCredentials.Length > 0)
+        {
+            return
+            [
+                Section(
+                    "Imported Wi-Fi information",
+                    string.Empty,
+                    activeCredentials
+                        .OrderBy(
+                            credential => credential.Name,
+                            StringComparer.OrdinalIgnoreCase)
+                        .Select(AccessField)
+                        .Cast<ClientInfoOverviewField?>()
+                        .ToArray())
+            ];
+        }
+
         var admin = MatchingCredentials(
             activeCredentials,
             ["wireless admin", "wifi admin", "controller", "management", "central", "unifi", "meraki"]);

@@ -11,6 +11,13 @@ namespace TechBench.Controls;
 
 public sealed class ClientInfoResourceDataGrid : DataGrid
 {
+    public static readonly DependencyProperty ShowReviewColumnProperty =
+        DependencyProperty.Register(
+            nameof(ShowReviewColumn),
+            typeof(bool),
+            typeof(ClientInfoResourceDataGrid),
+            new PropertyMetadata(true, OnShowReviewColumnChanged));
+
     private static readonly ClientInfoResourceFieldValueConverter
         FieldValueConverter = new();
     private INotifyCollectionChanged? _resources;
@@ -27,6 +34,22 @@ public sealed class ClientInfoResourceDataGrid : DataGrid
         DataContextChanged += (_, _) => AttachGroup();
         Loaded += (_, _) => AttachGroup();
         Unloaded += (_, _) => DetachResources();
+    }
+
+    public bool ShowReviewColumn
+    {
+        get => (bool)GetValue(ShowReviewColumnProperty);
+        set => SetValue(ShowReviewColumnProperty, value);
+    }
+
+    private static void OnShowReviewColumnChanged(
+        DependencyObject dependencyObject,
+        DependencyPropertyChangedEventArgs e)
+    {
+        if (dependencyObject is ClientInfoResourceDataGrid grid)
+        {
+            grid.BuildColumns();
+        }
     }
 
     private void AttachGroup()
@@ -118,7 +141,10 @@ public sealed class ClientInfoResourceDataGrid : DataGrid
         Columns.Add(TextColumn("Status", "Status", 0.7));
         Columns.Add(TextColumn("Notes", "Notes", 1.5));
         Columns.Add(TextColumn("Active", "IsActive", 0.6));
-        Columns.Add(TextColumn("Review", "ReviewStatus", 0.8));
+        if (ShowReviewColumn)
+        {
+            Columns.Add(TextColumn("Review", "ReviewStatus", 0.8));
+        }
         Columns.Add(TextColumn("Last verified", "LastVerifiedAtUtc", 0.9));
         Columns.Add(TextColumn("Updated", "UpdatedAtUtc", 0.9));
 

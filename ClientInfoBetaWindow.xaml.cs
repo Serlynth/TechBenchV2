@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -10,6 +11,7 @@ namespace TechBench;
 public partial class ClientInfoBetaWindow : Window
 {
     private readonly LocalPreferences _localPreferences;
+    private INotifyPropertyChanged? _viewModelNotifications;
 
     public ClientInfoBetaWindow()
         : this(LocalPreferenceStore.LoadOrCreate())
@@ -22,8 +24,11 @@ public partial class ClientInfoBetaWindow : Window
             ?? throw new ArgumentNullException(nameof(localPreferences));
         InitializeComponent();
         ApplyLayoutPreferences();
+        DataContextChanged += (_, _) => AttachViewModelNotifications();
+        Loaded += (_, _) => AttachViewModelNotifications();
         Closed += (_, _) =>
         {
+            DetachViewModelNotifications();
             (DataContext as ClientInfoBetaViewModel)?.ClearRevealedSecrets();
             SaveLayoutPreferences();
         };
@@ -84,6 +89,12 @@ public partial class ClientInfoBetaWindow : Window
         ApplyColumnWidths(
             PeopleDataGrid,
             _localPreferences.PeopleGridColumnWidths);
+        ApplyColumnWidths(
+            CredentialsDataGrid,
+            _localPreferences.AccessGridColumnWidths);
+        CredentialDetailsColumn.Width = new GridLength(
+            _localPreferences.AccessDetailsPaneWidth,
+            GridUnitType.Pixel);
         WindowState = _localPreferences.ProfileWindowState.Equals(
             "Maximized",
             StringComparison.OrdinalIgnoreCase)
@@ -116,7 +127,61 @@ public partial class ClientInfoBetaWindow : Window
             PeopleDataGrid,
             _localPreferences.PeopleGridColumnWidths,
             widths => _localPreferences.PeopleGridColumnWidths = widths);
+        SaveColumnWidths(
+            CredentialsDataGrid,
+            _localPreferences.AccessGridColumnWidths,
+            widths => _localPreferences.AccessGridColumnWidths = widths);
+        var credentialDetailsWidth = CredentialDetailsColumn.ActualWidth;
+        if (credentialDetailsWidth is >= 260 and <= 720
+            && double.IsFinite(credentialDetailsWidth))
+        {
+            _localPreferences.AccessDetailsPaneWidth =
+                credentialDetailsWidth;
+        }
         TrySaveLocalPreferences();
+    }
+
+    private void AttachViewModelNotifications()
+    {
+        DetachViewModelNotifications();
+        _viewModelNotifications = DataContext as INotifyPropertyChanged;
+        if (_viewModelNotifications is not null)
+        {
+            _viewModelNotifications.PropertyChanged += ViewModel_PropertyChanged;
+        }
+
+        ApplyLifecycleVisibility();
+    }
+
+    private void DetachViewModelNotifications()
+    {
+        if (_viewModelNotifications is not null)
+        {
+            _viewModelNotifications.PropertyChanged -= ViewModel_PropertyChanged;
+            _viewModelNotifications = null;
+        }
+    }
+
+    private void ViewModel_PropertyChanged(
+        object? sender,
+        PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(ClientInfoBetaViewModel.IsLive)
+            or nameof(ClientInfoBetaViewModel.Profile))
+        {
+            ApplyLifecycleVisibility();
+        }
+    }
+
+    private void ApplyLifecycleVisibility()
+    {
+        var visibility = DataContext is ClientInfoBetaViewModel { IsLive: true }
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        LocationsReviewColumn.Visibility = visibility;
+        PeopleReviewColumn.Visibility = visibility;
+        CredentialsReviewColumn.Visibility = visibility;
+        FactsReviewColumn.Visibility = visibility;
     }
 
     private static void ApplyColumnWidths(

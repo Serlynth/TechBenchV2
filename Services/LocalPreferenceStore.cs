@@ -170,6 +170,10 @@ public sealed class LocalPreferences
 
     public List<double> PeopleGridColumnWidths { get; set; } = [];
 
+    public List<double> AccessGridColumnWidths { get; set; } = [];
+
+    public double AccessDetailsPaneWidth { get; set; } = 330;
+
     public string LastBenchModule { get; set; } = "TechBench";
 
     public string TechBenchWorkspace { get; set; } = "Today";
@@ -227,6 +231,12 @@ public sealed class LocalPreferences
             LocationGridColumnWidths);
         PeopleGridColumnWidths = NormalizeColumnWidths(
             PeopleGridColumnWidths);
+        AccessGridColumnWidths = NormalizeColumnWidths(
+            AccessGridColumnWidths);
+        AccessDetailsPaneWidth =
+            double.IsFinite(AccessDetailsPaneWidth)
+                ? Math.Clamp(AccessDetailsPaneWidth, 260, 720)
+                : 330;
         LastBenchModule = NormalizeBenchModule(LastBenchModule);
         TechBenchWorkspace = NormalizeWorkspace(TechBenchWorkspace, "Today");
         AdminBenchWorkspace = NormalizeWorkspace(

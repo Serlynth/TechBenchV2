@@ -355,6 +355,7 @@
                     <controls:ClientInfoResourceDataGrid Grid.Row="4"
                                                          ItemsSource="{Binding Resources}"
                                                          SelectedItem="{Binding SelectedResource, Mode=TwoWay}"
+                                                         ShowReviewColumn="{Binding DataContext.ShowReviewWorkflow, RelativeSource={RelativeSource AncestorType=Window}}"
                                                          ClipboardCopyMode="IncludeHeader"
                                                          MouseDoubleClick="Resources_DoubleClick" />
                 </Grid>
@@ -643,6 +644,7 @@
                                               MinWidth="190"
                                               HorizontalAlignment="Left"
                                               Margin="0,0,0,14"
+                                              Visibility="{Binding ShowReviewWorkflow, Converter={StaticResource BooleanToVisibilityConverter}}"
                                               IsEnabled="{Binding CanEdit}" />
                                     <Border Grid.Row="3"
                                             BorderBrush="{DynamicResource BorderBrush}"
@@ -810,7 +812,10 @@
                             <DataGridTextColumn Header="Time Zone" Binding="{Binding TimeZoneId}" MinWidth="110" />
                             <DataGridCheckBoxColumn Header="Primary" Binding="{Binding IsPrimary}" MinWidth="70" />
                             <DataGridCheckBoxColumn Header="Active" Binding="{Binding IsActive}" MinWidth="65" />
-                            <DataGridTextColumn Header="Review" Binding="{Binding ReviewStatus}" MinWidth="100" />
+                            <DataGridTextColumn x:Name="LocationsReviewColumn"
+                                                Header="Review"
+                                                Binding="{Binding ReviewStatus}"
+                                                MinWidth="100" />
                             <DataGridTextColumn Header="Last Verified" Binding="{Binding LastVerifiedAtUtc, StringFormat={}{0:g}}" MinWidth="125" />
                             <DataGridTextColumn Header="Updated" Binding="{Binding UpdatedAtUtc, StringFormat={}{0:g}}" MinWidth="125" />
                         </DataGrid.Columns>
@@ -821,6 +826,8 @@
             <TabItem Header="Users">
                 <Grid Margin="18">
                         <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
@@ -843,7 +850,113 @@
                                     Margin="0,0,0,8"
                                     MinWidth="70" />
                         </Grid>
-                        <DataGrid Grid.Row="1"
+                        <Border Grid.Row="1"
+                                Background="{DynamicResource PanelAltBackgroundBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="10"
+                                Padding="14"
+                                Margin="0,2,0,10"
+                                Visibility="{Binding HasSelectedPerson, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <StackPanel>
+                                <TextBlock Text="Selected user"
+                                           FontSize="12"
+                                           Foreground="{DynamicResource MutedTextBrush}" />
+                                <TextBox Text="{Binding SelectedPerson.DisplayName, Mode=OneWay}"
+                                         Style="{StaticResource SelectableValueStyle}"
+                                         FontSize="19"
+                                         FontWeight="SemiBold"
+                                         TextWrapping="Wrap"
+                                         Margin="0,3,0,12" />
+                                <WrapPanel>
+                                    <StackPanel Width="185" Margin="0,0,18,8">
+                                        <TextBlock Text="ROLE / DEPARTMENT" Style="{StaticResource SubtleLabelStyle}" />
+                                        <TextBox Text="{Binding SelectedPerson.RoleDepartment, Mode=OneWay}"
+                                                 Style="{StaticResource SelectableValueStyle}" Margin="0,3,0,8" />
+                                        <TextBlock Text="LOCATION" Style="{StaticResource SubtleLabelStyle}" />
+                                        <TextBox Text="{Binding SelectedPerson.LocationName, Mode=OneWay}"
+                                                 Style="{StaticResource SelectableValueStyle}" Margin="0,3,0,0" />
+                                    </StackPanel>
+                                    <StackPanel Width="245" Margin="0,0,18,8">
+                                        <TextBlock Text="EMAIL" Style="{StaticResource SubtleLabelStyle}" />
+                                        <TextBox Text="{Binding SelectedPerson.Email, Mode=OneWay}"
+                                                 Style="{StaticResource SelectableValueStyle}" Margin="0,3,0,8" />
+                                        <TextBlock Text="PHONE / MOBILE" Style="{StaticResource SubtleLabelStyle}" />
+                                        <TextBox Style="{StaticResource SelectableValueStyle}" Margin="0,3,0,0">
+                                            <TextBox.Text>
+                                                <MultiBinding StringFormat="{}{0}   {1}">
+                                                    <Binding Path="SelectedPerson.Phone" />
+                                                    <Binding Path="SelectedPerson.MobilePhone" />
+                                                </MultiBinding>
+                                            </TextBox.Text>
+                                        </TextBox>
+                                    </StackPanel>
+                                    <StackPanel Width="250" Margin="0,0,18,8">
+                                        <TextBlock Text="ACTIVE DIRECTORY" Style="{StaticResource SubtleLabelStyle}" />
+                                        <TextBox Text="{Binding SelectedPerson.AdUsernameDisplay, Mode=OneWay}"
+                                                 Style="{StaticResource SelectableValueStyle}" Margin="0,3,0,7" />
+                                        <WrapPanel>
+                                            <TextBox Text="{Binding SelectedPerson.AdPassword.InlineDisplayValue, Mode=OneWay, TargetNullValue=Not stored}"
+                                                     Style="{StaticResource SelectableValueStyle}"
+                                                     MinWidth="82" Margin="0,0,6,0" />
+                                            <Button Content="{Binding SelectedPerson.AdPassword.InlineRevealLabel, TargetNullValue=Reveal}"
+                                                    Command="{Binding RevealSecretCommand}"
+                                                    CommandParameter="{Binding SelectedPerson.AdPassword}"
+                                                    Padding="7,2" Margin="0,0,5,0" />
+                                            <Button Content="Copy"
+                                                    Command="{Binding CopySecretCommand}"
+                                                    CommandParameter="{Binding SelectedPerson.AdPassword}"
+                                                    Padding="7,2" />
+                                        </WrapPanel>
+                                    </StackPanel>
+                                    <StackPanel Width="285" Margin="0,0,18,8">
+                                        <TextBlock Text="MICROSOFT 365" Style="{StaticResource SubtleLabelStyle}" />
+                                        <TextBlock Margin="0,3,0,4">
+                                            <Run Text="License: " />
+                                            <Run Text="{Binding SelectedPerson.Microsoft365LicenseDisplay}" />
+                                            <Run Text="  ·  Azure Sync: " />
+                                            <Run Text="{Binding SelectedPerson.AzureSyncLabel}" />
+                                        </TextBlock>
+                                        <TextBox Text="{Binding SelectedPerson.Microsoft365Username, Mode=OneWay}"
+                                                 Style="{StaticResource SelectableValueStyle}"
+                                                 ToolTip="Microsoft 365 username" Margin="0,0,0,6" />
+                                        <WrapPanel>
+                                            <TextBox Text="{Binding SelectedPerson.Microsoft365Password.InlineDisplayValue, Mode=OneWay, TargetNullValue=Uses Azure Sync}"
+                                                     Style="{StaticResource SelectableValueStyle}"
+                                                     MinWidth="82" Margin="0,0,6,0" />
+                                            <Button Content="{Binding SelectedPerson.Microsoft365Password.InlineRevealLabel, TargetNullValue=Reveal}"
+                                                    Command="{Binding RevealSecretCommand}"
+                                                    CommandParameter="{Binding SelectedPerson.Microsoft365Password}"
+                                                    Padding="7,2" Margin="0,0,5,0" />
+                                            <Button Content="Copy"
+                                                    Command="{Binding CopySecretCommand}"
+                                                    CommandParameter="{Binding SelectedPerson.Microsoft365Password}"
+                                                    Padding="7,2" />
+                                        </WrapPanel>
+                                    </StackPanel>
+                                    <StackPanel Width="160" Margin="0,0,0,8">
+                                        <TextBlock Text="PC NAME" Style="{StaticResource SubtleLabelStyle}" />
+                                        <TextBox Text="{Binding SelectedPerson.PcName, Mode=OneWay}"
+                                                 Style="{StaticResource SelectableValueStyle}" Margin="0,3,0,8" />
+                                        <TextBlock Text="CONTACT TYPE" Style="{StaticResource SubtleLabelStyle}" />
+                                        <TextBox Text="{Binding SelectedPerson.ContactType, Mode=OneWay}"
+                                                 Style="{StaticResource SelectableValueStyle}" Margin="0,3,0,0" />
+                                    </StackPanel>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Grid.Row="1"
+                                   Text="Select a user below to see their important details."
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   Margin="0,6,0,12"
+                                   Visibility="{Binding HasSelectedPerson, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,7">
+                            <TextBlock Text="Full list" FontSize="14" FontWeight="SemiBold" />
+                            <TextBlock Text="Select or double-click to edit"
+                                       Foreground="{DynamicResource MutedTextBrush}"
+                                       Margin="10,1,0,0" />
+                        </StackPanel>
+                        <DataGrid Grid.Row="3"
                                   x:Name="PeopleDataGrid"
                                   ItemsSource="{Binding People}"
                                   SelectedItem="{Binding SelectedPerson}"
@@ -901,9 +1014,9 @@
                                 <DataGridTextColumn Header="License"
                                                     Binding="{Binding Microsoft365LicenseDisplay}"
                                                     MinWidth="145" />
-                                <DataGridCheckBoxColumn Header="365 uses AD login"
-                                                        Binding="{Binding Microsoft365UsesAdLogin, Mode=OneWay}"
-                                                        MinWidth="125" />
+                                <DataGridCheckBoxColumn Header="Azure Sync"
+                                                        Binding="{Binding AzureSyncEnabled, Mode=OneWay}"
+                                                        MinWidth="95" />
                                 <DataGridTextColumn Header="365 Username"
                                                     Binding="{Binding Microsoft365Username}"
                                                     MinWidth="190" />
@@ -912,7 +1025,7 @@
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <WrapPanel VerticalAlignment="Center">
-                                                <TextBox Text="{Binding Microsoft365Password.InlineDisplayValue, Mode=OneWay, TargetNullValue=Uses AD login}"
+                                                <TextBox Text="{Binding Microsoft365Password.InlineDisplayValue, Mode=OneWay, TargetNullValue=Uses Azure Sync}"
                                                          Style="{StaticResource SelectableValueStyle}"
                                                          MinWidth="82"
                                                          Margin="0,0,5,0" />
@@ -947,7 +1060,8 @@
                                 <DataGridCheckBoxColumn Header="Active"
                                                         Binding="{Binding IsActive}"
                                                         MinWidth="65" />
-                                <DataGridTextColumn Header="Review"
+                                <DataGridTextColumn x:Name="PeopleReviewColumn"
+                                                    Header="Review"
                                                     Binding="{Binding ReviewStatus}"
                                                     MinWidth="100" />
                                 <DataGridTextColumn Header="Last Verified"
@@ -1146,8 +1260,9 @@
             <TabItem Header="Passwords">
                 <Grid Margin="18">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="1.45*" />
-                        <ColumnDefinition Width="0.8*" />
+                        <ColumnDefinition x:Name="CredentialListColumn" Width="*" MinWidth="420" />
+                        <ColumnDefinition Width="7" />
+                        <ColumnDefinition x:Name="CredentialDetailsColumn" Width="330" MinWidth="260" />
                     </Grid.ColumnDefinitions>
                     <Grid Margin="0,0,10,0">
                         <Grid.RowDefinitions>
@@ -1174,29 +1289,35 @@
                                     Margin="0,0,0,8" />
                         </Grid>
                         <DataGrid Grid.Row="1"
+                                  x:Name="CredentialsDataGrid"
                                   ItemsSource="{Binding Credentials}"
                                   SelectedItem="{Binding SelectedCredential}"
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"
                                   CanUserAddRows="False"
+                                  FrozenColumnCount="1"
                                   ClipboardCopyMode="IncludeHeader"
                                   MouseDoubleClick="Credentials_DoubleClick">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Name"
                                                     Binding="{Binding Name}"
-                                                    Width="1.1*" />
+                                                    Width="280"
+                                                    MinWidth="220" />
                                 <DataGridTextColumn Header="Category"
                                                     Binding="{Binding Category}"
-                                                    Width="0.8*" />
+                                                    Width="170"
+                                                    MinWidth="140" />
                                 <DataGridTextColumn Header="System / user"
                                                     Binding="{Binding LinkedObjectDisplay}"
-                                                    Width="1.1*" />
+                                                    Width="250"
+                                                    MinWidth="190" />
                                 <DataGridTextColumn Header="Username"
                                                     Binding="{Binding Username}"
-                                                    Width="1.2*" />
+                                                    Width="240"
+                                                    MinWidth="180" />
                                 <DataGridTemplateColumn Header="Login URL"
-                                                        Width="1.3*"
-                                                        MinWidth="210">
+                                                        Width="310"
+                                                        MinWidth="240">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <Grid>
@@ -1220,14 +1341,16 @@
                                 </DataGridTemplateColumn>
                                 <DataGridTextColumn Header="Notes"
                                                     Binding="{Binding Notes}"
-                                                    MinWidth="180" />
+                                                    Width="300"
+                                                    MinWidth="220" />
                                 <DataGridTextColumn Header="Secrets"
                                                     Binding="{Binding SecretCount}"
-                                                    Width="0.5*" />
+                                                    Width="80" />
                                 <DataGridCheckBoxColumn Header="Active"
                                                         Binding="{Binding IsActive}"
                                                         MinWidth="65" />
-                                <DataGridTextColumn Header="Review"
+                                <DataGridTextColumn x:Name="CredentialsReviewColumn"
+                                                    Header="Review"
                                                     Binding="{Binding ReviewStatus}"
                                                     MinWidth="100" />
                                 <DataGridTextColumn Header="Last Verified"
@@ -1239,7 +1362,14 @@
                             </DataGrid.Columns>
                         </DataGrid>
                     </Grid>
-                    <Border Grid.Column="1"
+                    <GridSplitter Grid.Column="1"
+                                  Width="5"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Stretch"
+                                  ResizeDirection="Columns"
+                                  ResizeBehavior="PreviousAndNext"
+                                  Background="{DynamicResource BorderBrush}" />
+                    <Border Grid.Column="2"
                             Background="{DynamicResource PanelAltBackgroundBrush}"
                             BorderBrush="{DynamicResource BorderBrush}"
                             BorderThickness="1"
@@ -1536,6 +1666,7 @@
                                 Margin="0,0,0,8" />
                     </Grid>
                     <DataGrid Grid.Row="1"
+                              x:Name="FactsDataGrid"
                               ItemsSource="{Binding Facts}"
                               SelectedItem="{Binding SelectedFact}"
                               AutoGenerateColumns="False"
@@ -1556,7 +1687,8 @@
                             <DataGridTextColumn Header="Type"
                                                 Binding="{Binding ValueType}"
                                                 Width="0.7*" />
-                            <DataGridTextColumn Header="Review"
+                            <DataGridTextColumn x:Name="FactsReviewColumn"
+                                                Header="Review"
                                                 Binding="{Binding ReviewStatus}"
                                                 MinWidth="100" />
                             <DataGridCheckBoxColumn Header="Active"
@@ -1678,7 +1810,7 @@
                             <Button Content="Approve"
                                     Command="{Binding ApproveImportCommand}"
                                     Margin="0,0,0,8" />
-                            <Button Content="Promote to SQL"
+                            <Button Content="Make Live"
                                     Command="{Binding PromoteImportCommand}"
                                     Style="{StaticResource PrimaryButtonStyle}" />
                         </StackPanel>
