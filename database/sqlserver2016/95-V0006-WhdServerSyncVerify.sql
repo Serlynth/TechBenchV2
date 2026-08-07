@@ -46,6 +46,8 @@ INSERT INTO @RequiredObjects([ObjectName], [ObjectType]) VALUES
     (N'tb_sync.WhdSyncLeases', N'U'),
     (N'tb_sync.WhdSyncCursors', N'U'),
     (N'tb_sync.WhdSyncHealth', N'U'),
+    (N'tb_sync.WhdClientIdentityHistory', N'U'),
+    (N'tb_sync.WhdPendingClientRemovals', N'U'),
     (N'tb_service.GetWhdSyncConfiguration', N'P'),
     (N'tb_service.ClaimWhdSyncWork', N'P'),
     (N'tb_service.RenewWhdSyncLease', N'P'),
@@ -87,7 +89,21 @@ INSERT INTO @RequiredColumns([ObjectName], [ColumnName]) VALUES
     (N'tb_data.Tickets', N'AssignedTechName'),
     (N'tb_data.Tickets', N'AssignedGroupExternalId'),
     (N'tb_data.Tickets', N'AssignedGroupName'),
-    (N'tb_whd.Technicians', N'Username');
+    (N'tb_whd.Technicians', N'Username'),
+    (N'tb_sync.WhdClientIdentityHistory', N'ExternalId'),
+    (N'tb_sync.WhdClientIdentityHistory', N'ClientId'),
+    (N'tb_sync.WhdClientIdentityHistory', N'ExternalName'),
+    (N'tb_sync.WhdClientIdentityHistory', N'LastSeenAtUtc'),
+    (N'tb_sync.WhdClientIdentityHistory', N'RetiredAtUtc'),
+    (N'tb_sync.WhdClientIdentityHistory', N'UpdatedByWindowsSid'),
+    (N'tb_sync.WhdClientIdentityHistory', N'UpdatedAtUtc'),
+    (N'tb_sync.WhdPendingClientRemovals', N'ExternalId'),
+    (N'tb_sync.WhdPendingClientRemovals', N'ExistingCount'),
+    (N'tb_sync.WhdPendingClientRemovals', N'IncomingCount'),
+    (N'tb_sync.WhdPendingClientRemovals', N'StaleCount'),
+    (N'tb_sync.WhdPendingClientRemovals', N'FirstObservedAtUtc'),
+    (N'tb_sync.WhdPendingClientRemovals', N'UpdatedByWindowsSid'),
+    (N'tb_sync.WhdPendingClientRemovals', N'UpdatedAtUtc');
 
 IF EXISTS
 (
@@ -113,7 +129,8 @@ INSERT INTO @RequiredIndexes([ObjectName], [IndexName]) VALUES
     (N'tb_sync.WhdSyncRequests', N'IX_WhdSyncRequests_RequestedAt'),
     (N'tb_sync.WhdSyncWork', N'IX_WhdSyncWork_Claim'),
     (N'tb_sync.WhdSyncWork', N'IX_WhdSyncWork_RequestState'),
-    (N'tb_sync.WhdSyncWork', N'IX_WhdSyncWork_ReferenceHistory');
+    (N'tb_sync.WhdSyncWork', N'IX_WhdSyncWork_ReferenceHistory'),
+    (N'tb_sync.WhdClientIdentityHistory', N'IX_WhdClientIdentityHistory_Client');
 
 IF EXISTS
 (
@@ -130,6 +147,33 @@ IF EXISTS
 )
 BEGIN
     PRINT N'FAIL: a required V0006 index is missing or disabled.';
+    SET @FailureCount += 1;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.foreign_keys
+    WHERE [parent_object_id] = OBJECT_ID(N'tb_sync.WhdClientIdentityHistory', N'U')
+      AND [referenced_object_id] = OBJECT_ID(N'tb_data.Clients', N'U')
+      AND [delete_referential_action_desc] = N'CASCADE'
+)
+OR NOT EXISTS
+(
+    SELECT 1
+    FROM sys.foreign_keys
+    WHERE [parent_object_id] = OBJECT_ID(N'tb_sync.WhdClientIdentityHistory', N'U')
+      AND [referenced_object_id] = OBJECT_ID(N'tb_security.Users', N'U')
+)
+OR NOT EXISTS
+(
+    SELECT 1
+    FROM sys.foreign_keys
+    WHERE [parent_object_id] = OBJECT_ID(N'tb_sync.WhdPendingClientRemovals', N'U')
+      AND [referenced_object_id] = OBJECT_ID(N'tb_security.Users', N'U')
+)
+BEGIN
+    PRINT N'FAIL: WHD client identity history or pending-removal confirmation lacks its required relationship.';
     SET @FailureCount += 1;
 END;
 
@@ -279,6 +323,7 @@ BEGIN
         (N'tb_service.ApplySageCustomerSnapshot'),
         (N'tb_service.CompleteSageSyncWork'),
         (N'tb_service.GetAutomaticClientMatchCandidates'),
+        (N'tb_service.ApplyAutomaticClientSourceMatch'),
         (N'tb_service.ApplyAutomaticClientMatch'),
         (N'tb_service.ApplyAutomaticWhdFamilyMember');
 END;
@@ -411,6 +456,7 @@ DECLARE @MappingDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.
 DECLARE @TechnicianListDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminGetWhdTechnicians'));
 DECLARE @SearchDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SearchTickets'));
 DECLARE @GetTicketDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetTicket'));
+DECLARE @ClientApplyDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyWhdClientSnapshot'));
 DECLARE @TicketApplyDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyWhdTicketBatch'));
 
 SELECT @ClaimDefinition = REPLACE(REPLACE(REPLACE(@ClaimDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
@@ -420,6 +466,7 @@ SELECT @MappingDefinition = REPLACE(REPLACE(REPLACE(@MappingDefinition, N' ', N'
 SELECT @TechnicianListDefinition = REPLACE(REPLACE(REPLACE(@TechnicianListDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @SearchDefinition = REPLACE(REPLACE(REPLACE(@SearchDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @GetTicketDefinition = REPLACE(REPLACE(REPLACE(@GetTicketDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @ClientApplyDefinition = REPLACE(REPLACE(REPLACE(@ClientApplyDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @TicketApplyDefinition = REPLACE(REPLACE(REPLACE(@TicketApplyDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 
 IF CHARINDEX(N'sp_getapplock', @ClaimDefinition) = 0
@@ -436,6 +483,23 @@ IF CHARINDEX(N'@WorkType<>N''Tickets''', @CompleteDefinition) = 0
    OR CHARINDEX(N'@HasPendingWork=0', @CompleteDefinition) = 0
 BEGIN
     PRINT N'FAIL: CompleteWhdSyncWork lacks ticket-only valid cursor or request-level health protection.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'@ExistingWhdLocationCount>0', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'@IncomingWhdLocationCount=0', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'@StaleWhdLocationCount>0', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'@StaleWhdLocationCount>=10', @ClientApplyDefinition) > 0
+   OR CHARINDEX(N'[tb_sync].[WhdPendingClientRemovals]', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'@PendingRemovalCount=@StaleWhdLocationCount', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'@RemovalSetConfirmed=1', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'@RemovalSetConfirmed=0', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'[RemovalDeferred]', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'[tb_sync].[WhdClientIdentityHistory]', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'@StaleLiveWhdIdentities', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'remaining_identity.[ClientId]=client.[Id]', @ClientApplyDefinition) = 0
+BEGIN
+    PRINT N'FAIL: ApplyWhdClientSnapshot lacks two-snapshot destructive confirmation, deterministic identity history, or multi-location preservation.';
     SET @FailureCount += 1;
 END;
 

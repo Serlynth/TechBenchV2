@@ -274,8 +274,38 @@ BEGIN
         client.[SageContactName],
         client.[SageTelephone],
         client.[MatchStatus],
+        CONVERT(bit, CASE WHEN live_profile.[ClientId] IS NULL THEN 0 ELSE 1 END)
+            AS [IsClientInfoLive],
+        CONVERT(bit, CASE
+            WHEN EXISTS
+            (
+                SELECT 1
+                FROM [tb_client].[ClientProfiles] AS any_profile
+                WHERE any_profile.[ClientId] = client.[Id]
+            )
+            OR EXISTS
+            (
+                SELECT 1
+                FROM [tb_ops].[ClientInfoCutovers] AS any_cutover
+                WHERE any_cutover.[ClientId] = client.[Id]
+            )
+                THEN 1 ELSE 0 END) AS [HasClientInfoWorkspace],
+        COALESCE(live_profile.[ReviewStatus], N'Unverified') AS [ClientInfoReviewStatus],
+        CONVERT(bit, CASE WHEN EXISTS
+            (SELECT 1 FROM [tb_data].[ClientExternalIdentities] AS whd_identity
+             WHERE whd_identity.[ClientId]=client.[Id]
+               AND whd_identity.[SourceSystem]=N'WHD')
+            THEN 1 ELSE 0 END) AS [HasWhdIdentity],
+        CONVERT(bit, CASE WHEN EXISTS
+            (SELECT 1 FROM [tb_data].[ClientExternalIdentities] AS sage_identity
+             WHERE sage_identity.[ClientId]=client.[Id]
+               AND sage_identity.[SourceSystem]=N'Sage')
+            THEN 1 ELSE 0 END) AS [HasSageIdentity],
         client.[RowVersion]
     FROM [tb_data].[Clients] AS client
+    LEFT JOIN [tb_client].[ClientProfiles] AS live_profile
+        ON live_profile.[ClientId]=client.[Id]
+       AND live_profile.[IsLive]=1
     WHERE (@IncludeInactive = 1 OR client.[IsActive] = 1)
       AND
       (
@@ -339,10 +369,40 @@ BEGIN
         client.[SageContactName],
         client.[SageTelephone],
         client.[MatchStatus],
+        CONVERT(bit, CASE WHEN live_profile.[ClientId] IS NULL THEN 0 ELSE 1 END)
+            AS [IsClientInfoLive],
+        CONVERT(bit, CASE
+            WHEN EXISTS
+            (
+                SELECT 1
+                FROM [tb_client].[ClientProfiles] AS any_profile
+                WHERE any_profile.[ClientId] = client.[Id]
+            )
+            OR EXISTS
+            (
+                SELECT 1
+                FROM [tb_ops].[ClientInfoCutovers] AS any_cutover
+                WHERE any_cutover.[ClientId] = client.[Id]
+            )
+                THEN 1 ELSE 0 END) AS [HasClientInfoWorkspace],
+        COALESCE(live_profile.[ReviewStatus], N'Unverified') AS [ClientInfoReviewStatus],
+        CONVERT(bit, CASE WHEN EXISTS
+            (SELECT 1 FROM [tb_data].[ClientExternalIdentities] AS whd_identity
+             WHERE whd_identity.[ClientId]=client.[Id]
+               AND whd_identity.[SourceSystem]=N'WHD')
+            THEN 1 ELSE 0 END) AS [HasWhdIdentity],
+        CONVERT(bit, CASE WHEN EXISTS
+            (SELECT 1 FROM [tb_data].[ClientExternalIdentities] AS sage_identity
+             WHERE sage_identity.[ClientId]=client.[Id]
+               AND sage_identity.[SourceSystem]=N'Sage')
+            THEN 1 ELSE 0 END) AS [HasSageIdentity],
         client.[RowVersion],
         client.[CreatedAtUtc],
         client.[UpdatedAtUtc]
     FROM [tb_data].[Clients] AS client
+    LEFT JOIN [tb_client].[ClientProfiles] AS live_profile
+        ON live_profile.[ClientId]=client.[Id]
+       AND live_profile.[IsLive]=1
     WHERE client.[Id] = @Id;
 END;
 GO

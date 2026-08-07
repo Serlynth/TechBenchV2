@@ -72,6 +72,7 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         public const string RemoveStaleSageCustomers =
             "[tb_app].[SyncRemoveStaleSageCustomers]";
         public const string MergeClients = "[tb_app].[AdminMergeClients]";
+        public const string LinkClientSources = "[tb_app].[AdminLinkClientSources]";
         public const string ReconcileClientMatches = "[tb_app].[ReconcileClientMatches]";
         public const string SearchWorkEntries = "[tb_app].[SearchWorkEntries]";
         public const string GetRepositoryCapabilities =

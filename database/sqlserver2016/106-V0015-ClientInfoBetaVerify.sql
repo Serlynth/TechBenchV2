@@ -41,6 +41,7 @@ FROM
         (N'tb_ops.ClientInfoCutovers',N'U'),
         (N'tb_app.SearchClientInfoClients',N'P'),
         (N'tb_app.AdminCreateManualClientInfoClient',N'P'),
+        (N'tb_app.AdminLinkClientSources',N'P'),
         (N'tb_app.GetClientInfoSnapshot',N'P'),
         (N'tb_app.SaveClientInfoProfile',N'P'),
         (N'tb_app.SaveClientInfoLocation',N'P'),
@@ -65,6 +66,8 @@ FROM
         (N'tb_app.DiscardClientInfoImport',N'P'),
         (N'tb_app.ApproveClientInfoImport',N'P'),
         (N'tb_app.PromoteClientInfoImport',N'P'),
+        (N'tb_client.EnsureLiveClientInfo',N'P'),
+        (N'tb_client.MergeSourceClientIntoCanonical',N'P'),
         (N'tb_client.ReparentClientGraph',N'P')
 ) required([ObjectName],[ObjectType])
 WHERE OBJECT_ID(required.[ObjectName],required.[ObjectType]) IS NULL;
@@ -190,16 +193,58 @@ IF NOT EXISTS
 )
     THROW 52516,N'The Admin role cannot create live manual clients.',1;
 
+DECLARE @AdminLinkSources nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminLinkClientSources'));
+IF @AdminLinkSources IS NULL
+   OR CHARINDEX(N'IS_ROLEMEMBER(N''tb_role_admin'')', @AdminLinkSources) = 0
+   OR CHARINDEX(N'[tb_client].[MergeSourceClientIntoCanonical]', @AdminLinkSources) = 0
+   OR CHARINDEX(N'[tb_security].[WriteAuditEvent]', @AdminLinkSources) = 0
+    THROW 52517,N'Canonical client source linking is not admin-only, atomic, and audited.',1;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions AS permission
+    WHERE permission.[grantee_principal_id] =
+            DATABASE_PRINCIPAL_ID(N'tb_role_admin')
+      AND permission.[major_id] =
+            OBJECT_ID(N'tb_app.AdminLinkClientSources')
+      AND permission.[permission_name] = N'EXECUTE'
+      AND permission.[state] IN (N'G',N'W')
+)
+    THROW 52518,N'The Admin role cannot link WHD and Sage identities to a canonical TechBench client.',1;
+
 DECLARE @MergeManual nvarchar(max)=
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminMergeClients'));
 DECLARE @MergeAuto nvarchar(max)=
     OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyAutomaticClientMatch'));
 DECLARE @MergeFamily nvarchar(max)=
     OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyAutomaticWhdFamilyMember'));
+DECLARE @MergeCanonicalSource nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_client.MergeSourceClientIntoCanonical'));
 IF @MergeManual NOT LIKE N'%ReparentClientGraph%'
    OR @MergeAuto NOT LIKE N'%ReparentClientGraph%'
    OR @MergeFamily NOT LIKE N'%ReparentClientGraph%'
+   OR @MergeCanonicalSource NOT LIKE N'%ReparentClientGraph%'
     THROW 52506,N'Every client merge path must reparent the canonical Client Info graph.',1;
+
+IF @MergeManual NOT LIKE N'%ClientInfoCutovers%'
+   OR @MergeManual NOT LIKE N'%Finish or discard the client workbook migration before linking it.%'
+   OR @MergeAuto NOT LIKE N'%ClientInfoCutovers%'
+   OR @MergeFamily NOT LIKE N'%ClientInfoCutovers%'
+   OR @MergeCanonicalSource NOT LIKE N'%ClientInfoCutovers%'
+   OR @MergeCanonicalSource NOT LIKE N'%Finish or discard the client workbook migration before linking it.%'
+    THROW 52519,N'Client merge sources are not protected from staged Client Information workspaces.',1;
+
+DECLARE @SearchClients nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SearchClients'));
+DECLARE @GetClient nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetClient'));
+IF @SearchClients NOT LIKE N'%HasClientInfoWorkspace%'
+   OR @SearchClients NOT LIKE N'%ClientInfoCutovers%'
+   OR @GetClient NOT LIKE N'%HasClientInfoWorkspace%'
+   OR @GetClient NOT LIKE N'%ClientInfoCutovers%'
+    THROW 52520,N'Client reads do not expose complete Client Information workspace eligibility.',1;
 
 IF EXISTS
 (

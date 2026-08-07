@@ -39,6 +39,7 @@ GRANT EXECUTE ON OBJECT::[tb_service].[RenewSageSyncLease] TO [tb_role_sync_serv
 GRANT EXECUTE ON OBJECT::[tb_service].[ApplySageCustomerSnapshot] TO [tb_role_sync_service];
 GRANT EXECUTE ON OBJECT::[tb_service].[CompleteSageSyncWork] TO [tb_role_sync_service];
 GRANT EXECUTE ON OBJECT::[tb_service].[GetAutomaticClientMatchCandidates] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[ApplyAutomaticClientSourceMatch] TO [tb_role_sync_service];
 GRANT EXECUTE ON OBJECT::[tb_service].[ApplyAutomaticClientMatch] TO [tb_role_sync_service];
 GRANT EXECUTE ON OBJECT::[tb_service].[ApplyAutomaticWhdFamilyMember] TO [tb_role_sync_service];
 

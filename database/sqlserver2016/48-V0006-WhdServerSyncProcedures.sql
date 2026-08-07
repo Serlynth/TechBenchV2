@@ -312,11 +312,174 @@ BEGIN
         IF @ClientWorkType IS NULL
             THROW 51804, N'Valid WHD client/ticket-work lease required.', 1;
 
+        /* Clients work is a complete active-location snapshot. An empty or
+           unexpectedly destructive response must present the same exact set
+           of missing WHD locations in two successive complete snapshots
+           before identities are retired. The first observation commits only
+           the durable pending set and returns successfully without touching
+           client data. Ticket-embedded client batches remain upsert-only. */
+        IF @ClientWorkType = N'Clients'
+        BEGIN
+            DECLARE @ExistingWhdLocationCount int = 0;
+            DECLARE @IncomingWhdLocationCount int = 0;
+            DECLARE @StaleWhdLocationCount int = 0;
+            DECLARE @RequiresRemovalConfirmation bit = 0;
+            DECLARE @RemovalSetConfirmed bit = 0;
+            DECLARE @PendingRemovalCount int = 0;
+
+            DECLARE @StaleWhdLocationIds TABLE
+            (
+                [ExternalId] nvarchar(500) NOT NULL PRIMARY KEY
+            );
+
+            SELECT @ExistingWhdLocationCount = COUNT(*)
+            FROM [tb_data].[ClientExternalIdentities] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [SourceSystem] = N'WHD'
+              AND [ExternalId] LIKE N'WHD-LOCATION-%';
+
+            SELECT @IncomingWhdLocationCount = COUNT(*)
+            FROM @Snapshot
+            WHERE [ExternalId] LIKE N'WHD-LOCATION-%';
+
+            INSERT INTO @StaleWhdLocationIds([ExternalId])
+            SELECT identity_row.[ExternalId]
+            FROM [tb_data].[ClientExternalIdentities] AS identity_row WITH (UPDLOCK, HOLDLOCK)
+            WHERE identity_row.[SourceSystem] = N'WHD'
+              AND identity_row.[ExternalId] LIKE N'WHD-LOCATION-%'
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM @Snapshot AS active_location
+                  WHERE active_location.[ExternalId] = identity_row.[ExternalId]
+              );
+
+            SELECT @StaleWhdLocationCount = COUNT(*)
+            FROM @StaleWhdLocationIds;
+
+            IF @ExistingWhdLocationCount > 0
+               AND @IncomingWhdLocationCount = 0
+                SET @RequiresRemovalConfirmation = 1;
+
+            IF @StaleWhdLocationCount > 0
+               AND CONVERT(bigint, @StaleWhdLocationCount) * 100
+                   >= CONVERT(bigint, @ExistingWhdLocationCount) * 25
+                SET @RequiresRemovalConfirmation = 1;
+
+            SELECT @PendingRemovalCount = COUNT(*)
+            FROM [tb_sync].[WhdPendingClientRemovals] WITH (UPDLOCK, HOLDLOCK);
+
+            IF @RequiresRemovalConfirmation = 1
+               AND @PendingRemovalCount = @StaleWhdLocationCount
+               AND NOT EXISTS
+               (
+                   SELECT 1
+                   FROM [tb_sync].[WhdPendingClientRemovals] AS pending WITH (UPDLOCK, HOLDLOCK)
+                   WHERE NOT EXISTS
+                   (
+                       SELECT 1
+                       FROM @StaleWhdLocationIds AS stale
+                       WHERE stale.[ExternalId] = pending.[ExternalId]
+                   )
+               )
+               AND NOT EXISTS
+               (
+                   SELECT 1
+                   FROM @StaleWhdLocationIds AS stale
+                   WHERE NOT EXISTS
+                   (
+                       SELECT 1
+                       FROM [tb_sync].[WhdPendingClientRemovals] AS pending WITH (UPDLOCK, HOLDLOCK)
+                       WHERE pending.[ExternalId] = stale.[ExternalId]
+                   )
+               )
+                SET @RemovalSetConfirmed = 1;
+
+            IF @RequiresRemovalConfirmation = 1
+               AND @RemovalSetConfirmed = 0
+            BEGIN
+                DELETE FROM [tb_sync].[WhdPendingClientRemovals];
+
+                INSERT INTO [tb_sync].[WhdPendingClientRemovals]
+                (
+                    [ExternalId], [ExistingCount], [IncomingCount],
+                    [StaleCount], [FirstObservedAtUtc],
+                    [UpdatedByWindowsSid], [UpdatedAtUtc]
+                )
+                SELECT
+                    stale.[ExternalId], @ExistingWhdLocationCount,
+                    @IncomingWhdLocationCount, @StaleWhdLocationCount,
+                    SYSUTCDATETIME(), @ActorSid, SYSUTCDATETIME()
+                FROM @StaleWhdLocationIds AS stale;
+
+                COMMIT TRANSACTION;
+
+                SELECT
+                    CONVERT(int, 0) AS [SavedCount],
+                    CONVERT(int, 0) AS [InsertedCount],
+                    @StaleWhdLocationCount AS [DeferredRemovalCount],
+                    CONVERT(bit, 1) AS [RemovalDeferred],
+                    @SyncedAtUtc AS [SyncedAtUtc];
+                RETURN;
+            END;
+
+            /* A safe snapshot cancels a pending warning. A confirmed
+               destructive snapshot consumes it in the same transaction as
+               retirement, so any later failure leaves confirmation intact. */
+            DELETE FROM [tb_sync].[WhdPendingClientRemovals];
+        END;
+
+        /* A live canonical client retains a durable historical WHD location
+           owner when a location disappears. Restore that exact relationship
+           before normal upsert logic so a reappearing location cannot create
+           a second TechBench client merely because its name changed. */
+        INSERT INTO [tb_data].[ClientExternalIdentities]
+        (
+            [ClientId], [SourceSystem], [ExternalId], [ExternalName],
+            [LastSyncedAtUtc], [CreatedByWindowsSid], [UpdatedByWindowsSid]
+        )
+        SELECT
+            history_row.[ClientId], N'WHD', snapshot.[ExternalId], snapshot.[Name],
+            @SyncedAtUtc, @ActorSid, @ActorSid
+        FROM @Snapshot AS snapshot
+        INNER JOIN [tb_sync].[WhdClientIdentityHistory] AS history_row WITH (UPDLOCK, HOLDLOCK)
+            ON history_row.[ExternalId] = snapshot.[ExternalId]
+        INNER JOIN [tb_data].[Clients] AS canonical_client WITH (UPDLOCK, HOLDLOCK)
+            ON canonical_client.[Id] = history_row.[ClientId]
+           AND canonical_client.[IsActive] = 1
+        INNER JOIN [tb_client].[ClientProfiles] AS canonical_profile WITH (UPDLOCK, HOLDLOCK)
+            ON canonical_profile.[ClientId] = history_row.[ClientId]
+           AND canonical_profile.[IsLive] = 1
+        WHERE snapshot.[ExternalId] LIKE N'WHD-LOCATION-%'
+          AND NOT EXISTS
+          (
+              SELECT 1
+              FROM [tb_data].[ClientExternalIdentities] AS existing WITH (UPDLOCK, HOLDLOCK)
+              WHERE existing.[SourceSystem] = N'WHD'
+                AND existing.[ExternalId] = snapshot.[ExternalId]
+          );
+
+        UPDATE history_row
+        SET
+            [ExternalName] = snapshot.[Name],
+            [LastSeenAtUtc] = @SyncedAtUtc,
+            [UpdatedByWindowsSid] = @ActorSid,
+            [UpdatedAtUtc] = SYSUTCDATETIME()
+        FROM [tb_sync].[WhdClientIdentityHistory] AS history_row
+        INNER JOIN @Snapshot AS snapshot
+            ON snapshot.[ExternalId] = history_row.[ExternalId];
+
         /* Preserve the shared customer match: WHD identities may point at a
            Sage/Both client rather than a standalone WHD client row. */
         UPDATE client
         SET
-            [Name] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[Name] ELSE client.[Name] END,
+            [Name] = CASE
+                WHEN client.[Source] = N'WHD'
+                 AND NOT EXISTS
+                    (SELECT 1 FROM [tb_client].[ClientProfiles] AS profile
+                     WHERE profile.[ClientId]=client.[Id] AND profile.[IsLive]=1)
+                    THEN snapshot.[Name]
+                ELSE client.[Name]
+            END,
             [WhdLocationName] = snapshot.[LocationName],
             [WhdContactName] =
                 CASE WHEN @ClientWorkType = N'Clients'
@@ -338,7 +501,14 @@ BEGIN
                     THEN snapshot.[Address]
                     ELSE COALESCE(client.[WhdAddress], snapshot.[Address])
                 END,
-            [IsActive] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[IsActive] ELSE client.[IsActive] END,
+            [IsActive] = CASE
+                WHEN client.[Source] = N'WHD'
+                 AND NOT EXISTS
+                    (SELECT 1 FROM [tb_client].[ClientProfiles] AS profile
+                     WHERE profile.[ClientId]=client.[Id] AND profile.[IsLive]=1)
+                    THEN snapshot.[IsActive]
+                ELSE client.[IsActive]
+            END,
             [LastSyncedAtUtc] = @SyncedAtUtc,
             [UpdatedAtUtc] = SYSUTCDATETIME(),
             [UpdatedByWindowsSid] = @ActorSid
@@ -430,7 +600,14 @@ BEGIN
            rather than waiting for the next synchronization cycle. */
         UPDATE client
         SET
-            [Name] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[Name] ELSE client.[Name] END,
+            [Name] = CASE
+                WHEN client.[Source] = N'WHD'
+                 AND NOT EXISTS
+                    (SELECT 1 FROM [tb_client].[ClientProfiles] AS profile
+                     WHERE profile.[ClientId]=client.[Id] AND profile.[IsLive]=1)
+                    THEN snapshot.[Name]
+                ELSE client.[Name]
+            END,
             [WhdLocationName] = snapshot.[LocationName],
             [WhdContactName] =
                 CASE WHEN @ClientWorkType = N'Clients'
@@ -452,7 +629,14 @@ BEGIN
                     THEN snapshot.[Address]
                     ELSE COALESCE(client.[WhdAddress], snapshot.[Address])
                 END,
-            [IsActive] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[IsActive] ELSE client.[IsActive] END,
+            [IsActive] = CASE
+                WHEN client.[Source] = N'WHD'
+                 AND NOT EXISTS
+                    (SELECT 1 FROM [tb_client].[ClientProfiles] AS profile
+                     WHERE profile.[ClientId]=client.[Id] AND profile.[IsLive]=1)
+                    THEN snapshot.[IsActive]
+                ELSE client.[IsActive]
+            END,
             [LastSyncedAtUtc] = @SyncedAtUtc,
             [UpdatedAtUtc] = SYSUTCDATETIME(),
             [UpdatedByWindowsSid] = @ActorSid
@@ -467,6 +651,42 @@ BEGIN
            client batches during Tickets work are deliberately upsert-only. */
         IF @ClientWorkType = N'Clients'
         BEGIN
+            DECLARE @StaleLiveWhdIdentities TABLE
+            (
+                [IdentityId] bigint NOT NULL PRIMARY KEY,
+                [ClientId] int NOT NULL,
+                [ExternalId] nvarchar(500) NOT NULL,
+                [ExternalName] nvarchar(240) NULL,
+                [LastSyncedAtUtc] datetime2(3) NULL
+            );
+            INSERT INTO @StaleLiveWhdIdentities
+                ([IdentityId], [ClientId], [ExternalId], [ExternalName], [LastSyncedAtUtc])
+            SELECT
+                identity_row.[Id], client.[Id], identity_row.[ExternalId],
+                identity_row.[ExternalName], identity_row.[LastSyncedAtUtc]
+            FROM [tb_data].[Clients] AS client
+            INNER JOIN [tb_client].[ClientProfiles] AS profile
+                ON profile.[ClientId] = client.[Id]
+               AND profile.[IsLive] = 1
+            INNER JOIN [tb_data].[ClientExternalIdentities] AS identity_row
+                ON identity_row.[ClientId] = client.[Id]
+               AND identity_row.[SourceSystem] = N'WHD'
+               AND identity_row.[ExternalId] LIKE N'WHD-LOCATION-%'
+            WHERE NOT EXISTS
+            (
+                SELECT 1
+                FROM @Snapshot AS active_location
+                WHERE active_location.[ExternalId] = identity_row.[ExternalId]
+            );
+
+            DECLARE @StaleLiveWhdClients TABLE
+            (
+                [ClientId] int NOT NULL PRIMARY KEY
+            );
+            INSERT INTO @StaleLiveWhdClients([ClientId])
+            SELECT DISTINCT [ClientId]
+            FROM @StaleLiveWhdIdentities;
+
             UPDATE client
             SET
                 [IsActive] = 0,
@@ -481,9 +701,122 @@ BEGIN
               AND NOT EXISTS
               (
                   SELECT 1
+                  FROM [tb_client].[ClientProfiles] AS profile
+                  WHERE profile.[ClientId]=client.[Id]
+                    AND profile.[IsLive]=1
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
                   FROM @Snapshot AS active_location
                   WHERE active_location.[ExternalId] = identity_row.[ExternalId]
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientExternalIdentities] AS remaining_identity
+                  INNER JOIN @Snapshot AS active_location
+                      ON active_location.[ExternalId] = remaining_identity.[ExternalId]
+                  WHERE remaining_identity.[ClientId] = client.[Id]
+                    AND remaining_identity.[SourceSystem] = N'WHD'
+                    AND remaining_identity.[ExternalId] LIKE N'WHD-LOCATION-%'
               );
+
+            /* Retiring an active identity must not erase its canonical owner.
+               Update first, then insert missing history rows under serializable
+               key-range locks so concurrent ticket/client work is idempotent. */
+            UPDATE history_row
+            SET
+                [ClientId] = stale_identity.[ClientId],
+                [ExternalName] = stale_identity.[ExternalName],
+                [LastSeenAtUtc] = stale_identity.[LastSyncedAtUtc],
+                [RetiredAtUtc] = SYSUTCDATETIME(),
+                [UpdatedByWindowsSid] = @ActorSid,
+                [UpdatedAtUtc] = SYSUTCDATETIME()
+            FROM [tb_sync].[WhdClientIdentityHistory] AS history_row WITH (UPDLOCK, HOLDLOCK)
+            INNER JOIN @StaleLiveWhdIdentities AS stale_identity
+                ON stale_identity.[ExternalId] = history_row.[ExternalId];
+
+            INSERT INTO [tb_sync].[WhdClientIdentityHistory]
+            (
+                [ExternalId], [ClientId], [ExternalName], [LastSeenAtUtc],
+                [RetiredAtUtc], [UpdatedByWindowsSid], [UpdatedAtUtc]
+            )
+            SELECT
+                stale_identity.[ExternalId], stale_identity.[ClientId],
+                stale_identity.[ExternalName], stale_identity.[LastSyncedAtUtc],
+                SYSUTCDATETIME(), @ActorSid, SYSUTCDATETIME()
+            FROM @StaleLiveWhdIdentities AS stale_identity
+            WHERE NOT EXISTS
+            (
+                SELECT 1
+                FROM [tb_sync].[WhdClientIdentityHistory] AS existing WITH (UPDLOCK, HOLDLOCK)
+                WHERE existing.[ExternalId] = stale_identity.[ExternalId]
+            );
+
+            DELETE identity_row
+            FROM [tb_data].[ClientExternalIdentities] AS identity_row
+            INNER JOIN @StaleLiveWhdIdentities AS stale_identity
+                ON stale_identity.[IdentityId] = identity_row.[Id];
+
+            UPDATE client
+            SET
+                [Source] = CASE
+                    WHEN remaining_whd.[ExternalId] IS NOT NULL
+                     AND sage_identity.[ExternalId] IS NOT NULL THEN N'Both'
+                    WHEN remaining_whd.[ExternalId] IS NOT NULL THEN N'WHD'
+                    WHEN sage_identity.[ExternalId] IS NOT NULL THEN N'Sage'
+                    ELSE N'Manual'
+                END,
+                [ExternalId] = COALESCE(
+                    remaining_whd.[ExternalId],
+                    sage_identity.[ExternalId]),
+                [MatchStatus] = CASE
+                    WHEN remaining_whd.[ExternalId] IS NOT NULL
+                     AND sage_identity.[ExternalId] IS NOT NULL THEN N'Matched'
+                    ELSE N'Unmatched'
+                END,
+                [WhdLocationName] = CASE
+                    WHEN remaining_whd.[ExternalId] IS NULL THEN NULL
+                    ELSE client.[WhdLocationName]
+                END,
+                [WhdContactName] = CASE
+                    WHEN remaining_whd.[ExternalId] IS NULL THEN NULL
+                    ELSE client.[WhdContactName]
+                END,
+                [WhdContactEmail] = CASE
+                    WHEN remaining_whd.[ExternalId] IS NULL THEN NULL
+                    ELSE client.[WhdContactEmail]
+                END,
+                [WhdPhone] = CASE
+                    WHEN remaining_whd.[ExternalId] IS NULL THEN NULL
+                    ELSE client.[WhdPhone]
+                END,
+                [WhdAddress] = CASE
+                    WHEN remaining_whd.[ExternalId] IS NULL THEN NULL
+                    ELSE client.[WhdAddress]
+                END,
+                [UpdatedAtUtc] = SYSUTCDATETIME(),
+                [UpdatedByWindowsSid] = @ActorSid
+            FROM [tb_data].[Clients] AS client
+            INNER JOIN @StaleLiveWhdClients AS stale_client
+                ON stale_client.[ClientId] = client.[Id]
+            OUTER APPLY
+            (
+                SELECT TOP (1) identity_row.[ExternalId]
+                FROM [tb_data].[ClientExternalIdentities] AS identity_row
+                WHERE identity_row.[ClientId] = client.[Id]
+                  AND identity_row.[SourceSystem] = N'WHD'
+                ORDER BY identity_row.[Id]
+            ) AS remaining_whd
+            OUTER APPLY
+            (
+                SELECT TOP (1) identity_row.[ExternalId]
+                FROM [tb_data].[ClientExternalIdentities] AS identity_row
+                WHERE identity_row.[ClientId] = client.[Id]
+                  AND identity_row.[SourceSystem] = N'Sage'
+                ORDER BY identity_row.[Id]
+            ) AS sage_identity;
         END;
 
         DECLARE @SavedCount int = (SELECT COUNT(*) FROM @Snapshot);

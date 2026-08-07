@@ -279,6 +279,68 @@ public sealed partial class SqlServerTechBenchRepository
                 $"{Procedures.MergeClients} did not return the merged client.");
     }
 
+    public Client LinkClientSources(
+        int canonicalClientId,
+        int? whdClientId,
+        int? sageClientId) =>
+        LinkClientSourcesAsync(canonicalClientId, whdClientId, sageClientId)
+            .GetAwaiter()
+            .GetResult();
+
+    public async Task<Client> LinkClientSourcesAsync(
+        int canonicalClientId,
+        int? whdClientId,
+        int? sageClientId,
+        CancellationToken cancellationToken = default)
+    {
+        if (canonicalClientId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(canonicalClientId),
+                "A canonical TechBench client is required.");
+        }
+
+        if (whdClientId is null && sageClientId is null)
+        {
+            throw new ArgumentException(
+                "Select at least one WHD or Sage source to link.");
+        }
+
+        return await QueryAsync(
+                Procedures.LinkClientSources,
+                command =>
+                {
+                    AddInt(command, "@CanonicalClientId", canonicalClientId);
+                    AddInt(command, "@WhdClientId", whdClientId);
+                    AddInt(command, "@SageClientId", sageClientId);
+                    AddBinary(
+                        command,
+                        "@ExpectedCanonicalRowVersion",
+                        8,
+                        GetTrackedRowVersion("Client", canonicalClientId));
+                    AddBinary(
+                        command,
+                        "@ExpectedWhdRowVersion",
+                        8,
+                        whdClientId.HasValue
+                            ? GetTrackedRowVersion("Client", whdClientId.Value)
+                            : null);
+                    AddBinary(
+                        command,
+                        "@ExpectedSageRowVersion",
+                        8,
+                        sageClientId.HasValue
+                            ? GetTrackedRowVersion("Client", sageClientId.Value)
+                            : null);
+                    AddGuid(command, "@RequestId", Guid.NewGuid());
+                },
+                (reader, token) => ReadSingleAsync(reader, token, ReadClient),
+                cancellationToken)
+            .ConfigureAwait(false)
+            ?? throw new InvalidOperationException(
+                $"{Procedures.LinkClientSources} did not return the linked client.");
+    }
+
     public int ReconcileExactClientMatches() =>
         ReconcileClientMatchesAsync("Exact").GetAwaiter().GetResult();
 
@@ -392,6 +454,26 @@ public sealed partial class SqlServerTechBenchRepository
             SageTelephone = GetNullableString(reader, "SageTelephone"),
             MatchStatus = GetString(reader, "MatchStatus", "Unmatched")
         };
+        client.HasWhdIdentity = GetBoolean(
+            reader,
+            "HasWhdIdentity",
+            client.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase)
+            || client.Source.Equals("Both", StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrWhiteSpace(client.WhdLocationName));
+        client.HasSageIdentity = GetBoolean(
+            reader,
+            "HasSageIdentity",
+            client.Source.Equals("Sage", StringComparison.OrdinalIgnoreCase)
+            || client.Source.Equals("Both", StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrWhiteSpace(client.SageCustomerId));
+        client.IsClientInfoLive = GetBoolean(reader, "IsClientInfoLive");
+        // Older server packages do not expose workspace state. Fail closed so
+        // those clients cannot be offered as destructive merge sources.
+        client.HasClientInfoWorkspace = GetBoolean(
+            reader,
+            "HasClientInfoWorkspace",
+            true);
+        client.ClientInfoReviewStatus = GetString(reader, "ClientInfoReviewStatus");
         client.RowVersion = GetBytes(reader, "RowVersion");
         TrackRowVersion("Client", client.Id, reader);
         return client;
@@ -499,6 +581,11 @@ public sealed partial class SqlServerTechBenchRepository
         target.SageContactName = source.SageContactName;
         target.SageTelephone = source.SageTelephone;
         target.MatchStatus = source.MatchStatus;
+        target.HasWhdIdentity = source.HasWhdIdentity;
+        target.HasSageIdentity = source.HasSageIdentity;
+        target.IsClientInfoLive = source.IsClientInfoLive;
+        target.HasClientInfoWorkspace = source.HasClientInfoWorkspace;
+        target.ClientInfoReviewStatus = source.ClientInfoReviewStatus;
         target.RowVersion = source.RowVersion;
     }
 

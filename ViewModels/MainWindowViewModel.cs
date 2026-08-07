@@ -61,11 +61,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private int _sagePendingCount;
     private string _clientSearchText = string.Empty;
     private Client? _selectedManagedClient;
+    private Client? _selectedCanonicalMatchClient;
+    private Client? _selectedWhdMatchCandidate;
     private Client? _selectedSageMatchCandidate;
-    private string _clientMatchSuggestionText = "Select an unmatched WHD location to review its Sage match.";
-    private int _matchedClientCount;
-    private int _unmatchedWhdClientCount;
-    private int _unmatchedSageClientCount;
+    private string _clientMatchSuggestionText =
+        "Choose a live TechBench client, then link its unmatched WHD and Sage records.";
+    private int _tbOnlyClientCount;
+    private int _whdLinkedClientCount;
+    private int _sageLinkedClientCount;
+    private int _fullyLinkedClientCount;
+    private int _needsReviewClientCount;
     private string _editorClientFilterText = string.Empty;
     private bool _isEditorClientDropDownOpen;
     private bool _isSyncingEditorClientFilterText;
@@ -186,7 +191,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         OpenPostingLogEntryCommand = new RelayCommand(OpenPostingLogEntry, parameter => parameter is PostingLog { WorkEntryId: > 0 } || SelectedPostingLog is { WorkEntryId: > 0 });
         ChangeTicketStatusCommand = new AsyncRelayCommand(ChangeTicketStatusAsync, CanChangeTicketStatus);
         SelectEditorClientCommand = new RelayCommand(SelectEditorClient, parameter => parameter is Client);
-        ApplyClientMatchCommand = new RelayCommand(_ => ApplyClientMatch(), _ => CanApplyClientMatch());
+        LinkClientSourcesCommand = new RelayCommand(
+            _ => LinkClientSources(),
+            _ => CanLinkClientSources());
+        CreateCanonicalClientFromSourcesCommand = new RelayCommand(
+            _ => CreateCanonicalClientFromSources(),
+            _ => CanCreateCanonicalClientFromSources());
+        ClearCanonicalMatchClientCommand = new RelayCommand(
+            _ => SelectedCanonicalMatchClient = null,
+            _ => SelectedCanonicalMatchClient is not null);
         InitializeClientNameEditing();
         SaveSettingsCommand = new RelayCommand(_ => SaveSettings(), _ => CanWrite);
         TestWhdConnectionCommand = new AsyncRelayCommand(TestWhdConnectionAsync, _ => CanWrite);
@@ -259,6 +272,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public ObservableCollection<Client> Clients { get; } = new();
     public ObservableCollection<Client> EditorClients { get; } = new();
     public ObservableCollection<Client> ManagedClients { get; } = new();
+    public ObservableCollection<Client> CanonicalClientCandidates { get; } = new();
+    public ObservableCollection<Client> WhdMatchCandidates { get; } = new();
     public ObservableCollection<Client> SageMatchCandidates { get; } = new();
     public ObservableCollection<Ticket> TicketsForEditor { get; } = new();
     public ObservableCollection<Ticket> Tickets { get; } = new();
@@ -312,7 +327,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public RelayCommand OpenPostingLogEntryCommand { get; }
     public AsyncRelayCommand ChangeTicketStatusCommand { get; }
     public RelayCommand SelectEditorClientCommand { get; }
-    public RelayCommand ApplyClientMatchCommand { get; }
+    public RelayCommand LinkClientSourcesCommand { get; }
+    public RelayCommand CreateCanonicalClientFromSourcesCommand { get; }
+    public RelayCommand ClearCanonicalMatchClientCommand { get; }
     public RelayCommand SaveSettingsCommand { get; }
     public AsyncRelayCommand TestWhdConnectionCommand { get; }
     public RelayCommand TestSageConnectionCommand { get; }
@@ -374,7 +391,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(IsEditorReadOnly));
                 OnPropertyChanged(nameof(WorkspaceStateLabel));
                 RaiseEntryCommandStates();
-                ApplyClientMatchCommand.RaiseCanExecuteChanged();
+                LinkClientSourcesCommand.RaiseCanExecuteChanged();
+                CreateCanonicalClientFromSourcesCommand.RaiseCanExecuteChanged();
                 ImportGoogleSheetsCommand.RaiseCanExecuteChanged();
                 ImportV1DatabaseCommand.RaiseCanExecuteChanged();
                 Updates.RefreshCommandStates();
@@ -697,8 +715,82 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _selectedManagedClient, value))
             {
-                RefreshClientMatchOptions();
+                if (value is { IsClientInfoLive: true })
+                {
+                    SelectedCanonicalMatchClient = value;
+                }
+                else if (CanChooseWhdMatchSource && value is
+                         {
+                             IsExternalSourceLinkEligible: true,
+                             HasWhdIdentity: true,
+                             HasSageIdentity: false
+                         })
+                {
+                    SelectedWhdMatchCandidate = WhdMatchCandidates.FirstOrDefault(
+                        candidate => candidate.Id == value.Id);
+                }
+                else if (CanChooseSageMatchSource && value is
+                         {
+                             IsExternalSourceLinkEligible: true,
+                             HasWhdIdentity: false,
+                             HasSageIdentity: true
+                         })
+                {
+                    SelectedSageMatchCandidate = SageMatchCandidates.FirstOrDefault(
+                        candidate => candidate.Id == value.Id);
+                }
+
                 ResetClientNameEditor();
+            }
+        }
+    }
+
+    public Client? SelectedCanonicalMatchClient
+    {
+        get => _selectedCanonicalMatchClient;
+        set
+        {
+            var previousCanonicalClient = _selectedCanonicalMatchClient;
+            if (SetProperty(ref _selectedCanonicalMatchClient, value))
+            {
+                ClearCanonicalMatchClientCommand.RaiseCanExecuteChanged();
+                if (value is null
+                    && previousCanonicalClient is not null
+                    && _selectedManagedClient?.Id == previousCanonicalClient.Id)
+                {
+                    _selectedManagedClient = null;
+                    OnPropertyChanged(nameof(SelectedManagedClient));
+                    ResetClientNameEditor();
+                }
+                else if (value is not null
+                    && !ReferenceEquals(_selectedManagedClient, value))
+                {
+                    _selectedManagedClient = value;
+                    OnPropertyChanged(nameof(SelectedManagedClient));
+                    ResetClientNameEditor();
+                }
+
+                if (value is not null && previousCanonicalClient?.Id != value.Id)
+                {
+                    _selectedWhdMatchCandidate = null;
+                    _selectedSageMatchCandidate = null;
+                }
+
+                RefreshClientMatchOptions();
+            }
+        }
+    }
+
+    public Client? SelectedWhdMatchCandidate
+    {
+        get => _selectedWhdMatchCandidate;
+        set
+        {
+            if (SetProperty(ref _selectedWhdMatchCandidate, value))
+            {
+                UpdateClientMatchSuggestion();
+                LinkClientSourcesCommand.RaiseCanExecuteChanged();
+                CreateCanonicalClientFromSourcesCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -710,15 +802,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _selectedSageMatchCandidate, value))
             {
-                if (value is not null && SelectedManagedClient is not null)
-                {
-                    var score = ClientMatchingService.ScoreNames(
-                        SelectedManagedClient.WhdLocationName ?? SelectedManagedClient.Name,
-                        value.SageCustomerName ?? value.Name);
-                    ClientMatchSuggestionText = $"Selected Sage customer {value.SageCustomerLabel} ({score:P0} name similarity).";
-                }
-
-                ApplyClientMatchCommand.RaiseCanExecuteChanged();
+                UpdateClientMatchSuggestion();
+                LinkClientSourcesCommand.RaiseCanExecuteChanged();
+                CreateCanonicalClientFromSourcesCommand.RaiseCanExecuteChanged();
                 RefreshClientNameSuggestion();
             }
         }
@@ -730,13 +816,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _clientMatchSuggestionText, value);
     }
 
-    public string ClientMatchSelectionLabel => SelectedManagedClient is null
-        ? "No WHD location selected"
-        : $"{SelectedManagedClient.WhdLocationLabel} · {SelectedManagedClient.MatchStatusLabel}";
+    public bool CanChooseWhdMatchSource => SelectedCanonicalMatchClient is null
+        || SelectedCanonicalMatchClient is { IsClientInfoLive: true, HasWhdIdentity: false };
 
-    public string MatchedClientCountLabel => $"{_matchedClientCount} matched";
-    public string UnmatchedWhdClientCountLabel => $"{_unmatchedWhdClientCount} WHD only";
-    public string UnmatchedSageClientCountLabel => $"{_unmatchedSageClientCount} Sage only";
+    public bool CanChooseSageMatchSource => SelectedCanonicalMatchClient is null
+        || SelectedCanonicalMatchClient is { IsClientInfoLive: true, HasSageIdentity: false };
+
+    public string TbOnlyClientCountLabel => $"{_tbOnlyClientCount} TB only";
+    public string WhdLinkedClientCountLabel => $"{_whdLinkedClientCount} WHD linked";
+    public string SageLinkedClientCountLabel => $"{_sageLinkedClientCount} Sage linked";
+    public string FullyLinkedClientCountLabel => $"{_fullyLinkedClientCount} fully linked";
+    public string NeedsReviewClientCountLabel => $"{_needsReviewClientCount} needs review";
 
     public string EditorClientFilterText
     {
@@ -1182,7 +1272,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "History" => "Showing historical worklog",
             "Posting Queue" => "Showing entries still pending WHD or Sage posting",
             "Posting History" => "Showing WHD and Sage posting history",
-            "Client Match" => "Showing synchronized WHD and Sage client matches",
+            "Client Match" => "Reviewing canonical TechBench clients and their WHD and Sage links",
             "Client Users" => "Showing synchronized users and accounts for each client",
             "Ticket List" => "Showing my assigned and group non-closed tickets",
             "Common Links" => "Showing commonly used websites",
@@ -1475,6 +1565,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private void RefreshManagedClientOptions(int? preferredClientId = null)
     {
         preferredClientId ??= SelectedManagedClient?.Id;
+        var preferredCanonicalClientId = SelectedCanonicalMatchClient?.Id;
         ManagedClients.Clear();
         foreach (var client in Clients.Where(client =>
                      ClientSearchMatcher.Matches(client, ClientSearchText)))
@@ -1482,70 +1573,188 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             ManagedClients.Add(client);
         }
 
-        _matchedClientCount = Clients.Count(client =>
-            client.Source.Equals("Both", StringComparison.OrdinalIgnoreCase));
-        _unmatchedWhdClientCount = Clients.Count(client =>
-            client.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase));
-        _unmatchedSageClientCount = Clients.Count(client =>
-            client.Source.Equals("Sage", StringComparison.OrdinalIgnoreCase));
-        OnPropertyChanged(nameof(MatchedClientCountLabel));
-        OnPropertyChanged(nameof(UnmatchedWhdClientCountLabel));
-        OnPropertyChanged(nameof(UnmatchedSageClientCountLabel));
+        CanonicalClientCandidates.Clear();
+        foreach (var client in Clients
+                     .Where(client => client.IsActive && client.IsClientInfoLive)
+                     .OrderBy(client => client.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            CanonicalClientCandidates.Add(client);
+        }
+
+        _tbOnlyClientCount = Clients.Count(client =>
+            client.IsClientInfoLive && !client.HasWhdIdentity && !client.HasSageIdentity);
+        _whdLinkedClientCount = Clients.Count(client =>
+            client.IsClientInfoLive && client.HasWhdIdentity && !client.HasSageIdentity);
+        _sageLinkedClientCount = Clients.Count(client =>
+            client.IsClientInfoLive && !client.HasWhdIdentity && client.HasSageIdentity);
+        _fullyLinkedClientCount = Clients.Count(client =>
+            client.IsClientInfoLive && client.HasWhdIdentity && client.HasSageIdentity);
+        _needsReviewClientCount = Clients.Count(client => !client.IsClientInfoLive);
+        OnPropertyChanged(nameof(TbOnlyClientCountLabel));
+        OnPropertyChanged(nameof(WhdLinkedClientCountLabel));
+        OnPropertyChanged(nameof(SageLinkedClientCountLabel));
+        OnPropertyChanged(nameof(FullyLinkedClientCountLabel));
+        OnPropertyChanged(nameof(NeedsReviewClientCountLabel));
 
         SelectedManagedClient = preferredClientId.HasValue
             ? ManagedClients.FirstOrDefault(client => client.Id == preferredClientId.Value)
             : null;
-        RefreshClientMatchOptions();
+        var restoredCanonicalClient = preferredCanonicalClientId.HasValue
+            ? CanonicalClientCandidates.FirstOrDefault(
+                client => client.Id == preferredCanonicalClientId.Value)
+            : SelectedManagedClient is { IsClientInfoLive: true } selectedClient
+                ? CanonicalClientCandidates.FirstOrDefault(
+                    client => client.Id == selectedClient.Id)
+                : null;
+        if (!ReferenceEquals(SelectedCanonicalMatchClient, restoredCanonicalClient))
+        {
+            SelectedCanonicalMatchClient = restoredCanonicalClient;
+        }
+        else
+        {
+            RefreshClientMatchOptions();
+        }
     }
 
     private void RefreshClientMatchOptions()
     {
-        var selectedCandidateId = SelectedSageMatchCandidate?.Id;
-        var candidates = ManagedClients
-            .Where(ClientMatchingService.IsSageMatchCandidate)
+        var selectedWhdCandidateId = SelectedWhdMatchCandidate?.Id;
+        var selectedSageCandidateId = SelectedSageMatchCandidate?.Id;
+        var whdCandidates = Clients
+            .Where(client =>
+                client.IsExternalSourceLinkEligible
+                && client.HasWhdIdentity
+                && !client.HasSageIdentity)
+            .OrderBy(client => client.WhdLocationName ?? client.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var sageCandidates = Clients
+            .Where(client =>
+                client.IsExternalSourceLinkEligible
+                && client.HasSageIdentity
+                && !client.HasWhdIdentity)
             .OrderBy(client => client.SageCustomerName ?? client.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        WhdMatchCandidates.Clear();
+        foreach (var candidate in whdCandidates)
+        {
+            WhdMatchCandidates.Add(candidate);
+        }
         SageMatchCandidates.Clear();
-        foreach (var candidate in candidates)
+        foreach (var candidate in sageCandidates)
         {
             SageMatchCandidates.Add(candidate);
         }
 
-        OnPropertyChanged(nameof(ClientMatchSelectionLabel));
-        if (SelectedManagedClient is null)
+        OnPropertyChanged(nameof(CanChooseWhdMatchSource));
+        OnPropertyChanged(nameof(CanChooseSageMatchSource));
+        if (SelectedCanonicalMatchClient is not { IsClientInfoLive: true } canonicalClient)
         {
-            _selectedSageMatchCandidate = null;
+            _selectedWhdMatchCandidate = selectedWhdCandidateId.HasValue
+                ? whdCandidates.FirstOrDefault(
+                    candidate => candidate.Id == selectedWhdCandidateId.Value)
+                : null;
+            _selectedSageMatchCandidate = selectedSageCandidateId.HasValue
+                ? sageCandidates.FirstOrDefault(
+                    candidate => candidate.Id == selectedSageCandidateId.Value)
+                : null;
+            OnPropertyChanged(nameof(SelectedWhdMatchCandidate));
             OnPropertyChanged(nameof(SelectedSageMatchCandidate));
-            ClientMatchSuggestionText = "Select an unmatched WHD location to review its Sage match.";
-            ApplyClientMatchCommand.RaiseCanExecuteChanged();
+            UpdateClientMatchSuggestion();
+            LinkClientSourcesCommand.RaiseCanExecuteChanged();
+            CreateCanonicalClientFromSourcesCommand.RaiseCanExecuteChanged();
             RefreshClientNameSuggestion();
             return;
         }
 
-        if (!SelectedManagedClient.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase))
-        {
-            _selectedSageMatchCandidate = null;
-            OnPropertyChanged(nameof(SelectedSageMatchCandidate));
-            ClientMatchSuggestionText = SelectedManagedClient.Source.Equals("Both", StringComparison.OrdinalIgnoreCase)
-                ? $"Already linked to {SelectedManagedClient.SageCustomerLabel}."
-                : "This is a Sage-only customer. Select a WHD-only location to create a match.";
-            ApplyClientMatchCommand.RaiseCanExecuteChanged();
-            RefreshClientNameSuggestion();
-            return;
-        }
-
-        var suggestion = ClientMatchingService.FindBestSuggestion(SelectedManagedClient, candidates);
-        var restoredCandidate = selectedCandidateId.HasValue
-            ? candidates.FirstOrDefault(candidate => candidate.Id == selectedCandidateId.Value)
-            : null;
-        _selectedSageMatchCandidate = restoredCandidate ?? suggestion?.Candidate;
+        _selectedWhdMatchCandidate = canonicalClient.HasWhdIdentity
+            ? null
+            : selectedWhdCandidateId.HasValue
+                ? whdCandidates.FirstOrDefault(candidate => candidate.Id == selectedWhdCandidateId.Value)
+                : FindBestSourceCandidate(
+                    canonicalClient.Name,
+                    whdCandidates,
+                    candidate => candidate.WhdLocationName ?? candidate.Name);
+        _selectedSageMatchCandidate = canonicalClient.HasSageIdentity
+            ? null
+            : selectedSageCandidateId.HasValue
+                ? sageCandidates.FirstOrDefault(candidate => candidate.Id == selectedSageCandidateId.Value)
+                : FindBestSourceCandidate(
+                    canonicalClient.Name,
+                    sageCandidates,
+                    candidate => candidate.SageCustomerName ?? candidate.Name);
+        OnPropertyChanged(nameof(SelectedWhdMatchCandidate));
         OnPropertyChanged(nameof(SelectedSageMatchCandidate));
-        ClientMatchSuggestionText = suggestion is null
-            ? "No confident automatic suggestion. Choose the correct Sage customer manually."
-            : $"{suggestion.Description} Suggested: {suggestion.Candidate.SageCustomerLabel}";
-        ApplyClientMatchCommand.RaiseCanExecuteChanged();
+        UpdateClientMatchSuggestion();
+        LinkClientSourcesCommand.RaiseCanExecuteChanged();
+        CreateCanonicalClientFromSourcesCommand.RaiseCanExecuteChanged();
         RefreshClientNameSuggestion();
+    }
+
+    private static Client? FindBestSourceCandidate(
+        string canonicalName,
+        IEnumerable<Client> candidates,
+        Func<Client, string> resolveSourceName)
+    {
+        var best = candidates
+            .Select(candidate => new
+            {
+                Candidate = candidate,
+                Score = ClientMatchingService.ScoreNames(
+                    canonicalName,
+                    resolveSourceName(candidate))
+            })
+            .OrderByDescending(candidate => candidate.Score)
+            .ThenBy(candidate => candidate.Candidate.Name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+        return best is { Score: >= 0.68 } ? best.Candidate : null;
+    }
+
+    private void UpdateClientMatchSuggestion()
+    {
+        if (SelectedCanonicalMatchClient is not { IsClientInfoLive: true } canonicalClient)
+        {
+            ClientMatchSuggestionText = SelectedWhdMatchCandidate is not null
+                && SelectedSageMatchCandidate is not null
+                ? "No live TechBench target selected. Create a new live client from the selected WHD and Sage records."
+                : "Choose a live TechBench client to keep, or select one WHD-only and one Sage-only record to create a new live client.";
+            return;
+        }
+
+        var details = new List<string>();
+        if (canonicalClient.HasWhdIdentity)
+        {
+            details.Add("WHD is already linked");
+        }
+        else if (SelectedWhdMatchCandidate is not null)
+        {
+            var score = ClientMatchingService.ScoreNames(
+                canonicalClient.Name,
+                SelectedWhdMatchCandidate.WhdLocationName ?? SelectedWhdMatchCandidate.Name);
+            details.Add($"WHD: {SelectedWhdMatchCandidate.WhdLocationLabel} ({score:P0})");
+        }
+        else
+        {
+            details.Add("choose a WHD source if one exists");
+        }
+
+        if (canonicalClient.HasSageIdentity)
+        {
+            details.Add("Sage is already linked");
+        }
+        else if (SelectedSageMatchCandidate is not null)
+        {
+            var score = ClientMatchingService.ScoreNames(
+                canonicalClient.Name,
+                SelectedSageMatchCandidate.SageCustomerName ?? SelectedSageMatchCandidate.Name);
+            details.Add($"Sage: {SelectedSageMatchCandidate.SageCustomerLabel} ({score:P0})");
+        }
+        else
+        {
+            details.Add("choose a Sage source if one exists");
+        }
+
+        ClientMatchSuggestionText = string.Join(" · ", details) + ".";
     }
 
     private void RefreshEditorClientOptions()
@@ -3541,30 +3750,64 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             && SelectedTicketStatus is not null;
     }
 
-    private bool CanApplyClientMatch()
+    private bool CanLinkClientSources()
     {
+        var canonicalClient = SelectedCanonicalMatchClient;
+        var whdClient = SelectedWhdMatchCandidate;
+        var sageClient = SelectedSageMatchCandidate;
         return _currentUser.CanManageClients
             && !IsEntryOperationRunning
-            && SelectedManagedClient is not null
-            && SelectedManagedClient.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase)
-            && SelectedSageMatchCandidate is not null
-            && ClientMatchingService.IsSageMatchCandidate(SelectedSageMatchCandidate);
+            && canonicalClient is { Id: > 0, IsClientInfoLive: true }
+            && ((whdClient is not null
+                    && !canonicalClient.HasWhdIdentity
+                    && whdClient.IsExternalSourceLinkEligible
+                    && whdClient.HasWhdIdentity
+                    && !whdClient.HasSageIdentity)
+                || (sageClient is not null
+                    && !canonicalClient.HasSageIdentity
+                    && sageClient.IsExternalSourceLinkEligible
+                    && sageClient.HasSageIdentity
+                    && !sageClient.HasWhdIdentity))
+            && canonicalClient.Id != whdClient?.Id
+            && canonicalClient.Id != sageClient?.Id
+            && (whdClient is null || sageClient is null || whdClient.Id != sageClient.Id);
     }
 
-    private void ApplyClientMatch()
+    private void LinkClientSources()
     {
-        if (!CanApplyClientMatch())
+        if (SelectedWhdMatchCandidate is { IsExternalSourceLinkEligible: false }
+            || SelectedSageMatchCandidate is { IsExternalSourceLinkEligible: false })
+        {
+            ShowClientSourceMigrationBlocker("Client source linking");
+            return;
+        }
+
+        if (!CanLinkClientSources())
         {
             return;
         }
 
-        var whdClient = SelectedManagedClient!;
-        var sageClient = SelectedSageMatchCandidate!;
+        var canonicalClient = SelectedCanonicalMatchClient!;
+        var whdClient = canonicalClient.HasWhdIdentity ? null : SelectedWhdMatchCandidate;
+        var sageClient = canonicalClient.HasSageIdentity ? null : SelectedSageMatchCandidate;
+        var sources = new List<string>();
+        if (whdClient is not null)
+        {
+            sources.Add($"WHD: {whdClient.WhdLocationLabel}");
+        }
+
+        if (sageClient is not null)
+        {
+            sources.Add($"Sage: {sageClient.SageCustomerLabel}");
+        }
+
         var confirmed = _dialogService.Confirm(
-            "Match customer records",
-            $"Link WHD location \"{whdClient.WhdLocationLabel}\" to Sage customer \"{sageClient.SageCustomerLabel}\"?\n\n"
-            + "TechBench will merge the two records and keep existing notes and tickets attached.",
-            "Match",
+            "Link client sources",
+            $"Keep TechBench client \"{canonicalClient.Name}\" ({canonicalClient.InternalIdLabel}) and link:\n"
+            + string.Join("\n", sources)
+            + $"\n\nThe TechBench name and internal ID {canonicalClient.Id} stay the same. "
+            + "Client Information, equipment, tickets, and notes remain attached to that ID.",
+            "Link selected sources",
             "Cancel");
         if (!confirmed)
         {
@@ -3573,17 +3816,129 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         try
         {
-            var merged = _repository.MergeClientRecords(whdClient.Id, sageClient.Id);
-            var mergedId = merged.Id;
+            var linked = _repository.LinkClientSources(
+                canonicalClient.Id,
+                whdClient?.Id,
+                sageClient?.Id);
+            var canonicalClientId = linked.Id;
             RefreshClients();
-            SelectedManagedClient = ManagedClients.FirstOrDefault(client => client.Id == mergedId);
-            StatusMessage = $"Matched {merged.WhdLocationLabel} to {merged.SageCustomerLabel}.";
+            SelectedCanonicalMatchClient = CanonicalClientCandidates.FirstOrDefault(
+                client => client.Id == canonicalClientId);
+            SelectedManagedClient = ManagedClients.FirstOrDefault(
+                client => client.Id == canonicalClientId);
+            StatusMessage =
+                $"Linked {sources.Count} source record(s) to {linked.Name} "
+                + $"without changing internal TechBench ID {canonicalClientId}.";
         }
         catch (InvalidOperationException ex)
         {
-            StatusMessage = ex.Message;
-            _dialogService.Error("Customer matching", ex.Message);
+            ShowClientSourceLinkingError("Client source linking", ex.Message);
         }
+        catch (SqlException ex)
+        {
+            ShowClientSourceLinkingError("Client source linking", ex.Message);
+        }
+    }
+
+    private bool CanCreateCanonicalClientFromSources()
+    {
+        return _currentUser.CanManageClients
+            && !IsEntryOperationRunning
+            && SelectedCanonicalMatchClient is null
+            && SelectedWhdMatchCandidate is
+            {
+                Id: > 0,
+                IsExternalSourceLinkEligible: true,
+                HasWhdIdentity: true,
+                HasSageIdentity: false
+            }
+            && SelectedSageMatchCandidate is
+            {
+                Id: > 0,
+                IsExternalSourceLinkEligible: true,
+                HasWhdIdentity: false,
+                HasSageIdentity: true
+            }
+            && SelectedWhdMatchCandidate.Id != SelectedSageMatchCandidate.Id;
+    }
+
+    private void CreateCanonicalClientFromSources()
+    {
+        if (SelectedWhdMatchCandidate is { IsExternalSourceLinkEligible: false }
+            || SelectedSageMatchCandidate is { IsExternalSourceLinkEligible: false })
+        {
+            ShowClientSourceMigrationBlocker("Create live TechBench client");
+            return;
+        }
+
+        if (!CanCreateCanonicalClientFromSources())
+        {
+            return;
+        }
+
+        var whdClient = SelectedWhdMatchCandidate!;
+        var sageClient = SelectedSageMatchCandidate!;
+        var confirmed = _dialogService.Confirm(
+            "Create live TechBench client",
+            $"Create one live TechBench client from:\n"
+            + $"WHD: {whdClient.WhdLocationLabel}\n"
+            + $"Sage: {sageClient.SageCustomerLabel}\n\n"
+            + "Use this when no live Client Information profile exists yet. "
+            + "Existing tickets and notes remain attached to the resulting TechBench client.",
+            "Create live client",
+            "Cancel");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        try
+        {
+            var canonicalClient = _repository.MergeClientRecords(
+                whdClient.Id,
+                sageClient.Id);
+            var canonicalClientId = canonicalClient.Id;
+            RefreshClients();
+            SelectedCanonicalMatchClient = CanonicalClientCandidates.FirstOrDefault(
+                client => client.Id == canonicalClientId);
+            SelectedManagedClient = ManagedClients.FirstOrDefault(
+                client => client.Id == canonicalClientId);
+            StatusMessage =
+                $"Created live TechBench client {canonicalClient.Name} "
+                + $"with internal ID {canonicalClientId} and linked its WHD and Sage records.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            ShowClientSourceLinkingError("Create live TechBench client", ex.Message);
+        }
+        catch (SqlException ex)
+        {
+            ShowClientSourceLinkingError("Create live TechBench client", ex.Message);
+        }
+    }
+
+    private const string ClientSourceMigrationBlockerMessage =
+        "This source client already has Client Information or an in-progress workbook migration. "
+        + "Finish or discard the client workbook migration first.";
+
+    private void ShowClientSourceMigrationBlocker(string title)
+    {
+        StatusMessage = ClientSourceMigrationBlockerMessage;
+        _dialogService.Error(title, ClientSourceMigrationBlockerMessage);
+    }
+
+    private void ShowClientSourceLinkingError(string title, string message)
+    {
+        if (message.Contains("client workbook migration", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("ClientInfoCutover", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Client Information profile", StringComparison.OrdinalIgnoreCase))
+        {
+            ShowClientSourceMigrationBlocker(title);
+            return;
+        }
+
+        StatusMessage = message;
+        _dialogService.Error(title, message);
     }
 
     private void LoadSettings()

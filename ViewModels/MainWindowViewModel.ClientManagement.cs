@@ -69,9 +69,7 @@ public sealed partial class MainWindowViewModel
             ClientNameSuggestionText =
                 "Select a client to review or change its TechBench name.";
         }
-        else if (client.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase)
-                 && SelectedSageMatchCandidate is not null
-                 && !string.IsNullOrWhiteSpace(_suggestedClientName))
+        else if (!client.IsClientInfoLive)
         {
             ClientNameSuggestionText =
                 $"Match the WHD and Sage records first. The likely canonical name is “{_suggestedClientName}”.";
@@ -101,7 +99,7 @@ public sealed partial class MainWindowViewModel
     private bool CanUseSuggestedClientName()
     {
         return _currentUser.CanManageClients
-            && SelectedManagedClient is not null
+            && SelectedManagedClient is { IsClientInfoLive: true }
             && !string.IsNullOrWhiteSpace(_suggestedClientName)
             && !string.Equals(
                 ClientNameEditText.Trim(),
@@ -123,7 +121,7 @@ public sealed partial class MainWindowViewModel
     {
         return _currentUser.CanManageClients
             && !IsEntryOperationRunning
-            && SelectedManagedClient is { Id: > 0 } client
+            && SelectedManagedClient is { Id: > 0, IsClientInfoLive: true } client
             && !string.IsNullOrWhiteSpace(ClientNameEditText)
             && ClientNameEditText.Trim().Length <= 240
             && !string.Equals(

@@ -18,6 +18,11 @@ public sealed class Client
     public string? SageContactName { get; set; }
     public string? SageTelephone { get; set; }
     public string MatchStatus { get; set; } = "Unmatched";
+    public bool HasWhdIdentity { get; set; }
+    public bool HasSageIdentity { get; set; }
+    public bool IsClientInfoLive { get; set; }
+    public bool HasClientInfoWorkspace { get; set; }
+    public string ClientInfoReviewStatus { get; set; } = string.Empty;
     public byte[]? RowVersion { get; set; }
 
     public string DisplayName => IsActive ? Name : $"{Name} (inactive)";
@@ -31,6 +36,25 @@ public sealed class Client
             ? SageCustomerId
             : $"{SageCustomerId} - {SageCustomerName}";
     public string MatchStatusLabel => string.IsNullOrWhiteSpace(MatchStatus) ? "Unmatched" : MatchStatus;
+    public string InternalIdLabel => $"ID {Id}";
+    public string CanonicalCandidateLabel => $"{Name} ({InternalIdLabel})";
+    public bool IsExternalSourceLinkEligible => IsActive
+        && !IsClientInfoLive
+        && !HasClientInfoWorkspace;
+    public string CanonicalLinkStatusLabel => !IsClientInfoLive
+        ? "Needs review"
+        : HasWhdIdentity && HasSageIdentity
+            ? "Fully linked"
+            : HasWhdIdentity
+                ? "WHD linked"
+                : HasSageIdentity
+                    ? "Sage linked"
+                    : "TB only";
+    public string ClientInfoStatusLabel => !IsClientInfoLive
+        ? "Source record"
+        : string.IsNullOrWhiteSpace(ClientInfoReviewStatus)
+            ? "Live"
+            : $"Live · {ClientInfoReviewStatus}";
     public string ActiveStatus => IsActive ? "Active" : "Inactive";
     public string LastSyncedLabel => LastSyncedAt.HasValue ? LastSyncedAt.Value.ToString("g") : "-";
 

@@ -2262,7 +2262,7 @@
                                     </Grid.ColumnDefinitions>
                                     <StackPanel>
                                         <TextBlock Text="Client Match" Style="{StaticResource SectionHeadingStyle}" />
-                                        <TextBlock Text="One TechBench client per customer, linked to its WHD location and Sage customer."
+                                        <TextBlock Text="Choose the live TechBench client to keep, then link its WHD location and Sage customer. The internal TechBench ID and name remain canonical."
                                                    Style="{StaticResource MutedTextStyle}"
                                                    Margin="0,0,0,10" />
                                     </StackPanel>
@@ -2271,14 +2271,20 @@
                                 <TextBox Text="{Binding ClientSearchText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,12" />
 
                                 <WrapPanel Margin="0,0,0,12">
-                                    <Border Style="{StaticResource BadgeStyle}" Background="{DynamicResource SuccessBrush}">
-                                        <TextBlock Text="{Binding MatchedClientCountLabel}" Style="{StaticResource BadgeTextStyle}" />
+                                    <Border Style="{StaticResource BadgeStyle}" Background="{DynamicResource PanelAltBackgroundBrush}">
+                                        <TextBlock Text="{Binding TbOnlyClientCountLabel}" Style="{StaticResource BadgeTextStyle}" />
                                     </Border>
-                                    <Border Style="{StaticResource BadgeStyle}" Background="{DynamicResource WarningBrush}">
-                                        <TextBlock Text="{Binding UnmatchedWhdClientCountLabel}" Style="{StaticResource BadgeTextStyle}" />
+                                    <Border Style="{StaticResource BadgeStyle}" Background="{DynamicResource AccentSoftBrush}">
+                                        <TextBlock Text="{Binding WhdLinkedClientCountLabel}" Style="{StaticResource BadgeTextStyle}" />
                                     </Border>
                                     <Border Style="{StaticResource BadgeStyle}" Background="{DynamicResource NoTicketBadgeBrush}">
-                                        <TextBlock Text="{Binding UnmatchedSageClientCountLabel}" Style="{StaticResource BadgeTextStyle}" />
+                                        <TextBlock Text="{Binding SageLinkedClientCountLabel}" Style="{StaticResource BadgeTextStyle}" />
+                                    </Border>
+                                    <Border Style="{StaticResource BadgeStyle}" Background="{DynamicResource SuccessBrush}">
+                                        <TextBlock Text="{Binding FullyLinkedClientCountLabel}" Style="{StaticResource BadgeTextStyle}" />
+                                    </Border>
+                                    <Border Style="{StaticResource BadgeStyle}" Background="{DynamicResource WarningBrush}">
+                                        <TextBlock Text="{Binding NeedsReviewClientCountLabel}" Style="{StaticResource BadgeTextStyle}" />
                                     </Border>
                                 </WrapPanel>
 
@@ -2297,7 +2303,7 @@
                                         <StackPanel Grid.Column="0">
                                             <TextBlock Text="Client exports"
                                                        Style="{StaticResource FieldLabelStyle}" />
-                                            <TextBlock Text="Create an Excel audit workbook with current WHD and Sage totals plus Summary, Matched, WHD Only, Sage Only, Manual/Other, and All Clients tabs."
+                                            <TextBlock Text="Create an Excel audit workbook with internal TechBench IDs and canonical, WHD, Sage, fully linked, and source-only views."
                                                        Style="{StaticResource MutedTextStyle}"
                                                        TextWrapping="Wrap"
                                                        Margin="0,4,12,0" />
@@ -2320,37 +2326,62 @@
                                         Visibility="{Binding CanManageOrganizationSettings, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="1.2*" />
-                                            <ColumnDefinition Width="16" />
-                                            <ColumnDefinition Width="1.4*" />
+                                            <ColumnDefinition Width="1.25*" />
+                                            <ColumnDefinition Width="12" />
+                                            <ColumnDefinition Width="1.15*" />
+                                            <ColumnDefinition Width="12" />
+                                            <ColumnDefinition Width="1.15*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Grid.Column="0">
-                                            <TextBlock Text="Selected WHD location" Style="{StaticResource FieldLabelStyle}" />
-                                            <TextBlock Text="{Binding ClientMatchSelectionLabel}"
-                                                       Style="{StaticResource DetailValueStyle}"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       ToolTip="{Binding ClientMatchSelectionLabel}" />
+                                            <TextBlock Text="Canonical TechBench client" Style="{StaticResource FieldLabelStyle}" />
+                                            <ComboBox ItemsSource="{Binding CanonicalClientCandidates}"
+                                                      SelectedItem="{Binding SelectedCanonicalMatchClient}"
+                                                      DisplayMemberPath="CanonicalCandidateLabel"
+                                                      IsTextSearchEnabled="True"
+                                                      ToolTip="Choose the live Client Information profile whose internal TechBench ID and name should be kept." />
+                                            <Button Content="No live TB client"
+                                                    Command="{Binding ClearCanonicalMatchClientCommand}"
+                                                    HorizontalAlignment="Left"
+                                                    Padding="8,3"
+                                                    Margin="0,5,0,0"
+                                                    ToolTip="Clear the canonical target so a new live client can be created from one WHD-only and one Sage-only record." />
                                             <TextBlock Text="{Binding ClientMatchSuggestionText}"
                                                        Style="{StaticResource MutedTextStyle}"
                                                        TextWrapping="Wrap"
                                                        Margin="0,5,0,0" />
                                         </StackPanel>
                                         <StackPanel Grid.Column="2">
-                                            <TextBlock Text="Sage customer" Style="{StaticResource FieldLabelStyle}" />
+                                            <TextBlock Text="Unmatched WHD location" Style="{StaticResource FieldLabelStyle}" />
+                                            <ComboBox ItemsSource="{Binding WhdMatchCandidates}"
+                                                      SelectedItem="{Binding SelectedWhdMatchCandidate}"
+                                                      DisplayMemberPath="WhdLocationLabel"
+                                                      IsTextSearchEnabled="True"
+                                                      IsEnabled="{Binding CanChooseWhdMatchSource}"
+                                                      ToolTip="Choose the WHD-only record that belongs to this live TechBench client." />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="4">
+                                            <TextBlock Text="Unmatched Sage customer" Style="{StaticResource FieldLabelStyle}" />
                                             <ComboBox ItemsSource="{Binding SageMatchCandidates}"
                                                       SelectedItem="{Binding SelectedSageMatchCandidate}"
                                                       DisplayMemberPath="SageCustomerLabel"
                                                       IsTextSearchEnabled="True"
-                                                      ToolTip="Choose the Sage customer that represents the same company." />
+                                                      IsEnabled="{Binding CanChooseSageMatchSource}"
+                                                      ToolTip="Choose the Sage-only record that belongs to this live TechBench client." />
                                         </StackPanel>
-                                        <Button Grid.Column="3"
-                                                Content="Match"
-                                                Command="{Binding ApplyClientMatchCommand}"
-                                                Style="{StaticResource PrimaryButtonStyle}"
-                                                MinWidth="88"
-                                                Margin="12,20,0,0"
-                                                VerticalAlignment="Top" />
+                                        <StackPanel Grid.Column="5"
+                                                    Margin="12,20,0,0"
+                                                    VerticalAlignment="Top">
+                                            <Button Content="Link selected sources"
+                                                    Command="{Binding LinkClientSourcesCommand}"
+                                                    Style="{StaticResource PrimaryButtonStyle}"
+                                                    MinWidth="170" />
+                                            <Button Content="Create live client"
+                                                    Command="{Binding CreateCanonicalClientFromSourcesCommand}"
+                                                    MinWidth="170"
+                                                    Margin="0,6,0,0"
+                                                    ToolTip="When no live TechBench client exists, combine the selected WHD-only and Sage-only records into one live client." />
+                                        </StackPanel>
                                     </Grid>
                                 </Border>
 
@@ -2401,22 +2432,22 @@
                                         Padding="10,8">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="1.7*" />
                                             <ColumnDefinition Width="90" />
+                                            <ColumnDefinition Width="1.7*" />
                                             <ColumnDefinition Width="120" />
-                                            <ColumnDefinition Width="1.2*" />
-                                            <ColumnDefinition Width="1.1*" />
+                                            <ColumnDefinition Width="150" />
+                                            <ColumnDefinition Width="1.4*" />
                                             <ColumnDefinition Width="1.6*" />
                                             <ColumnDefinition Width="120" />
                                             <ColumnDefinition Width="150" />
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Text="Client name" Style="{StaticResource TableHeaderTextStyle}" />
-                                        <TextBlock Grid.Column="1" Text="Source" Style="{StaticResource TableHeaderTextStyle}" />
-                                        <TextBlock Grid.Column="2" Text="WHD ID" Style="{StaticResource TableHeaderTextStyle}" />
-                                        <TextBlock Grid.Column="3" Text="WHD location" Style="{StaticResource TableHeaderTextStyle}" />
-                                        <TextBlock Grid.Column="4" Text="WHD contact" Style="{StaticResource TableHeaderTextStyle}" />
+                                        <TextBlock Grid.Column="0" Text="Internal TB ID" Style="{StaticResource TableHeaderTextStyle}" />
+                                        <TextBlock Grid.Column="1" Text="TechBench client name" Style="{StaticResource TableHeaderTextStyle}" />
+                                        <TextBlock Grid.Column="2" Text="Links" Style="{StaticResource TableHeaderTextStyle}" />
+                                        <TextBlock Grid.Column="3" Text="Client Info" Style="{StaticResource TableHeaderTextStyle}" />
+                                        <TextBlock Grid.Column="4" Text="WHD location" Style="{StaticResource TableHeaderTextStyle}" />
                                         <TextBlock Grid.Column="5" Text="Sage customer" Style="{StaticResource TableHeaderTextStyle}" />
-                                        <TextBlock Grid.Column="6" Text="Match" Style="{StaticResource TableHeaderTextStyle}" />
+                                        <TextBlock Grid.Column="6" Text="Review" Style="{StaticResource TableHeaderTextStyle}" />
                                         <TextBlock Grid.Column="7" Text="Last synced" Style="{StaticResource TableHeaderTextStyle}" />
                                     </Grid>
                                 </Border>
@@ -2438,22 +2469,22 @@
                                                 Padding="10,9">
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="1.7*" />
                                                     <ColumnDefinition Width="90" />
+                                                    <ColumnDefinition Width="1.7*" />
                                                     <ColumnDefinition Width="120" />
-                                                    <ColumnDefinition Width="1.2*" />
-                                                    <ColumnDefinition Width="1.1*" />
+                                                    <ColumnDefinition Width="150" />
+                                                    <ColumnDefinition Width="1.4*" />
                                                     <ColumnDefinition Width="1.6*" />
                                                     <ColumnDefinition Width="120" />
                                                     <ColumnDefinition Width="150" />
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Grid.Column="0" Text="{Binding Name}" Style="{StaticResource DetailValueStyle}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
-                                                <TextBlock Grid.Column="1" Text="{Binding SourceLabel}" Style="{StaticResource TableCellTextStyle}" />
-                                                <TextBlock Grid.Column="2" Text="{Binding ExternalIdLabel}" Style="{StaticResource TableCellTextStyle}" />
-                                                <TextBlock Grid.Column="3" Text="{Binding WhdLocationLabel}" Style="{StaticResource TableCellTextStyle}" />
-                                                <TextBlock Grid.Column="4" Text="{Binding WhdContactLabel}" Style="{StaticResource TableCellTextStyle}" />
+                                                <TextBlock Grid.Column="0" Text="{Binding InternalIdLabel}" Style="{StaticResource TableCellTextStyle}" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Name}" Style="{StaticResource DetailValueStyle}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Grid.Column="2" Text="{Binding CanonicalLinkStatusLabel}" Style="{StaticResource TableCellTextStyle}" />
+                                                <TextBlock Grid.Column="3" Text="{Binding ClientInfoStatusLabel}" Style="{StaticResource TableCellTextStyle}" />
+                                                <TextBlock Grid.Column="4" Text="{Binding WhdLocationLabel}" Style="{StaticResource TableCellTextStyle}" />
                                                 <TextBlock Grid.Column="5" Text="{Binding SageCustomerLabel}" Style="{StaticResource TableCellTextStyle}" />
-                                                <TextBlock Grid.Column="6" Text="{Binding MatchStatusLabel}" Style="{StaticResource TableCellTextStyle}" />
+                                                <TextBlock Grid.Column="6" Text="{Binding ClientInfoReviewStatus}" Style="{StaticResource TableCellTextStyle}" />
                                                 <TextBlock Grid.Column="7" Text="{Binding LastSyncedLabel}" Style="{StaticResource TableCellTextStyle}" />
                                             </Grid>
                                         </Border>

@@ -2390,6 +2390,80 @@ BEGIN TRY
         );
     END;
 
+    /*
+        Keep the last canonical owner of a WHD location after that location
+        disappears from a complete snapshot. The active identity row can then
+        be removed without losing the deterministic path back to the same live
+        TechBench client if WHD later returns the location again.
+    */
+    IF OBJECT_ID(N'tb_sync.WhdClientIdentityHistory', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_sync].[WhdClientIdentityHistory]
+        (
+            [ExternalId] nvarchar(500) NOT NULL,
+            [ClientId] int NOT NULL,
+            [ExternalName] nvarchar(240) NULL,
+            [LastSeenAtUtc] datetime2(3) NULL,
+            [RetiredAtUtc] datetime2(3) NOT NULL,
+            [UpdatedByWindowsSid] varbinary(85) NOT NULL,
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_WhdClientIdentityHistory_Updated]
+                DEFAULT (SYSUTCDATETIME()),
+            CONSTRAINT [PK_WhdClientIdentityHistory]
+                PRIMARY KEY CLUSTERED ([ExternalId]),
+            CONSTRAINT [FK_WhdClientIdentityHistory_Client]
+                FOREIGN KEY ([ClientId]) REFERENCES [tb_data].[Clients]([Id])
+                ON DELETE CASCADE,
+            CONSTRAINT [FK_WhdClientIdentityHistory_UpdatedBy]
+                FOREIGN KEY ([UpdatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid])
+        );
+    END;
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.indexes
+        WHERE [object_id] = OBJECT_ID(N'tb_sync.WhdClientIdentityHistory')
+          AND [name] = N'IX_WhdClientIdentityHistory_Client'
+    )
+        CREATE INDEX [IX_WhdClientIdentityHistory_Client]
+            ON [tb_sync].[WhdClientIdentityHistory]([ClientId]);
+
+    /*
+        An unexpectedly destructive complete WHD client snapshot must be
+        observed twice with the same missing-location set before identities
+        are retired. Keeping the pending set in SQL makes that confirmation
+        durable across separate sync work items and service restarts.
+    */
+    IF OBJECT_ID(N'tb_sync.WhdPendingClientRemovals', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_sync].[WhdPendingClientRemovals]
+        (
+            [ExternalId] nvarchar(500) NOT NULL,
+            [ExistingCount] int NOT NULL,
+            [IncomingCount] int NOT NULL,
+            [StaleCount] int NOT NULL,
+            [FirstObservedAtUtc] datetime2(3) NOT NULL,
+            [UpdatedByWindowsSid] varbinary(85) NOT NULL,
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_WhdPendingClientRemovals_Updated]
+                DEFAULT (SYSUTCDATETIME()),
+            CONSTRAINT [PK_WhdPendingClientRemovals]
+                PRIMARY KEY CLUSTERED ([ExternalId]),
+            CONSTRAINT [CK_WhdPendingClientRemovals_Counts]
+                CHECK
+                (
+                    [ExistingCount] > 0
+                    AND [IncomingCount] >= 0
+                    AND [StaleCount] > 0
+                    AND [StaleCount] <= [ExistingCount]
+                ),
+            CONSTRAINT [FK_WhdPendingClientRemovals_UpdatedBy]
+                FOREIGN KEY ([UpdatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid])
+        );
+    END;
+
     IF NOT EXISTS (SELECT 1 FROM [tb_sync].[WhdSyncHealth] WHERE [HealthId] = 1)
         INSERT INTO [tb_sync].[WhdSyncHealth]([HealthId]) VALUES (1);
 
@@ -5650,8 +5724,38 @@ BEGIN
         client.[SageContactName],
         client.[SageTelephone],
         client.[MatchStatus],
+        CONVERT(bit, CASE WHEN live_profile.[ClientId] IS NULL THEN 0 ELSE 1 END)
+            AS [IsClientInfoLive],
+        CONVERT(bit, CASE
+            WHEN EXISTS
+            (
+                SELECT 1
+                FROM [tb_client].[ClientProfiles] AS any_profile
+                WHERE any_profile.[ClientId] = client.[Id]
+            )
+            OR EXISTS
+            (
+                SELECT 1
+                FROM [tb_ops].[ClientInfoCutovers] AS any_cutover
+                WHERE any_cutover.[ClientId] = client.[Id]
+            )
+                THEN 1 ELSE 0 END) AS [HasClientInfoWorkspace],
+        COALESCE(live_profile.[ReviewStatus], N'Unverified') AS [ClientInfoReviewStatus],
+        CONVERT(bit, CASE WHEN EXISTS
+            (SELECT 1 FROM [tb_data].[ClientExternalIdentities] AS whd_identity
+             WHERE whd_identity.[ClientId]=client.[Id]
+               AND whd_identity.[SourceSystem]=N'WHD')
+            THEN 1 ELSE 0 END) AS [HasWhdIdentity],
+        CONVERT(bit, CASE WHEN EXISTS
+            (SELECT 1 FROM [tb_data].[ClientExternalIdentities] AS sage_identity
+             WHERE sage_identity.[ClientId]=client.[Id]
+               AND sage_identity.[SourceSystem]=N'Sage')
+            THEN 1 ELSE 0 END) AS [HasSageIdentity],
         client.[RowVersion]
     FROM [tb_data].[Clients] AS client
+    LEFT JOIN [tb_client].[ClientProfiles] AS live_profile
+        ON live_profile.[ClientId]=client.[Id]
+       AND live_profile.[IsLive]=1
     WHERE (@IncludeInactive = 1 OR client.[IsActive] = 1)
       AND
       (
@@ -5715,10 +5819,40 @@ BEGIN
         client.[SageContactName],
         client.[SageTelephone],
         client.[MatchStatus],
+        CONVERT(bit, CASE WHEN live_profile.[ClientId] IS NULL THEN 0 ELSE 1 END)
+            AS [IsClientInfoLive],
+        CONVERT(bit, CASE
+            WHEN EXISTS
+            (
+                SELECT 1
+                FROM [tb_client].[ClientProfiles] AS any_profile
+                WHERE any_profile.[ClientId] = client.[Id]
+            )
+            OR EXISTS
+            (
+                SELECT 1
+                FROM [tb_ops].[ClientInfoCutovers] AS any_cutover
+                WHERE any_cutover.[ClientId] = client.[Id]
+            )
+                THEN 1 ELSE 0 END) AS [HasClientInfoWorkspace],
+        COALESCE(live_profile.[ReviewStatus], N'Unverified') AS [ClientInfoReviewStatus],
+        CONVERT(bit, CASE WHEN EXISTS
+            (SELECT 1 FROM [tb_data].[ClientExternalIdentities] AS whd_identity
+             WHERE whd_identity.[ClientId]=client.[Id]
+               AND whd_identity.[SourceSystem]=N'WHD')
+            THEN 1 ELSE 0 END) AS [HasWhdIdentity],
+        CONVERT(bit, CASE WHEN EXISTS
+            (SELECT 1 FROM [tb_data].[ClientExternalIdentities] AS sage_identity
+             WHERE sage_identity.[ClientId]=client.[Id]
+               AND sage_identity.[SourceSystem]=N'Sage')
+            THEN 1 ELSE 0 END) AS [HasSageIdentity],
         client.[RowVersion],
         client.[CreatedAtUtc],
         client.[UpdatedAtUtc]
     FROM [tb_data].[Clients] AS client
+    LEFT JOIN [tb_client].[ClientProfiles] AS live_profile
+        ON live_profile.[ClientId]=client.[Id]
+       AND live_profile.[IsLive]=1
     WHERE client.[Id] = @Id;
 END;
 GO
@@ -9622,23 +9756,107 @@ BEGIN
     BEGIN TRY
         BEGIN TRANSACTION;
 
-        IF NOT EXISTS
+        IF EXISTS
         (
             SELECT 1
-            FROM [tb_data].[Clients] WITH (UPDLOCK, HOLDLOCK)
-            WHERE [Id] = @WhdClientId
-              AND [RowVersion] = @ExpectedWhdRowVersion
+            FROM [tb_client].[ClientProfiles] AS profile WITH (UPDLOCK, HOLDLOCK)
+            WHERE profile.[ClientId] = @WhdClientId
         )
-            THROW 51272, N'The target client changed or no longer exists.', 1;
+        OR EXISTS
+        (
+            SELECT 1
+            FROM [tb_ops].[ClientInfoCutovers] AS cutover WITH (UPDLOCK, HOLDLOCK)
+            WHERE cutover.[ClientId] = @WhdClientId
+        )
+            THROW 51274, N'The selected WHD source has a Client Information workspace. Finish or discard the client workbook migration before linking it.', 1;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM [tb_client].[ClientProfiles] AS profile WITH (UPDLOCK, HOLDLOCK)
+            WHERE profile.[ClientId] = @SageClientId
+        )
+        OR EXISTS
+        (
+            SELECT 1
+            FROM [tb_ops].[ClientInfoCutovers] AS cutover WITH (UPDLOCK, HOLDLOCK)
+            WHERE cutover.[ClientId] = @SageClientId
+        )
+            THROW 51275, N'The selected Sage source has a Client Information workspace. Finish or discard the client workbook migration before linking it.', 1;
 
         IF NOT EXISTS
         (
             SELECT 1
-            FROM [tb_data].[Clients] WITH (UPDLOCK, HOLDLOCK)
-            WHERE [Id] = @SageClientId
-              AND [RowVersion] = @ExpectedSageRowVersion
+            FROM [tb_data].[Clients] AS whd_client WITH (UPDLOCK, HOLDLOCK)
+            WHERE whd_client.[Id] = @WhdClientId
+              AND whd_client.[RowVersion] = @ExpectedWhdRowVersion
+              AND whd_client.[IsActive] = 1
+              AND whd_client.[Source] = N'WHD'
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_client].[ClientProfiles] AS profile WITH (UPDLOCK, HOLDLOCK)
+                  WHERE profile.[ClientId] = whd_client.[Id]
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_ops].[ClientInfoCutovers] AS cutover WITH (UPDLOCK, HOLDLOCK)
+                  WHERE cutover.[ClientId] = whd_client.[Id]
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientExternalIdentities] AS other_identity WITH (UPDLOCK, HOLDLOCK)
+                  WHERE other_identity.[ClientId] = whd_client.[Id]
+                    AND other_identity.[SourceSystem] <> N'WHD'
+              )
+              AND 1 =
+              (
+                  SELECT COUNT(*)
+                  FROM [tb_data].[ClientExternalIdentities] AS whd_identity WITH (UPDLOCK, HOLDLOCK)
+                  WHERE whd_identity.[ClientId] = whd_client.[Id]
+                    AND whd_identity.[SourceSystem] = N'WHD'
+              )
         )
-            THROW 51273, N'The source client changed or no longer exists.', 1;
+            THROW 51272, N'The WHD-only client changed, has a Client Information workspace, or is no longer available.', 1;
+
+        IF NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[Clients] AS sage_client WITH (UPDLOCK, HOLDLOCK)
+            WHERE sage_client.[Id] = @SageClientId
+              AND sage_client.[RowVersion] = @ExpectedSageRowVersion
+              AND sage_client.[IsActive] = 1
+              AND sage_client.[Source] = N'Sage'
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_client].[ClientProfiles] AS profile WITH (UPDLOCK, HOLDLOCK)
+                  WHERE profile.[ClientId] = sage_client.[Id]
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_ops].[ClientInfoCutovers] AS cutover WITH (UPDLOCK, HOLDLOCK)
+                  WHERE cutover.[ClientId] = sage_client.[Id]
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientExternalIdentities] AS other_identity WITH (UPDLOCK, HOLDLOCK)
+                  WHERE other_identity.[ClientId] = sage_client.[Id]
+                    AND other_identity.[SourceSystem] <> N'Sage'
+              )
+              AND 1 =
+              (
+                  SELECT COUNT(*)
+                  FROM [tb_data].[ClientExternalIdentities] AS sage_identity WITH (UPDLOCK, HOLDLOCK)
+                  WHERE sage_identity.[ClientId] = sage_client.[Id]
+                    AND sage_identity.[SourceSystem] = N'Sage'
+              )
+        )
+            THROW 51273, N'The Sage-only client changed, has a Client Information workspace, or is no longer available.', 1;
 
         UPDATE target_client
         SET
@@ -9680,6 +9898,12 @@ BEGIN
                 COALESCE(target_client.[WhdLocationName], source_client.[WhdLocationName]),
             [WhdContactName] =
                 COALESCE(target_client.[WhdContactName], source_client.[WhdContactName]),
+            [WhdContactEmail] =
+                COALESCE(target_client.[WhdContactEmail], source_client.[WhdContactEmail]),
+            [WhdPhone] =
+                COALESCE(target_client.[WhdPhone], source_client.[WhdPhone]),
+            [WhdAddress] =
+                COALESCE(target_client.[WhdAddress], source_client.[WhdAddress]),
             [SageCustomerId] =
                 COALESCE(target_client.[SageCustomerId], source_client.[SageCustomerId]),
             [SageCustomerName] =
@@ -9709,6 +9933,27 @@ BEGIN
             [UpdatedByWindowsSid] = @UserSid,
             [UpdatedAtUtc] = SYSUTCDATETIME()
         WHERE [ClientId] = @SageClientId;
+
+        DELETE source_alias
+        FROM [tb_data].[ClientAliases] AS source_alias
+        WHERE source_alias.[ClientId] = @SageClientId
+          AND EXISTS
+          (
+              SELECT 1
+              FROM [tb_data].[ClientAliases] AS target_alias
+              WHERE target_alias.[ClientId] = @WhdClientId
+                AND target_alias.[ScopeType] = source_alias.[ScopeType]
+                AND
+                (
+                    target_alias.[OwnerWindowsSid] = source_alias.[OwnerWindowsSid]
+                    OR
+                    (
+                        target_alias.[OwnerWindowsSid] IS NULL
+                        AND source_alias.[OwnerWindowsSid] IS NULL
+                    )
+                )
+                AND target_alias.[Alias] = source_alias.[Alias]
+          );
 
         UPDATE [tb_data].[ClientAliases]
         SET
@@ -9748,6 +9993,20 @@ BEGIN
 
         IF @@ROWCOUNT = 0
             THROW 51273, N'The source client changed during the merge.', 1;
+
+        IF EXISTS
+        (
+            SELECT 1 FROM [tb_data].[ClientExternalIdentities]
+            WHERE [ClientId]=@WhdClientId AND [SourceSystem]=N'WHD'
+        )
+        AND EXISTS
+        (
+            SELECT 1 FROM [tb_data].[ClientExternalIdentities]
+            WHERE [ClientId]=@WhdClientId AND [SourceSystem]=N'Sage'
+        )
+            EXEC [tb_client].[EnsureLiveClientInfo]
+                @ClientId=@WhdClientId,
+                @ActorWindowsSid=@UserSid;
 
         DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @WhdClientId);
         EXEC [tb_security].[WriteAuditEvent]
@@ -17871,11 +18130,174 @@ BEGIN
         IF @ClientWorkType IS NULL
             THROW 51804, N'Valid WHD client/ticket-work lease required.', 1;
 
+        /* Clients work is a complete active-location snapshot. An empty or
+           unexpectedly destructive response must present the same exact set
+           of missing WHD locations in two successive complete snapshots
+           before identities are retired. The first observation commits only
+           the durable pending set and returns successfully without touching
+           client data. Ticket-embedded client batches remain upsert-only. */
+        IF @ClientWorkType = N'Clients'
+        BEGIN
+            DECLARE @ExistingWhdLocationCount int = 0;
+            DECLARE @IncomingWhdLocationCount int = 0;
+            DECLARE @StaleWhdLocationCount int = 0;
+            DECLARE @RequiresRemovalConfirmation bit = 0;
+            DECLARE @RemovalSetConfirmed bit = 0;
+            DECLARE @PendingRemovalCount int = 0;
+
+            DECLARE @StaleWhdLocationIds TABLE
+            (
+                [ExternalId] nvarchar(500) NOT NULL PRIMARY KEY
+            );
+
+            SELECT @ExistingWhdLocationCount = COUNT(*)
+            FROM [tb_data].[ClientExternalIdentities] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [SourceSystem] = N'WHD'
+              AND [ExternalId] LIKE N'WHD-LOCATION-%';
+
+            SELECT @IncomingWhdLocationCount = COUNT(*)
+            FROM @Snapshot
+            WHERE [ExternalId] LIKE N'WHD-LOCATION-%';
+
+            INSERT INTO @StaleWhdLocationIds([ExternalId])
+            SELECT identity_row.[ExternalId]
+            FROM [tb_data].[ClientExternalIdentities] AS identity_row WITH (UPDLOCK, HOLDLOCK)
+            WHERE identity_row.[SourceSystem] = N'WHD'
+              AND identity_row.[ExternalId] LIKE N'WHD-LOCATION-%'
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM @Snapshot AS active_location
+                  WHERE active_location.[ExternalId] = identity_row.[ExternalId]
+              );
+
+            SELECT @StaleWhdLocationCount = COUNT(*)
+            FROM @StaleWhdLocationIds;
+
+            IF @ExistingWhdLocationCount > 0
+               AND @IncomingWhdLocationCount = 0
+                SET @RequiresRemovalConfirmation = 1;
+
+            IF @StaleWhdLocationCount > 0
+               AND CONVERT(bigint, @StaleWhdLocationCount) * 100
+                   >= CONVERT(bigint, @ExistingWhdLocationCount) * 25
+                SET @RequiresRemovalConfirmation = 1;
+
+            SELECT @PendingRemovalCount = COUNT(*)
+            FROM [tb_sync].[WhdPendingClientRemovals] WITH (UPDLOCK, HOLDLOCK);
+
+            IF @RequiresRemovalConfirmation = 1
+               AND @PendingRemovalCount = @StaleWhdLocationCount
+               AND NOT EXISTS
+               (
+                   SELECT 1
+                   FROM [tb_sync].[WhdPendingClientRemovals] AS pending WITH (UPDLOCK, HOLDLOCK)
+                   WHERE NOT EXISTS
+                   (
+                       SELECT 1
+                       FROM @StaleWhdLocationIds AS stale
+                       WHERE stale.[ExternalId] = pending.[ExternalId]
+                   )
+               )
+               AND NOT EXISTS
+               (
+                   SELECT 1
+                   FROM @StaleWhdLocationIds AS stale
+                   WHERE NOT EXISTS
+                   (
+                       SELECT 1
+                       FROM [tb_sync].[WhdPendingClientRemovals] AS pending WITH (UPDLOCK, HOLDLOCK)
+                       WHERE pending.[ExternalId] = stale.[ExternalId]
+                   )
+               )
+                SET @RemovalSetConfirmed = 1;
+
+            IF @RequiresRemovalConfirmation = 1
+               AND @RemovalSetConfirmed = 0
+            BEGIN
+                DELETE FROM [tb_sync].[WhdPendingClientRemovals];
+
+                INSERT INTO [tb_sync].[WhdPendingClientRemovals]
+                (
+                    [ExternalId], [ExistingCount], [IncomingCount],
+                    [StaleCount], [FirstObservedAtUtc],
+                    [UpdatedByWindowsSid], [UpdatedAtUtc]
+                )
+                SELECT
+                    stale.[ExternalId], @ExistingWhdLocationCount,
+                    @IncomingWhdLocationCount, @StaleWhdLocationCount,
+                    SYSUTCDATETIME(), @ActorSid, SYSUTCDATETIME()
+                FROM @StaleWhdLocationIds AS stale;
+
+                COMMIT TRANSACTION;
+
+                SELECT
+                    CONVERT(int, 0) AS [SavedCount],
+                    CONVERT(int, 0) AS [InsertedCount],
+                    @StaleWhdLocationCount AS [DeferredRemovalCount],
+                    CONVERT(bit, 1) AS [RemovalDeferred],
+                    @SyncedAtUtc AS [SyncedAtUtc];
+                RETURN;
+            END;
+
+            /* A safe snapshot cancels a pending warning. A confirmed
+               destructive snapshot consumes it in the same transaction as
+               retirement, so any later failure leaves confirmation intact. */
+            DELETE FROM [tb_sync].[WhdPendingClientRemovals];
+        END;
+
+        /* A live canonical client retains a durable historical WHD location
+           owner when a location disappears. Restore that exact relationship
+           before normal upsert logic so a reappearing location cannot create
+           a second TechBench client merely because its name changed. */
+        INSERT INTO [tb_data].[ClientExternalIdentities]
+        (
+            [ClientId], [SourceSystem], [ExternalId], [ExternalName],
+            [LastSyncedAtUtc], [CreatedByWindowsSid], [UpdatedByWindowsSid]
+        )
+        SELECT
+            history_row.[ClientId], N'WHD', snapshot.[ExternalId], snapshot.[Name],
+            @SyncedAtUtc, @ActorSid, @ActorSid
+        FROM @Snapshot AS snapshot
+        INNER JOIN [tb_sync].[WhdClientIdentityHistory] AS history_row WITH (UPDLOCK, HOLDLOCK)
+            ON history_row.[ExternalId] = snapshot.[ExternalId]
+        INNER JOIN [tb_data].[Clients] AS canonical_client WITH (UPDLOCK, HOLDLOCK)
+            ON canonical_client.[Id] = history_row.[ClientId]
+           AND canonical_client.[IsActive] = 1
+        INNER JOIN [tb_client].[ClientProfiles] AS canonical_profile WITH (UPDLOCK, HOLDLOCK)
+            ON canonical_profile.[ClientId] = history_row.[ClientId]
+           AND canonical_profile.[IsLive] = 1
+        WHERE snapshot.[ExternalId] LIKE N'WHD-LOCATION-%'
+          AND NOT EXISTS
+          (
+              SELECT 1
+              FROM [tb_data].[ClientExternalIdentities] AS existing WITH (UPDLOCK, HOLDLOCK)
+              WHERE existing.[SourceSystem] = N'WHD'
+                AND existing.[ExternalId] = snapshot.[ExternalId]
+          );
+
+        UPDATE history_row
+        SET
+            [ExternalName] = snapshot.[Name],
+            [LastSeenAtUtc] = @SyncedAtUtc,
+            [UpdatedByWindowsSid] = @ActorSid,
+            [UpdatedAtUtc] = SYSUTCDATETIME()
+        FROM [tb_sync].[WhdClientIdentityHistory] AS history_row
+        INNER JOIN @Snapshot AS snapshot
+            ON snapshot.[ExternalId] = history_row.[ExternalId];
+
         /* Preserve the shared customer match: WHD identities may point at a
            Sage/Both client rather than a standalone WHD client row. */
         UPDATE client
         SET
-            [Name] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[Name] ELSE client.[Name] END,
+            [Name] = CASE
+                WHEN client.[Source] = N'WHD'
+                 AND NOT EXISTS
+                    (SELECT 1 FROM [tb_client].[ClientProfiles] AS profile
+                     WHERE profile.[ClientId]=client.[Id] AND profile.[IsLive]=1)
+                    THEN snapshot.[Name]
+                ELSE client.[Name]
+            END,
             [WhdLocationName] = snapshot.[LocationName],
             [WhdContactName] =
                 CASE WHEN @ClientWorkType = N'Clients'
@@ -17897,7 +18319,14 @@ BEGIN
                     THEN snapshot.[Address]
                     ELSE COALESCE(client.[WhdAddress], snapshot.[Address])
                 END,
-            [IsActive] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[IsActive] ELSE client.[IsActive] END,
+            [IsActive] = CASE
+                WHEN client.[Source] = N'WHD'
+                 AND NOT EXISTS
+                    (SELECT 1 FROM [tb_client].[ClientProfiles] AS profile
+                     WHERE profile.[ClientId]=client.[Id] AND profile.[IsLive]=1)
+                    THEN snapshot.[IsActive]
+                ELSE client.[IsActive]
+            END,
             [LastSyncedAtUtc] = @SyncedAtUtc,
             [UpdatedAtUtc] = SYSUTCDATETIME(),
             [UpdatedByWindowsSid] = @ActorSid
@@ -17989,7 +18418,14 @@ BEGIN
            rather than waiting for the next synchronization cycle. */
         UPDATE client
         SET
-            [Name] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[Name] ELSE client.[Name] END,
+            [Name] = CASE
+                WHEN client.[Source] = N'WHD'
+                 AND NOT EXISTS
+                    (SELECT 1 FROM [tb_client].[ClientProfiles] AS profile
+                     WHERE profile.[ClientId]=client.[Id] AND profile.[IsLive]=1)
+                    THEN snapshot.[Name]
+                ELSE client.[Name]
+            END,
             [WhdLocationName] = snapshot.[LocationName],
             [WhdContactName] =
                 CASE WHEN @ClientWorkType = N'Clients'
@@ -18011,7 +18447,14 @@ BEGIN
                     THEN snapshot.[Address]
                     ELSE COALESCE(client.[WhdAddress], snapshot.[Address])
                 END,
-            [IsActive] = CASE WHEN client.[Source] = N'WHD' THEN snapshot.[IsActive] ELSE client.[IsActive] END,
+            [IsActive] = CASE
+                WHEN client.[Source] = N'WHD'
+                 AND NOT EXISTS
+                    (SELECT 1 FROM [tb_client].[ClientProfiles] AS profile
+                     WHERE profile.[ClientId]=client.[Id] AND profile.[IsLive]=1)
+                    THEN snapshot.[IsActive]
+                ELSE client.[IsActive]
+            END,
             [LastSyncedAtUtc] = @SyncedAtUtc,
             [UpdatedAtUtc] = SYSUTCDATETIME(),
             [UpdatedByWindowsSid] = @ActorSid
@@ -18026,6 +18469,42 @@ BEGIN
            client batches during Tickets work are deliberately upsert-only. */
         IF @ClientWorkType = N'Clients'
         BEGIN
+            DECLARE @StaleLiveWhdIdentities TABLE
+            (
+                [IdentityId] bigint NOT NULL PRIMARY KEY,
+                [ClientId] int NOT NULL,
+                [ExternalId] nvarchar(500) NOT NULL,
+                [ExternalName] nvarchar(240) NULL,
+                [LastSyncedAtUtc] datetime2(3) NULL
+            );
+            INSERT INTO @StaleLiveWhdIdentities
+                ([IdentityId], [ClientId], [ExternalId], [ExternalName], [LastSyncedAtUtc])
+            SELECT
+                identity_row.[Id], client.[Id], identity_row.[ExternalId],
+                identity_row.[ExternalName], identity_row.[LastSyncedAtUtc]
+            FROM [tb_data].[Clients] AS client
+            INNER JOIN [tb_client].[ClientProfiles] AS profile
+                ON profile.[ClientId] = client.[Id]
+               AND profile.[IsLive] = 1
+            INNER JOIN [tb_data].[ClientExternalIdentities] AS identity_row
+                ON identity_row.[ClientId] = client.[Id]
+               AND identity_row.[SourceSystem] = N'WHD'
+               AND identity_row.[ExternalId] LIKE N'WHD-LOCATION-%'
+            WHERE NOT EXISTS
+            (
+                SELECT 1
+                FROM @Snapshot AS active_location
+                WHERE active_location.[ExternalId] = identity_row.[ExternalId]
+            );
+
+            DECLARE @StaleLiveWhdClients TABLE
+            (
+                [ClientId] int NOT NULL PRIMARY KEY
+            );
+            INSERT INTO @StaleLiveWhdClients([ClientId])
+            SELECT DISTINCT [ClientId]
+            FROM @StaleLiveWhdIdentities;
+
             UPDATE client
             SET
                 [IsActive] = 0,
@@ -18040,9 +18519,122 @@ BEGIN
               AND NOT EXISTS
               (
                   SELECT 1
+                  FROM [tb_client].[ClientProfiles] AS profile
+                  WHERE profile.[ClientId]=client.[Id]
+                    AND profile.[IsLive]=1
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
                   FROM @Snapshot AS active_location
                   WHERE active_location.[ExternalId] = identity_row.[ExternalId]
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientExternalIdentities] AS remaining_identity
+                  INNER JOIN @Snapshot AS active_location
+                      ON active_location.[ExternalId] = remaining_identity.[ExternalId]
+                  WHERE remaining_identity.[ClientId] = client.[Id]
+                    AND remaining_identity.[SourceSystem] = N'WHD'
+                    AND remaining_identity.[ExternalId] LIKE N'WHD-LOCATION-%'
               );
+
+            /* Retiring an active identity must not erase its canonical owner.
+               Update first, then insert missing history rows under serializable
+               key-range locks so concurrent ticket/client work is idempotent. */
+            UPDATE history_row
+            SET
+                [ClientId] = stale_identity.[ClientId],
+                [ExternalName] = stale_identity.[ExternalName],
+                [LastSeenAtUtc] = stale_identity.[LastSyncedAtUtc],
+                [RetiredAtUtc] = SYSUTCDATETIME(),
+                [UpdatedByWindowsSid] = @ActorSid,
+                [UpdatedAtUtc] = SYSUTCDATETIME()
+            FROM [tb_sync].[WhdClientIdentityHistory] AS history_row WITH (UPDLOCK, HOLDLOCK)
+            INNER JOIN @StaleLiveWhdIdentities AS stale_identity
+                ON stale_identity.[ExternalId] = history_row.[ExternalId];
+
+            INSERT INTO [tb_sync].[WhdClientIdentityHistory]
+            (
+                [ExternalId], [ClientId], [ExternalName], [LastSeenAtUtc],
+                [RetiredAtUtc], [UpdatedByWindowsSid], [UpdatedAtUtc]
+            )
+            SELECT
+                stale_identity.[ExternalId], stale_identity.[ClientId],
+                stale_identity.[ExternalName], stale_identity.[LastSyncedAtUtc],
+                SYSUTCDATETIME(), @ActorSid, SYSUTCDATETIME()
+            FROM @StaleLiveWhdIdentities AS stale_identity
+            WHERE NOT EXISTS
+            (
+                SELECT 1
+                FROM [tb_sync].[WhdClientIdentityHistory] AS existing WITH (UPDLOCK, HOLDLOCK)
+                WHERE existing.[ExternalId] = stale_identity.[ExternalId]
+            );
+
+            DELETE identity_row
+            FROM [tb_data].[ClientExternalIdentities] AS identity_row
+            INNER JOIN @StaleLiveWhdIdentities AS stale_identity
+                ON stale_identity.[IdentityId] = identity_row.[Id];
+
+            UPDATE client
+            SET
+                [Source] = CASE
+                    WHEN remaining_whd.[ExternalId] IS NOT NULL
+                     AND sage_identity.[ExternalId] IS NOT NULL THEN N'Both'
+                    WHEN remaining_whd.[ExternalId] IS NOT NULL THEN N'WHD'
+                    WHEN sage_identity.[ExternalId] IS NOT NULL THEN N'Sage'
+                    ELSE N'Manual'
+                END,
+                [ExternalId] = COALESCE(
+                    remaining_whd.[ExternalId],
+                    sage_identity.[ExternalId]),
+                [MatchStatus] = CASE
+                    WHEN remaining_whd.[ExternalId] IS NOT NULL
+                     AND sage_identity.[ExternalId] IS NOT NULL THEN N'Matched'
+                    ELSE N'Unmatched'
+                END,
+                [WhdLocationName] = CASE
+                    WHEN remaining_whd.[ExternalId] IS NULL THEN NULL
+                    ELSE client.[WhdLocationName]
+                END,
+                [WhdContactName] = CASE
+                    WHEN remaining_whd.[ExternalId] IS NULL THEN NULL
+                    ELSE client.[WhdContactName]
+                END,
+                [WhdContactEmail] = CASE
+                    WHEN remaining_whd.[ExternalId] IS NULL THEN NULL
+                    ELSE client.[WhdContactEmail]
+                END,
+                [WhdPhone] = CASE
+                    WHEN remaining_whd.[ExternalId] IS NULL THEN NULL
+                    ELSE client.[WhdPhone]
+                END,
+                [WhdAddress] = CASE
+                    WHEN remaining_whd.[ExternalId] IS NULL THEN NULL
+                    ELSE client.[WhdAddress]
+                END,
+                [UpdatedAtUtc] = SYSUTCDATETIME(),
+                [UpdatedByWindowsSid] = @ActorSid
+            FROM [tb_data].[Clients] AS client
+            INNER JOIN @StaleLiveWhdClients AS stale_client
+                ON stale_client.[ClientId] = client.[Id]
+            OUTER APPLY
+            (
+                SELECT TOP (1) identity_row.[ExternalId]
+                FROM [tb_data].[ClientExternalIdentities] AS identity_row
+                WHERE identity_row.[ClientId] = client.[Id]
+                  AND identity_row.[SourceSystem] = N'WHD'
+                ORDER BY identity_row.[Id]
+            ) AS remaining_whd
+            OUTER APPLY
+            (
+                SELECT TOP (1) identity_row.[ExternalId]
+                FROM [tb_data].[ClientExternalIdentities] AS identity_row
+                WHERE identity_row.[ClientId] = client.[Id]
+                  AND identity_row.[SourceSystem] = N'Sage'
+                ORDER BY identity_row.[Id]
+            ) AS sage_identity;
         END;
 
         DECLARE @SavedCount int = (SELECT COUNT(*) FROM @Snapshot);
@@ -20900,10 +21492,18 @@ BEGIN
 
         UPDATE client
         SET
-            [Name] = CASE WHEN whd_identity.[ClientId] IS NULL THEN snapshot.[CustomerName] ELSE client.[Name] END,
+            [Name] = CASE
+                WHEN COALESCE(profile.[IsLive], CONVERT(bit,0)) = 1 THEN client.[Name]
+                WHEN whd_identity.[ClientId] IS NULL THEN snapshot.[CustomerName]
+                ELSE client.[Name]
+            END,
             [Source] = CASE WHEN whd_identity.[ClientId] IS NULL THEN N'Sage' ELSE N'Both' END,
             [ExternalId] = CASE WHEN whd_identity.[ClientId] IS NULL THEN snapshot.[CustomerId] ELSE client.[ExternalId] END,
-            [IsActive] = CASE WHEN whd_identity.[ClientId] IS NULL THEN snapshot.[IsActive] ELSE client.[IsActive] END,
+            [IsActive] = CASE
+                WHEN COALESCE(profile.[IsLive], CONVERT(bit,0)) = 1 THEN client.[IsActive]
+                WHEN whd_identity.[ClientId] IS NULL THEN snapshot.[IsActive]
+                ELSE client.[IsActive]
+            END,
             [LastSyncedAtUtc] = @SyncedAtUtc,
             [SageCustomerId] = snapshot.[CustomerId], [SageCustomerName] = snapshot.[CustomerName],
             [SageContactName] = snapshot.[ContactName], [SageTelephone] = snapshot.[Telephone],
@@ -20918,7 +21518,13 @@ BEGIN
             SELECT TOP (1) whd.[ClientId]
             FROM [tb_data].[ClientExternalIdentities] AS whd
             WHERE whd.[ClientId] = client.[Id] AND whd.[SourceSystem] = N'WHD'
-        ) AS whd_identity;
+        ) AS whd_identity
+        OUTER APPLY
+        (
+            SELECT client_profile.[ClientId], client_profile.[IsLive]
+            FROM [tb_client].[ClientProfiles] AS client_profile
+            WHERE client_profile.[ClientId] = client.[Id]
+        ) AS profile;
 
         SET @SavedCount = @ReadCount;
 
@@ -20956,8 +21562,18 @@ BEGIN
         )
         UPDATE client
         SET
-            [Source] = CASE WHEN whd_identity.[ClientId] IS NULL THEN N'Sage' ELSE N'WHD' END,
-            [IsActive] = CASE WHEN whd_identity.[ClientId] IS NULL THEN CONVERT(bit, 0) ELSE client.[IsActive] END,
+            [Source] = CASE
+                WHEN whd_identity.[ClientId] IS NOT NULL THEN N'WHD'
+                WHEN COALESCE(profile.[IsLive], CONVERT(bit,0)) = 1 THEN N'Manual'
+                ELSE N'Sage'
+            END,
+            [ExternalId] = whd_identity.[ExternalId],
+            [IsActive] = CASE
+                WHEN whd_identity.[ClientId] IS NOT NULL
+                  OR COALESCE(profile.[IsLive], CONVERT(bit,0)) = 1
+                    THEN client.[IsActive]
+                ELSE CONVERT(bit, 0)
+            END,
             [SageCustomerId] = NULL, [SageCustomerName] = NULL,
             [SageContactName] = NULL, [SageTelephone] = NULL,
             [MatchStatus] = N'Unmatched', [LastSyncedAtUtc] = @SyncedAtUtc,
@@ -20966,10 +21582,17 @@ BEGIN
         INNER JOIN removed_clients AS removed ON removed.[ClientId] = client.[Id]
         OUTER APPLY
         (
-            SELECT TOP (1) whd.[ClientId]
+            SELECT TOP (1) whd.[ClientId], whd.[ExternalId]
             FROM [tb_data].[ClientExternalIdentities] AS whd
             WHERE whd.[ClientId] = client.[Id] AND whd.[SourceSystem] = N'WHD'
-        ) AS whd_identity;
+            ORDER BY whd.[Id]
+        ) AS whd_identity
+        OUTER APPLY
+        (
+            SELECT client_profile.[ClientId], client_profile.[IsLive]
+            FROM [tb_client].[ClientProfiles] AS client_profile
+            WHERE client_profile.[ClientId] = client.[Id]
+        ) AS profile;
 
         SELECT @MatchedCount = COUNT(DISTINCT client.[Id])
         FROM [tb_data].[Clients] AS client
@@ -21229,8 +21852,11 @@ BEGIN
         client.[WhdLocationName],
         client.[SageCustomerId],
         client.[SageCustomerName],
+        COALESCE(profile.[IsLive], CONVERT(bit, 0)) AS [IsTechBenchLive],
         client.[RowVersion]
     FROM [tb_data].[Clients] AS client
+    LEFT JOIN [tb_client].[ClientProfiles] AS profile
+        ON profile.[ClientId] = client.[Id]
     OUTER APPLY
     (
         SELECT TOP (1) identity_row.[ExternalId]
@@ -21243,14 +21869,30 @@ BEGIN
     WHERE client.[IsActive] = 1
       AND
       (
+          profile.[IsLive] = 1
+          OR
           (
-              client.[Source] = N'WHD'
+              profile.[ClientId] IS NULL
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_ops].[ClientInfoCutovers] AS source_cutover
+                  WHERE source_cutover.[ClientId] = client.[Id]
+              )
+              AND client.[Source] = N'WHD'
               AND NULLIF(LTRIM(RTRIM(client.[SageCustomerId])), N'') IS NULL
               AND whd_identity.[ExternalId] IS NOT NULL
           )
           OR
           (
-              client.[Source] = N'Sage'
+              profile.[ClientId] IS NULL
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_ops].[ClientInfoCutovers] AS source_cutover
+                  WHERE source_cutover.[ClientId] = client.[Id]
+              )
+              AND client.[Source] = N'Sage'
               AND NULLIF(LTRIM(RTRIM(client.[SageCustomerId])), N'') IS NOT NULL
               AND EXISTS
               (
@@ -21263,6 +21905,136 @@ BEGIN
           )
       )
     ORDER BY client.[Id];
+END;
+GO
+
+IF OBJECT_ID(N'tb_service.ApplyAutomaticClientSourceMatch', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_service].[ApplyAutomaticClientSourceMatch];
+GO
+
+/* Attach one unmatched external source record to an existing Live TechBench
+   client. Row-version guards make concurrent WHD/Sage workers harmless: the
+   loser returns zero, reloads candidates, and observes the winner. */
+CREATE PROCEDURE [tb_service].[ApplyAutomaticClientSourceMatch]
+    @CanonicalClientId int,
+    @SourceClientId int,
+    @ExpectedCanonicalRowVersion binary(8),
+    @ExpectedSourceRowVersion binary(8),
+    @SourceSystem nvarchar(20),
+    @MatchScore decimal(6,5)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    SET @SourceSystem = NULLIF(LTRIM(RTRIM(@SourceSystem)), N'');
+    IF @CanonicalClientId IS NULL OR @SourceClientId IS NULL
+       OR @CanonicalClientId = @SourceClientId
+       OR @ExpectedCanonicalRowVersion IS NULL
+       OR @ExpectedSourceRowVersion IS NULL
+       OR @SourceSystem NOT IN (N'WHD', N'Sage')
+       OR @MatchScore < CONVERT(decimal(6,5), 0.86000)
+       OR @MatchScore > CONVERT(decimal(6,5), 1.00000)
+    BEGIN
+        SELECT CONVERT(int, 0) AS [AppliedCount];
+        RETURN;
+    END;
+
+    DECLARE @ActorSid varbinary(85) =
+    (
+        SELECT [WindowsSid]
+        FROM [tb_security].[Users]
+        WHERE [LoginName] = N'$(SyncServicePrincipal)'
+    );
+    IF @ActorSid IS NULL
+        THROW 51974, N'The configured sync service principal has no TechBench service actor.', 1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        IF NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[Clients] AS canonical WITH (UPDLOCK, HOLDLOCK)
+            INNER JOIN [tb_client].[ClientProfiles] AS profile WITH (UPDLOCK, HOLDLOCK)
+                ON profile.[ClientId] = canonical.[Id]
+               AND profile.[IsLive] = 1
+            WHERE canonical.[Id] = @CanonicalClientId
+              AND canonical.[RowVersion] = @ExpectedCanonicalRowVersion
+              AND canonical.[IsActive] = 1
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientExternalIdentities] AS existing_identity WITH (UPDLOCK, HOLDLOCK)
+                  WHERE existing_identity.[ClientId] = canonical.[Id]
+                    AND existing_identity.[SourceSystem] = @SourceSystem
+              )
+        )
+        OR NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[Clients] AS source_client WITH (UPDLOCK, HOLDLOCK)
+            WHERE source_client.[Id] = @SourceClientId
+              AND source_client.[RowVersion] = @ExpectedSourceRowVersion
+              AND source_client.[IsActive] = 1
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_client].[ClientProfiles] AS source_profile WITH (UPDLOCK, HOLDLOCK)
+                  WHERE source_profile.[ClientId] = source_client.[Id]
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_ops].[ClientInfoCutovers] AS source_cutover WITH (UPDLOCK, HOLDLOCK)
+                  WHERE source_cutover.[ClientId] = source_client.[Id]
+              )
+              AND EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientExternalIdentities] AS source_identity WITH (UPDLOCK, HOLDLOCK)
+                  WHERE source_identity.[ClientId] = source_client.[Id]
+                    AND source_identity.[SourceSystem] = @SourceSystem
+              )
+        )
+        BEGIN
+            COMMIT TRANSACTION;
+            SELECT CONVERT(int, 0) AS [AppliedCount];
+            RETURN;
+        END;
+
+        EXEC [tb_client].[MergeSourceClientIntoCanonical]
+            @CanonicalClientId=@CanonicalClientId,
+            @SourceClientId=@SourceClientId,
+            @ExpectedCanonicalRowVersion=@ExpectedCanonicalRowVersion,
+            @ExpectedSourceRowVersion=@ExpectedSourceRowVersion,
+            @SourceSystem=@SourceSystem,
+            @ActorWindowsSid=@ActorSid;
+
+        DECLARE @AuditEntityId nvarchar(120)=CONVERT(nvarchar(120),@CanonicalClientId);
+        DECLARE @AuditData nvarchar(max)=
+        (
+            SELECT @SourceSystem AS [sourceSystem],
+                   @SourceClientId AS [sourceClientId],
+                   @MatchScore AS [matchScore],
+                   CONVERT(bit,1) AS [canonicalIdPreserved]
+            FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+        );
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'ClientSourceAutoLinked',
+            @EntityType=N'Client',
+            @EntityId=@AuditEntityId,
+            @RequestId=NULL,
+            @DataJson=@AuditData;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    SELECT CONVERT(int, 1) AS [AppliedCount];
 END;
 GO
 
@@ -21313,6 +22085,18 @@ BEGIN
               AND whd_client.[RowVersion] = @ExpectedWhdRowVersion
               AND whd_client.[IsActive] = 1
               AND whd_client.[Source] = N'WHD'
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_client].[ClientProfiles] AS source_profile WITH (UPDLOCK, HOLDLOCK)
+                  WHERE source_profile.[ClientId]=whd_client.[Id]
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_ops].[ClientInfoCutovers] AS source_cutover WITH (UPDLOCK, HOLDLOCK)
+                  WHERE source_cutover.[ClientId]=whd_client.[Id]
+              )
               AND NULLIF(LTRIM(RTRIM(whd_client.[SageCustomerId])), N'') IS NULL
               AND EXISTS
               (
@@ -21338,6 +22122,18 @@ BEGIN
               AND sage_client.[RowVersion] = @ExpectedSageRowVersion
               AND sage_client.[IsActive] = 1
               AND sage_client.[Source] = N'Sage'
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_client].[ClientProfiles] AS source_profile WITH (UPDLOCK, HOLDLOCK)
+                  WHERE source_profile.[ClientId]=sage_client.[Id]
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_ops].[ClientInfoCutovers] AS source_cutover WITH (UPDLOCK, HOLDLOCK)
+                  WHERE source_cutover.[ClientId]=sage_client.[Id]
+              )
               AND NULLIF(LTRIM(RTRIM(sage_client.[SageCustomerId])), N'') IS NOT NULL
               AND EXISTS
               (
@@ -21433,6 +22229,10 @@ BEGIN
         IF @@ROWCOUNT <> 1
             THROW 51971, N'The Sage client changed during automatic matching.', 1;
 
+        EXEC [tb_client].[EnsureLiveClientInfo]
+            @ClientId=@WhdClientId,
+            @ActorWindowsSid=@ActorSid;
+
         DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @WhdClientId);
         EXEC [tb_security].[WriteAuditEvent]
             @Action = N'ClientAutoMatched',
@@ -21525,6 +22325,18 @@ BEGIN
               AND source_client.[RowVersion] = @ExpectedSourceWhdRowVersion
               AND source_client.[IsActive] = 1
               AND source_client.[Source] = N'WHD'
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_client].[ClientProfiles] AS source_profile WITH (UPDLOCK, HOLDLOCK)
+                  WHERE source_profile.[ClientId] = source_client.[Id]
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_ops].[ClientInfoCutovers] AS source_cutover WITH (UPDLOCK, HOLDLOCK)
+                  WHERE source_cutover.[ClientId] = source_client.[Id]
+              )
               AND NULLIF(LTRIM(RTRIM(source_client.[SageCustomerId])), N'') IS NULL
               AND EXISTS
               (
@@ -21540,6 +22352,13 @@ BEGIN
                   FROM [tb_data].[ClientExternalIdentities] AS sage_identity WITH (UPDLOCK, HOLDLOCK)
                   WHERE sage_identity.[ClientId] = source_client.[Id]
                     AND sage_identity.[SourceSystem] = N'Sage'
+              )
+              AND 1 =
+              (
+                  SELECT COUNT(*)
+                  FROM [tb_data].[ClientExternalIdentities] AS whd_identity WITH (UPDLOCK, HOLDLOCK)
+                  WHERE whd_identity.[ClientId] = source_client.[Id]
+                    AND whd_identity.[SourceSystem] = N'WHD'
               )
         )
         BEGIN
@@ -24658,6 +25477,13 @@ BEGIN
         [UpdatedAtUtc] = @NowUtc
     WHERE [ClientId] = @SourceClientId;
 
+    UPDATE [tb_sync].[WhdClientIdentityHistory]
+    SET
+        [ClientId] = @TargetClientId,
+        [UpdatedByWindowsSid] = @ActorWindowsSid,
+        [UpdatedAtUtc] = @NowUtc
+    WHERE [ClientId] = @SourceClientId;
+
     UPDATE source_equipment
     SET
         [ClientId] = @TargetClientId,
@@ -24675,12 +25501,12 @@ BEGIN
                               source_equipment.[ClientInfoLocalKey]
                     )
                     THEN LEFT(
-                        source_equipment.[ClientInfoLocalKey]
-                        +N'-merged-'
-                        +CONVERT(
-                            nvarchar(20),
-                            source_equipment.[EquipmentId]),
-                        120)
+                        source_equipment.[ClientInfoLocalKey],
+                        120 - LEN(
+                            N'-merged-'
+                            + CONVERT(nvarchar(20), source_equipment.[EquipmentId])))
+                        + N'-merged-'
+                        + CONVERT(nvarchar(20), source_equipment.[EquipmentId])
                 ELSE source_equipment.[ClientInfoLocalKey]
             END
     FROM [tb_inventory].[Equipment] source_equipment
@@ -24706,8 +25532,9 @@ BEGIN
                           AND target_record.[LocalKey] = [tb_client].[Locations].[LocalKey]
                     )
                     THEN LEFT(
-                        [LocalKey] + N'-merged-' + CONVERT(nvarchar(20), [LocationId]),
-                        120)
+                        [LocalKey],
+                        120 - LEN(N'-merged-' + CONVERT(nvarchar(20), [LocationId])))
+                        + N'-merged-' + CONVERT(nvarchar(20), [LocationId])
                 ELSE [LocalKey]
             END
     WHERE [ClientId] = @SourceClientId;
@@ -24728,8 +25555,9 @@ BEGIN
                           AND target_record.[LocalKey] = [tb_client].[People].[LocalKey]
                     )
                     THEN LEFT(
-                        [LocalKey] + N'-merged-' + CONVERT(nvarchar(20), [PersonId]),
-                        120)
+                        [LocalKey],
+                        120 - LEN(N'-merged-' + CONVERT(nvarchar(20), [PersonId])))
+                        + N'-merged-' + CONVERT(nvarchar(20), [PersonId])
                 ELSE [LocalKey]
             END
     WHERE [ClientId] = @SourceClientId;
@@ -24750,8 +25578,9 @@ BEGIN
                           AND target_record.[LocalKey] = [tb_client].[Resources].[LocalKey]
                     )
                     THEN LEFT(
-                        [LocalKey] + N'-merged-' + CONVERT(nvarchar(20), [ResourceId]),
-                        120)
+                        [LocalKey],
+                        120 - LEN(N'-merged-' + CONVERT(nvarchar(20), [ResourceId])))
+                        + N'-merged-' + CONVERT(nvarchar(20), [ResourceId])
                 ELSE [LocalKey]
             END
     WHERE [ClientId] = @SourceClientId;
@@ -24772,8 +25601,9 @@ BEGIN
                           AND target_record.[LocalKey] = [tb_client].[Credentials].[LocalKey]
                     )
                     THEN LEFT(
-                        [LocalKey] + N'-merged-' + CONVERT(nvarchar(20), [CredentialId]),
-                        120)
+                        [LocalKey],
+                        120 - LEN(N'-merged-' + CONVERT(nvarchar(20), [CredentialId])))
+                        + N'-merged-' + CONVERT(nvarchar(20), [CredentialId])
                 ELSE [LocalKey]
             END
     WHERE [ClientId] = @SourceClientId;
@@ -24794,8 +25624,9 @@ BEGIN
                           AND target_record.[LocalKey] = [tb_client].[ClientFacts].[LocalKey]
                     )
                     THEN LEFT(
-                        [LocalKey] + N'-merged-' + CONVERT(nvarchar(20), [FactId]),
-                        120)
+                        [LocalKey],
+                        120 - LEN(N'-merged-' + CONVERT(nvarchar(20), [FactId])))
+                        + N'-merged-' + CONVERT(nvarchar(20), [FactId])
                 ELSE [LocalKey]
             END
     WHERE [ClientId] = @SourceClientId;
@@ -24903,6 +25734,506 @@ BEGIN
 END;
 GO
 
+IF OBJECT_ID(N'tb_client.EnsureLiveClientInfo', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_client].[EnsureLiveClientInfo];
+GO
+
+/* A WHD/Sage pair that has no pre-existing TechBench profile becomes a live,
+   manually maintainable Client Information record immediately. Existing
+   profiles are never promoted or otherwise changed here: an in-progress
+   workbook migration keeps its own review/cutover lifecycle. */
+CREATE PROCEDURE [tb_client].[EnsureLiveClientInfo]
+    @ClientId int,
+    @ActorWindowsSid varbinary(85)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_data].[Clients] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [Id] = @ClientId
+    )
+        THROW 52303, N'The client no longer exists.', 1;
+
+    DECLARE @NowUtc datetime2(3) = SYSUTCDATETIME();
+    DECLARE @CreatedProfile bit = 0;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_client].[ClientProfiles] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [ClientId] = @ClientId
+    )
+    BEGIN
+        INSERT INTO [tb_client].[ClientProfiles]
+        (
+            [ClientId], [Summary], [ClientFolderPath],
+            [LegacyClientInfoSheetPath], [ReviewStatus], [IsLive],
+            [LastVerifiedAtUtc], [LastVerifiedByWindowsSid],
+            [CreatedByWindowsSid], [UpdatedByWindowsSid],
+            [CreatedAtUtc], [UpdatedAtUtc]
+        )
+        VALUES
+        (
+            @ClientId, NULL, NULL,
+            NULL, N'Unverified', 1,
+            NULL, NULL,
+            @ActorWindowsSid, @ActorWindowsSid,
+            @NowUtc, @NowUtc
+        );
+        SET @CreatedProfile = 1;
+    END;
+
+    IF @CreatedProfile = 1
+       AND NOT EXISTS
+       (
+           SELECT 1
+           FROM [tb_ops].[ClientInfoCutovers] WITH (UPDLOCK, HOLDLOCK)
+           WHERE [ClientId] = @ClientId
+       )
+    BEGIN
+        INSERT INTO [tb_ops].[ClientInfoCutovers]
+        (
+            [ClientId], [ActiveBatchId], [State], [LegacyFrozenAtUtc],
+            [LiveAtUtc], [HypercareEndsAtUtc], [CompletedAtUtc],
+            [UpdatedByWindowsSid], [UpdatedAtUtc]
+        )
+        VALUES
+        (
+            @ClientId, NULL, N'Complete', NULL,
+            @NowUtc, NULL, @NowUtc,
+            @ActorWindowsSid, @NowUtc
+        );
+    END;
+END;
+GO
+
+/* One-time/idempotent reconciliation for client pairs matched before the
+   canonical TechBench profile existed. Future automatic and Admin matches
+   call EnsureLiveClientInfo directly. */
+DECLARE @LegacyMatchActorSid varbinary(85) =
+(
+    SELECT [WindowsSid]
+    FROM [tb_security].[Users]
+    WHERE [LoginName] = N'$(SyncServicePrincipal)'
+);
+IF @LegacyMatchActorSid IS NULL
+    THROW 52319, N'The configured sync service principal has no TechBench service actor for canonical client reconciliation.', 1;
+
+DECLARE @LegacyMatchedClientId int;
+DECLARE legacy_matched_client_cursor CURSOR LOCAL FAST_FORWARD FOR
+    SELECT client.[Id]
+    FROM [tb_data].[Clients] AS client
+    WHERE client.[IsActive] = 1
+      AND NOT EXISTS
+      (
+          SELECT 1 FROM [tb_client].[ClientProfiles] AS profile
+          WHERE profile.[ClientId] = client.[Id]
+      )
+      AND NOT EXISTS
+      (
+          SELECT 1 FROM [tb_ops].[ClientInfoCutovers] AS cutover
+          WHERE cutover.[ClientId] = client.[Id]
+      )
+      AND EXISTS
+      (
+          SELECT 1 FROM [tb_data].[ClientExternalIdentities] AS whd_identity
+          WHERE whd_identity.[ClientId] = client.[Id]
+            AND whd_identity.[SourceSystem] = N'WHD'
+      )
+      AND EXISTS
+      (
+          SELECT 1 FROM [tb_data].[ClientExternalIdentities] AS sage_identity
+          WHERE sage_identity.[ClientId] = client.[Id]
+            AND sage_identity.[SourceSystem] = N'Sage'
+      );
+
+OPEN legacy_matched_client_cursor;
+FETCH NEXT FROM legacy_matched_client_cursor INTO @LegacyMatchedClientId;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        EXEC [tb_client].[EnsureLiveClientInfo]
+            @ClientId = @LegacyMatchedClientId,
+            @ActorWindowsSid = @LegacyMatchActorSid;
+
+        DECLARE @LegacyMatchEntityId nvarchar(120) =
+            CONVERT(nvarchar(120), @LegacyMatchedClientId);
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action = N'LegacyMatchedClientPromoted',
+            @EntityType = N'Client',
+            @EntityId = @LegacyMatchEntityId,
+            @RequestId = NULL,
+            @DataJson = N'{"isLive":true,"reviewStatus":"Unverified"}';
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        CLOSE legacy_matched_client_cursor;
+        DEALLOCATE legacy_matched_client_cursor;
+        THROW;
+    END CATCH;
+
+    FETCH NEXT FROM legacy_matched_client_cursor INTO @LegacyMatchedClientId;
+END;
+CLOSE legacy_matched_client_cursor;
+DEALLOCATE legacy_matched_client_cursor;
+GO
+
+IF OBJECT_ID(N'tb_client.MergeSourceClientIntoCanonical', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_client].[MergeSourceClientIntoCanonical];
+GO
+
+/* Internal, ownership-chained merge primitive used by both the sync service
+   and the Admin Client Match screen. The canonical TechBench client always
+   wins: its ID, name, active state, profile, and cutover are preserved. */
+CREATE PROCEDURE [tb_client].[MergeSourceClientIntoCanonical]
+    @CanonicalClientId int,
+    @SourceClientId int,
+    @ExpectedCanonicalRowVersion binary(8),
+    @ExpectedSourceRowVersion binary(8),
+    @SourceSystem nvarchar(20),
+    @ActorWindowsSid varbinary(85)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    SET @SourceSystem = NULLIF(LTRIM(RTRIM(@SourceSystem)), N'');
+    IF @CanonicalClientId IS NULL OR @SourceClientId IS NULL
+       OR @CanonicalClientId = @SourceClientId
+       OR @ExpectedCanonicalRowVersion IS NULL
+       OR @ExpectedSourceRowVersion IS NULL
+       OR @SourceSystem NOT IN (N'WHD', N'Sage')
+        THROW 52304, N'A canonical client, distinct source client, row versions, and WHD or Sage source are required.', 1;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_data].[Clients] AS canonical WITH (UPDLOCK, HOLDLOCK)
+        INNER JOIN [tb_client].[ClientProfiles] AS profile WITH (UPDLOCK, HOLDLOCK)
+            ON profile.[ClientId] = canonical.[Id]
+           AND profile.[IsLive] = 1
+        WHERE canonical.[Id] = @CanonicalClientId
+          AND canonical.[RowVersion] = @ExpectedCanonicalRowVersion
+          AND canonical.[IsActive] = 1
+    )
+        THROW 52305, N'The canonical TechBench client changed, is not Live, or no longer exists.', 1;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [tb_client].[ClientProfiles] AS source_profile WITH (UPDLOCK, HOLDLOCK)
+        WHERE source_profile.[ClientId] = @SourceClientId
+    )
+    OR EXISTS
+    (
+        SELECT 1
+        FROM [tb_ops].[ClientInfoCutovers] AS source_cutover WITH (UPDLOCK, HOLDLOCK)
+        WHERE source_cutover.[ClientId] = @SourceClientId
+    )
+        THROW 52316, N'The selected source has a Client Information workspace. Finish or discard the client workbook migration before linking it.', 1;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [tb_data].[Clients] AS source_client WITH (UPDLOCK, HOLDLOCK)
+        WHERE source_client.[Id] = @SourceClientId
+          AND source_client.[RowVersion] = @ExpectedSourceRowVersion
+          AND source_client.[IsActive] = 1
+          AND NOT EXISTS
+          (
+              SELECT 1
+              FROM [tb_client].[ClientProfiles] AS source_profile WITH (UPDLOCK, HOLDLOCK)
+              WHERE source_profile.[ClientId] = source_client.[Id]
+          )
+          AND NOT EXISTS
+          (
+              SELECT 1
+              FROM [tb_ops].[ClientInfoCutovers] AS source_cutover WITH (UPDLOCK, HOLDLOCK)
+              WHERE source_cutover.[ClientId] = source_client.[Id]
+          )
+          AND EXISTS
+          (
+              SELECT 1
+              FROM [tb_data].[ClientExternalIdentities] AS source_identity WITH (UPDLOCK, HOLDLOCK)
+              WHERE source_identity.[ClientId] = source_client.[Id]
+                AND source_identity.[SourceSystem] = @SourceSystem
+          )
+          AND NOT EXISTS
+          (
+              SELECT 1
+              FROM [tb_data].[ClientExternalIdentities] AS other_identity WITH (UPDLOCK, HOLDLOCK)
+              WHERE other_identity.[ClientId] = source_client.[Id]
+                AND other_identity.[SourceSystem] <> @SourceSystem
+          )
+          AND 1 =
+          (
+              SELECT COUNT(*)
+              FROM [tb_data].[ClientExternalIdentities] AS requested_identity WITH (UPDLOCK, HOLDLOCK)
+              WHERE requested_identity.[ClientId] = source_client.[Id]
+                AND requested_identity.[SourceSystem] = @SourceSystem
+          )
+    )
+        THROW 52306, N'The selected source changed, has a Client Information workspace, or does not contain the requested identity.', 1;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [tb_data].[ClientExternalIdentities] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [ClientId] = @CanonicalClientId
+          AND [SourceSystem] = @SourceSystem
+    )
+        THROW 52307, N'The canonical TechBench client is already linked to this source system.', 1;
+
+    DECLARE @NowUtc datetime2(3) = SYSUTCDATETIME();
+
+    UPDATE canonical
+    SET
+        [LastSyncedAtUtc] =
+            CASE
+                WHEN source_client.[LastSyncedAtUtc] IS NULL
+                    THEN canonical.[LastSyncedAtUtc]
+                WHEN canonical.[LastSyncedAtUtc] IS NULL
+                  OR source_client.[LastSyncedAtUtc] > canonical.[LastSyncedAtUtc]
+                    THEN source_client.[LastSyncedAtUtc]
+                ELSE canonical.[LastSyncedAtUtc]
+            END,
+        [WhdLocationName] = COALESCE(canonical.[WhdLocationName], source_client.[WhdLocationName]),
+        [WhdContactName] = COALESCE(canonical.[WhdContactName], source_client.[WhdContactName]),
+        [WhdContactEmail] = COALESCE(canonical.[WhdContactEmail], source_client.[WhdContactEmail]),
+        [WhdPhone] = COALESCE(canonical.[WhdPhone], source_client.[WhdPhone]),
+        [WhdAddress] = COALESCE(canonical.[WhdAddress], source_client.[WhdAddress]),
+        [SageCustomerId] = COALESCE(canonical.[SageCustomerId], source_client.[SageCustomerId]),
+        [SageCustomerName] = COALESCE(canonical.[SageCustomerName], source_client.[SageCustomerName]),
+        [SageContactName] = COALESCE(canonical.[SageContactName], source_client.[SageContactName]),
+        [SageTelephone] = COALESCE(canonical.[SageTelephone], source_client.[SageTelephone]),
+        [UpdatedByWindowsSid] = @ActorWindowsSid,
+        [UpdatedAtUtc] = @NowUtc
+    FROM [tb_data].[Clients] AS canonical
+    CROSS JOIN [tb_data].[Clients] AS source_client
+    WHERE canonical.[Id] = @CanonicalClientId
+      AND source_client.[Id] = @SourceClientId;
+
+    UPDATE [tb_data].[Tickets]
+    SET [ClientId] = @CanonicalClientId,
+        [UpdatedByWindowsSid] = @ActorWindowsSid,
+        [UpdatedAtUtc] = @NowUtc
+    WHERE [ClientId] = @SourceClientId;
+
+    UPDATE [tb_data].[WorkEntries]
+    SET [ClientId] = @CanonicalClientId,
+        [UpdatedByWindowsSid] = @ActorWindowsSid,
+        [UpdatedAtUtc] = @NowUtc
+    WHERE [ClientId] = @SourceClientId;
+
+    DELETE source_alias
+    FROM [tb_data].[ClientAliases] AS source_alias
+    WHERE source_alias.[ClientId] = @SourceClientId
+      AND EXISTS
+      (
+          SELECT 1
+          FROM [tb_data].[ClientAliases] AS target_alias
+          WHERE target_alias.[ClientId] = @CanonicalClientId
+            AND target_alias.[ScopeType] = source_alias.[ScopeType]
+            AND
+            (
+                target_alias.[OwnerWindowsSid] = source_alias.[OwnerWindowsSid]
+                OR
+                (
+                    target_alias.[OwnerWindowsSid] IS NULL
+                    AND source_alias.[OwnerWindowsSid] IS NULL
+                )
+            )
+            AND target_alias.[Alias] = source_alias.[Alias]
+      );
+
+    UPDATE [tb_data].[ClientAliases]
+    SET [ClientId] = @CanonicalClientId,
+        [UpdatedByWindowsSid] = @ActorWindowsSid,
+        [UpdatedAtUtc] = @NowUtc
+    WHERE [ClientId] = @SourceClientId;
+
+    DELETE source_identity
+    FROM [tb_data].[ClientExternalIdentities] AS source_identity
+    WHERE source_identity.[ClientId] = @SourceClientId
+      AND EXISTS
+      (
+          SELECT 1
+          FROM [tb_data].[ClientExternalIdentities] AS target_identity
+          WHERE target_identity.[ClientId] = @CanonicalClientId
+            AND target_identity.[SourceSystem] = source_identity.[SourceSystem]
+            AND target_identity.[ExternalId] = source_identity.[ExternalId]
+      );
+
+    UPDATE [tb_data].[ClientExternalIdentities]
+    SET [ClientId] = @CanonicalClientId,
+        [UpdatedByWindowsSid] = @ActorWindowsSid,
+        [UpdatedAtUtc] = @NowUtc
+    WHERE [ClientId] = @SourceClientId;
+
+    EXEC [tb_client].[ReparentClientGraph]
+        @SourceClientId = @SourceClientId,
+        @TargetClientId = @CanonicalClientId,
+        @ActorWindowsSid = @ActorWindowsSid;
+
+    DELETE FROM [tb_data].[Clients]
+    WHERE [Id] = @SourceClientId
+      AND [RowVersion] = @ExpectedSourceRowVersion;
+    IF @@ROWCOUNT <> 1
+        THROW 52308, N'The source client changed during linking.', 1;
+
+    UPDATE canonical
+    SET
+        [Source] =
+            CASE
+                WHEN source_presence.[HasWhd] = 1 AND source_presence.[HasSage] = 1 THEN N'Both'
+                WHEN source_presence.[HasWhd] = 1 THEN N'WHD'
+                WHEN source_presence.[HasSage] = 1 THEN N'Sage'
+                ELSE N'Manual'
+            END,
+        [ExternalId] = COALESCE(source_presence.[WhdExternalId], source_presence.[SageExternalId]),
+        [MatchStatus] = CASE
+            WHEN source_presence.[HasWhd] = 1 AND source_presence.[HasSage] = 1
+                THEN N'Matched'
+            ELSE N'Unmatched'
+        END,
+        [UpdatedByWindowsSid] = @ActorWindowsSid,
+        [UpdatedAtUtc] = @NowUtc
+    FROM [tb_data].[Clients] AS canonical
+    CROSS APPLY
+    (
+        SELECT
+            CONVERT(bit, CASE WHEN EXISTS
+                (SELECT 1 FROM [tb_data].[ClientExternalIdentities]
+                 WHERE [ClientId]=@CanonicalClientId AND [SourceSystem]=N'WHD')
+                THEN 1 ELSE 0 END) AS [HasWhd],
+            CONVERT(bit, CASE WHEN EXISTS
+                (SELECT 1 FROM [tb_data].[ClientExternalIdentities]
+                 WHERE [ClientId]=@CanonicalClientId AND [SourceSystem]=N'Sage')
+                THEN 1 ELSE 0 END) AS [HasSage],
+            (SELECT TOP (1) [ExternalId]
+             FROM [tb_data].[ClientExternalIdentities]
+             WHERE [ClientId]=@CanonicalClientId AND [SourceSystem]=N'WHD'
+             ORDER BY [Id]) AS [WhdExternalId],
+            (SELECT TOP (1) [ExternalId]
+             FROM [tb_data].[ClientExternalIdentities]
+             WHERE [ClientId]=@CanonicalClientId AND [SourceSystem]=N'Sage'
+             ORDER BY [Id]) AS [SageExternalId]
+    ) AS source_presence
+    WHERE canonical.[Id] = @CanonicalClientId;
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.AdminLinkClientSources', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[AdminLinkClientSources];
+GO
+
+CREATE PROCEDURE [tb_app].[AdminLinkClientSources]
+    @CanonicalClientId int,
+    @WhdClientId int = NULL,
+    @SageClientId int = NULL,
+    @ExpectedCanonicalRowVersion binary(8),
+    @ExpectedWhdRowVersion binary(8) = NULL,
+    @ExpectedSageRowVersion binary(8) = NULL,
+    @RequestId uniqueidentifier = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[GetCurrentAccess]
+        @UserSid=@ActorSid OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
+        THROW 52309, N'Only a current TechBench Admin may link client sources.', 1;
+
+    IF @CanonicalClientId IS NULL OR @ExpectedCanonicalRowVersion IS NULL
+       OR (@WhdClientId IS NULL AND @SageClientId IS NULL)
+       OR (@WhdClientId IS NOT NULL AND @ExpectedWhdRowVersion IS NULL)
+       OR (@SageClientId IS NOT NULL AND @ExpectedSageRowVersion IS NULL)
+       OR @CanonicalClientId IN (COALESCE(@WhdClientId, -1), COALESCE(@SageClientId, -1))
+       OR (@WhdClientId IS NOT NULL AND @WhdClientId = @SageClientId)
+        THROW 52314, N'Choose a Live TechBench client and at least one distinct WHD or Sage source.', 1;
+
+    SET @RequestId = COALESCE(@RequestId, NEWID());
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        DECLARE @LockResult int;
+        DECLARE @LockResource nvarchar(255) =
+            N'TechBench.ClientSourceLink.' + CONVERT(nvarchar(20), @CanonicalClientId);
+        EXEC @LockResult = sys.sp_getapplock
+            @Resource = @LockResource,
+            @LockMode = N'Exclusive',
+            @LockOwner = N'Transaction',
+            @LockTimeout = 5000;
+        IF @LockResult < 0
+            THROW 52315, N'Could not acquire the client-link lock.', 1;
+
+        IF @WhdClientId IS NOT NULL
+        BEGIN
+            EXEC [tb_client].[MergeSourceClientIntoCanonical]
+                @CanonicalClientId=@CanonicalClientId,
+                @SourceClientId=@WhdClientId,
+                @ExpectedCanonicalRowVersion=@ExpectedCanonicalRowVersion,
+                @ExpectedSourceRowVersion=@ExpectedWhdRowVersion,
+                @SourceSystem=N'WHD',
+                @ActorWindowsSid=@ActorSid;
+
+            SELECT @ExpectedCanonicalRowVersion=[RowVersion]
+            FROM [tb_data].[Clients] WITH (UPDLOCK, HOLDLOCK)
+            WHERE [Id]=@CanonicalClientId;
+        END;
+
+        IF @SageClientId IS NOT NULL
+        BEGIN
+            EXEC [tb_client].[MergeSourceClientIntoCanonical]
+                @CanonicalClientId=@CanonicalClientId,
+                @SourceClientId=@SageClientId,
+                @ExpectedCanonicalRowVersion=@ExpectedCanonicalRowVersion,
+                @ExpectedSourceRowVersion=@ExpectedSageRowVersion,
+                @SourceSystem=N'Sage',
+                @ActorWindowsSid=@ActorSid;
+        END;
+
+        DECLARE @AuditEntityId nvarchar(120)=CONVERT(nvarchar(120),@CanonicalClientId);
+        DECLARE @AuditData nvarchar(max)=
+        (
+            SELECT @WhdClientId AS [whdSourceClientId],
+                   @SageClientId AS [sageSourceClientId],
+                   CONVERT(bit,1) AS [canonicalIdPreserved]
+            FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+        );
+        EXEC [tb_security].[WriteAuditEvent]
+            @Action=N'ClientSourcesLinked',
+            @EntityType=N'Client',
+            @EntityId=@AuditEntityId,
+            @RequestId=@RequestId,
+            @DataJson=@AuditData;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+
+    EXEC [tb_app].[GetClient] @Id=@CanonicalClientId;
+END;
+GO
+
 IF OBJECT_ID(N'tb_app.AdminCreateManualClientInfoClient', N'P') IS NOT NULL
     DROP PROCEDURE [tb_app].[AdminCreateManualClientInfoClient];
 GO
@@ -24935,67 +26266,100 @@ BEGIN
 
     DECLARE @NowUtc datetime2(3) = SYSUTCDATETIME();
     DECLARE @ClientId int;
+    DECLARE @ExactNameCount int = 0;
+    DECLARE @PromotedExistingSource bit = 0;
 
     BEGIN TRY
         BEGIN TRANSACTION;
 
-        IF EXISTS
-        (
-            SELECT 1
-            FROM [tb_data].[Clients] WITH (UPDLOCK, HOLDLOCK)
-            WHERE [IsActive] = 1
-              AND LOWER(LTRIM(RTRIM([Name]))) = LOWER(@Name)
-        )
-            THROW 52313, N'An active client with this exact name already exists. Open the existing client or use Client Match.', 1;
+        SELECT
+            @ClientId = MIN(client.[Id]),
+            @ExactNameCount = COUNT(*)
+        FROM [tb_data].[Clients] AS client WITH (UPDLOCK, HOLDLOCK)
+        WHERE client.[IsActive] = 1
+          AND LOWER(LTRIM(RTRIM(client.[Name]))) = LOWER(@Name);
 
-        INSERT INTO [tb_data].[Clients]
-        (
-            [Name], [Source], [ExternalId], [IsActive], [LastSyncedAtUtc],
-            [WhdLocationName], [WhdContactName], [SageCustomerId],
-            [SageCustomerName], [SageContactName], [SageTelephone],
-            [MatchStatus], [CreatedByWindowsSid], [UpdatedByWindowsSid],
-            [CreatedAtUtc], [UpdatedAtUtc]
-        )
-        VALUES
-        (
-            @Name, N'Manual', NULL, 1, NULL,
-            NULL, NULL, NULL,
-            NULL, NULL, NULL,
-            N'Unmatched', @ActorSid, @ActorSid,
-            @NowUtc, @NowUtc
-        );
+        IF @ExactNameCount > 1
+            THROW 52313, N'Multiple active clients with this exact name exist. Use Client Match to choose the correct source records.', 1;
 
-        SET @ClientId = CONVERT(int, SCOPE_IDENTITY());
+        IF @ClientId IS NOT NULL
+        BEGIN
+            IF EXISTS
+            (
+                SELECT 1
+                FROM [tb_client].[ClientProfiles] AS profile WITH (UPDLOCK, HOLDLOCK)
+                WHERE profile.[ClientId] = @ClientId
+            )
+            OR EXISTS
+            (
+                SELECT 1
+                FROM [tb_ops].[ClientInfoCutovers] AS cutover WITH (UPDLOCK, HOLDLOCK)
+                WHERE cutover.[ClientId] = @ClientId
+            )
+                THROW 52313, N'An active client with this exact name already exists. Open the existing client or use Client Match.', 1;
 
-        INSERT INTO [tb_client].[ClientProfiles]
-        (
-            [ClientId], [Summary], [ClientFolderPath],
-            [LegacyClientInfoSheetPath], [ReviewStatus], [IsLive],
-            [LastVerifiedAtUtc], [LastVerifiedByWindowsSid],
-            [CreatedByWindowsSid], [UpdatedByWindowsSid],
-            [CreatedAtUtc], [UpdatedAtUtc]
-        )
-        VALUES
-        (
-            @ClientId, NULL, NULL,
-            NULL, N'Unverified', 1,
-            NULL, NULL,
-            @ActorSid, @ActorSid,
-            @NowUtc, @NowUtc
-        );
+            EXEC [tb_client].[EnsureLiveClientInfo]
+                @ClientId = @ClientId,
+                @ActorWindowsSid = @ActorSid;
 
-        INSERT INTO [tb_ops].[ClientInfoCutovers]
-        (
-            [ClientId], [ActiveBatchId], [State], [LegacyFrozenAtUtc],
-            [LiveAtUtc], [HypercareEndsAtUtc], [CompletedAtUtc],
-            [UpdatedByWindowsSid], [UpdatedAtUtc]
-        )
-        VALUES
-        (
-            @ClientId, NULL, N'Complete', NULL,
-            @NowUtc, NULL, @NowUtc,
-            @ActorSid, @NowUtc
-        );
+            UPDATE [tb_data].[Clients]
+            SET [Name] = @Name,
+                [UpdatedByWindowsSid] = @ActorSid,
+                [UpdatedAtUtc] = @NowUtc
+            WHERE [Id] = @ClientId;
+            SET @PromotedExistingSource = 1;
+        END
+        ELSE
+        BEGIN
+            INSERT INTO [tb_data].[Clients]
+            (
+                [Name], [Source], [ExternalId], [IsActive], [LastSyncedAtUtc],
+                [WhdLocationName], [WhdContactName], [SageCustomerId],
+                [SageCustomerName], [SageContactName], [SageTelephone],
+                [MatchStatus], [CreatedByWindowsSid], [UpdatedByWindowsSid],
+                [CreatedAtUtc], [UpdatedAtUtc]
+            )
+            VALUES
+            (
+                @Name, N'Manual', NULL, 1, NULL,
+                NULL, NULL, NULL,
+                NULL, NULL, NULL,
+                N'Unmatched', @ActorSid, @ActorSid,
+                @NowUtc, @NowUtc
+            );
+
+            SET @ClientId = CONVERT(int, SCOPE_IDENTITY());
+
+            INSERT INTO [tb_client].[ClientProfiles]
+            (
+                [ClientId], [Summary], [ClientFolderPath],
+                [LegacyClientInfoSheetPath], [ReviewStatus], [IsLive],
+                [LastVerifiedAtUtc], [LastVerifiedByWindowsSid],
+                [CreatedByWindowsSid], [UpdatedByWindowsSid],
+                [CreatedAtUtc], [UpdatedAtUtc]
+            )
+            VALUES
+            (
+                @ClientId, NULL, NULL,
+                NULL, N'Unverified', 1,
+                NULL, NULL,
+                @ActorSid, @ActorSid,
+                @NowUtc, @NowUtc
+            );
+
+            INSERT INTO [tb_ops].[ClientInfoCutovers]
+            (
+                [ClientId], [ActiveBatchId], [State], [LegacyFrozenAtUtc],
+                [LiveAtUtc], [HypercareEndsAtUtc], [CompletedAtUtc],
+                [UpdatedByWindowsSid], [UpdatedAtUtc]
+            )
+            VALUES
+            (
+                @ClientId, NULL, N'Complete', NULL,
+                @NowUtc, NULL, @NowUtc,
+                @ActorSid, @NowUtc
+            );
+        END;
 
         DECLARE @AuditEntityId nvarchar(120) =
             CONVERT(nvarchar(120), @ClientId);
@@ -25003,13 +26367,19 @@ BEGIN
         (
             SELECT
                 @Name AS [name],
-                N'Manual' AS [source],
+                CASE WHEN @PromotedExistingSource = 1
+                    THEN N'Existing source record'
+                    ELSE N'Manual' END AS [source],
                 CONVERT(bit, 1) AS [isLive],
                 N'Complete' AS [cutoverState]
             FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
         );
+        DECLARE @AuditAction nvarchar(120) =
+            CASE WHEN @PromotedExistingSource = 1
+                THEN N'ManualClientInfoPromoted'
+                ELSE N'ManualClientInfoCreated' END;
         EXEC [tb_security].[WriteAuditEvent]
-            @Action=N'ManualClientInfoCreated',
+            @Action=@AuditAction,
             @EntityType=N'Client',
             @EntityId=@AuditEntityId,
             @RequestId=@RequestId,
@@ -30322,6 +31692,7 @@ GRANT EXECUTE ON OBJECT::[tb_service].[RenewSageSyncLease] TO [tb_role_sync_serv
 GRANT EXECUTE ON OBJECT::[tb_service].[ApplySageCustomerSnapshot] TO [tb_role_sync_service];
 GRANT EXECUTE ON OBJECT::[tb_service].[CompleteSageSyncWork] TO [tb_role_sync_service];
 GRANT EXECUTE ON OBJECT::[tb_service].[GetAutomaticClientMatchCandidates] TO [tb_role_sync_service];
+GRANT EXECUTE ON OBJECT::[tb_service].[ApplyAutomaticClientSourceMatch] TO [tb_role_sync_service];
 GRANT EXECUTE ON OBJECT::[tb_service].[ApplyAutomaticClientMatch] TO [tb_role_sync_service];
 GRANT EXECUTE ON OBJECT::[tb_service].[ApplyAutomaticWhdFamilyMember] TO [tb_role_sync_service];
 
@@ -30658,6 +32029,8 @@ GRANT EXECUTE ON OBJECT::[tb_app].[SearchClientInfoClients]
 GRANT EXECUTE ON OBJECT::[tb_app].[GetClientInfoSnapshot]
     TO [tb_role_user];
 GRANT EXECUTE ON OBJECT::[tb_app].[AdminCreateManualClientInfoClient]
+    TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminLinkClientSources]
     TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[GetClientInfoImportBatch]
     TO [tb_role_client_migration_operator];
@@ -34483,6 +35856,8 @@ INSERT INTO @RequiredObjects([ObjectName], [ObjectType]) VALUES
     (N'tb_sync.WhdSyncLeases', N'U'),
     (N'tb_sync.WhdSyncCursors', N'U'),
     (N'tb_sync.WhdSyncHealth', N'U'),
+    (N'tb_sync.WhdClientIdentityHistory', N'U'),
+    (N'tb_sync.WhdPendingClientRemovals', N'U'),
     (N'tb_service.GetWhdSyncConfiguration', N'P'),
     (N'tb_service.ClaimWhdSyncWork', N'P'),
     (N'tb_service.RenewWhdSyncLease', N'P'),
@@ -34524,7 +35899,21 @@ INSERT INTO @RequiredColumns([ObjectName], [ColumnName]) VALUES
     (N'tb_data.Tickets', N'AssignedTechName'),
     (N'tb_data.Tickets', N'AssignedGroupExternalId'),
     (N'tb_data.Tickets', N'AssignedGroupName'),
-    (N'tb_whd.Technicians', N'Username');
+    (N'tb_whd.Technicians', N'Username'),
+    (N'tb_sync.WhdClientIdentityHistory', N'ExternalId'),
+    (N'tb_sync.WhdClientIdentityHistory', N'ClientId'),
+    (N'tb_sync.WhdClientIdentityHistory', N'ExternalName'),
+    (N'tb_sync.WhdClientIdentityHistory', N'LastSeenAtUtc'),
+    (N'tb_sync.WhdClientIdentityHistory', N'RetiredAtUtc'),
+    (N'tb_sync.WhdClientIdentityHistory', N'UpdatedByWindowsSid'),
+    (N'tb_sync.WhdClientIdentityHistory', N'UpdatedAtUtc'),
+    (N'tb_sync.WhdPendingClientRemovals', N'ExternalId'),
+    (N'tb_sync.WhdPendingClientRemovals', N'ExistingCount'),
+    (N'tb_sync.WhdPendingClientRemovals', N'IncomingCount'),
+    (N'tb_sync.WhdPendingClientRemovals', N'StaleCount'),
+    (N'tb_sync.WhdPendingClientRemovals', N'FirstObservedAtUtc'),
+    (N'tb_sync.WhdPendingClientRemovals', N'UpdatedByWindowsSid'),
+    (N'tb_sync.WhdPendingClientRemovals', N'UpdatedAtUtc');
 
 IF EXISTS
 (
@@ -34550,7 +35939,8 @@ INSERT INTO @RequiredIndexes([ObjectName], [IndexName]) VALUES
     (N'tb_sync.WhdSyncRequests', N'IX_WhdSyncRequests_RequestedAt'),
     (N'tb_sync.WhdSyncWork', N'IX_WhdSyncWork_Claim'),
     (N'tb_sync.WhdSyncWork', N'IX_WhdSyncWork_RequestState'),
-    (N'tb_sync.WhdSyncWork', N'IX_WhdSyncWork_ReferenceHistory');
+    (N'tb_sync.WhdSyncWork', N'IX_WhdSyncWork_ReferenceHistory'),
+    (N'tb_sync.WhdClientIdentityHistory', N'IX_WhdClientIdentityHistory_Client');
 
 IF EXISTS
 (
@@ -34567,6 +35957,33 @@ IF EXISTS
 )
 BEGIN
     PRINT N'FAIL: a required V0006 index is missing or disabled.';
+    SET @FailureCount += 1;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.foreign_keys
+    WHERE [parent_object_id] = OBJECT_ID(N'tb_sync.WhdClientIdentityHistory', N'U')
+      AND [referenced_object_id] = OBJECT_ID(N'tb_data.Clients', N'U')
+      AND [delete_referential_action_desc] = N'CASCADE'
+)
+OR NOT EXISTS
+(
+    SELECT 1
+    FROM sys.foreign_keys
+    WHERE [parent_object_id] = OBJECT_ID(N'tb_sync.WhdClientIdentityHistory', N'U')
+      AND [referenced_object_id] = OBJECT_ID(N'tb_security.Users', N'U')
+)
+OR NOT EXISTS
+(
+    SELECT 1
+    FROM sys.foreign_keys
+    WHERE [parent_object_id] = OBJECT_ID(N'tb_sync.WhdPendingClientRemovals', N'U')
+      AND [referenced_object_id] = OBJECT_ID(N'tb_security.Users', N'U')
+)
+BEGIN
+    PRINT N'FAIL: WHD client identity history or pending-removal confirmation lacks its required relationship.';
     SET @FailureCount += 1;
 END;
 
@@ -34716,6 +36133,7 @@ BEGIN
         (N'tb_service.ApplySageCustomerSnapshot'),
         (N'tb_service.CompleteSageSyncWork'),
         (N'tb_service.GetAutomaticClientMatchCandidates'),
+        (N'tb_service.ApplyAutomaticClientSourceMatch'),
         (N'tb_service.ApplyAutomaticClientMatch'),
         (N'tb_service.ApplyAutomaticWhdFamilyMember');
 END;
@@ -34848,6 +36266,7 @@ DECLARE @MappingDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.
 DECLARE @TechnicianListDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminGetWhdTechnicians'));
 DECLARE @SearchDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SearchTickets'));
 DECLARE @GetTicketDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetTicket'));
+DECLARE @ClientApplyDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyWhdClientSnapshot'));
 DECLARE @TicketApplyDefinition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyWhdTicketBatch'));
 
 SELECT @ClaimDefinition = REPLACE(REPLACE(REPLACE(@ClaimDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
@@ -34857,6 +36276,7 @@ SELECT @MappingDefinition = REPLACE(REPLACE(REPLACE(@MappingDefinition, N' ', N'
 SELECT @TechnicianListDefinition = REPLACE(REPLACE(REPLACE(@TechnicianListDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @SearchDefinition = REPLACE(REPLACE(REPLACE(@SearchDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @GetTicketDefinition = REPLACE(REPLACE(REPLACE(@GetTicketDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
+SELECT @ClientApplyDefinition = REPLACE(REPLACE(REPLACE(@ClientApplyDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 SELECT @TicketApplyDefinition = REPLACE(REPLACE(REPLACE(@TicketApplyDefinition, N' ', N''), CHAR(13), N''), CHAR(10), N'');
 
 IF CHARINDEX(N'sp_getapplock', @ClaimDefinition) = 0
@@ -34873,6 +36293,23 @@ IF CHARINDEX(N'@WorkType<>N''Tickets''', @CompleteDefinition) = 0
    OR CHARINDEX(N'@HasPendingWork=0', @CompleteDefinition) = 0
 BEGIN
     PRINT N'FAIL: CompleteWhdSyncWork lacks ticket-only valid cursor or request-level health protection.';
+    SET @FailureCount += 1;
+END;
+
+IF CHARINDEX(N'@ExistingWhdLocationCount>0', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'@IncomingWhdLocationCount=0', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'@StaleWhdLocationCount>0', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'@StaleWhdLocationCount>=10', @ClientApplyDefinition) > 0
+   OR CHARINDEX(N'[tb_sync].[WhdPendingClientRemovals]', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'@PendingRemovalCount=@StaleWhdLocationCount', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'@RemovalSetConfirmed=1', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'@RemovalSetConfirmed=0', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'[RemovalDeferred]', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'[tb_sync].[WhdClientIdentityHistory]', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'@StaleLiveWhdIdentities', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'remaining_identity.[ClientId]=client.[Id]', @ClientApplyDefinition) = 0
+BEGIN
+    PRINT N'FAIL: ApplyWhdClientSnapshot lacks two-snapshot destructive confirmation, deterministic identity history, or multi-location preservation.';
     SET @FailureCount += 1;
 END;
 
@@ -35092,6 +36529,7 @@ INSERT INTO @RequiredObjects([ObjectName], [ObjectType]) VALUES
     (N'tb_service.ApplySageCustomerSnapshot', N'P'),
     (N'tb_service.CompleteSageSyncWork', N'P'),
     (N'tb_service.GetAutomaticClientMatchCandidates', N'P'),
+    (N'tb_service.ApplyAutomaticClientSourceMatch', N'P'),
     (N'tb_service.ApplyAutomaticClientMatch', N'P'),
     (N'tb_service.ApplyAutomaticWhdFamilyMember', N'P'),
     (N'tb_app.AdminListPreviewUsers', N'P'),
@@ -35216,6 +36654,12 @@ INSERT INTO @RequiredParameters([ProcedureName], [ParameterName]) VALUES
     (N'tb_service.CompleteSageSyncWork', N'@WorkerId'),
     (N'tb_service.CompleteSageSyncWork', N'@Succeeded'),
     (N'tb_service.CompleteSageSyncWork', N'@Message'),
+    (N'tb_service.ApplyAutomaticClientSourceMatch', N'@CanonicalClientId'),
+    (N'tb_service.ApplyAutomaticClientSourceMatch', N'@SourceClientId'),
+    (N'tb_service.ApplyAutomaticClientSourceMatch', N'@ExpectedCanonicalRowVersion'),
+    (N'tb_service.ApplyAutomaticClientSourceMatch', N'@ExpectedSourceRowVersion'),
+    (N'tb_service.ApplyAutomaticClientSourceMatch', N'@SourceSystem'),
+    (N'tb_service.ApplyAutomaticClientSourceMatch', N'@MatchScore'),
     (N'tb_service.ApplyAutomaticClientMatch', N'@WhdClientId'),
     (N'tb_service.ApplyAutomaticClientMatch', N'@SageClientId'),
     (N'tb_service.ApplyAutomaticClientMatch', N'@ExpectedWhdRowVersion'),
@@ -35348,6 +36792,7 @@ INSERT INTO @ServiceProcedures([ObjectName]) VALUES
     (N'tb_service.ApplySageCustomerSnapshot'),
     (N'tb_service.CompleteSageSyncWork'),
     (N'tb_service.GetAutomaticClientMatchCandidates'),
+    (N'tb_service.ApplyAutomaticClientSourceMatch'),
     (N'tb_service.ApplyAutomaticClientMatch'),
     (N'tb_service.ApplyAutomaticWhdFamilyMember');
 
@@ -35673,6 +37118,25 @@ IF CHARINDEX(N'Sage.SyncDsn', @SageConfigDefinition) = 0
    OR CHARINDEX(N'Sage.SyncUsername', @SageConfigDefinition) = 0
 BEGIN
     PRINT N'FAIL: the service-owned Sage configuration contract is incomplete.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @AutomaticCandidatesDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_service.GetAutomaticClientMatchCandidates', N'P'));
+DECLARE @AutomaticSourceDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyAutomaticClientSourceMatch', N'P'));
+DECLARE @AutomaticPairDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyAutomaticClientMatch', N'P'));
+DECLARE @AutomaticFamilyDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyAutomaticWhdFamilyMember', N'P'));
+
+IF CHARINDEX(N'profile.[ClientId] IS NULL', @AutomaticCandidatesDefinition) = 0
+   OR CHARINDEX(N'ClientInfoCutovers', @AutomaticCandidatesDefinition) = 0
+   OR CHARINDEX(N'ClientInfoCutovers', @AutomaticSourceDefinition) = 0
+   OR CHARINDEX(N'ClientInfoCutovers', @AutomaticPairDefinition) = 0
+   OR CHARINDEX(N'ClientInfoCutovers', @AutomaticFamilyDefinition) = 0
+BEGIN
+    PRINT N'FAIL: automatic client matching can consume a staged Client Information workspace.';
     SET @FailureCount += 1;
 END;
 
@@ -37028,6 +38492,7 @@ FROM
         (N'tb_ops.ClientInfoCutovers',N'U'),
         (N'tb_app.SearchClientInfoClients',N'P'),
         (N'tb_app.AdminCreateManualClientInfoClient',N'P'),
+        (N'tb_app.AdminLinkClientSources',N'P'),
         (N'tb_app.GetClientInfoSnapshot',N'P'),
         (N'tb_app.SaveClientInfoProfile',N'P'),
         (N'tb_app.SaveClientInfoLocation',N'P'),
@@ -37052,6 +38517,8 @@ FROM
         (N'tb_app.DiscardClientInfoImport',N'P'),
         (N'tb_app.ApproveClientInfoImport',N'P'),
         (N'tb_app.PromoteClientInfoImport',N'P'),
+        (N'tb_client.EnsureLiveClientInfo',N'P'),
+        (N'tb_client.MergeSourceClientIntoCanonical',N'P'),
         (N'tb_client.ReparentClientGraph',N'P')
 ) required([ObjectName],[ObjectType])
 WHERE OBJECT_ID(required.[ObjectName],required.[ObjectType]) IS NULL;
@@ -37177,16 +38644,58 @@ IF NOT EXISTS
 )
     THROW 52516,N'The Admin role cannot create live manual clients.',1;
 
+DECLARE @AdminLinkSources nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminLinkClientSources'));
+IF @AdminLinkSources IS NULL
+   OR CHARINDEX(N'IS_ROLEMEMBER(N''tb_role_admin'')', @AdminLinkSources) = 0
+   OR CHARINDEX(N'[tb_client].[MergeSourceClientIntoCanonical]', @AdminLinkSources) = 0
+   OR CHARINDEX(N'[tb_security].[WriteAuditEvent]', @AdminLinkSources) = 0
+    THROW 52517,N'Canonical client source linking is not admin-only, atomic, and audited.',1;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.database_permissions AS permission
+    WHERE permission.[grantee_principal_id] =
+            DATABASE_PRINCIPAL_ID(N'tb_role_admin')
+      AND permission.[major_id] =
+            OBJECT_ID(N'tb_app.AdminLinkClientSources')
+      AND permission.[permission_name] = N'EXECUTE'
+      AND permission.[state] IN (N'G',N'W')
+)
+    THROW 52518,N'The Admin role cannot link WHD and Sage identities to a canonical TechBench client.',1;
+
 DECLARE @MergeManual nvarchar(max)=
     OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminMergeClients'));
 DECLARE @MergeAuto nvarchar(max)=
     OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyAutomaticClientMatch'));
 DECLARE @MergeFamily nvarchar(max)=
     OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyAutomaticWhdFamilyMember'));
+DECLARE @MergeCanonicalSource nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_client.MergeSourceClientIntoCanonical'));
 IF @MergeManual NOT LIKE N'%ReparentClientGraph%'
    OR @MergeAuto NOT LIKE N'%ReparentClientGraph%'
    OR @MergeFamily NOT LIKE N'%ReparentClientGraph%'
+   OR @MergeCanonicalSource NOT LIKE N'%ReparentClientGraph%'
     THROW 52506,N'Every client merge path must reparent the canonical Client Info graph.',1;
+
+IF @MergeManual NOT LIKE N'%ClientInfoCutovers%'
+   OR @MergeManual NOT LIKE N'%Finish or discard the client workbook migration before linking it.%'
+   OR @MergeAuto NOT LIKE N'%ClientInfoCutovers%'
+   OR @MergeFamily NOT LIKE N'%ClientInfoCutovers%'
+   OR @MergeCanonicalSource NOT LIKE N'%ClientInfoCutovers%'
+   OR @MergeCanonicalSource NOT LIKE N'%Finish or discard the client workbook migration before linking it.%'
+    THROW 52519,N'Client merge sources are not protected from staged Client Information workspaces.',1;
+
+DECLARE @SearchClients nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.SearchClients'));
+DECLARE @GetClient nvarchar(max)=
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_app.GetClient'));
+IF @SearchClients NOT LIKE N'%HasClientInfoWorkspace%'
+   OR @SearchClients NOT LIKE N'%ClientInfoCutovers%'
+   OR @GetClient NOT LIKE N'%HasClientInfoWorkspace%'
+   OR @GetClient NOT LIKE N'%ClientInfoCutovers%'
+    THROW 52520,N'Client reads do not expose complete Client Information workspace eligibility.',1;
 
 IF EXISTS
 (

@@ -92,6 +92,13 @@ public sealed class SqlServerTechBenchRepositoryContractTests
             SqlServerTechBenchRepository.Procedures.CreateManualClientInfoClient);
         Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
             nameof(ITechBenchRepository.CreateManualClientInfoClient)));
+        Assert.Equal(
+            "[tb_app].[AdminLinkClientSources]",
+            SqlServerTechBenchRepository.Procedures.LinkClientSources);
+        Assert.NotNull(typeof(ITechBenchRepository).GetMethod(
+            nameof(ITechBenchRepository.LinkClientSources)));
+        Assert.NotNull(typeof(SqlServerTechBenchRepository).GetMethod(
+            nameof(SqlServerTechBenchRepository.LinkClientSourcesAsync)));
     }
 
     [Fact]

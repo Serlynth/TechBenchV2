@@ -294,6 +294,10 @@ public sealed partial class SqlServer2016SyntaxTests
             schemaV7AllowList,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
+            "(N'tb_service.ApplyAutomaticClientSourceMatch')",
+            schemaV7AllowList,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
             "(N'tb_service.ApplyAutomaticClientMatch')",
             schemaV7AllowList,
             StringComparison.OrdinalIgnoreCase);
@@ -438,6 +442,7 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("CREATE PROCEDURE [tb_service].[ClaimSageSyncWork]", procedureSource);
         Assert.Contains("CREATE PROCEDURE [tb_service].[ApplySageCustomerSnapshot]", procedureSource);
         Assert.Contains("CREATE PROCEDURE [tb_service].[GetAutomaticClientMatchCandidates]", procedureSource);
+        Assert.Contains("CREATE PROCEDURE [tb_service].[ApplyAutomaticClientSourceMatch]", procedureSource);
         Assert.Contains("CREATE PROCEDURE [tb_service].[ApplyAutomaticClientMatch]", procedureSource);
         Assert.Contains("CREATE PROCEDURE [tb_service].[ApplyAutomaticWhdFamilyMember]", procedureSource);
         var requestSageBody = ProcedureBody(
@@ -509,6 +514,15 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("sage_client.[Source] = N'Sage'", automaticMatchBody);
         Assert.Contains("[MatchStatus] = N'Matched'", automaticMatchBody);
         Assert.Contains("@Action = N'ClientAutoMatched'", automaticMatchBody);
+        var canonicalSourceMatchBody = ProcedureBody(
+            procedureSource,
+            "ApplyAutomaticClientSourceMatch",
+            "tb_service");
+        Assert.Contains("@CanonicalClientId", canonicalSourceMatchBody);
+        Assert.Contains("@SourceClientId", canonicalSourceMatchBody);
+        Assert.Contains("profile.[IsLive] = 1", canonicalSourceMatchBody);
+        Assert.Contains("[tb_client].[MergeSourceClientIntoCanonical]", canonicalSourceMatchBody);
+        Assert.Contains("@Action=N'ClientSourceAutoLinked'", canonicalSourceMatchBody);
         var familyMatchBody = ProcedureBody(
             procedureSource,
             "ApplyAutomaticWhdFamilyMember",
@@ -520,6 +534,10 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains("@Action = N'ClientAutoMatchedLocationFamily'", familyMatchBody);
         Assert.Contains(
             "GRANT EXECUTE ON OBJECT::[tb_service].[GetAutomaticClientMatchCandidates] TO [tb_role_sync_service]",
+            grantSource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "GRANT EXECUTE ON OBJECT::[tb_service].[ApplyAutomaticClientSourceMatch] TO [tb_role_sync_service]",
             grantSource,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains(

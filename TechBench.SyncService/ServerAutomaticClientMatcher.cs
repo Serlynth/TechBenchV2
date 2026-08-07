@@ -11,12 +11,21 @@ internal sealed record AutomaticClientMatchCandidate(
     string? WhdLocationName,
     string? SageCustomerId,
     string? SageCustomerName,
-    byte[]? RowVersion);
+    byte[]? RowVersion,
+    bool IsTechBenchLive = false);
 
 internal sealed record ServerAutomaticClientMatch(
     AutomaticClientMatchCandidate WhdClient,
     AutomaticClientMatchCandidate SageClient,
     double Score);
+
+internal sealed record ServerAutomaticClientSourceMatch(
+    AutomaticClientMatchCandidate CanonicalClient,
+    AutomaticClientMatchCandidate SourceClient,
+    string SourceSystem,
+    double Score,
+    string? SourceFamilyKey = null,
+    IReadOnlyList<AutomaticClientMatchCandidate>? AdditionalWhdFamilyMembers = null);
 
 internal static class ServerAutomaticClientMatcher
 {
@@ -38,16 +47,62 @@ internal static class ServerAutomaticClientMatcher
         "LLC", "LLP", "LTD", "LIMITED", "PC", "PLLC"
     ];
 
+    public static IReadOnlyList<ServerAutomaticClientSourceMatch>
+        FindSafeCanonicalSourceMatches(
+            IEnumerable<AutomaticClientMatchCandidate> candidates)
+    {
+        var materialized = candidates.ToList();
+        var canonicalCandidates = materialized
+            .Where(static client => client.IsActive && client.IsTechBenchLive)
+            .OrderBy(static client => client.Id)
+            .ToList();
+        if (canonicalCandidates.Count == 0)
+        {
+            return Array.Empty<ServerAutomaticClientSourceMatch>();
+        }
+
+        var matches = new List<ServerAutomaticClientSourceMatch>();
+        var whdSources = materialized
+            .Where(IsUnmatchedNonLiveWhdSource)
+            .ToList();
+        AddCanonicalSourceMatches(
+            canonicalCandidates,
+            whdSources,
+            "WHD",
+            matches);
+        AddCanonicalWhdFamilyMatches(
+            canonicalCandidates,
+            whdSources,
+            matches);
+        AddCanonicalSourceMatches(
+            canonicalCandidates,
+            materialized.Where(IsUnmatchedNonLiveSageSource).ToList(),
+            "Sage",
+            matches);
+        return matches;
+    }
+
     public static IReadOnlyList<ServerAutomaticClientMatch> FindSafeAutomaticMatches(
         IEnumerable<AutomaticClientMatchCandidate> candidates)
     {
         var materialized = candidates.ToList();
+        var liveCanonicals = materialized
+            .Where(static client => client.IsActive && client.IsTechBenchLive)
+            .ToList();
         var whdCandidates = materialized
             .Where(IsWhdLocationCandidate)
+            .Where(client => !HasCredibleLiveCanonicalCandidate(
+                client,
+                "WHD",
+                liveCanonicals))
             .OrderBy(static client => client.Id)
             .ToList();
         var sageCandidates = materialized
             .Where(IsSageMatchCandidate)
+            .Where(client => !HasCredibleLiveCanonicalCandidate(
+                client,
+                "Sage",
+                liveCanonicals))
             .OrderBy(static client => client.Id)
             .ToList();
         if (whdCandidates.Count == 0 || sageCandidates.Count == 0)
@@ -100,6 +155,53 @@ internal static class ServerAutomaticClientMatcher
         AddNumberedLocationFamilyMatches(whdCandidates, sageCandidates, matches);
 
         return matches;
+    }
+
+    public static IReadOnlyList<ServerAutomaticClientMatch>
+        FindSafeCanonicalWhdFamilyMembers(
+            IEnumerable<AutomaticClientMatchCandidate> candidates)
+    {
+        var materialized = candidates.ToList();
+        var canonicalFamilies = materialized
+            .Where(static client =>
+                client.IsActive
+                && client.IsTechBenchLive
+                && HasSource(client, "WHD")
+                && HasSource(client, "Sage"))
+            .Select(client => new
+            {
+                Client = client,
+                Stem = GetNumberedLocationStem(ResolveWhdName(client))
+            })
+            .Where(static candidate => candidate.Stem is not null)
+            .GroupBy(static candidate => candidate.Stem!, StringComparer.Ordinal)
+            .Where(static group => group.Count() == 1)
+            .ToDictionary(
+                static group => group.Key,
+                static group => group.Single().Client,
+                StringComparer.Ordinal);
+        if (canonicalFamilies.Count == 0)
+        {
+            return Array.Empty<ServerAutomaticClientMatch>();
+        }
+
+        return materialized
+            .Where(IsUnmatchedNonLiveWhdSource)
+            .Select(source => new
+            {
+                Source = source,
+                Stem = GetNumberedLocationStem(ResolveWhdName(source))
+            })
+            .Where(candidate =>
+                candidate.Stem is not null
+                && canonicalFamilies.ContainsKey(candidate.Stem))
+            .OrderBy(static candidate => candidate.Stem, StringComparer.Ordinal)
+            .ThenBy(static candidate => candidate.Source.Id)
+            .Select(candidate => new ServerAutomaticClientMatch(
+                candidate.Source,
+                canonicalFamilies[candidate.Stem!],
+                1d))
+            .ToList();
     }
 
     private static void AddNumberedLocationFamilyMatches(
@@ -181,6 +283,167 @@ internal static class ServerAutomaticClientMatcher
         }
     }
 
+    private static void AddCanonicalSourceMatches(
+        IReadOnlyList<AutomaticClientMatchCandidate> canonicalCandidates,
+        IReadOnlyList<AutomaticClientMatchCandidate> sourceCandidates,
+        string sourceSystem,
+        ICollection<ServerAutomaticClientSourceMatch> matches)
+    {
+        if (sourceCandidates.Count == 0)
+        {
+            return;
+        }
+
+        var availableCanonicals = canonicalCandidates
+            .Where(client => !HasSource(client, sourceSystem))
+            .ToList();
+        if (availableCanonicals.Count == 0)
+        {
+            return;
+        }
+
+        var scores = availableCanonicals
+            .SelectMany(canonical => sourceCandidates.Select(source =>
+                ScoreCanonicalSourceMatch(canonical, source, sourceSystem)))
+            .ToList();
+
+        foreach (var source in sourceCandidates.OrderBy(static client => client.Id))
+        {
+            var sourceRanking = scores
+                .Where(score => score.SourceClient.Id == source.Id)
+                .OrderByDescending(static score => score.Score)
+                .ThenBy(static score => score.CanonicalClient.Id)
+                .ToList();
+            if (!HasUniqueAutomaticLead(sourceRanking.Select(static score => score.Score)))
+            {
+                continue;
+            }
+
+            var best = sourceRanking[0];
+            if (!IsStructurallySafeAutomaticMatch(
+                    best.CanonicalMatchName,
+                    best.SourceMatchName))
+            {
+                continue;
+            }
+
+            var canonicalRanking = scores
+                .Where(score => score.CanonicalClient.Id == best.CanonicalClient.Id)
+                .OrderByDescending(static score => score.Score)
+                .ThenBy(static score => score.SourceClient.Id)
+                .ToList();
+            if (canonicalRanking[0].SourceClient.Id != source.Id
+                || !HasUniqueAutomaticLead(
+                    canonicalRanking.Select(static score => score.Score)))
+            {
+                continue;
+            }
+
+            matches.Add(new ServerAutomaticClientSourceMatch(
+                best.CanonicalClient,
+                source,
+                sourceSystem,
+                best.Score));
+        }
+    }
+
+    private static void AddCanonicalWhdFamilyMatches(
+        IReadOnlyList<AutomaticClientMatchCandidate> canonicalCandidates,
+        IReadOnlyList<AutomaticClientMatchCandidate> whdCandidates,
+        ICollection<ServerAutomaticClientSourceMatch> matches)
+    {
+        var assignedWhdIds = matches
+            .Where(static match => match.SourceSystem == "WHD")
+            .Select(static match => match.SourceClient.Id)
+            .ToHashSet();
+        var assignedCanonicalIds = matches
+            .Where(static match => match.SourceSystem == "WHD")
+            .Select(static match => match.CanonicalClient.Id)
+            .ToHashSet();
+        var families = whdCandidates
+            .Where(client => !assignedWhdIds.Contains(client.Id))
+            .Select(client => new
+            {
+                Client = client,
+                Stem = GetNumberedLocationStem(ResolveWhdName(client))
+            })
+            .Where(static candidate => candidate.Stem is not null)
+            .GroupBy(static candidate => candidate.Stem!, StringComparer.Ordinal)
+            .Where(static group => group.Count() >= 2)
+            .Select(group => new NumberedLocationFamily(
+                group.Key,
+                group.Select(static candidate => candidate.Client)
+                    .OrderBy(static client => client.Id)
+                    .ToList()))
+            .OrderBy(static family => family.Stem, StringComparer.Ordinal)
+            .ToList();
+        var availableCanonicals = canonicalCandidates
+            .Where(client => !assignedCanonicalIds.Contains(client.Id)
+                && !HasSource(client, "WHD")
+                && HasSource(client, "Sage"))
+            .ToList();
+        if (families.Count == 0 || availableCanonicals.Count == 0)
+        {
+            return;
+        }
+
+        var scores = families
+            .SelectMany(family => availableCanonicals.Select(canonical =>
+            {
+                var canonicalNameScore = FindBestCanonicalNameScore(
+                    canonical,
+                    family.Stem);
+                return new CanonicalWhdFamilyMatchScore(
+                    family,
+                    canonical,
+                    canonicalNameScore.Name,
+                    canonicalNameScore.Score);
+            }))
+            .ToList();
+
+        foreach (var family in families)
+        {
+            var familyRanking = scores
+                .Where(score => ReferenceEquals(score.Family, family))
+                .OrderByDescending(static score => score.Score)
+                .ThenBy(static score => score.CanonicalClient.Id)
+                .ToList();
+            if (!HasUniqueAutomaticLead(
+                    familyRanking.Select(static score => score.Score)))
+            {
+                continue;
+            }
+
+            var best = familyRanking[0];
+            if (!IsStructurallySafeAutomaticMatch(
+                    best.CanonicalMatchName,
+                    family.Stem))
+            {
+                continue;
+            }
+
+            var canonicalRanking = scores
+                .Where(score => score.CanonicalClient.Id == best.CanonicalClient.Id)
+                .OrderByDescending(static score => score.Score)
+                .ThenBy(static score => score.Family.Stem, StringComparer.Ordinal)
+                .ToList();
+            if (!ReferenceEquals(canonicalRanking[0].Family, family)
+                || !HasUniqueAutomaticLead(
+                    canonicalRanking.Select(static score => score.Score)))
+            {
+                continue;
+            }
+
+            matches.Add(new ServerAutomaticClientSourceMatch(
+                best.CanonicalClient,
+                family.Clients[0],
+                "WHD",
+                best.Score,
+                family.Stem,
+                family.Clients.Skip(1).ToList()));
+        }
+    }
+
     internal static string NormalizeCompanyName(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -224,6 +487,7 @@ internal static class ServerAutomaticClientMatcher
 
     private static bool IsWhdLocationCandidate(AutomaticClientMatchCandidate client) =>
         client.IsActive
+        && !client.IsTechBenchLive
         && client.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase)
         && string.IsNullOrWhiteSpace(client.SageCustomerId)
         && (client.ExternalId ?? string.Empty)
@@ -231,8 +495,25 @@ internal static class ServerAutomaticClientMatcher
 
     private static bool IsSageMatchCandidate(AutomaticClientMatchCandidate client) =>
         client.IsActive
+        && !client.IsTechBenchLive
         && client.Source.Equals("Sage", StringComparison.OrdinalIgnoreCase)
         && !string.IsNullOrWhiteSpace(client.SageCustomerId);
+
+    private static bool IsUnmatchedNonLiveWhdSource(
+        AutomaticClientMatchCandidate client) =>
+        !client.IsTechBenchLive && IsWhdLocationCandidate(client);
+
+    private static bool IsUnmatchedNonLiveSageSource(
+        AutomaticClientMatchCandidate client) =>
+        !client.IsTechBenchLive && IsSageMatchCandidate(client);
+
+    private static bool HasSource(
+        AutomaticClientMatchCandidate client,
+        string sourceSystem) =>
+        sourceSystem.Equals("WHD", StringComparison.OrdinalIgnoreCase)
+            ? HasWhdLocationExternalId(client.ExternalId)
+            : sourceSystem.Equals("Sage", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(client.SageCustomerId);
 
     private static double ScoreNames(string? left, string? right)
     {
@@ -343,6 +624,83 @@ internal static class ServerAutomaticClientMatcher
     private static string ResolveSageName(AutomaticClientMatchCandidate client) =>
         string.IsNullOrWhiteSpace(client.SageCustomerName) ? client.Name : client.SageCustomerName;
 
+    private static string ResolveSourceName(
+        AutomaticClientMatchCandidate client,
+        string sourceSystem) =>
+        sourceSystem.Equals("WHD", StringComparison.OrdinalIgnoreCase)
+            ? ResolveWhdName(client)
+            : ResolveSageName(client);
+
+    private static CanonicalSourceMatchScore ScoreCanonicalSourceMatch(
+        AutomaticClientMatchCandidate canonical,
+        AutomaticClientMatchCandidate source,
+        string sourceSystem)
+    {
+        var sourceName = ResolveSourceName(source, sourceSystem);
+        var bestCanonicalName = FindBestCanonicalNameScore(canonical, sourceName);
+        return new CanonicalSourceMatchScore(
+            canonical,
+            source,
+            bestCanonicalName.Name,
+            sourceName,
+            bestCanonicalName.Score);
+    }
+
+    private static bool HasCredibleLiveCanonicalCandidate(
+        AutomaticClientMatchCandidate source,
+        string sourceSystem,
+        IEnumerable<AutomaticClientMatchCandidate> liveCanonicals)
+    {
+        return liveCanonicals
+            .Where(canonical => !HasSource(canonical, sourceSystem))
+            .Select(canonical => ScoreCanonicalSourceMatch(
+                canonical,
+                source,
+                sourceSystem))
+            .Any(score =>
+                score.Score >= AutomaticMatchThreshold
+                && IsStructurallySafeAutomaticMatch(
+                    score.CanonicalMatchName,
+                    score.SourceMatchName));
+    }
+
+    private static CanonicalNameScore FindBestCanonicalNameScore(
+        AutomaticClientMatchCandidate canonical,
+        string comparisonName)
+    {
+        var bestCanonicalName = new[]
+            {
+                canonical.Name,
+                canonical.WhdLocationName,
+                canonical.SageCustomerName
+            }
+            .Where(static name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(name => new
+            {
+                Name = name!,
+                Score = ScoreNames(name, comparisonName)
+            })
+            .OrderByDescending(static candidate => candidate.Score)
+            .ThenBy(static candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+        if (bestCanonicalName is null)
+        {
+            return new CanonicalNameScore(string.Empty, 0);
+        }
+
+        return new CanonicalNameScore(
+            bestCanonicalName.Name,
+            bestCanonicalName.Score);
+    }
+
+    private static bool HasWhdLocationExternalId(string? externalIds) =>
+        (externalIds ?? string.Empty)
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(static id => id.StartsWith(
+                "WHD-LOCATION-",
+                StringComparison.OrdinalIgnoreCase));
+
     private static int LevenshteinDistance(string left, string right)
     {
         var previous = new int[right.Length + 1];
@@ -382,4 +740,19 @@ internal static class ServerAutomaticClientMatcher
         NumberedLocationFamily Family,
         AutomaticClientMatchCandidate SageClient,
         double Score);
+
+    private sealed record CanonicalSourceMatchScore(
+        AutomaticClientMatchCandidate CanonicalClient,
+        AutomaticClientMatchCandidate SourceClient,
+        string CanonicalMatchName,
+        string SourceMatchName,
+        double Score);
+
+    private sealed record CanonicalWhdFamilyMatchScore(
+        NumberedLocationFamily Family,
+        AutomaticClientMatchCandidate CanonicalClient,
+        string CanonicalMatchName,
+        double Score);
+
+    private sealed record CanonicalNameScore(string Name, double Score);
 }
