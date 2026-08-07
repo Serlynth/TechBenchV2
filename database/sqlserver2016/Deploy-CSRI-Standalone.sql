@@ -2410,7 +2410,7 @@ BEGIN TRY
                 CONSTRAINT [DF_WhdClientIdentityHistory_Updated]
                 DEFAULT (SYSUTCDATETIME()),
             CONSTRAINT [PK_WhdClientIdentityHistory]
-                PRIMARY KEY CLUSTERED ([ExternalId]),
+                PRIMARY KEY NONCLUSTERED ([ExternalId]),
             CONSTRAINT [FK_WhdClientIdentityHistory_Client]
                 FOREIGN KEY ([ClientId]) REFERENCES [tb_data].[Clients]([Id])
                 ON DELETE CASCADE,
@@ -2418,6 +2418,31 @@ BEGIN TRY
                 FOREIGN KEY ([UpdatedByWindowsSid])
                 REFERENCES [tb_security].[Users]([WindowsSid])
         );
+    END;
+
+    /* SQL Server 2016 limits clustered keys to 900 bytes. ExternalId keeps
+       its established nvarchar(500) contract, while the 1,000-byte key uses
+       the SQL Server 2016 nonclustered-key limit instead. Upgrade databases
+       that received the original clustered definition before a later batch
+       stopped the deployment. */
+    IF EXISTS
+    (
+        SELECT 1
+        FROM sys.key_constraints AS key_constraint
+        INNER JOIN sys.indexes AS key_index
+            ON key_index.[object_id] = key_constraint.[parent_object_id]
+           AND key_index.[index_id] = key_constraint.[unique_index_id]
+        WHERE key_constraint.[parent_object_id]
+                = OBJECT_ID(N'tb_sync.WhdClientIdentityHistory', N'U')
+          AND key_constraint.[name] = N'PK_WhdClientIdentityHistory'
+          AND key_index.[type_desc] = N'CLUSTERED'
+    )
+    BEGIN
+        ALTER TABLE [tb_sync].[WhdClientIdentityHistory]
+            DROP CONSTRAINT [PK_WhdClientIdentityHistory];
+        ALTER TABLE [tb_sync].[WhdClientIdentityHistory]
+            ADD CONSTRAINT [PK_WhdClientIdentityHistory]
+                PRIMARY KEY NONCLUSTERED ([ExternalId]);
     END;
 
     IF NOT EXISTS
@@ -2449,7 +2474,7 @@ BEGIN TRY
                 CONSTRAINT [DF_WhdPendingClientRemovals_Updated]
                 DEFAULT (SYSUTCDATETIME()),
             CONSTRAINT [PK_WhdPendingClientRemovals]
-                PRIMARY KEY CLUSTERED ([ExternalId]),
+                PRIMARY KEY NONCLUSTERED ([ExternalId]),
             CONSTRAINT [CK_WhdPendingClientRemovals_Counts]
                 CHECK
                 (
@@ -2462,6 +2487,26 @@ BEGIN TRY
                 FOREIGN KEY ([UpdatedByWindowsSid])
                 REFERENCES [tb_security].[Users]([WindowsSid])
         );
+    END;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM sys.key_constraints AS key_constraint
+        INNER JOIN sys.indexes AS key_index
+            ON key_index.[object_id] = key_constraint.[parent_object_id]
+           AND key_index.[index_id] = key_constraint.[unique_index_id]
+        WHERE key_constraint.[parent_object_id]
+                = OBJECT_ID(N'tb_sync.WhdPendingClientRemovals', N'U')
+          AND key_constraint.[name] = N'PK_WhdPendingClientRemovals'
+          AND key_index.[type_desc] = N'CLUSTERED'
+    )
+    BEGIN
+        ALTER TABLE [tb_sync].[WhdPendingClientRemovals]
+            DROP CONSTRAINT [PK_WhdPendingClientRemovals];
+        ALTER TABLE [tb_sync].[WhdPendingClientRemovals]
+            ADD CONSTRAINT [PK_WhdPendingClientRemovals]
+                PRIMARY KEY NONCLUSTERED ([ExternalId]);
     END;
 
     IF NOT EXISTS (SELECT 1 FROM [tb_sync].[WhdSyncHealth] WHERE [HealthId] = 1)
@@ -12310,7 +12355,7 @@ BEGIN
 
     DECLARE @Snapshot TABLE
     (
-        [ExternalId] nvarchar(500) NOT NULL PRIMARY KEY,
+        [ExternalId] nvarchar(500) NOT NULL PRIMARY KEY NONCLUSTERED,
         [Name] nvarchar(240) NOT NULL,
         [LocationName] nvarchar(240) NULL,
         [ContactName] nvarchar(240) NULL,
@@ -18064,7 +18109,7 @@ BEGIN
 
     DECLARE @Snapshot TABLE
     (
-        [ExternalId] nvarchar(500) NOT NULL PRIMARY KEY,
+        [ExternalId] nvarchar(500) NOT NULL PRIMARY KEY NONCLUSTERED,
         [Name] nvarchar(240) NOT NULL,
         [LocationName] nvarchar(240) NULL,
         [ContactName] nvarchar(240) NULL,
@@ -18147,7 +18192,7 @@ BEGIN
 
             DECLARE @StaleWhdLocationIds TABLE
             (
-                [ExternalId] nvarchar(500) NOT NULL PRIMARY KEY
+                [ExternalId] nvarchar(500) NOT NULL PRIMARY KEY NONCLUSTERED
             );
 
             SELECT @ExistingWhdLocationCount = COUNT(*)
@@ -18377,7 +18422,7 @@ BEGIN
 
         DECLARE @NewClients TABLE
         (
-            [ExternalId] nvarchar(500) NOT NULL PRIMARY KEY,
+            [ExternalId] nvarchar(500) NOT NULL PRIMARY KEY NONCLUSTERED,
             [ClientId] int NOT NULL
         );
 
@@ -24715,7 +24760,7 @@ BEGIN
 
     CREATE TABLE #People
     (
-        [SourceKey] nvarchar(500) NOT NULL PRIMARY KEY,
+        [SourceKey] nvarchar(500) NOT NULL PRIMARY KEY NONCLUSTERED,
         [ClientName] nvarchar(240) NOT NULL,
         [DisplayName] nvarchar(240) NOT NULL,
         [RoleDepartment] nvarchar(240) NULL,
@@ -24812,7 +24857,7 @@ BEGIN
 
     CREATE TABLE #Accounts
     (
-        [SourceKey] nvarchar(500) NOT NULL PRIMARY KEY,
+        [SourceKey] nvarchar(500) NOT NULL PRIMARY KEY NONCLUSTERED,
         [PersonSourceKey] nvarchar(500) NOT NULL,
         [AccountSystem] nvarchar(240) NOT NULL,
         [RowHash] binary(32) NULL,
@@ -24854,7 +24899,7 @@ BEGIN
         [SortOrder] int NOT NULL,
         [FieldValue] nvarchar(3000) NULL,
         CONSTRAINT [PK_CredentialsClientUserFields]
-            PRIMARY KEY ([AccountSourceKey], [FieldKey]),
+            PRIMARY KEY NONCLUSTERED ([AccountSourceKey], [FieldKey]),
         CONSTRAINT [UQ_CredentialsClientUserFieldOrder]
             UNIQUE ([AccountSourceKey], [SortOrder])
     );
@@ -24975,7 +25020,7 @@ BEGIN
 
         CREATE TABLE #ChangedAccounts
         (
-            [SourceKey] nvarchar(500) NOT NULL PRIMARY KEY
+            [SourceKey] nvarchar(500) NOT NULL PRIMARY KEY NONCLUSTERED
         );
 
         INSERT INTO #ChangedAccounts([SourceKey])
@@ -25814,13 +25859,15 @@ GO
 /* One-time/idempotent reconciliation for client pairs matched before the
    canonical TechBench profile existed. Future automatic and Admin matches
    call EnsureLiveClientInfo directly. */
-DECLARE @LegacyMatchActorSid varbinary(85) =
-(
-    SELECT [WindowsSid]
-    FROM [tb_security].[Users]
-    WHERE [LoginName] = N'$(SyncServicePrincipal)'
-);
+DECLARE @LegacyMatchActorSid varbinary(85);
+DECLARE @LegacyMatchActorLoginName nvarchar(256);
+SELECT
+    @LegacyMatchActorSid = [WindowsSid],
+    @LegacyMatchActorLoginName = [LoginName]
+FROM [tb_security].[Users]
+WHERE [LoginName] = N'$(SyncServicePrincipal)';
 IF @LegacyMatchActorSid IS NULL
+   OR NULLIF(LTRIM(RTRIM(@LegacyMatchActorLoginName)), N'') IS NULL
     THROW 52319, N'The configured sync service principal has no TechBench service actor for canonical client reconciliation.', 1;
 
 DECLARE @LegacyMatchedClientId int;
@@ -25864,12 +25911,23 @@ BEGIN
 
         DECLARE @LegacyMatchEntityId nvarchar(120) =
             CONVERT(nvarchar(120), @LegacyMatchedClientId);
-        EXEC [tb_security].[WriteAuditEvent]
-            @Action = N'LegacyMatchedClientPromoted',
-            @EntityType = N'Client',
-            @EntityId = @LegacyMatchEntityId,
-            @RequestId = NULL,
-            @DataJson = N'{"isLive":true,"reviewStatus":"Unverified"}';
+        /* This is a deployment-time reconciliation, so ORIGINAL_LOGIN() is
+           the installer rather than the registered application actor used
+           by WriteAuditEvent. Persist the audit with the validated sync
+           service identity inside the same transaction as the promotion. */
+        INSERT INTO [tb_audit].[AuditEvents]
+        (
+            [ActorWindowsSid], [ActorLoginName], [Action], [EntityType],
+            [EntityId], [RequestId], [DataJson], [OccurredAtUtc]
+        )
+        VALUES
+        (
+            @LegacyMatchActorSid, @LegacyMatchActorLoginName,
+            N'LegacyMatchedClientPromoted', N'Client',
+            @LegacyMatchEntityId, NEWID(),
+            N'{"isLive":true,"reviewStatus":"Unverified"}',
+            SYSUTCDATETIME()
+        );
 
         COMMIT TRANSACTION;
     END TRY
@@ -35987,6 +36045,29 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
+IF EXISTS
+(
+    SELECT 1
+    FROM
+    (
+        VALUES
+            (N'tb_sync.WhdClientIdentityHistory', N'PK_WhdClientIdentityHistory'),
+            (N'tb_sync.WhdPendingClientRemovals', N'PK_WhdPendingClientRemovals')
+    ) AS required([ObjectName], [ConstraintName])
+    LEFT JOIN sys.key_constraints AS key_constraint
+        ON key_constraint.[parent_object_id] = OBJECT_ID(required.[ObjectName], N'U')
+       AND key_constraint.[name] = required.[ConstraintName]
+    LEFT JOIN sys.indexes AS key_index
+        ON key_index.[object_id] = key_constraint.[parent_object_id]
+       AND key_index.[index_id] = key_constraint.[unique_index_id]
+    WHERE key_constraint.[object_id] IS NULL
+       OR key_index.[type_desc] <> N'NONCLUSTERED'
+)
+BEGIN
+    PRINT N'FAIL: wide WHD external-identifier keys must use SQL Server 2016-safe nonclustered primary keys.';
+    SET @FailureCount += 1;
+END;
+
 DECLARE @RequiredParameters TABLE
 (
     [ProcedureName] nvarchar(300) NOT NULL,
@@ -36308,8 +36389,9 @@ IF CHARINDEX(N'@ExistingWhdLocationCount>0', @ClientApplyDefinition) = 0
    OR CHARINDEX(N'[tb_sync].[WhdClientIdentityHistory]', @ClientApplyDefinition) = 0
    OR CHARINDEX(N'@StaleLiveWhdIdentities', @ClientApplyDefinition) = 0
    OR CHARINDEX(N'remaining_identity.[ClientId]=client.[Id]', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'nvarchar(500)NOTNULLPRIMARYKEYNONCLUSTERED', @ClientApplyDefinition) = 0
 BEGIN
-    PRINT N'FAIL: ApplyWhdClientSnapshot lacks two-snapshot destructive confirmation, deterministic identity history, or multi-location preservation.';
+    PRINT N'FAIL: ApplyWhdClientSnapshot lacks two-snapshot destructive confirmation, deterministic identity history, multi-location preservation, or SQL Server 2016-safe wide keys.';
     SET @FailureCount += 1;
 END;
 

@@ -63,8 +63,21 @@ public sealed class ClientInfoResourceDataGrid : DataGrid
             return;
         }
 
+        var useReadableHeaders = group.CategoryName is
+            ClientInfoResourceCategories.Wifi or
+            ClientInfoResourceCategories.Security;
+        ColumnHeaderHeight = useReadableHeaders ? 56 : 38;
+
         Columns.Add(TextColumn("Name", "Name", 1.2));
-        Columns.Add(TextColumn("Type", "TypeLabel", 0.9));
+        Columns.Add(TextColumn(
+            "Type",
+            "TypeLabel",
+            group.CategoryName == ClientInfoResourceCategories.ServersInfrastructure
+                ? 0.55
+                : 0.9,
+            group.CategoryName == ClientInfoResourceCategories.ServersInfrastructure
+                ? 72
+                : 90));
         Columns.Add(TextColumn("Provider", "Provider", 0.9));
         Columns.Add(TextColumn(
             ClientInfoResourceFieldDefinitions.AddressLabelForCategory(
@@ -78,7 +91,9 @@ public sealed class ClientInfoResourceDataGrid : DataGrid
         foreach (var field in ClientInfoResourceFieldDefinitions
                      .ForEditorCategory(group.CategoryName))
         {
-            Columns.Add(FieldColumn(field.FieldLabel, field.FieldKey));
+            Columns.Add(FieldColumn(
+                FieldHeader(group.CategoryName, field),
+                field.FieldKey));
         }
 
         var customFields = group.Resources
@@ -106,18 +121,53 @@ public sealed class ClientInfoResourceDataGrid : DataGrid
         Columns.Add(TextColumn("Review", "ReviewStatus", 0.8));
         Columns.Add(TextColumn("Last verified", "LastVerifiedAtUtc", 0.9));
         Columns.Add(TextColumn("Updated", "UpdatedAtUtc", 0.9));
+
+        if (useReadableHeaders
+            && TryFindResource("WrappedResourceColumnHeaderTemplate") is DataTemplate template)
+        {
+            foreach (var column in Columns)
+            {
+                column.HeaderTemplate = template;
+            }
+        }
     }
+
+    private static string FieldHeader(
+        string categoryName,
+        ClientInfoResourceFieldDefinition field) =>
+        categoryName == ClientInfoResourceCategories.ConnectionInternet
+            ? field.FieldKey switch
+            {
+                "public_wan_ip" => "WAN IP",
+                "ssl_vpn_port" => "VPN Port",
+                "subnet_cidr" => "Subnet",
+                "ip_assignment_type" => "IP Type",
+                "usable_static_ip_count" => "Usable #",
+                "static_ip_addresses" => "Static IPs",
+                "static_ip_range_start" => "First IP",
+                "static_ip_range_end" => "Last IP",
+                "device_model" => "Model",
+                "firmware_version" => "Firmware",
+                "isp_provider" => "ISP",
+                "support_phone" => "Support",
+                "account_number" => "Account #",
+                "service_type" => "Service",
+                "support_contact" => "Contact",
+                _ => field.FieldLabel
+            }
+            : field.FieldLabel;
 
     private static DataGridTextColumn TextColumn(
         string header,
         string path,
-        double width) =>
+        double width,
+        double minWidth = 90) =>
         new()
         {
             Header = header,
             Binding = new WpfBinding(path),
             Width = new DataGridLength(width, DataGridLengthUnitType.Star),
-            MinWidth = 90
+            MinWidth = minWidth
         };
 
     private static DataGridTextColumn FieldColumn(

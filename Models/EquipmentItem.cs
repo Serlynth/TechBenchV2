@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using TechBench.Formatting;
 
 namespace TechBench.Models;
 
@@ -16,6 +17,8 @@ public sealed class EquipmentItem
     public string Manufacturer { get; init; } = string.Empty;
     public string Model { get; init; } = string.Empty;
     public string AnyDeskNumber { get; init; } = string.Empty;
+    public string AnyDeskDisplayNumber =>
+        AnyDeskIdFormatter.FormatForDisplay(AnyDeskNumber);
     public string AnyDeskPassword { get; init; } = string.Empty;
     public int? ClientId { get; init; }
     public string ClientName { get; init; } = string.Empty;

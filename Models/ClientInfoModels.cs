@@ -162,6 +162,11 @@ public sealed record ClientInfoPerson
     public DateTime? UpdatedAtUtc { get; init; }
     public byte[]? RowVersion { get; init; }
     [JsonIgnore]
+    public string Microsoft365LicenseDisplay =>
+        Microsoft365License.StartsWith("Microsoft ", StringComparison.OrdinalIgnoreCase)
+            ? Microsoft365License["Microsoft ".Length..]
+            : Microsoft365License;
+    [JsonIgnore]
     public ClientInfoCredential? AdCredential { get; init; }
     [JsonIgnore]
     public ClientInfoCredential? Microsoft365Credential { get; init; }

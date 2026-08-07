@@ -177,6 +177,29 @@ BEGIN
     SET @FailureCount += 1;
 END;
 
+IF EXISTS
+(
+    SELECT 1
+    FROM
+    (
+        VALUES
+            (N'tb_sync.WhdClientIdentityHistory', N'PK_WhdClientIdentityHistory'),
+            (N'tb_sync.WhdPendingClientRemovals', N'PK_WhdPendingClientRemovals')
+    ) AS required([ObjectName], [ConstraintName])
+    LEFT JOIN sys.key_constraints AS key_constraint
+        ON key_constraint.[parent_object_id] = OBJECT_ID(required.[ObjectName], N'U')
+       AND key_constraint.[name] = required.[ConstraintName]
+    LEFT JOIN sys.indexes AS key_index
+        ON key_index.[object_id] = key_constraint.[parent_object_id]
+       AND key_index.[index_id] = key_constraint.[unique_index_id]
+    WHERE key_constraint.[object_id] IS NULL
+       OR key_index.[type_desc] <> N'NONCLUSTERED'
+)
+BEGIN
+    PRINT N'FAIL: wide WHD external-identifier keys must use SQL Server 2016-safe nonclustered primary keys.';
+    SET @FailureCount += 1;
+END;
+
 DECLARE @RequiredParameters TABLE
 (
     [ProcedureName] nvarchar(300) NOT NULL,
@@ -498,8 +521,9 @@ IF CHARINDEX(N'@ExistingWhdLocationCount>0', @ClientApplyDefinition) = 0
    OR CHARINDEX(N'[tb_sync].[WhdClientIdentityHistory]', @ClientApplyDefinition) = 0
    OR CHARINDEX(N'@StaleLiveWhdIdentities', @ClientApplyDefinition) = 0
    OR CHARINDEX(N'remaining_identity.[ClientId]=client.[Id]', @ClientApplyDefinition) = 0
+   OR CHARINDEX(N'nvarchar(500)NOTNULLPRIMARYKEYNONCLUSTERED', @ClientApplyDefinition) = 0
 BEGIN
-    PRINT N'FAIL: ApplyWhdClientSnapshot lacks two-snapshot destructive confirmation, deterministic identity history, or multi-location preservation.';
+    PRINT N'FAIL: ApplyWhdClientSnapshot lacks two-snapshot destructive confirmation, deterministic identity history, multi-location preservation, or SQL Server 2016-safe wide keys.';
     SET @FailureCount += 1;
 END;
 

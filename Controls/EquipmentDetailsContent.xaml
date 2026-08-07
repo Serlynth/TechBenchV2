@@ -182,7 +182,7 @@
                     <StackPanel Margin="0,0,12,0">
                         <TextBlock Text="AnyDesk number"
                                    Style="{StaticResource EquipmentDetailsLabelStyle}" />
-                        <TextBlock Text="{Binding AnyDeskNumber, Converter={StaticResource StringOrPlaceholderConverter}}"
+                        <TextBlock Text="{Binding AnyDeskDisplayNumber, Converter={StaticResource StringOrPlaceholderConverter}}"
                                    Style="{StaticResource EquipmentDetailsValueStyle}" />
                     </StackPanel>
                     <StackPanel Grid.Column="1">

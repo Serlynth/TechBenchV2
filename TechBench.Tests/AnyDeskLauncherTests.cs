@@ -1,9 +1,58 @@
+using TechBench.Formatting;
+using TechBench.Models;
 using TechBench.Services;
 
 namespace TechBench.Tests;
 
 public sealed class AnyDeskLauncherTests
 {
+    [Theory]
+    [InlineData("123456789", "123 456 789")]
+    [InlineData("123 456 789", "123 456 789")]
+    [InlineData("123-456-789", "123 456 789")]
+    [InlineData("1-234-567-890", "1 234 567 890")]
+    [InlineData("1 234 567 890", "1 234 567 890")]
+    public void DisplayFormattingGroupsSupportedNumericIds(
+        string input,
+        string expected)
+    {
+        Assert.Equal(
+            expected,
+            AnyDeskIdFormatter.FormatForDisplay(input));
+    }
+
+    [Theory]
+    [InlineData("2234567890")]
+    [InlineData("123-45")]
+    [InlineData("support-pc@ad")]
+    [InlineData("  support-pc@ad  ")]
+    public void DisplayFormattingPreservesNonstandardAddresses(string input)
+    {
+        Assert.Equal(
+            input,
+            AnyDeskIdFormatter.FormatForDisplay(input));
+    }
+
+    [Fact]
+    public void DisplayFormattingTreatsNullAsEmpty()
+    {
+        Assert.Equal(
+            string.Empty,
+            AnyDeskIdFormatter.FormatForDisplay(null));
+    }
+
+    [Fact]
+    public void EquipmentExposesFormattedIdWithoutChangingStoredValue()
+    {
+        var equipment = new EquipmentItem
+        {
+            AnyDeskNumber = "1-234-567-890"
+        };
+
+        Assert.Equal("1-234-567-890", equipment.AnyDeskNumber);
+        Assert.Equal("1 234 567 890", equipment.AnyDeskDisplayNumber);
+    }
+
     [Theory]
     [InlineData("123 456 789", "123456789")]
     [InlineData("1-234-567-890", "1234567890")]

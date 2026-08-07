@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Windows.Data;
 using ExcelDataReader.Exceptions;
 using Microsoft.Data.SqlClient;
+using TechBench.Formatting;
 using TechBench.Models;
 using TechBench.Services;
 
@@ -1124,7 +1125,8 @@ public sealed partial class MainWindowViewModel
         EquipmentManufacturer = import.Manufacturer;
         EquipmentModel = import.Model;
         EquipmentIpAddress = import.IpAddress;
-        EquipmentAnyDeskNumber = import.AnyDeskNumber;
+        EquipmentAnyDeskNumber =
+            AnyDeskIdFormatter.FormatForDisplay(import.AnyDeskNumber);
         EquipmentAnyDeskPassword = import.AnyDeskPassword;
 
         var warnings = new List<string>();
@@ -1196,7 +1198,7 @@ public sealed partial class MainWindowViewModel
         EquipmentIpAddress = item.IpAddress;
         EquipmentManufacturer = item.Manufacturer;
         EquipmentModel = item.Model;
-        EquipmentAnyDeskNumber = item.AnyDeskNumber;
+        EquipmentAnyDeskNumber = item.AnyDeskDisplayNumber;
         EquipmentAnyDeskPassword = item.AnyDeskPassword;
         ShowEquipmentAnyDeskPassword = false;
         EquipmentClient = InventoryClientOptions.FirstOrDefault(client =>
@@ -1252,6 +1254,11 @@ public sealed partial class MainWindowViewModel
         try
         {
             var source = _isNewEquipment ? null : SelectedEquipment;
+            var anyDeskNumber = EquipmentSupportsAnyDesk
+                ? AnyDeskIdFormatter.FormatForDisplay(
+                    EquipmentAnyDeskNumber.Trim())
+                : string.Empty;
+            EquipmentAnyDeskNumber = anyDeskNumber;
             var record = new EquipmentItem
             {
                 EquipmentId = source?.EquipmentId ?? 0,
@@ -1263,9 +1270,7 @@ public sealed partial class MainWindowViewModel
                 IpAddress = EquipmentIpAddress.Trim(),
                 Manufacturer = EquipmentManufacturer.Trim(),
                 Model = EquipmentModel.Trim(),
-                AnyDeskNumber = EquipmentSupportsAnyDesk
-                    ? EquipmentAnyDeskNumber.Trim()
-                    : string.Empty,
+                AnyDeskNumber = anyDeskNumber,
                 AnyDeskPassword = EquipmentSupportsAnyDesk
                     ? EquipmentAnyDeskPassword
                     : string.Empty,
@@ -1659,7 +1664,10 @@ public sealed partial class MainWindowViewModel
         AddEquipmentCopyLine(lines, "Manufacturer", EquipmentManufacturer);
         AddEquipmentCopyLine(lines, "Model", EquipmentModel);
         AddEquipmentCopyLine(lines, "IP address", EquipmentIpAddress);
-        AddEquipmentCopyLine(lines, "AnyDesk number", EquipmentAnyDeskNumber);
+        AddEquipmentCopyLine(
+            lines,
+            "AnyDesk number",
+            AnyDeskIdFormatter.FormatForDisplay(EquipmentAnyDeskNumber));
         AddEquipmentCopyLine(lines, "Client", EquipmentClient?.Name);
         AddEquipmentCopyLine(
             lines,
@@ -1726,7 +1734,7 @@ public sealed partial class MainWindowViewModel
         }
 
         var target = string.IsNullOrWhiteSpace(equipmentName)
-            ? AnyDeskLauncher.NormalizeAddress(address)
+            ? AnyDeskIdFormatter.FormatForDisplay(address)
             : equipmentName.Trim();
         StatusMessage = result.PasswordSubmitted
             ? $"Opening AnyDesk for {target} and submitting the unattended-access password."
