@@ -80,6 +80,10 @@ public sealed class ClientInfoBetaTests
         Assert.Contains("[LiveAtUtc]", procedure, StringComparison.Ordinal);
         Assert.Contains("[CompletedAtUtc]", procedure, StringComparison.Ordinal);
         Assert.Contains("ManualClientInfoCreated", procedure, StringComparison.Ordinal);
+        Assert.Contains(
+            "@LifecycleReason = N'ManualNewClient'",
+            procedure,
+            StringComparison.Ordinal);
         Assert.Contains("[tb_security].[WriteAuditEvent]", procedure, StringComparison.Ordinal);
         Assert.Contains("exact name already exists", procedure, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
@@ -3206,33 +3210,49 @@ public sealed class ClientInfoBetaTests
             "[tb_client].[MergeSourceClientIntoCanonical]",
             canonical,
             StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "[tb_client].[EnsureLiveClientInfo]",
+            manual,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "[tb_client].[EnsureLiveClientInfo]",
+            automatic,
+            StringComparison.Ordinal);
         Assert.Contains(
-            "[IsLive] = 1",
+            "[SourceSystem]=N'WHD'",
             canonical,
             StringComparison.Ordinal);
         Assert.Contains(
-            "LegacyMatchedClientPromoted",
-            canonical,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "[SourceSystem] = N'WHD'",
-            canonical,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "[SourceSystem] = N'Sage'",
+            "[SourceSystem]=N'Sage'",
             canonical,
             StringComparison.Ordinal);
     }
 
     [Fact]
-    public void LegacyCanonicalBackfillAuditsAsTheRegisteredServiceActor()
+    public void SourceMatchingCannotCompleteTheClientInfoLifecycle()
     {
+        var manual = Read(
+            "database",
+            "sqlserver2016",
+            "42-V0002-SharedProcedures.sql");
+        var automatic = Read(
+            "database",
+            "sqlserver2016",
+            "49-V0007-ServerOwnedSageAndAdminPreviewProcedures.sql");
         var canonical = Read(
             "database",
             "sqlserver2016",
             "61-V0015-ClientInfoBetaProcedures.sql");
+        var imports = Read(
+            "database",
+            "sqlserver2016",
+            "62-V0015-ClientInfoBetaImportProcedures.sql");
+        var verifier = Read(
+            "database",
+            "sqlserver2016",
+            "106-V0015-ClientInfoBetaVerify.sql");
         var start = canonical.IndexOf(
-            "/* One-time/idempotent reconciliation",
+            "/* Server 0.6.26/0.6.27 incorrectly treated source matching",
             StringComparison.Ordinal);
         var end = canonical.IndexOf(
             "IF OBJECT_ID(N'tb_client.MergeSourceClientIntoCanonical'",
@@ -3240,22 +3260,77 @@ public sealed class ClientInfoBetaTests
             StringComparison.Ordinal);
 
         Assert.True(start >= 0 && end > start);
-        var backfill = canonical[start..end];
-        Assert.Contains(
-            "INSERT INTO [tb_audit].[AuditEvents]",
-            backfill,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "@LegacyMatchActorSid, @LegacyMatchActorLoginName",
-            backfill,
+        var correction = canonical[start..end];
+        Assert.DoesNotContain(
+            "[tb_client].[EnsureLiveClientInfo]",
+            manual,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
-            "[tb_security].[WriteAuditEvent]",
-            backfill,
+            "[tb_client].[EnsureLiveClientInfo]",
+            automatic,
             StringComparison.Ordinal);
-        Assert.Contains("BEGIN TRANSACTION", backfill, StringComparison.Ordinal);
-        Assert.Contains("COMMIT TRANSACTION", backfill, StringComparison.Ordinal);
-        Assert.Contains("ROLLBACK TRANSACTION", backfill, StringComparison.Ordinal);
+        Assert.Equal(
+            1,
+            canonical.Split(
+                "EXEC [tb_client].[EnsureLiveClientInfo]",
+                StringSplitOptions.None).Length - 1);
+        Assert.Contains(
+            "@LifecycleReason <> N'ManualNewClient'",
+            canonical,
+            StringComparison.Ordinal);
+        Assert.Contains("@ExistingIsLive = 1", canonical, StringComparison.Ordinal);
+        Assert.Contains(
+            "@ExistingCutoverState <> N'NotStarted'",
+            canonical,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "UPDATE [tb_client].[ClientProfiles]",
+            canonical,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "UPDATE [tb_ops].[ClientInfoCutovers]",
+            canonical,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Finish or discard the client workbook migration before creating this client manually.",
+            canonical,
+            StringComparison.Ordinal);
+        Assert.Contains("SET [IsLive]=1", imports, StringComparison.Ordinal);
+        Assert.Contains("SET [State]=N'Complete'", imports, StringComparison.Ordinal);
+        Assert.Contains(
+            "INSERT INTO [tb_audit].[AuditEvents]",
+            correction,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ClientInfoMatchLifecycleCorrected",
+            correction,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "LegacyMatchedClientPromoted",
+            correction,
+            StringComparison.Ordinal);
+        Assert.Contains("ClientAutoMatched", correction, StringComparison.Ordinal);
+        Assert.Contains("ClientMerged", correction, StringComparison.Ordinal);
+        Assert.Contains("ManualClientInfoCreated", correction, StringComparison.Ordinal);
+        Assert.Contains("ManualClientInfoPromoted", correction, StringComparison.Ordinal);
+        Assert.Contains("promoted_batch.[State] = N'Promoted'", correction, StringComparison.Ordinal);
+        Assert.Contains("[IsLive] = 0", correction, StringComparison.Ordinal);
+        Assert.Contains("[State] =", correction, StringComparison.Ordinal);
+        Assert.Contains("N'NotStarted'", correction, StringComparison.Ordinal);
+        Assert.Contains("N'Staging'", correction, StringComparison.Ordinal);
+        Assert.Contains("N'Ready'", correction, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "DELETE FROM [tb_client]",
+            correction,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("BEGIN TRANSACTION", correction, StringComparison.Ordinal);
+        Assert.Contains("COMMIT TRANSACTION", correction, StringComparison.Ordinal);
+        Assert.Contains("ROLLBACK TRANSACTION", correction, StringComparison.Ordinal);
+        Assert.Contains("WHD/Sage matching still promotes", verifier, StringComparison.Ordinal);
+        Assert.Contains(
+            "source-matched clients remain incorrectly Live",
+            verifier,
+            StringComparison.Ordinal);
     }
 
     [Fact]

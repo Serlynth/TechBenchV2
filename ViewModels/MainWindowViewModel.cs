@@ -1716,8 +1716,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             ClientMatchSuggestionText = SelectedWhdMatchCandidate is not null
                 && SelectedSageMatchCandidate is not null
-                ? "No live TechBench target selected. Create a new live client from the selected WHD and Sage records."
-                : "Choose a live TechBench client to keep, or select one WHD-only and one Sage-only record to create a new live client.";
+                ? "No live TechBench target selected. Match the WHD and Sage source records, then use Workbook Imports to make the client Live."
+                : "Choose a live TechBench client to keep, or select one WHD-only and one Sage-only record to match before workbook import.";
             return;
         }
 
@@ -3867,7 +3867,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         if (SelectedWhdMatchCandidate is { IsExternalSourceLinkEligible: false }
             || SelectedSageMatchCandidate is { IsExternalSourceLinkEligible: false })
         {
-            ShowClientSourceMigrationBlocker("Create live TechBench client");
+            ShowClientSourceMigrationBlocker("Match WHD and Sage records");
             return;
         }
 
@@ -3879,13 +3879,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var whdClient = SelectedWhdMatchCandidate!;
         var sageClient = SelectedSageMatchCandidate!;
         var confirmed = _dialogService.Confirm(
-            "Create live TechBench client",
-            $"Create one live TechBench client from:\n"
+            "Match WHD and Sage records",
+            $"Match these source records into one TechBench client:\n"
             + $"WHD: {whdClient.WhdLocationLabel}\n"
             + $"Sage: {sageClient.SageCustomerLabel}\n\n"
-            + "Use this when no live Client Information profile exists yet. "
+            + "The result remains Needs review, not Live, until its Client Information workbook is imported and promoted. "
             + "Existing tickets and notes remain attached to the resulting TechBench client.",
-            "Create live client",
+            "Match source records",
             "Cancel");
         if (!confirmed)
         {
@@ -3899,21 +3899,21 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 sageClient.Id);
             var canonicalClientId = canonicalClient.Id;
             RefreshClients();
-            SelectedCanonicalMatchClient = CanonicalClientCandidates.FirstOrDefault(
-                client => client.Id == canonicalClientId);
+            SelectedCanonicalMatchClient = null;
             SelectedManagedClient = ManagedClients.FirstOrDefault(
                 client => client.Id == canonicalClientId);
             StatusMessage =
-                $"Created live TechBench client {canonicalClient.Name} "
-                + $"with internal ID {canonicalClientId} and linked its WHD and Sage records.";
+                $"Matched the WHD and Sage records as TechBench client {canonicalClient.Name} "
+                + $"with internal ID {canonicalClientId}. It remains Needs review; "
+                + "use Workbook Imports to promote it to Live.";
         }
         catch (InvalidOperationException ex)
         {
-            ShowClientSourceLinkingError("Create live TechBench client", ex.Message);
+            ShowClientSourceLinkingError("Match WHD and Sage records", ex.Message);
         }
         catch (SqlException ex)
         {
-            ShowClientSourceLinkingError("Create live TechBench client", ex.Message);
+            ShowClientSourceLinkingError("Match WHD and Sage records", ex.Message);
         }
     }
 

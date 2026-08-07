@@ -2080,19 +2080,10 @@ BEGIN
         IF @@ROWCOUNT = 0
             THROW 51273, N'The source client changed during the merge.', 1;
 
-        IF EXISTS
-        (
-            SELECT 1 FROM [tb_data].[ClientExternalIdentities]
-            WHERE [ClientId]=@WhdClientId AND [SourceSystem]=N'WHD'
-        )
-        AND EXISTS
-        (
-            SELECT 1 FROM [tb_data].[ClientExternalIdentities]
-            WHERE [ClientId]=@WhdClientId AND [SourceSystem]=N'Sage'
-        )
-            EXEC [tb_client].[EnsureLiveClientInfo]
-                @ClientId=@WhdClientId,
-                @ActorWindowsSid=@UserSid;
+        /* Matching source identities does not complete the Client Information
+           lifecycle. The merged client remains source-only until an approved
+           workbook is promoted or an Admin explicitly creates it as a manual
+           Client Information client. */
 
         DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @WhdClientId);
         EXEC [tb_security].[WriteAuditEvent]

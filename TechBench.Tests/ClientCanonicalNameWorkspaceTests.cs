@@ -37,7 +37,9 @@ public sealed class ClientCanonicalNameWorkspaceTests
         Assert.Contains("LinkClientSourcesCommand", xaml, StringComparison.Ordinal);
         Assert.Contains("Link selected sources", xaml, StringComparison.Ordinal);
         Assert.Contains("CreateCanonicalClientFromSourcesCommand", xaml, StringComparison.Ordinal);
-        Assert.Contains("Create live client", xaml, StringComparison.Ordinal);
+        Assert.Contains("Match WHD + Sage", xaml, StringComparison.Ordinal);
+        Assert.Contains("Workbook import is required before it becomes Live", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("combine the selected WHD-only and Sage-only records into one live client", xaml, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("InternalIdLabel", xaml, StringComparison.Ordinal);
         Assert.Contains("CanonicalLinkStatusLabel", xaml, StringComparison.Ordinal);
 
@@ -59,6 +61,10 @@ public sealed class ClientCanonicalNameWorkspaceTests
             "_repository.MergeClientRecords(",
             viewModel,
             StringComparison.Ordinal);
+        Assert.Contains("SelectedCanonicalMatchClient = null;", viewModel, StringComparison.Ordinal);
+        Assert.Contains("It remains Needs review", viewModel, StringComparison.Ordinal);
+        Assert.Contains("use Workbook Imports to promote it to Live", viewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("Created live TechBench client", viewModel, StringComparison.Ordinal);
     }
 
     [Fact]

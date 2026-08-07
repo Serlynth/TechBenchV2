@@ -32,6 +32,7 @@ public sealed class ClientCanonicalLinkStatusTests
     [InlineData(true, true, true, "Fully linked")]
     [InlineData(false, true, false, "Needs review")]
     [InlineData(false, false, true, "Needs review")]
+    [InlineData(false, true, true, "Needs review")]
     public void DescribesCanonicalAndSourceOnlyLinkStates(
         bool isClientInfoLive,
         bool hasWhdIdentity,

@@ -2188,9 +2188,9 @@ BEGIN
         IF @@ROWCOUNT <> 1
             THROW 51971, N'The Sage client changed during automatic matching.', 1;
 
-        EXEC [tb_client].[EnsureLiveClientInfo]
-            @ClientId=@WhdClientId,
-            @ActorWindowsSid=@ActorSid;
+        /* Matching WHD and Sage identities is not a Client Information
+           promotion. The surviving client remains source-only until its
+           workbook is promoted or it is explicitly created manually. */
 
         DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @WhdClientId);
         EXEC [tb_security].[WriteAuditEvent]

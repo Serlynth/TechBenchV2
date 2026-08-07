@@ -83,6 +83,24 @@ public sealed class ClientMatchExcelExportServiceTests
     }
 
     [Fact]
+    public void MatchedSourcePairRemainsSourceOnlyUntilClientInfoIsLive()
+    {
+        var client = new Client
+        {
+            Id = 735,
+            Name = "Marrone & O'Rourke",
+            IsActive = true,
+            IsClientInfoLive = false,
+            HasWhdIdentity = true,
+            HasSageIdentity = true
+        };
+
+        Assert.Equal(
+            ClientMatchExportCategory.SourceOnly,
+            ClientMatchExcelExportService.GetCategory(client));
+    }
+
+    [Fact]
     public void GeneratedWorkbookCanBeReadByAnExcelWorkbookParser()
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
