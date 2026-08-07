@@ -183,7 +183,7 @@ FireDrill is not retired in this beta. Global retirement can occur only after:
 - all workstations and server components are on a stable release that reads
   canonical Client Info;
 - backup/restore of the client-secret certificate and key is tested;
-- a rollback window and hypercare owner are assigned.
+- a rollback window and post-import review owner are assigned.
 
 The later stable cutover removes the FireDrill workbook configuration, sync
 reader, service schedule, source-shaped cache, repository naming, and UI only

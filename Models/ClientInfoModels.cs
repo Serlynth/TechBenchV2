@@ -21,6 +21,7 @@ public sealed record ClientInfoClientSummary
     public bool IsDemo { get; init; }
 
     public string InternalIdLabel => IsDemo ? "DEMO" : $"ID {ClientId}";
+    public string DisplayStatus => IsLive ? "Live" : CutoverState;
     public string CountLabel =>
         $"{LocationCount} locations · {PersonCount} users · {ResourceCount} systems · {CredentialCount} credentials";
 }
@@ -44,6 +45,7 @@ public sealed record ClientInfoProfile
     public byte[]? RowVersion { get; init; }
     public string CutoverState { get; init; } = "NotStarted";
     public byte[]? CutoverRowVersion { get; init; }
+    public string DisplayStatus => IsLive ? "Live" : CutoverState;
 }
 
 public sealed record ClientAttachmentStorageConfiguration
