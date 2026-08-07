@@ -13,7 +13,8 @@ namespace TechBench.Services;
 
 public sealed class ClientInfoWorkbookService
 {
-    public const string TemplateVersion = "TB-CI-10";
+    public const string TemplateVersion = "TB-CI-11";
+    public const string FireDrillTransferTemplateVersion = "TB-CI-10";
     public const string PrimaryAccessTemplateVersion = "TB-CI-9";
     public const string InlineCredentialsTemplateVersion = "TB-CI-8";
     public const string PreviousTemplateVersion = "TB-CI-7";
@@ -49,7 +50,18 @@ public sealed class ClientInfoWorkbookService
         "Password", "API Key", "Token", "PIN", "Recovery Code", "Other"
     ];
 
-    public void CreateTemplate(string path, int clientId, string clientName)
+    private static readonly string[] LegacyFireDrillHeaders =
+    [
+        "Firebox IP", "Status", "Admin", "csriadmin",
+        "*if enabled -Firebox-DB\\csri", "Authpoint User", "sslvpnpassword",
+        "AD Auth User", "AD Password", "RustPW"
+    ];
+
+    public void CreateTemplate(
+        string path,
+        int clientId,
+        string clientName,
+        IReadOnlyList<string>? fireDrillFieldLabels = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentException.ThrowIfNullOrWhiteSpace(clientName);
@@ -72,7 +84,7 @@ public sealed class ClientInfoWorkbookService
             "Start Here",
             [
                 ["TechBench Client Info Migration Workbook", ""],
-                ["What to do", "Copy cleaned information into the matching category tabs. Use the category-specific IP and network columns. You may add optional columns whose headings begin with 'Custom:' for unusual client-specific details."],
+                ["What to do", "Copy cleaned information into the matching category tabs. The FireDrill tab uses this client's current FireDrill column names; copy existing FireDrill values there instead of renaming them or entering the same value twice. Use the category-specific tabs for new information and object-linked logins. You may add optional columns whose headings begin with 'Custom:' for unusual client-specific details."],
                 ["Review each row", "Choose Verified, Keep as-is, Needs review, or Do not import. A workbook cannot be approved while a populated row is blank or still Needs review."],
                 ["Passwords", "Enter the primary username and password beside each application, security product, server, service, or other system. Firewall rows provide separate Status and Admin logins. For Microsoft 365 users, choose whether the AD login is reused; when it is not, enter the separate Microsoft 365 username and password. Use Passwords for additional logins or credentials that are not tied to one row. Imported credentials stay linked to their item and also appear in the master Passwords section. All secrets are encrypted when imported and are never written to import logs."],
                 ["Template Version", TemplateVersion],
@@ -113,6 +125,20 @@ public sealed class ClientInfoWorkbookService
                  "Is Primary", "Review Status"]
             ],
             columnWidths: [26, 24, 24, 28, 32, 18, 26, 24, 30, 30, 20, 18, 18, 22, 20, 12, 22]);
+        var fireDrillHeaders = BuildFireDrillHeaders(fireDrillFieldLabels);
+        AddSheet(
+            workbookPart,
+            sheets,
+            ref sheetId,
+            "FireDrill",
+            [fireDrillHeaders],
+            columnWidths: fireDrillHeaders
+                .Select(header => header.Equals(
+                    "Review Status",
+                    StringComparison.OrdinalIgnoreCase)
+                    ? 22D
+                    : 30D)
+                .ToArray());
         AddSheet(
             workbookPart,
             sheets,
@@ -239,6 +265,10 @@ public sealed class ClientInfoWorkbookService
         if (!string.Equals(version, TemplateVersion, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(
                 version,
+                FireDrillTransferTemplateVersion,
+                StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(
+                version,
                 PrimaryAccessTemplateVersion,
                 StringComparison.OrdinalIgnoreCase)
             && !string.Equals(
@@ -275,7 +305,7 @@ public sealed class ClientInfoWorkbookService
                 StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException(
-                $"Template version '{version}' is not supported. Expected {TemplateVersion}, {PrimaryAccessTemplateVersion}, {InlineCredentialsTemplateVersion}, {PreviousTemplateVersion}, {ResourceFieldsTemplateVersion}, {WifiTemplateVersion}, {ConnectionTemplateVersion}, {CategorizedTemplateVersion}, {FriendlyTemplateVersion}, or {LegacyTemplateVersion}.");
+                $"Template version '{version}' is not supported. Expected {TemplateVersion}, {FireDrillTransferTemplateVersion}, {PrimaryAccessTemplateVersion}, {InlineCredentialsTemplateVersion}, {PreviousTemplateVersion}, {ResourceFieldsTemplateVersion}, {WifiTemplateVersion}, {ConnectionTemplateVersion}, {CategorizedTemplateVersion}, {FriendlyTemplateVersion}, or {LegacyTemplateVersion}.");
         }
 
         if (!Guid.TryParse(GetRequired(info, "Workbook ID"), out var workbookId))
@@ -315,6 +345,10 @@ public sealed class ClientInfoWorkbookService
                 StringComparison.OrdinalIgnoreCase)
             || string.Equals(
                 version,
+                FireDrillTransferTemplateVersion,
+                StringComparison.OrdinalIgnoreCase)
+            || string.Equals(
+                version,
                 PrimaryAccessTemplateVersion,
                 StringComparison.OrdinalIgnoreCase)
             || string.Equals(
@@ -348,6 +382,10 @@ public sealed class ClientInfoWorkbookService
                 StringComparison.OrdinalIgnoreCase)
                 || string.Equals(
                     version,
+                    FireDrillTransferTemplateVersion,
+                    StringComparison.OrdinalIgnoreCase)
+                || string.Equals(
+                    version,
                     PrimaryAccessTemplateVersion,
                     StringComparison.OrdinalIgnoreCase)
                 || string.Equals(
@@ -360,12 +398,20 @@ public sealed class ClientInfoWorkbookService
                 StringComparison.OrdinalIgnoreCase)
                 || string.Equals(
                     version,
+                    FireDrillTransferTemplateVersion,
+                    StringComparison.OrdinalIgnoreCase)
+                || string.Equals(
+                    version,
                     PrimaryAccessTemplateVersion,
                     StringComparison.OrdinalIgnoreCase);
             var hasSplitProtectionSheets = hasInlineCredentials;
             var hasWifiSheet = string.Equals(
                     version,
                     TemplateVersion,
+                    StringComparison.OrdinalIgnoreCase)
+                || string.Equals(
+                    version,
+                    FireDrillTransferTemplateVersion,
                     StringComparison.OrdinalIgnoreCase)
                 || string.Equals(
                     version,
@@ -513,6 +559,16 @@ public sealed class ClientInfoWorkbookService
                 resourceKeys,
                 userKeys);
             ParseSimpleFacts(GetSheet(tables, "Other Info"), records);
+            if (string.Equals(
+                    version,
+                    TemplateVersion,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                ParseFireDrillCredentials(
+                    GetSheet(tables, "FireDrill"),
+                    records,
+                    secrets);
+            }
         }
         else if (string.Equals(
                      version,
@@ -1301,6 +1357,124 @@ public sealed class ClientInfoWorkbookService
         }
     }
 
+    private static void ParseFireDrillCredentials(
+        IReadOnlyList<string[]> rows,
+        ICollection<ClientInfoImportRecord> records,
+        ICollection<ClientInfoImportSecret> secrets)
+    {
+        foreach (var row in DataRows(rows))
+        {
+            var reviewStatus = NormalizeReviewStatus(
+                Value(row.Values, row.Headers, "Review Status"));
+            for (var index = 0;
+                 index < row.Headers.Length && index < row.Values.Length;
+                 index++)
+            {
+                var label = row.Headers[index].Trim();
+                var value = row.Values[index];
+                if (string.IsNullOrWhiteSpace(label)
+                    || label.Equals(
+                        "Review Status",
+                        StringComparison.OrdinalIgnoreCase)
+                    || label.Equals("Client", StringComparison.OrdinalIgnoreCase)
+                    || string.IsNullOrWhiteSpace(value))
+                {
+                    continue;
+                }
+
+                var localKey = $"firedrill-credential-{row.RowNumber}-{index + 1}";
+                records.Add(new ClientInfoImportRecord(
+                    "Credential",
+                    localKey,
+                    null,
+                    JsonSerializer.Serialize(new
+                    {
+                        resourceKey = (string?)null,
+                        personKey = (string?)null,
+                        name = label,
+                        category = ClassifyFireDrillField(label),
+                        username = "",
+                        loginUrl = "",
+                        notes = "Imported from the matching FireDrill column."
+                    }),
+                    "FireDrill",
+                    row.RowNumber,
+                    reviewStatus));
+                secrets.Add(new ClientInfoImportSecret(
+                    localKey,
+                    "Password",
+                    label,
+                    value));
+            }
+        }
+    }
+
+    private static string ClassifyFireDrillField(string label)
+    {
+        var normalized = label.Trim().ToLowerInvariant();
+        if (normalized is "status" or "admin" or "csriadmin"
+            || normalized.Contains("watchguard", StringComparison.Ordinal)
+            || normalized.Contains("firebox", StringComparison.Ordinal)
+            || normalized.Contains("authpoint", StringComparison.Ordinal)
+            || normalized.Contains("sslvpn", StringComparison.Ordinal)
+            || normalized.Contains("ssl vpn", StringComparison.Ordinal))
+        {
+            return ClientInfoResourceCategories.ConnectionInternet;
+        }
+
+        if (normalized.Contains("wireless", StringComparison.Ordinal)
+            || normalized.Contains("wifi", StringComparison.Ordinal)
+            || normalized.Contains("wi-fi", StringComparison.Ordinal))
+        {
+            return ClientInfoResourceCategories.Wifi;
+        }
+
+        if (normalized.Contains("microsoft 365", StringComparison.Ordinal)
+            || normalized.Contains("office 365", StringComparison.Ordinal)
+            || normalized.Contains("m365", StringComparison.Ordinal)
+            || normalized.Contains("o365", StringComparison.Ordinal)
+            || normalized.Contains("rustpw", StringComparison.Ordinal)
+            || normalized.Contains("rust pw", StringComparison.Ordinal)
+            || normalized.Contains("rustdesk", StringComparison.Ordinal)
+            || normalized.Contains("screenconnect", StringComparison.Ordinal)
+            || normalized.Contains("connectwise", StringComparison.Ordinal))
+        {
+            return ClientInfoResourceCategories.ApplicationsCloud;
+        }
+
+        if (normalized.Contains("barracuda", StringComparison.Ordinal)
+            || normalized.Contains("ad auth", StringComparison.Ordinal)
+            || normalized.Contains("ad password", StringComparison.Ordinal)
+            || normalized.Contains("active directory", StringComparison.Ordinal)
+            || normalized.Contains("domain", StringComparison.Ordinal))
+        {
+            return ClientInfoResourceCategories.DomainsEmail;
+        }
+
+        if (normalized.Contains("veeam", StringComparison.Ordinal)
+            || normalized.Contains("backup", StringComparison.Ordinal))
+        {
+            return ClientInfoResourceCategories.Backup;
+        }
+
+        if (normalized.Contains("eset", StringComparison.Ordinal)
+            || normalized.Contains("antivirus", StringComparison.Ordinal)
+            || normalized.Contains("edr", StringComparison.Ordinal))
+        {
+            return ClientInfoResourceCategories.Security;
+        }
+
+        if (normalized.Contains("ilo", StringComparison.Ordinal)
+            || normalized.Contains("ups", StringComparison.Ordinal)
+            || normalized.Contains("server", StringComparison.Ordinal)
+            || normalized.Contains("switch", StringComparison.Ordinal))
+        {
+            return ClientInfoResourceCategories.ServersInfrastructure;
+        }
+
+        return ClientInfoResourceCategories.NeedsSorting;
+    }
+
     private static void ParseSimpleFacts(
         IReadOnlyList<string[]> rows,
         ICollection<ClientInfoImportRecord> records)
@@ -1810,6 +1984,27 @@ public sealed class ClientInfoWorkbookService
             "Notes",
             "Review Status"
         ];
+
+    private static string[] BuildFireDrillHeaders(
+        IReadOnlyList<string>? fieldLabels)
+    {
+        var unique = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var headers = (fieldLabels is { Count: > 0 }
+                ? fieldLabels
+                : LegacyFireDrillHeaders)
+            .Select(label => label?.Trim() ?? string.Empty)
+            .Where(label => !string.IsNullOrWhiteSpace(label)
+                            && !label.Equals(
+                                "Client",
+                                StringComparison.OrdinalIgnoreCase)
+                            && !label.Equals(
+                                "Review Status",
+                                StringComparison.OrdinalIgnoreCase)
+                            && unique.Add(label))
+            .ToList();
+        headers.Add("Review Status");
+        return headers.ToArray();
+    }
 
     private static string[] ResourceAccessHeaders(string category) =>
         category.Equals(
