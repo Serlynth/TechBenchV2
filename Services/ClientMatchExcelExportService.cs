@@ -9,10 +9,11 @@ namespace TechBench.Services;
 
 public enum ClientMatchExportCategory
 {
-    Matched,
-    WhdOnly,
-    SageOnly,
-    ManualOrOther
+    FullyLinked,
+    TechBenchWhd,
+    TechBenchSage,
+    TechBenchOnly,
+    SourceOnly
 }
 
 public static class ClientMatchExcelExportService
@@ -28,11 +29,14 @@ public static class ClientMatchExcelExportService
 
     private static readonly string[] ClientHeaders =
     [
+        "Internal TechBench ID",
         "TechBench client name",
         "Category",
-        "Source",
+        "Client Information",
+        "WHD linked",
+        "Sage linked",
         "Active",
-        "Match status",
+        "Review status",
         "WHD ID",
         "WHD location",
         "WHD contact",
@@ -61,21 +65,25 @@ public static class ClientMatchExcelExportService
         {
             BuildSummarySheet(allClients, generatedAt ?? DateTimeOffset.Now),
             BuildClientSheet(
-                "Matched",
+                "Fully Linked",
                 allClients.Where(client =>
-                    GetCategory(client) == ClientMatchExportCategory.Matched)),
+                    GetCategory(client) == ClientMatchExportCategory.FullyLinked)),
             BuildClientSheet(
-                "WHD Only",
+                "TB WHD",
                 allClients.Where(client =>
-                    GetCategory(client) == ClientMatchExportCategory.WhdOnly)),
+                    GetCategory(client) == ClientMatchExportCategory.TechBenchWhd)),
             BuildClientSheet(
-                "Sage Only",
+                "TB Sage",
                 allClients.Where(client =>
-                    GetCategory(client) == ClientMatchExportCategory.SageOnly)),
+                    GetCategory(client) == ClientMatchExportCategory.TechBenchSage)),
             BuildClientSheet(
-                "Manual Other",
+                "TB Only",
                 allClients.Where(client =>
-                    GetCategory(client) == ClientMatchExportCategory.ManualOrOther)),
+                    GetCategory(client) == ClientMatchExportCategory.TechBenchOnly)),
+            BuildClientSheet(
+                "Source Only",
+                allClients.Where(client =>
+                    GetCategory(client) == ClientMatchExportCategory.SourceOnly)),
             BuildClientSheet("All Clients", allClients)
         };
 
@@ -100,40 +108,50 @@ public static class ClientMatchExcelExportService
     {
         ArgumentNullException.ThrowIfNull(client);
 
-        if (client.Source.Equals("Both", StringComparison.OrdinalIgnoreCase))
+        if (!client.IsClientInfoLive)
         {
-            return ClientMatchExportCategory.Matched;
+            return ClientMatchExportCategory.SourceOnly;
         }
 
-        if (client.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase))
+        if (client.HasWhdIdentity && client.HasSageIdentity)
         {
-            return ClientMatchExportCategory.WhdOnly;
+            return ClientMatchExportCategory.FullyLinked;
         }
 
-        if (client.Source.Equals("Sage", StringComparison.OrdinalIgnoreCase))
+        if (client.HasWhdIdentity)
         {
-            return ClientMatchExportCategory.SageOnly;
+            return ClientMatchExportCategory.TechBenchWhd;
         }
 
-        return ClientMatchExportCategory.ManualOrOther;
+        return client.HasSageIdentity
+            ? ClientMatchExportCategory.TechBenchSage
+            : ClientMatchExportCategory.TechBenchOnly;
     }
 
     public static string GetCategoryLabel(Client client) =>
         GetCategory(client) switch
         {
-            ClientMatchExportCategory.Matched => "Matched",
-            ClientMatchExportCategory.WhdOnly => "WHD only",
-            ClientMatchExportCategory.SageOnly => "Sage only",
-            _ => "Manual / other"
+            ClientMatchExportCategory.FullyLinked => "Fully linked",
+            ClientMatchExportCategory.TechBenchWhd => "TB + WHD",
+            ClientMatchExportCategory.TechBenchSage => "TB + Sage",
+            ClientMatchExportCategory.TechBenchOnly => "TB only",
+            _ => client.HasWhdIdentity && client.HasSageIdentity
+                ? "Source only: WHD + Sage"
+                : client.HasWhdIdentity
+                    ? "Source only: WHD"
+                    : client.HasSageIdentity
+                        ? "Source only: Sage"
+                        : "Source only"
         };
 
     private static int GetCategorySortOrder(Client client) =>
         GetCategory(client) switch
         {
-            ClientMatchExportCategory.Matched => 0,
-            ClientMatchExportCategory.WhdOnly => 1,
-            ClientMatchExportCategory.SageOnly => 2,
-            _ => 3
+            ClientMatchExportCategory.FullyLinked => 0,
+            ClientMatchExportCategory.TechBenchWhd => 1,
+            ClientMatchExportCategory.TechBenchSage => 2,
+            ClientMatchExportCategory.TechBenchOnly => 3,
+            _ => 4
         };
 
     private static WorkbookSheet BuildSummarySheet(
@@ -155,20 +173,24 @@ public static class ClientMatchExcelExportService
 
         AddSummaryRow(
             rows,
-            "Imported from WHD (includes matched)",
+            "WHD identities (all link states)",
             clients.Where(HasWhdSource));
         AddSummaryRow(
             rows,
-            "Imported from Sage (includes matched)",
+            "Sage identities (all link states)",
             clients.Where(HasSageSource));
-        AddSummaryRow(rows, "Matched", clients.Where(client =>
-            GetCategory(client) == ClientMatchExportCategory.Matched));
-        AddSummaryRow(rows, "WHD only", clients.Where(client =>
-            GetCategory(client) == ClientMatchExportCategory.WhdOnly));
-        AddSummaryRow(rows, "Sage only", clients.Where(client =>
-            GetCategory(client) == ClientMatchExportCategory.SageOnly));
-        AddSummaryRow(rows, "Manual / other", clients.Where(client =>
-            GetCategory(client) == ClientMatchExportCategory.ManualOrOther));
+        AddSummaryRow(rows, "Live TechBench clients", clients.Where(client =>
+            client.IsClientInfoLive));
+        AddSummaryRow(rows, "Fully linked", clients.Where(client =>
+            GetCategory(client) == ClientMatchExportCategory.FullyLinked));
+        AddSummaryRow(rows, "TB + WHD", clients.Where(client =>
+            GetCategory(client) == ClientMatchExportCategory.TechBenchWhd));
+        AddSummaryRow(rows, "TB + Sage", clients.Where(client =>
+            GetCategory(client) == ClientMatchExportCategory.TechBenchSage));
+        AddSummaryRow(rows, "TB only", clients.Where(client =>
+            GetCategory(client) == ClientMatchExportCategory.TechBenchOnly));
+        AddSummaryRow(rows, "Source only / needs review", clients.Where(client =>
+            GetCategory(client) == ClientMatchExportCategory.SourceOnly));
         AddSummaryRow(rows, "All clients", clients);
 
         return new WorkbookSheet(
@@ -195,13 +217,9 @@ public static class ClientMatchExcelExportService
             NumericColumns: [1]));
     }
 
-    private static bool HasWhdSource(Client client) =>
-        client.Source.Equals("WHD", StringComparison.OrdinalIgnoreCase)
-        || client.Source.Equals("Both", StringComparison.OrdinalIgnoreCase);
+    private static bool HasWhdSource(Client client) => client.HasWhdIdentity;
 
-    private static bool HasSageSource(Client client) =>
-        client.Source.Equals("Sage", StringComparison.OrdinalIgnoreCase)
-        || client.Source.Equals("Both", StringComparison.OrdinalIgnoreCase);
+    private static bool HasSageSource(Client client) => client.HasSageIdentity;
 
     private static WorkbookSheet BuildClientSheet(
         string name,
@@ -217,11 +235,14 @@ public static class ClientMatchExcelExportService
                 .ThenBy(static client => client.Id)
                 .Select(client => new WorkbookRow(
                     [
+                        client.Id.ToString(CultureInfo.InvariantCulture),
                         client.Name,
                         GetCategoryLabel(client),
-                        client.SourceLabel,
+                        client.IsClientInfoLive ? "Live" : "Source only",
+                        client.HasWhdIdentity ? "Yes" : "No",
+                        client.HasSageIdentity ? "Yes" : "No",
                         client.IsActive ? "Yes" : "No",
-                        client.MatchStatusLabel,
+                        client.ClientInfoReviewStatus,
                         ResolveWhdExternalId(client),
                         client.WhdLocationName ?? string.Empty,
                         client.WhdContactName ?? string.Empty,
@@ -241,14 +262,14 @@ public static class ClientMatchExcelExportService
         return new WorkbookSheet(
             name,
             rows,
-            [34d, 16d, 12d, 10d, 16d, 22d, 32d, 26d, 30d, 18d, 42d, 20d, 34d, 26d, 18d, 20d],
+            [20d, 34d, 22d, 18d, 14d, 14d, 10d, 18d, 22d, 32d, 26d, 30d, 18d, 42d, 20d, 34d, 26d, 18d, 20d],
             FreezeRow: 1,
             AutoFilterRow: 1);
     }
 
     private static string ResolveWhdExternalId(Client client)
     {
-        if (client.Source.Equals("Sage", StringComparison.OrdinalIgnoreCase))
+        if (!client.HasWhdIdentity)
         {
             return string.Empty;
         }

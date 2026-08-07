@@ -48,6 +48,13 @@ public interface ITechBenchRepository
 
     Client MergeClientRecords(int whdClientId, int sageClientId);
 
+    Client LinkClientSources(
+        int canonicalClientId,
+        int? whdClientId,
+        int? sageClientId) =>
+        throw new NotSupportedException(
+            "Canonical client source linking requires the current shared SQL Server package.");
+
     int ReconcileExactClientMatches();
 
     int ReconcileStrongClientMatches();

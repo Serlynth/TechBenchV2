@@ -8,6 +8,8 @@ namespace TechBench.SyncService;
 
 public sealed partial class SyncSqlRepository
 {
+    private const int MaxCanonicalSourceMatchesPerReconciliation = 1000;
+
     private readonly SyncServiceOptions _options;
     private readonly string _connectionString;
 
@@ -239,10 +241,101 @@ public sealed partial class SyncSqlRepository
     internal async Task<int> ReconcileAutomaticClientMatchesAsync(
         CancellationToken cancellationToken)
     {
+        var appliedCount = 0;
+
+        /* A canonical client changes rowversion each time it absorbs a source.
+           Apply one source per canonical from a snapshot, while allowing all
+           disjoint canonical clients to make progress before the next reload. */
+        var canonicalSourceAttempts = 0;
+        var noProgressReloadAvailable = true;
+        while (canonicalSourceAttempts
+               < MaxCanonicalSourceMatchesPerReconciliation)
+        {
+            var canonicalCandidates =
+                await GetAutomaticClientMatchCandidatesAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            var canonicalMatches =
+                ServerAutomaticClientMatcher.FindSafeCanonicalSourceMatches(
+                    canonicalCandidates);
+            if (canonicalMatches.Count == 0)
+            {
+                break;
+            }
+
+            var appliedThisPass = 0;
+            var attemptedCanonicalIds = new HashSet<int>();
+            foreach (var canonicalMatch in canonicalMatches
+                         .OrderBy(static match => match.CanonicalClient.Id)
+                         .ThenBy(static match => match.SourceSystem == "Sage" ? 0 : 1)
+                         .ThenBy(static match => match.SourceClient.Id))
+            {
+                if (canonicalSourceAttempts
+                        >= MaxCanonicalSourceMatchesPerReconciliation
+                    || !attemptedCanonicalIds.Add(
+                        canonicalMatch.CanonicalClient.Id))
+                {
+                    continue;
+                }
+
+                canonicalSourceAttempts++;
+                var canonicalApplied = await ApplyAutomaticClientSourceMatchAsync(
+                        canonicalMatch,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (canonicalApplied <= 0)
+                {
+                    continue;
+                }
+
+                appliedCount += canonicalApplied;
+                appliedThisPass += canonicalApplied;
+                appliedCount += await ApplyCanonicalWhdFamilyMembersAsync(
+                        canonicalMatch,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (appliedThisPass > 0)
+            {
+                noProgressReloadAvailable = true;
+                continue;
+            }
+
+            if (noProgressReloadAvailable)
+            {
+                noProgressReloadAvailable = false;
+                continue;
+            }
+
+            break;
+        }
+
         var candidates = await GetAutomaticClientMatchCandidatesAsync(cancellationToken)
             .ConfigureAwait(false);
+        var canonicalFamilyMembers =
+            ServerAutomaticClientMatcher.FindSafeCanonicalWhdFamilyMembers(candidates);
+        foreach (var familyMember in canonicalFamilyMembers)
+        {
+            if (string.IsNullOrWhiteSpace(familyMember.SageClient.SageCustomerId))
+            {
+                continue;
+            }
+
+            appliedCount += await ApplyAutomaticWhdFamilyMemberAsync(
+                    familyMember.SageClient.Id,
+                    familyMember.SageClient.SageCustomerId,
+                    familyMember,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (canonicalFamilyMembers.Count > 0)
+        {
+            candidates = await GetAutomaticClientMatchCandidatesAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         var matches = ServerAutomaticClientMatcher.FindSafeAutomaticMatches(candidates);
-        var appliedCount = 0;
 
         foreach (var matchGroup in matches
                      .GroupBy(static match => match.SageClient.Id)
@@ -276,6 +369,71 @@ public sealed partial class SyncSqlRepository
         }
 
         return appliedCount;
+    }
+
+    private async Task<int> ApplyCanonicalWhdFamilyMembersAsync(
+        ServerAutomaticClientSourceMatch match,
+        CancellationToken cancellationToken)
+    {
+        if (match.SourceSystem != "WHD"
+            || string.IsNullOrWhiteSpace(match.SourceFamilyKey)
+            || match.AdditionalWhdFamilyMembers is not { Count: > 0 } familyMembers
+            || string.IsNullOrWhiteSpace(match.CanonicalClient.SageCustomerId))
+        {
+            return 0;
+        }
+
+        var appliedCount = 0;
+        foreach (var familyMember in familyMembers.OrderBy(static client => client.Id))
+        {
+            appliedCount += await ApplyAutomaticWhdFamilyMemberAsync(
+                    match.CanonicalClient.Id,
+                    match.CanonicalClient.SageCustomerId,
+                    new ServerAutomaticClientMatch(
+                        familyMember,
+                        match.CanonicalClient,
+                        match.Score),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return appliedCount;
+    }
+
+    private async Task<int> ApplyAutomaticClientSourceMatchAsync(
+        ServerAutomaticClientSourceMatch match,
+        CancellationToken cancellationToken)
+    {
+        if (match.CanonicalClient.RowVersion is not { Length: 8 } canonicalRowVersion
+            || match.SourceClient.RowVersion is not { Length: 8 } sourceRowVersion
+            || (match.SourceSystem != "WHD" && match.SourceSystem != "Sage"))
+        {
+            return 0;
+        }
+
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = CreateCommand(
+            connection,
+            "[tb_service].[ApplyAutomaticClientSourceMatch]");
+        Add(command, "@CanonicalClientId", SqlDbType.Int, match.CanonicalClient.Id);
+        Add(command, "@SourceClientId", SqlDbType.Int, match.SourceClient.Id);
+        Add(
+            command,
+            "@ExpectedCanonicalRowVersion",
+            SqlDbType.Binary,
+            canonicalRowVersion,
+            8);
+        Add(
+            command,
+            "@ExpectedSourceRowVersion",
+            SqlDbType.Binary,
+            sourceRowVersion,
+            8);
+        Add(command, "@SourceSystem", SqlDbType.NVarChar, match.SourceSystem, 20);
+        AddMatchScore(command, match.Score);
+        return Convert.ToInt32(
+            await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
+            CultureInfo.InvariantCulture);
     }
 
     private async Task<int> ApplyAutomaticClientMatchAsync(
@@ -354,7 +512,8 @@ public sealed partial class SyncSqlRepository
                 GetNullableString(reader, "WhdLocationName"),
                 GetNullableString(reader, "SageCustomerId"),
                 GetNullableString(reader, "SageCustomerName"),
-                GetBytes(reader, "RowVersion")));
+                GetBytes(reader, "RowVersion"),
+                GetBoolean(reader, "IsTechBenchLive", false)));
         }
 
         return candidates;

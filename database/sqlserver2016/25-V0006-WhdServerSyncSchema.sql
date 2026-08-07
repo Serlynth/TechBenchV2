@@ -296,6 +296,80 @@ BEGIN TRY
         );
     END;
 
+    /*
+        Keep the last canonical owner of a WHD location after that location
+        disappears from a complete snapshot. The active identity row can then
+        be removed without losing the deterministic path back to the same live
+        TechBench client if WHD later returns the location again.
+    */
+    IF OBJECT_ID(N'tb_sync.WhdClientIdentityHistory', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_sync].[WhdClientIdentityHistory]
+        (
+            [ExternalId] nvarchar(500) NOT NULL,
+            [ClientId] int NOT NULL,
+            [ExternalName] nvarchar(240) NULL,
+            [LastSeenAtUtc] datetime2(3) NULL,
+            [RetiredAtUtc] datetime2(3) NOT NULL,
+            [UpdatedByWindowsSid] varbinary(85) NOT NULL,
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_WhdClientIdentityHistory_Updated]
+                DEFAULT (SYSUTCDATETIME()),
+            CONSTRAINT [PK_WhdClientIdentityHistory]
+                PRIMARY KEY CLUSTERED ([ExternalId]),
+            CONSTRAINT [FK_WhdClientIdentityHistory_Client]
+                FOREIGN KEY ([ClientId]) REFERENCES [tb_data].[Clients]([Id])
+                ON DELETE CASCADE,
+            CONSTRAINT [FK_WhdClientIdentityHistory_UpdatedBy]
+                FOREIGN KEY ([UpdatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid])
+        );
+    END;
+
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM sys.indexes
+        WHERE [object_id] = OBJECT_ID(N'tb_sync.WhdClientIdentityHistory')
+          AND [name] = N'IX_WhdClientIdentityHistory_Client'
+    )
+        CREATE INDEX [IX_WhdClientIdentityHistory_Client]
+            ON [tb_sync].[WhdClientIdentityHistory]([ClientId]);
+
+    /*
+        An unexpectedly destructive complete WHD client snapshot must be
+        observed twice with the same missing-location set before identities
+        are retired. Keeping the pending set in SQL makes that confirmation
+        durable across separate sync work items and service restarts.
+    */
+    IF OBJECT_ID(N'tb_sync.WhdPendingClientRemovals', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [tb_sync].[WhdPendingClientRemovals]
+        (
+            [ExternalId] nvarchar(500) NOT NULL,
+            [ExistingCount] int NOT NULL,
+            [IncomingCount] int NOT NULL,
+            [StaleCount] int NOT NULL,
+            [FirstObservedAtUtc] datetime2(3) NOT NULL,
+            [UpdatedByWindowsSid] varbinary(85) NOT NULL,
+            [UpdatedAtUtc] datetime2(3) NOT NULL
+                CONSTRAINT [DF_WhdPendingClientRemovals_Updated]
+                DEFAULT (SYSUTCDATETIME()),
+            CONSTRAINT [PK_WhdPendingClientRemovals]
+                PRIMARY KEY CLUSTERED ([ExternalId]),
+            CONSTRAINT [CK_WhdPendingClientRemovals_Counts]
+                CHECK
+                (
+                    [ExistingCount] > 0
+                    AND [IncomingCount] >= 0
+                    AND [StaleCount] > 0
+                    AND [StaleCount] <= [ExistingCount]
+                ),
+            CONSTRAINT [FK_WhdPendingClientRemovals_UpdatedBy]
+                FOREIGN KEY ([UpdatedByWindowsSid])
+                REFERENCES [tb_security].[Users]([WindowsSid])
+        );
+    END;
+
     IF NOT EXISTS (SELECT 1 FROM [tb_sync].[WhdSyncHealth] WHERE [HealthId] = 1)
         INSERT INTO [tb_sync].[WhdSyncHealth]([HealthId]) VALUES (1);
 

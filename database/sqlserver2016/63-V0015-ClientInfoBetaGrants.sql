@@ -76,6 +76,8 @@ GRANT EXECUTE ON OBJECT::[tb_app].[GetClientInfoSnapshot]
     TO [tb_role_user];
 GRANT EXECUTE ON OBJECT::[tb_app].[AdminCreateManualClientInfoClient]
     TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminLinkClientSources]
+    TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[GetClientInfoImportBatch]
     TO [tb_role_client_migration_operator];
 GRANT EXECUTE ON OBJECT::[tb_app].[GetClientInfoImportBatch]

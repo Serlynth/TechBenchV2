@@ -56,6 +56,7 @@ INSERT INTO @RequiredObjects([ObjectName], [ObjectType]) VALUES
     (N'tb_service.ApplySageCustomerSnapshot', N'P'),
     (N'tb_service.CompleteSageSyncWork', N'P'),
     (N'tb_service.GetAutomaticClientMatchCandidates', N'P'),
+    (N'tb_service.ApplyAutomaticClientSourceMatch', N'P'),
     (N'tb_service.ApplyAutomaticClientMatch', N'P'),
     (N'tb_service.ApplyAutomaticWhdFamilyMember', N'P'),
     (N'tb_app.AdminListPreviewUsers', N'P'),
@@ -180,6 +181,12 @@ INSERT INTO @RequiredParameters([ProcedureName], [ParameterName]) VALUES
     (N'tb_service.CompleteSageSyncWork', N'@WorkerId'),
     (N'tb_service.CompleteSageSyncWork', N'@Succeeded'),
     (N'tb_service.CompleteSageSyncWork', N'@Message'),
+    (N'tb_service.ApplyAutomaticClientSourceMatch', N'@CanonicalClientId'),
+    (N'tb_service.ApplyAutomaticClientSourceMatch', N'@SourceClientId'),
+    (N'tb_service.ApplyAutomaticClientSourceMatch', N'@ExpectedCanonicalRowVersion'),
+    (N'tb_service.ApplyAutomaticClientSourceMatch', N'@ExpectedSourceRowVersion'),
+    (N'tb_service.ApplyAutomaticClientSourceMatch', N'@SourceSystem'),
+    (N'tb_service.ApplyAutomaticClientSourceMatch', N'@MatchScore'),
     (N'tb_service.ApplyAutomaticClientMatch', N'@WhdClientId'),
     (N'tb_service.ApplyAutomaticClientMatch', N'@SageClientId'),
     (N'tb_service.ApplyAutomaticClientMatch', N'@ExpectedWhdRowVersion'),
@@ -312,6 +319,7 @@ INSERT INTO @ServiceProcedures([ObjectName]) VALUES
     (N'tb_service.ApplySageCustomerSnapshot'),
     (N'tb_service.CompleteSageSyncWork'),
     (N'tb_service.GetAutomaticClientMatchCandidates'),
+    (N'tb_service.ApplyAutomaticClientSourceMatch'),
     (N'tb_service.ApplyAutomaticClientMatch'),
     (N'tb_service.ApplyAutomaticWhdFamilyMember');
 
@@ -637,6 +645,25 @@ IF CHARINDEX(N'Sage.SyncDsn', @SageConfigDefinition) = 0
    OR CHARINDEX(N'Sage.SyncUsername', @SageConfigDefinition) = 0
 BEGIN
     PRINT N'FAIL: the service-owned Sage configuration contract is incomplete.';
+    SET @FailureCount += 1;
+END;
+
+DECLARE @AutomaticCandidatesDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_service.GetAutomaticClientMatchCandidates', N'P'));
+DECLARE @AutomaticSourceDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyAutomaticClientSourceMatch', N'P'));
+DECLARE @AutomaticPairDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyAutomaticClientMatch', N'P'));
+DECLARE @AutomaticFamilyDefinition nvarchar(max) =
+    OBJECT_DEFINITION(OBJECT_ID(N'tb_service.ApplyAutomaticWhdFamilyMember', N'P'));
+
+IF CHARINDEX(N'profile.[ClientId] IS NULL', @AutomaticCandidatesDefinition) = 0
+   OR CHARINDEX(N'ClientInfoCutovers', @AutomaticCandidatesDefinition) = 0
+   OR CHARINDEX(N'ClientInfoCutovers', @AutomaticSourceDefinition) = 0
+   OR CHARINDEX(N'ClientInfoCutovers', @AutomaticPairDefinition) = 0
+   OR CHARINDEX(N'ClientInfoCutovers', @AutomaticFamilyDefinition) = 0
+BEGIN
+    PRINT N'FAIL: automatic client matching can consume a staged Client Information workspace.';
     SET @FailureCount += 1;
 END;
 

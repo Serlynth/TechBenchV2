@@ -3135,6 +3135,10 @@ public sealed class ClientInfoBetaTests
             "database",
             "sqlserver2016",
             "49-V0007-ServerOwnedSageAndAdminPreviewProcedures.sql");
+        var canonical = Read(
+            "database",
+            "sqlserver2016",
+            "61-V0015-ClientInfoBetaProcedures.sql");
 
         Assert.Contains(
             "EXEC [tb_client].[ReparentClientGraph]",
@@ -3144,6 +3148,184 @@ public sealed class ClientInfoBetaTests
             automatic.Split(
                 "EXEC [tb_client].[ReparentClientGraph]",
                 StringSplitOptions.None).Length - 1 >= 2);
+        Assert.Contains(
+            "EXEC [tb_client].[ReparentClientGraph]",
+            canonical,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CREATE PROCEDURE [tb_app].[AdminLinkClientSources]",
+            canonical,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[tb_client].[MergeSourceClientIntoCanonical]",
+            canonical,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[IsLive] = 1",
+            canonical,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "LegacyMatchedClientPromoted",
+            canonical,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[SourceSystem] = N'WHD'",
+            canonical,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[SourceSystem] = N'Sage'",
+            canonical,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CanonicalClientMergePathsCannotConsumeClientInfoWorkspaces()
+    {
+        var adminMerge = Read(
+            "database",
+            "sqlserver2016",
+            "42-V0002-SharedProcedures.sql");
+        var automatic = Read(
+            "database",
+            "sqlserver2016",
+            "49-V0007-ServerOwnedSageAndAdminPreviewProcedures.sql");
+        var whdSnapshot = Read(
+            "database",
+            "sqlserver2016",
+            "48-V0006-WhdServerSyncProcedures.sql");
+        var canonical = Read(
+            "database",
+            "sqlserver2016",
+            "61-V0015-ClientInfoBetaProcedures.sql");
+        var clientReads = Read(
+            "database",
+            "sqlserver2016",
+            "40-StoredProcedures.sql");
+
+        Assert.Contains(
+            "Finish or discard the client workbook migration before linking it.",
+            adminMerge,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Finish or discard the client workbook migration before linking it.",
+            canonical,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "source_profile.[IsLive] = 1",
+            automatic,
+            StringComparison.Ordinal);
+        Assert.True(
+            automatic.Split(
+                "FROM [tb_ops].[ClientInfoCutovers] AS source_cutover",
+                StringSplitOptions.None).Length - 1 >= 6,
+            "Every automatic source candidate and merge guard must exclude staged cutovers.");
+        Assert.True(
+            automatic.Split("profile.[ClientId] IS NULL", StringSplitOptions.None).Length - 1 >= 2,
+            "Candidate reads must distinguish a missing profile from a non-live staged profile.");
+        Assert.Equal(
+            2,
+            clientReads.Split("AS [HasClientInfoWorkspace]", StringSplitOptions.None).Length - 1);
+        Assert.Contains(
+            "@StaleLiveWhdClients",
+            whdSnapshot,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "DELETE identity_row",
+            whdSnapshot,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "WHEN sage_identity.[ExternalId] IS NOT NULL THEN N'Sage'",
+            whdSnapshot,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WhdClientSnapshotsFailClosedAndPreserveCanonicalIdentityHistory()
+    {
+        var schema = Read(
+            "database",
+            "sqlserver2016",
+            "25-V0006-WhdServerSyncSchema.sql");
+        var whdSnapshot = Read(
+            "database",
+            "sqlserver2016",
+            "48-V0006-WhdServerSyncProcedures.sql");
+        var canonical = Read(
+            "database",
+            "sqlserver2016",
+            "61-V0015-ClientInfoBetaProcedures.sql");
+        var verifier = Read(
+            "database",
+            "sqlserver2016",
+            "95-V0006-WhdServerSyncVerify.sql");
+
+        Assert.Contains(
+            "CREATE TABLE [tb_sync].[WhdClientIdentityHistory]",
+            schema,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CREATE TABLE [tb_sync].[WhdPendingClientRemovals]",
+            schema,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("THROW 51833", whdSnapshot, StringComparison.Ordinal);
+        Assert.DoesNotContain("THROW 51834", whdSnapshot, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "@ExistingWhdLocationCount >= 20",
+            whdSnapshot,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "@StaleWhdLocationCount >= 10",
+            whdSnapshot,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "@StaleWhdLocationCount > 0",
+            whdSnapshot,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "@PendingRemovalCount = @StaleWhdLocationCount",
+            whdSnapshot,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[tb_sync].[WhdPendingClientRemovals]",
+            whdSnapshot,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "AS [RemovalDeferred]",
+            whdSnapshot,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "@StaleLiveWhdIdentities",
+            whdSnapshot,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "remaining_identity.[ClientId] = client.[Id]",
+            whdSnapshot,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "UPDATE [tb_sync].[WhdClientIdentityHistory]",
+            canonical,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "two-snapshot destructive confirmation",
+            verifier,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CanonicalGraphCollisionRenamesReserveSpaceForUniqueSuffixes()
+    {
+        var canonical = Read(
+            "database",
+            "sqlserver2016",
+            "61-V0015-ClientInfoBetaProcedures.sql");
+
+        Assert.True(
+            canonical.Split("120 - LEN(", StringSplitOptions.None).Length - 1 >= 6,
+            "Every 120-character merge key must reserve room for its unique record suffix.");
+        Assert.DoesNotContain(
+            "[LocalKey] + N'-merged-' + CONVERT(nvarchar(20)",
+            canonical,
+            StringComparison.Ordinal);
     }
 
     [Fact]

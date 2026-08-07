@@ -1842,23 +1842,107 @@ BEGIN
     BEGIN TRY
         BEGIN TRANSACTION;
 
-        IF NOT EXISTS
+        IF EXISTS
         (
             SELECT 1
-            FROM [tb_data].[Clients] WITH (UPDLOCK, HOLDLOCK)
-            WHERE [Id] = @WhdClientId
-              AND [RowVersion] = @ExpectedWhdRowVersion
+            FROM [tb_client].[ClientProfiles] AS profile WITH (UPDLOCK, HOLDLOCK)
+            WHERE profile.[ClientId] = @WhdClientId
         )
-            THROW 51272, N'The target client changed or no longer exists.', 1;
+        OR EXISTS
+        (
+            SELECT 1
+            FROM [tb_ops].[ClientInfoCutovers] AS cutover WITH (UPDLOCK, HOLDLOCK)
+            WHERE cutover.[ClientId] = @WhdClientId
+        )
+            THROW 51274, N'The selected WHD source has a Client Information workspace. Finish or discard the client workbook migration before linking it.', 1;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM [tb_client].[ClientProfiles] AS profile WITH (UPDLOCK, HOLDLOCK)
+            WHERE profile.[ClientId] = @SageClientId
+        )
+        OR EXISTS
+        (
+            SELECT 1
+            FROM [tb_ops].[ClientInfoCutovers] AS cutover WITH (UPDLOCK, HOLDLOCK)
+            WHERE cutover.[ClientId] = @SageClientId
+        )
+            THROW 51275, N'The selected Sage source has a Client Information workspace. Finish or discard the client workbook migration before linking it.', 1;
 
         IF NOT EXISTS
         (
             SELECT 1
-            FROM [tb_data].[Clients] WITH (UPDLOCK, HOLDLOCK)
-            WHERE [Id] = @SageClientId
-              AND [RowVersion] = @ExpectedSageRowVersion
+            FROM [tb_data].[Clients] AS whd_client WITH (UPDLOCK, HOLDLOCK)
+            WHERE whd_client.[Id] = @WhdClientId
+              AND whd_client.[RowVersion] = @ExpectedWhdRowVersion
+              AND whd_client.[IsActive] = 1
+              AND whd_client.[Source] = N'WHD'
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_client].[ClientProfiles] AS profile WITH (UPDLOCK, HOLDLOCK)
+                  WHERE profile.[ClientId] = whd_client.[Id]
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_ops].[ClientInfoCutovers] AS cutover WITH (UPDLOCK, HOLDLOCK)
+                  WHERE cutover.[ClientId] = whd_client.[Id]
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientExternalIdentities] AS other_identity WITH (UPDLOCK, HOLDLOCK)
+                  WHERE other_identity.[ClientId] = whd_client.[Id]
+                    AND other_identity.[SourceSystem] <> N'WHD'
+              )
+              AND 1 =
+              (
+                  SELECT COUNT(*)
+                  FROM [tb_data].[ClientExternalIdentities] AS whd_identity WITH (UPDLOCK, HOLDLOCK)
+                  WHERE whd_identity.[ClientId] = whd_client.[Id]
+                    AND whd_identity.[SourceSystem] = N'WHD'
+              )
         )
-            THROW 51273, N'The source client changed or no longer exists.', 1;
+            THROW 51272, N'The WHD-only client changed, has a Client Information workspace, or is no longer available.', 1;
+
+        IF NOT EXISTS
+        (
+            SELECT 1
+            FROM [tb_data].[Clients] AS sage_client WITH (UPDLOCK, HOLDLOCK)
+            WHERE sage_client.[Id] = @SageClientId
+              AND sage_client.[RowVersion] = @ExpectedSageRowVersion
+              AND sage_client.[IsActive] = 1
+              AND sage_client.[Source] = N'Sage'
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_client].[ClientProfiles] AS profile WITH (UPDLOCK, HOLDLOCK)
+                  WHERE profile.[ClientId] = sage_client.[Id]
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_ops].[ClientInfoCutovers] AS cutover WITH (UPDLOCK, HOLDLOCK)
+                  WHERE cutover.[ClientId] = sage_client.[Id]
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM [tb_data].[ClientExternalIdentities] AS other_identity WITH (UPDLOCK, HOLDLOCK)
+                  WHERE other_identity.[ClientId] = sage_client.[Id]
+                    AND other_identity.[SourceSystem] <> N'Sage'
+              )
+              AND 1 =
+              (
+                  SELECT COUNT(*)
+                  FROM [tb_data].[ClientExternalIdentities] AS sage_identity WITH (UPDLOCK, HOLDLOCK)
+                  WHERE sage_identity.[ClientId] = sage_client.[Id]
+                    AND sage_identity.[SourceSystem] = N'Sage'
+              )
+        )
+            THROW 51273, N'The Sage-only client changed, has a Client Information workspace, or is no longer available.', 1;
 
         UPDATE target_client
         SET
@@ -1900,6 +1984,12 @@ BEGIN
                 COALESCE(target_client.[WhdLocationName], source_client.[WhdLocationName]),
             [WhdContactName] =
                 COALESCE(target_client.[WhdContactName], source_client.[WhdContactName]),
+            [WhdContactEmail] =
+                COALESCE(target_client.[WhdContactEmail], source_client.[WhdContactEmail]),
+            [WhdPhone] =
+                COALESCE(target_client.[WhdPhone], source_client.[WhdPhone]),
+            [WhdAddress] =
+                COALESCE(target_client.[WhdAddress], source_client.[WhdAddress]),
             [SageCustomerId] =
                 COALESCE(target_client.[SageCustomerId], source_client.[SageCustomerId]),
             [SageCustomerName] =
@@ -1929,6 +2019,27 @@ BEGIN
             [UpdatedByWindowsSid] = @UserSid,
             [UpdatedAtUtc] = SYSUTCDATETIME()
         WHERE [ClientId] = @SageClientId;
+
+        DELETE source_alias
+        FROM [tb_data].[ClientAliases] AS source_alias
+        WHERE source_alias.[ClientId] = @SageClientId
+          AND EXISTS
+          (
+              SELECT 1
+              FROM [tb_data].[ClientAliases] AS target_alias
+              WHERE target_alias.[ClientId] = @WhdClientId
+                AND target_alias.[ScopeType] = source_alias.[ScopeType]
+                AND
+                (
+                    target_alias.[OwnerWindowsSid] = source_alias.[OwnerWindowsSid]
+                    OR
+                    (
+                        target_alias.[OwnerWindowsSid] IS NULL
+                        AND source_alias.[OwnerWindowsSid] IS NULL
+                    )
+                )
+                AND target_alias.[Alias] = source_alias.[Alias]
+          );
 
         UPDATE [tb_data].[ClientAliases]
         SET
@@ -1968,6 +2079,20 @@ BEGIN
 
         IF @@ROWCOUNT = 0
             THROW 51273, N'The source client changed during the merge.', 1;
+
+        IF EXISTS
+        (
+            SELECT 1 FROM [tb_data].[ClientExternalIdentities]
+            WHERE [ClientId]=@WhdClientId AND [SourceSystem]=N'WHD'
+        )
+        AND EXISTS
+        (
+            SELECT 1 FROM [tb_data].[ClientExternalIdentities]
+            WHERE [ClientId]=@WhdClientId AND [SourceSystem]=N'Sage'
+        )
+            EXEC [tb_client].[EnsureLiveClientInfo]
+                @ClientId=@WhdClientId,
+                @ActorWindowsSid=@UserSid;
 
         DECLARE @AuditEntityId nvarchar(120) = CONVERT(nvarchar(120), @WhdClientId);
         EXEC [tb_security].[WriteAuditEvent]

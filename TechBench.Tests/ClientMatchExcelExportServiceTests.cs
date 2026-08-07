@@ -23,7 +23,7 @@ public sealed class ClientMatchExcelExportServiceTests
         Assert.NotNull(archive.GetEntry("[Content_Types].xml"));
         Assert.NotNull(archive.GetEntry("xl/workbook.xml"));
         Assert.NotNull(archive.GetEntry("xl/styles.xml"));
-        Assert.Equal(6, archive.Entries.Count(entry =>
+        Assert.Equal(7, archive.Entries.Count(entry =>
             entry.FullName.StartsWith("xl/worksheets/sheet", StringComparison.Ordinal)));
 
         var workbookXml = ReadXml(archive, "xl/workbook.xml");
@@ -34,7 +34,7 @@ public sealed class ClientMatchExcelExportServiceTests
             .Select(element => element.Attribute("name")?.Value ?? string.Empty)
             .ToArray();
         Assert.Equal(
-            ["Summary", "Matched", "WHD Only", "Sage Only", "Manual Other", "All Clients"],
+            ["Summary", "Fully Linked", "TB WHD", "TB Sage", "TB Only", "Source Only", "All Clients"],
             sheetNames);
     }
 
@@ -45,16 +45,18 @@ public sealed class ClientMatchExcelExportServiceTests
 
         using var stream = new MemoryStream(workbook);
         using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
-        var matched = ReadXml(archive, "xl/worksheets/sheet2.xml").ToString();
-        var whdOnly = ReadXml(archive, "xl/worksheets/sheet3.xml").ToString();
-        var sageOnly = ReadXml(archive, "xl/worksheets/sheet4.xml").ToString();
-        var allClients = ReadXml(archive, "xl/worksheets/sheet6.xml").ToString();
+        var fullyLinked = ReadXml(archive, "xl/worksheets/sheet2.xml").ToString();
+        var techBenchWhd = ReadXml(archive, "xl/worksheets/sheet3.xml").ToString();
+        var techBenchSage = ReadXml(archive, "xl/worksheets/sheet4.xml").ToString();
+        var sourceOnly = ReadXml(archive, "xl/worksheets/sheet6.xml").ToString();
+        var allClients = ReadXml(archive, "xl/worksheets/sheet7.xml").ToString();
 
-        Assert.Contains("Marrone &amp; O'Rourke", matched, StringComparison.Ordinal);
-        Assert.DoesNotContain("WHD Only Client", matched, StringComparison.Ordinal);
-        Assert.Contains("WHD Only Client", whdOnly, StringComparison.Ordinal);
-        Assert.DoesNotContain("Sage Only Client", whdOnly, StringComparison.Ordinal);
-        Assert.Contains("Sage Only Client", sageOnly, StringComparison.Ordinal);
+        Assert.Contains("Marrone &amp; O'Rourke", fullyLinked, StringComparison.Ordinal);
+        Assert.DoesNotContain("TB WHD Client", fullyLinked, StringComparison.Ordinal);
+        Assert.Contains("TB WHD Client", techBenchWhd, StringComparison.Ordinal);
+        Assert.DoesNotContain("TB Sage Client", techBenchWhd, StringComparison.Ordinal);
+        Assert.Contains("TB Sage Client", techBenchSage, StringComparison.Ordinal);
+        Assert.Contains("WHD Source Record", sourceOnly, StringComparison.Ordinal);
         Assert.Contains("Manual Client", allClients, StringComparison.Ordinal);
     }
 
@@ -64,17 +66,20 @@ public sealed class ClientMatchExcelExportServiceTests
         var clients = TestClients();
 
         Assert.Equal(
-            ClientMatchExportCategory.Matched,
+            ClientMatchExportCategory.FullyLinked,
             ClientMatchExcelExportService.GetCategory(clients[0]));
         Assert.Equal(
-            ClientMatchExportCategory.WhdOnly,
+            ClientMatchExportCategory.TechBenchWhd,
             ClientMatchExcelExportService.GetCategory(clients[1]));
         Assert.Equal(
-            ClientMatchExportCategory.SageOnly,
+            ClientMatchExportCategory.TechBenchSage,
             ClientMatchExcelExportService.GetCategory(clients[2]));
         Assert.Equal(
-            ClientMatchExportCategory.ManualOrOther,
+            ClientMatchExportCategory.TechBenchOnly,
             ClientMatchExcelExportService.GetCategory(clients[3]));
+        Assert.Equal(
+            ClientMatchExportCategory.SourceOnly,
+            ClientMatchExcelExportService.GetCategory(clients[4]));
     }
 
     [Fact]
@@ -94,7 +99,7 @@ public sealed class ClientMatchExcelExportServiceTests
         while (reader.NextResult());
 
         Assert.Equal(
-            ["Summary", "Matched", "WHD Only", "Sage Only", "Manual Other", "All Clients"],
+            ["Summary", "Fully Linked", "TB WHD", "TB Sage", "TB Only", "Source Only", "All Clients"],
             sheetNames);
     }
 
@@ -118,11 +123,14 @@ public sealed class ClientMatchExcelExportServiceTests
             }
         }
 
-        Assert.Equal(2, summaryTotals["Imported from WHD (includes matched)"]);
-        Assert.Equal(2, summaryTotals["Imported from Sage (includes matched)"]);
-        Assert.Equal(1, summaryTotals["Matched"]);
-        Assert.Equal(1, summaryTotals["WHD only"]);
-        Assert.Equal(1, summaryTotals["Sage only"]);
+        Assert.Equal(3, summaryTotals["WHD identities (all link states)"]);
+        Assert.Equal(2, summaryTotals["Sage identities (all link states)"]);
+        Assert.Equal(3, summaryTotals["Live TechBench clients"]);
+        Assert.Equal(1, summaryTotals["Fully linked"]);
+        Assert.Equal(1, summaryTotals["TB + WHD"]);
+        Assert.Equal(1, summaryTotals["TB + Sage"]);
+        Assert.Equal(0, summaryTotals["TB only"]);
+        Assert.Equal(1, summaryTotals["Source only / needs review"]);
     }
 
     [Fact]
@@ -162,8 +170,8 @@ public sealed class ClientMatchExcelExportServiceTests
             while (reader.Read())
             {
                 foundInactiveClient |=
-                    reader.GetValue(0)?.ToString() == "Manual Client"
-                    && reader.GetValue(3)?.ToString() == "No";
+                    reader.GetValue(1)?.ToString() == "Manual Client"
+                    && reader.GetValue(6)?.ToString() == "No";
             }
 
             Assert.True(foundInactiveClient);
@@ -190,32 +198,54 @@ public sealed class ClientMatchExcelExportServiceTests
             WhdLocationName = "Marrone & O'Rourke LLP",
             SageCustomerId = "69832",
             SageCustomerName = "Marrone & O'Rourke",
-            MatchStatus = "Matched"
+            MatchStatus = "Matched",
+            IsClientInfoLive = true,
+            HasWhdIdentity = true,
+            HasSageIdentity = true,
+            ClientInfoReviewStatus = "Verified"
         },
         new()
         {
             Id = 2,
-            Name = "WHD Only Client",
+            Name = "TB WHD Client",
             Source = "WHD",
             IsActive = true,
             ExternalId = "WHD-LOCATION-2",
-            WhdLocationName = "WHD Only Client"
+            WhdLocationName = "TB WHD Client",
+            IsClientInfoLive = true,
+            HasWhdIdentity = true,
+            ClientInfoReviewStatus = "Verified"
         },
         new()
         {
             Id = 3,
-            Name = "Sage Only Client",
+            Name = "TB Sage Client",
             Source = "Sage",
             IsActive = true,
             SageCustomerId = "300",
-            SageCustomerName = "Sage Only Client"
+            SageCustomerName = "TB Sage Client",
+            IsClientInfoLive = true,
+            HasSageIdentity = true,
+            ClientInfoReviewStatus = "Verified"
         },
         new()
         {
             Id = 4,
             Name = "Manual Client",
             Source = "Manual",
-            IsActive = false
+            IsActive = false,
+            IsClientInfoLive = true,
+            ClientInfoReviewStatus = "Verified"
+        },
+        new()
+        {
+            Id = 5,
+            Name = "WHD Source Record",
+            Source = "WHD",
+            IsActive = true,
+            ExternalId = "WHD-LOCATION-5",
+            WhdLocationName = "WHD Source Record",
+            HasWhdIdentity = true
         }
     ];
 }
