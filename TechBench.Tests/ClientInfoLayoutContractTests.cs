@@ -125,9 +125,47 @@ public sealed class ClientInfoLayoutContractTests
         Assert.Contains("Text=\"{Binding ModelLine}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding SerialNumber", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding StatusLabel}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("OpenEquipmentDetailsCommand", xaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "<controls:ClientEquipmentDetailsDrawer Grid.Row=\"0\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Visibility=\"{Binding IsEquipmentDetailsVisible, Converter={StaticResource BooleanToVisibilityConverter}}\"",
+            xaml,
+            StringComparison.Ordinal);
 
         var viewModel = Read("ViewModels", "ClientInfoBetaViewModel.cs");
         Assert.Contains("?? People.FirstOrDefault();", viewModel, StringComparison.Ordinal);
+        Assert.Contains(
+            "public RelayCommand OpenEquipmentDetailsCommand { get; }",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "SelectedEquipment = equipment;",
+            viewModel,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MissingAdPasswordsDoNotLeaveEmptyRevealOrCopyControls()
+    {
+        var xaml = Read("ClientInfoBetaWindow.xaml");
+        var adPasswordTriggers = xaml.Split(
+            "<DataTrigger Binding=\"{Binding AdPassword}\" Value=\"{x:Null}\">",
+            StringSplitOptions.None);
+
+        Assert.True(
+            adPasswordTriggers.Length >= 3,
+            "Both the user summary and the full Users grid must hide empty AD password controls.");
+        Assert.Contains(
+            "<Setter Property=\"Visibility\" Value=\"Collapsed\" />",
+            adPasswordTriggers[1],
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<Setter Property=\"Visibility\" Value=\"Collapsed\" />",
+            adPasswordTriggers[2],
+            StringComparison.Ordinal);
     }
 
     [Fact]
