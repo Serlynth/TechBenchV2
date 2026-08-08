@@ -290,6 +290,8 @@
                                 <Style TargetType="ListBoxItem">
                                     <Setter Property="Margin" Value="0,0,12,12" />
                                     <Setter Property="Padding" Value="0" />
+                                    <Setter Property="Width" Value="650" />
+                                    <Setter Property="HorizontalAlignment" Value="Left" />
                                     <Setter Property="HorizontalContentAlignment" Value="Left" />
                                     <Setter Property="Template">
                                         <Setter.Value>
@@ -299,7 +301,7 @@
                                                         BorderBrush="{DynamicResource BorderBrush}"
                                                         BorderThickness="1"
                                                         CornerRadius="10">
-                                                    <ContentPresenter />
+                                                    <ContentPresenter HorizontalAlignment="Left" />
                                                 </Border>
                                                 <ControlTemplate.Triggers>
                                                     <Trigger Property="IsSelected" Value="True">
@@ -317,7 +319,7 @@
                             </ListBox.ItemContainerStyle>
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <Grid Width="620" MaxWidth="720" MinWidth="330" MinHeight="170" Margin="15">
+                                    <Grid Width="620" MinWidth="330" MinHeight="170" Margin="15">
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="*" />

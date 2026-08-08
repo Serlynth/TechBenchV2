@@ -233,6 +233,18 @@ public sealed class ClientInfoLayoutContractTests
         Assert.Contains("ResourceGrid_Sorting", grid, StringComparison.Ordinal);
         Assert.Contains("$field:", grid, StringComparison.Ordinal);
         Assert.Contains("Width=\"620\"", xaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "<Setter Property=\"Width\" Value=\"650\" />",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<Setter Property=\"HorizontalAlignment\" Value=\"Left\" />",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<ContentPresenter HorizontalAlignment=\"Left\" />",
+            xaml,
+            StringComparison.Ordinal);
         Assert.Contains("HorizontalContentAlignment\" Value=\"Left\"", xaml, StringComparison.Ordinal);
     }
 
