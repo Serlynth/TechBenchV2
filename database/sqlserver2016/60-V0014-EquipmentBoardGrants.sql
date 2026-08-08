@@ -12,6 +12,13 @@ GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentAssignmentHistory] TO [tb_ro
 GRANT EXECUTE ON OBJECT::[tb_app].[AdminSaveEquipment] TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[AdminMoveEquipment] TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[AdminArchiveEquipment] TO [tb_role_admin];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentBoard] TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetInventoryClients] TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentAssignmentHistory] TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminSaveEquipment] TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[AdminMoveEquipment] TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetEquipmentTechnicians] TO [tb_role_user];
+GRANT EXECUTE ON OBJECT::[tb_app].[GetEquipmentTechnicians] TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[SearchClientUsers] TO [tb_role_user];
 GRANT EXECUTE ON OBJECT::[tb_app].[SearchClientUsers] TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_app].[RevealClientUser] TO [tb_role_user];
@@ -21,11 +28,6 @@ GRANT EXECUTE ON OBJECT::[tb_app].[GetEquipmentInventory] TO [tb_role_admin];
 GRANT EXECUTE ON OBJECT::[tb_service].[ApplyCredentialsClientUserSnapshot]
     TO [tb_role_sync_service];
 
-REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentBoard] FROM [tb_role_user];
-REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetInventoryClients] FROM [tb_role_user];
-REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentAssignmentHistory] FROM [tb_role_user];
-REVOKE EXECUTE ON OBJECT::[tb_app].[AdminSaveEquipment] FROM [tb_role_user];
-REVOKE EXECUTE ON OBJECT::[tb_app].[AdminMoveEquipment] FROM [tb_role_user];
 REVOKE EXECUTE ON OBJECT::[tb_app].[AdminArchiveEquipment] FROM [tb_role_user];
 REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetEquipmentBoard] FROM [tb_preview_reader];
 REVOKE EXECUTE ON OBJECT::[tb_app].[AdminGetInventoryClients] FROM [tb_preview_reader];
@@ -36,9 +38,11 @@ REVOKE EXECUTE ON OBJECT::[tb_app].[AdminArchiveEquipment] FROM [tb_preview_read
 REVOKE EXECUTE ON OBJECT::[tb_app].[SearchClientUsers] FROM [tb_preview_reader];
 REVOKE EXECUTE ON OBJECT::[tb_app].[RevealClientUser] FROM [tb_preview_reader];
 REVOKE EXECUTE ON OBJECT::[tb_app].[GetEquipmentInventory] FROM [tb_preview_reader];
+REVOKE EXECUTE ON OBJECT::[tb_app].[GetEquipmentTechnicians] FROM [tb_preview_reader];
 REVOKE EXECUTE ON OBJECT::[tb_app].[SearchClientUsers] FROM [tb_role_sync_service];
 REVOKE EXECUTE ON OBJECT::[tb_app].[RevealClientUser] FROM [tb_role_sync_service];
 REVOKE EXECUTE ON OBJECT::[tb_app].[GetEquipmentInventory] FROM [tb_role_sync_service];
+REVOKE EXECUTE ON OBJECT::[tb_app].[GetEquipmentTechnicians] FROM [tb_role_sync_service];
 REVOKE EXECUTE ON OBJECT::[tb_service].[ApplyCredentialsClientUserSnapshot]
     FROM [tb_role_user];
 REVOKE EXECUTE ON OBJECT::[tb_service].[ApplyCredentialsClientUserSnapshot]

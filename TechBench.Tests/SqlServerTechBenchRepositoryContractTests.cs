@@ -220,7 +220,7 @@ public sealed class SqlServerTechBenchRepositoryContractTests
     }
 
     [Fact]
-    public void EquipmentBoardWritesRemainAdminOnlyAndProfilesUseSharedInventoryRead()
+    public void EquipmentBoardSupportsTechnicianWorkflowAndProfilesUseSharedInventoryRead()
     {
         Assert.Equal(
             "[tb_app].[GetEquipmentInventory]",
@@ -237,12 +237,15 @@ public sealed class SqlServerTechBenchRepositoryContractTests
         Assert.Equal(
             "[tb_app].[AdminArchiveEquipment]",
             SqlServerTechBenchRepository.Procedures.ArchiveEquipment);
+        Assert.Equal(
+            "[tb_app].[GetEquipmentTechnicians]",
+            SqlServerTechBenchRepository.Procedures.GetEquipmentTechnicians);
 
         var repositorySource = File.ReadAllText(FindRepositoryFile(
             "Data",
             "SqlServerTechBenchRepository.Equipment.cs"));
-        Assert.DoesNotContain(
-            "@IncludeDeployed",
+        Assert.Contains(
+            "AddBit(command, \"@IncludeDeployed\", true)",
             repositorySource,
             StringComparison.Ordinal);
     }

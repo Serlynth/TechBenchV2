@@ -340,7 +340,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         BenchModuleAccess.CanAccessModules(_currentUser);
     public bool CanAccessAdminCenter => _currentUser.IsAdmin && CanWrite;
     public bool CanAccessEquipmentBoard =>
-        CanAccessAdminCenter && _repository.EquipmentBoardAvailable;
+        (_currentUser.IsTechnician || _currentUser.IsAdmin)
+        && CanWrite
+        && _repository.EquipmentBoardAvailable;
+    public bool CanManageEquipmentSecrets => _currentUser.IsAdmin && CanWrite;
+    public bool CanArchiveEquipmentRecords =>
+        _currentUser.IsAdmin && CanAccessEquipmentBoard;
     public bool IsReadOnlyPreview => _currentUser.IsReadOnlyPreview;
     public string ReadOnlyPreviewLabel => _currentUser.IsReadOnlyPreview
         ? $"READ-ONLY PREVIEW: {_currentUser.DisplayName} ({_currentUser.LoginName}) — authenticated as {_currentUser.AuthenticationLabel}"
@@ -1232,9 +1237,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
              || section.Equals("Equipment Board", StringComparison.Ordinal))
             && !CanAccessEquipmentBoard)
         {
-            StatusMessage = CanAccessAdminCenter
+            StatusMessage = !_repository.EquipmentBoardAvailable
                 ? "Inventory is not installed in this TechBench database yet."
-                : "Only TechBench Admins can open Inventory and Equipment Board.";
+                : "Only TechBench technicians and Admins can open Inventory and Equipment Board.";
             return;
         }
 

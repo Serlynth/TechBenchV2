@@ -184,6 +184,8 @@ public sealed partial class SqlServerTechBenchRepository : ITechBenchRepository
         public const string GetWhdTechnicians = "[tb_app].[AdminGetWhdTechnicians]";
         public const string SaveWhdUserMapping = "[tb_app].[AdminSaveWhdUserMapping]";
         public const string GetEquipmentBoard = "[tb_app].[AdminGetEquipmentBoard]";
+        public const string GetEquipmentTechnicians =
+            "[tb_app].[GetEquipmentTechnicians]";
         public const string GetEquipmentInventory = "[tb_app].[GetEquipmentInventory]";
         public const string GetInventoryClients = "[tb_app].[AdminGetInventoryClients]";
         public const string GetEquipmentAssignmentHistory =

@@ -942,7 +942,7 @@ public sealed partial class SqlServer2016SyntaxTests
     }
 
     [Fact]
-    public void V0014PersistsAdminEquipmentBoardAndOrdersEveryDeploymentStage()
+    public void V0014PersistsTechnicianEquipmentBoardAndOrdersEveryDeploymentStage()
     {
         var sqlDirectory = FindSqlDirectory();
         var schemaSource = File.ReadAllText(Path.Combine(
@@ -972,6 +972,18 @@ public sealed partial class SqlServer2016SyntaxTests
         Assert.Contains(
             "GRANT EXECUTE ON OBJECT::[tb_app].[AdminMoveEquipment] TO [tb_role_admin]",
             grantSource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "GRANT EXECUTE ON OBJECT::[tb_app].[AdminMoveEquipment] TO [tb_role_user]",
+            grantSource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "CREATE PROCEDURE [tb_app].[GetEquipmentTechnicians]",
+            procedureSource,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "@IsTechnician = 1 AND IS_ROLEMEMBER(N'tb_role_user') = 1",
+            procedureSource,
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains("schema version 14", verifySource, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(

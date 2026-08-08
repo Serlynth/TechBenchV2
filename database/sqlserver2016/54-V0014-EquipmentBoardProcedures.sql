@@ -47,15 +47,24 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
-    EXEC [tb_security].[GetCurrentAccess]
+    DECLARE @ActorSid varbinary(85), @ActorLogin nvarchar(256),
+            @ActorDisplay nvarchar(160), @IsTechnician bit,
+            @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[EnsureCurrentUser]
         @UserSid=@ActorSid OUTPUT,
+        @LoginName=@ActorLogin OUTPUT,
+        @DisplayName=@ActorDisplay OUTPUT,
+        @IsTechnician=@IsTechnician OUTPUT,
         @IsManager=@IsManager OUTPUT,
         @IsAdmin=@IsAdmin OUTPUT,
         @IsSyncOperator=@IsSyncOperator OUTPUT;
 
-    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
-        THROW 52213, N'Only a TechBench Admin may view inventory clients and users.', 1;
+    IF NOT
+    (
+        (@IsAdmin = 1 AND IS_ROLEMEMBER(N'tb_role_admin') = 1)
+        OR (@IsTechnician = 1 AND IS_ROLEMEMBER(N'tb_role_user') = 1)
+    )
+        THROW 52213, N'Only a TechBench technician or Admin may view inventory clients and users.', 1;
 
     SELECT
         client.[Id] AS [ClientId],
@@ -80,6 +89,52 @@ BEGIN
         client.[Name],
         client_user.[DisplayName],
         client_user.[ClientUserId];
+END;
+GO
+
+IF OBJECT_ID(N'tb_app.GetEquipmentTechnicians', N'P') IS NOT NULL
+    DROP PROCEDURE [tb_app].[GetEquipmentTechnicians];
+GO
+
+CREATE PROCEDURE [tb_app].[GetEquipmentTechnicians]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF USER_NAME() = N'tb_preview_reader'
+        THROW 52250, N'Equipment technicians are unavailable in Admin user-preview mode.', 1;
+
+    DECLARE @ActorSid varbinary(85), @ActorLogin nvarchar(256),
+            @ActorDisplay nvarchar(160), @IsTechnician bit,
+            @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[EnsureCurrentUser]
+        @UserSid=@ActorSid OUTPUT,
+        @LoginName=@ActorLogin OUTPUT,
+        @DisplayName=@ActorDisplay OUTPUT,
+        @IsTechnician=@IsTechnician OUTPUT,
+        @IsManager=@IsManager OUTPUT,
+        @IsAdmin=@IsAdmin OUTPUT,
+        @IsSyncOperator=@IsSyncOperator OUTPUT;
+
+    IF NOT
+    (
+        (@IsAdmin = 1 AND IS_ROLEMEMBER(N'tb_role_admin') = 1)
+        OR (@IsTechnician = 1 AND IS_ROLEMEMBER(N'tb_role_user') = 1)
+    )
+        THROW 52217, N'Only a TechBench technician or Admin may view equipment technicians.', 1;
+
+    SELECT
+        CONVERT(int, 0) AS [Id],
+        CONVERT(varchar(170), [WindowsSid], 1) AS [UserSid],
+        [LoginName],
+        [DisplayName],
+        CAST(NULL AS nvarchar(120)) AS [TechnicianExternalId],
+        CAST(NULL AS nvarchar(240)) AS [TechnicianDisplayName]
+    FROM [tb_security].[Users]
+    WHERE [IsTechnician] = 1
+      AND [IsSyncOperator] = 0
+    ORDER BY [DisplayName], [LoginName];
 END;
 GO
 
@@ -109,6 +164,8 @@ BEGIN
     SET @ClientName = NULLIF(LTRIM(RTRIM(@ClientName)), N'');
 
     IF @ClientId IS NULL AND @ClientUserId IS NULL AND @ClientName IS NULL
+       AND @Tech <> 1
+       AND @Admin <> 1
         THROW 52251, N'A client or client user is required to read equipment inventory.', 1;
 
     SELECT
@@ -238,18 +295,75 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
-    EXEC [tb_security].[GetCurrentAccess]
+    DECLARE @ActorSid varbinary(85), @ActorLogin nvarchar(256),
+            @ActorDisplay nvarchar(160), @IsTechnician bit,
+            @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[EnsureCurrentUser]
         @UserSid=@ActorSid OUTPUT,
+        @LoginName=@ActorLogin OUTPUT,
+        @DisplayName=@ActorDisplay OUTPUT,
+        @IsTechnician=@IsTechnician OUTPUT,
         @IsManager=@IsManager OUTPUT,
         @IsAdmin=@IsAdmin OUTPUT,
         @IsSyncOperator=@IsSyncOperator OUTPUT;
 
-    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
-        THROW 52200, N'Only a TechBench Admin may view the equipment board.', 1;
+    IF @IsAdmin = 1 AND IS_ROLEMEMBER(N'tb_role_admin') = 1
+    BEGIN
+        EXEC [tb_app].[AdminGetEquipmentBoardSecure]
+            @IncludeDeployed=@IncludeDeployed;
+        RETURN;
+    END;
 
-    EXEC [tb_app].[AdminGetEquipmentBoardSecure]
-        @IncludeDeployed=@IncludeDeployed;
+    IF @IsTechnician <> 1 OR IS_ROLEMEMBER(N'tb_role_user') <> 1
+        THROW 52200, N'Only a TechBench technician or Admin may view the equipment board.', 1;
+
+    SELECT
+        equipment.[EquipmentId],
+        equipment.[AssetTag],
+        equipment.[DeviceType],
+        equipment.[Name],
+        equipment.[SerialNumber],
+        equipment.[PartNumber],
+        equipment.[IpAddress],
+        equipment.[Manufacturer],
+        equipment.[Model],
+        equipment.[AnyDeskNumber],
+        CAST(N'' AS nvarchar(max)) AS [AnyDeskPassword],
+        equipment.[ClientId],
+        COALESCE(client.[Name], equipment.[ClientName]) AS [ClientName],
+        equipment.[ClientUserId],
+        client_user.[DisplayName] AS [ClientUserDisplayName],
+        client_user.[Email] AS [ClientUserEmail],
+        equipment.[LocationName],
+        equipment.[Notes],
+        equipment.[WorkflowStage],
+        user_row.[LoginName] AS [AssignedToLoginName],
+        user_row.[DisplayName] AS [AssignedToDisplayName],
+        equipment.[SortOrder],
+        equipment.[AssignedAtUtc],
+        equipment.[CreatedAtUtc],
+        equipment.[UpdatedAtUtc],
+        equipment.[RowVersion]
+    FROM [tb_inventory].[Equipment] AS equipment
+    LEFT JOIN [tb_security].[Users] AS user_row
+        ON user_row.[WindowsSid] = equipment.[AssignedToWindowsSid]
+    LEFT JOIN [tb_data].[Clients] AS client
+        ON client.[Id] = equipment.[ClientId]
+    LEFT JOIN [tb_inventory].[ClientUsers] AS client_user
+        ON client_user.[ClientUserId] = equipment.[ClientUserId]
+    WHERE equipment.[IsArchived] = 0
+      AND (@IncludeDeployed = 1 OR equipment.[WorkflowStage] <> N'Deployed')
+    ORDER BY
+        CASE equipment.[WorkflowStage]
+            WHEN N'Stock' THEN 0
+            WHEN N'Assigned' THEN 1
+            WHEN N'Deployment' THEN 2
+            ELSE 3
+        END,
+        user_row.[DisplayName],
+        user_row.[LoginName],
+        equipment.[SortOrder],
+        equipment.[EquipmentId];
 END;
 GO
 
@@ -334,15 +448,25 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
-    EXEC [tb_security].[GetCurrentAccess]
+    DECLARE @ActorSid varbinary(85), @ActorLogin nvarchar(256),
+            @ActorDisplay nvarchar(160), @IsTechnician bit,
+            @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[EnsureCurrentUser]
         @UserSid=@ActorSid OUTPUT,
+        @LoginName=@ActorLogin OUTPUT,
+        @DisplayName=@ActorDisplay OUTPUT,
+        @IsTechnician=@IsTechnician OUTPUT,
         @IsManager=@IsManager OUTPUT,
         @IsAdmin=@IsAdmin OUTPUT,
         @IsSyncOperator=@IsSyncOperator OUTPUT;
 
-    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
-        THROW 52201, N'Only a TechBench Admin may save equipment.', 1;
+    DECLARE @CanManageAnyDeskPassword bit = CONVERT(bit, CASE
+        WHEN @IsAdmin = 1 AND IS_ROLEMEMBER(N'tb_role_admin') = 1 THEN 1
+        ELSE 0
+    END);
+    IF @CanManageAnyDeskPassword <> 1
+       AND (@IsTechnician <> 1 OR IS_ROLEMEMBER(N'tb_role_user') <> 1)
+        THROW 52201, N'Only a TechBench technician or Admin may save equipment.', 1;
 
     SET @EquipmentId = NULLIF(@EquipmentId, 0);
     SET @AssetTag = NULLIF(LTRIM(RTRIM(@AssetTag)), N'');
@@ -355,6 +479,8 @@ BEGIN
     SET @Model = NULLIF(LTRIM(RTRIM(@Model)), N'');
     SET @AnyDeskNumber = NULLIF(LTRIM(RTRIM(@AnyDeskNumber)), N'');
     SET @AnyDeskPassword = NULLIF(@AnyDeskPassword, N'');
+    IF @CanManageAnyDeskPassword <> 1
+        SET @AnyDeskPassword = NULL;
     SET @ClientId = NULLIF(@ClientId, 0);
     SET @ClientUserId = NULLIF(@ClientUserId, 0);
     SET @LocationName = NULLIF(LTRIM(RTRIM(@LocationName)), N'');
@@ -421,10 +547,11 @@ BEGIN
 
         SET @EquipmentId = SCOPE_IDENTITY();
 
-        EXEC [tb_security].[EncryptEquipmentAnyDeskPassword]
-            @EquipmentId=@EquipmentId,
-            @PlainText=@AnyDeskPassword,
-            @EncryptedValue=@AnyDeskPasswordEncrypted OUTPUT;
+        IF @CanManageAnyDeskPassword = 1
+            EXEC [tb_security].[EncryptEquipmentAnyDeskPassword]
+                @EquipmentId=@EquipmentId,
+                @PlainText=@AnyDeskPassword,
+                @EncryptedValue=@AnyDeskPasswordEncrypted OUTPUT;
 
         UPDATE [tb_inventory].[Equipment]
         SET
@@ -464,10 +591,11 @@ BEGIN
         WHERE [EquipmentId] = @EquipmentId
           AND [IsArchived] = 0;
 
-        EXEC [tb_security].[EncryptEquipmentAnyDeskPassword]
-            @EquipmentId=@EquipmentId,
-            @PlainText=@AnyDeskPassword,
-            @EncryptedValue=@AnyDeskPasswordEncrypted OUTPUT;
+        IF @CanManageAnyDeskPassword = 1
+            EXEC [tb_security].[EncryptEquipmentAnyDeskPassword]
+                @EquipmentId=@EquipmentId,
+                @PlainText=@AnyDeskPassword,
+                @EncryptedValue=@AnyDeskPasswordEncrypted OUTPUT;
 
         UPDATE [tb_inventory].[Equipment]
         SET
@@ -480,7 +608,11 @@ BEGIN
             [Manufacturer]=@Manufacturer,
             [Model]=@Model,
             [AnyDeskNumber]=@AnyDeskNumber,
-            [AnyDeskPasswordEncrypted]=@AnyDeskPasswordEncrypted,
+            [AnyDeskPasswordEncrypted]=CASE
+                WHEN @CanManageAnyDeskPassword = 1
+                    THEN @AnyDeskPasswordEncrypted
+                ELSE [AnyDeskPasswordEncrypted]
+            END,
             [ClientId]=@ClientId,
             [ClientName]=@ClientName,
             [ClientUserId]=@ClientUserId,
@@ -547,7 +679,8 @@ BEGIN
         equipment.[Manufacturer],
         equipment.[Model],
         equipment.[AnyDeskNumber],
-        @AnyDeskPassword AS [AnyDeskPassword],
+        CASE WHEN @CanManageAnyDeskPassword = 1
+            THEN @AnyDeskPassword ELSE N'' END AS [AnyDeskPassword],
         equipment.[ClientId],
         COALESCE(client.[Name], equipment.[ClientName]) AS [ClientName],
         equipment.[ClientUserId],
@@ -585,15 +718,24 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
-    EXEC [tb_security].[GetCurrentAccess]
+    DECLARE @ActorSid varbinary(85), @ActorLogin nvarchar(256),
+            @ActorDisplay nvarchar(160), @IsTechnician bit,
+            @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[EnsureCurrentUser]
         @UserSid=@ActorSid OUTPUT,
+        @LoginName=@ActorLogin OUTPUT,
+        @DisplayName=@ActorDisplay OUTPUT,
+        @IsTechnician=@IsTechnician OUTPUT,
         @IsManager=@IsManager OUTPUT,
         @IsAdmin=@IsAdmin OUTPUT,
         @IsSyncOperator=@IsSyncOperator OUTPUT;
 
-    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
-        THROW 52216, N'Only a TechBench Admin may view equipment assignment history.', 1;
+    IF NOT
+    (
+        (@IsAdmin = 1 AND IS_ROLEMEMBER(N'tb_role_admin') = 1)
+        OR (@IsTechnician = 1 AND IS_ROLEMEMBER(N'tb_role_user') = 1)
+    )
+        THROW 52216, N'Only a TechBench technician or Admin may view equipment assignment history.', 1;
 
     SELECT
         history.[EquipmentAssignmentHistoryId],
@@ -639,15 +781,24 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    DECLARE @ActorSid varbinary(85), @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
-    EXEC [tb_security].[GetCurrentAccess]
+    DECLARE @ActorSid varbinary(85), @ActorLogin nvarchar(256),
+            @ActorDisplay nvarchar(160), @IsTechnician bit,
+            @IsManager bit, @IsAdmin bit, @IsSyncOperator bit;
+    EXEC [tb_security].[EnsureCurrentUser]
         @UserSid=@ActorSid OUTPUT,
+        @LoginName=@ActorLogin OUTPUT,
+        @DisplayName=@ActorDisplay OUTPUT,
+        @IsTechnician=@IsTechnician OUTPUT,
         @IsManager=@IsManager OUTPUT,
         @IsAdmin=@IsAdmin OUTPUT,
         @IsSyncOperator=@IsSyncOperator OUTPUT;
 
-    IF @IsAdmin <> 1 OR IS_ROLEMEMBER(N'tb_role_admin') <> 1
-        THROW 52205, N'Only a TechBench Admin may assign equipment.', 1;
+    IF NOT
+    (
+        (@IsAdmin = 1 AND IS_ROLEMEMBER(N'tb_role_admin') = 1)
+        OR (@IsTechnician = 1 AND IS_ROLEMEMBER(N'tb_role_user') = 1)
+    )
+        THROW 52205, N'Only a TechBench technician or Admin may assign equipment.', 1;
 
     SET @TargetWindowsLoginName =
         NULLIF(LTRIM(RTRIM(@TargetWindowsLoginName)), N'');
