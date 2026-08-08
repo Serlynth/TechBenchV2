@@ -65,6 +65,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     private ClientInfoImportBatch? _selectedImportBatch;
     private ClientInfoAttachment? _selectedAttachment;
     private EquipmentItem? _selectedClientEquipment;
+    private EquipmentItem? _selectedEquipment;
     private ImageSource? _selectedAttachmentPreview;
     private string _selectedAttachmentPreviewMessage =
         "Select an attachment to preview it.";
@@ -155,6 +156,16 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             item => CopyLoginUrl(item as ClientInfoCredential),
             item => item is ClientInfoCredential credential
                 && !string.IsNullOrWhiteSpace(credential.LoginUrl));
+        OpenEquipmentDetailsCommand = new RelayCommand(
+            OpenEquipmentDetails,
+            item => item is EquipmentItem);
+        CloseEquipmentDetailsCommand = new RelayCommand(
+            _ => CloseEquipmentDetails(),
+            _ => SelectedEquipment is not null);
+        LaunchAnyDeskCommand = new RelayCommand(
+            LaunchAnyDesk,
+            item => item is EquipmentItem equipment
+                && !string.IsNullOrWhiteSpace(equipment.AnyDeskNumber));
         CreateTemplateCommand = new RelayCommand(_ => CreateTemplate());
         ImportWorkbookCommand = new RelayCommand(
             _ => ImportWorkbook(),
@@ -427,6 +438,23 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     }
 
     public bool HasSelectedClientEquipment => SelectedClientEquipment is not null;
+
+    public EquipmentItem? SelectedEquipment
+    {
+        get => _selectedEquipment;
+        private set
+        {
+            if (!SetProperty(ref _selectedEquipment, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(IsEquipmentDetailsVisible));
+            CloseEquipmentDetailsCommand.RaiseCanExecuteChanged();
+        }
+    }
+
+    public bool IsEquipmentDetailsVisible => SelectedEquipment is not null;
     public bool HasSelectedEquipmentAttachments =>
         SelectedEquipmentAttachments.Count > 0;
     public string SelectedEquipmentAttachmentCountLabel =>
@@ -580,6 +608,9 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     public RelayCommand RevealSecretCommand { get; }
     public RelayCommand CopySecretCommand { get; }
     public RelayCommand CopyLoginUrlCommand { get; }
+    public RelayCommand OpenEquipmentDetailsCommand { get; }
+    public RelayCommand CloseEquipmentDetailsCommand { get; }
+    public RelayCommand LaunchAnyDeskCommand { get; }
     public RelayCommand CreateTemplateCommand { get; }
     public RelayCommand ImportWorkbookCommand { get; }
     public RelayCommand ReloadImportCommand { get; }
@@ -601,6 +632,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 
     public void Refresh()
     {
+        SelectedEquipment = null;
         ClearRevealedSecrets();
         try
         {
@@ -748,6 +780,37 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             FindAssignedEquipment(SelectedPerson, Equipment));
         OnPropertyChanged(nameof(HasSelectedPersonEquipment));
         OnPropertyChanged(nameof(SelectedPersonEquipmentLabel));
+    }
+
+    private void OpenEquipmentDetails(object? parameter)
+    {
+        if (parameter is not EquipmentItem equipment)
+        {
+            return;
+        }
+
+        SelectedEquipment = equipment;
+        StatusMessage = $"Showing details for {equipment.Name}.";
+    }
+
+    private void CloseEquipmentDetails()
+    {
+        SelectedEquipment = null;
+    }
+
+    private void LaunchAnyDesk(object? parameter)
+    {
+        if (parameter is not EquipmentItem equipment)
+        {
+            return;
+        }
+
+        var result = AnyDeskLauncher.Launch(
+            equipment.AnyDeskNumber,
+            equipment.AnyDeskPassword);
+        StatusMessage = result.Succeeded
+            ? $"Opening AnyDesk for {equipment.Name}."
+            : $"AnyDesk launch failed: {result.ErrorMessage ?? "AnyDesk could not be started."}";
     }
 
     private static string NormalizePersonIdentity(string? value)

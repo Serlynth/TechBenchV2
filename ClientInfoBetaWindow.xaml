@@ -957,6 +957,16 @@
                                         <TextBox Text="{Binding AdUsernameDisplay, Mode=OneWay}"
                                                  Style="{StaticResource SelectableValueStyle}" Margin="0,3,0,7" />
                                         <WrapPanel>
+                                            <WrapPanel.Style>
+                                                <Style TargetType="WrapPanel">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding AdPassword}" Value="{x:Null}">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </WrapPanel.Style>
                                             <TextBox Text="{Binding AdPassword.InlineDisplayValue, Mode=OneWay, TargetNullValue=Not stored}"
                                                      Style="{StaticResource SelectableValueStyle}"
                                                      MinWidth="82" Margin="0,0,6,0" />
@@ -1029,6 +1039,15 @@
                                         </ItemsControl.ItemsPanel>
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
+                                                <Button Command="{Binding DataContext.OpenEquipmentDetailsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}"
+                                                        ToolTip="Open equipment details"
+                                                        Cursor="Hand"
+                                                        Background="Transparent"
+                                                        BorderThickness="0"
+                                                        Padding="0"
+                                                        HorizontalContentAlignment="Stretch"
+                                                        VerticalContentAlignment="Stretch">
                                                 <Border Width="310"
                                                         MinHeight="126"
                                                         Margin="0,0,10,7"
@@ -1131,6 +1150,7 @@
                                                         </Grid>
                                                     </Grid>
                                                 </Border>
+                                                </Button>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
@@ -1201,6 +1221,16 @@
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <WrapPanel VerticalAlignment="Center">
+                                                <WrapPanel.Style>
+                                                    <Style TargetType="WrapPanel">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding AdPassword}" Value="{x:Null}">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </WrapPanel.Style>
                                                 <TextBox Text="{Binding AdPassword.InlineDisplayValue, Mode=OneWay, TargetNullValue=Not stored}"
                                                          Style="{StaticResource SelectableValueStyle}"
                                                          MinWidth="82"
@@ -2050,5 +2080,10 @@
                 </StackPanel>
             </Grid>
         </Border>
+
+        <controls:ClientEquipmentDetailsDrawer Grid.Row="0"
+                                               Grid.RowSpan="3"
+                                               Panel.ZIndex="50"
+                                               Visibility="{Binding IsEquipmentDetailsVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
     </Grid>
 </Window>
