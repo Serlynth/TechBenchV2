@@ -95,6 +95,15 @@ public sealed class ClientInfoLayoutContractTests
             xaml,
             StringComparison.Ordinal);
         Assert.Contains(
+            "SelectionChanged=\"Users_SelectionChanged\"",
+            xaml,
+            StringComparison.Ordinal);
+        var codeBehind = Read("ClientInfoBetaWindow.xaml.cs");
+        Assert.Contains(
+            "viewModel.SelectedPerson = person;",
+            codeBehind,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "Text=\"{Binding SelectedPerson.DisplayInitials}\"",
             xaml,
             StringComparison.Ordinal);

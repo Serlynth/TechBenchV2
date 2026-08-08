@@ -1158,6 +1158,7 @@
                                   CanUserAddRows="False"
                                   FrozenColumnCount="1"
                                   ClipboardCopyMode="IncludeHeader"
+                                  SelectionChanged="Users_SelectionChanged"
                                   MouseDoubleClick="Users_DoubleClick">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Name"
