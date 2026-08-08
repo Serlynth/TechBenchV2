@@ -167,6 +167,33 @@ public sealed record ClientInfoPerson
             ? Microsoft365License["Microsoft ".Length..]
             : Microsoft365License;
     [JsonIgnore]
+    public string DisplayInitials
+    {
+        get
+        {
+            var parts = DisplayName.Split(
+                [' ', '\t', '\r', '\n'],
+                StringSplitOptions.RemoveEmptyEntries
+                | StringSplitOptions.TrimEntries);
+            if (parts.Length == 0)
+            {
+                return "?";
+            }
+
+            var first = parts[0][0];
+            var last = parts.Length > 1 ? parts[^1][0] : '\0';
+            return last == '\0'
+                ? char.ToUpperInvariant(first).ToString()
+                : string.Concat(
+                    char.ToUpperInvariant(first),
+                    char.ToUpperInvariant(last));
+        }
+    }
+    [JsonIgnore]
+    public string ActiveStatusLabel => IsActive ? "Active user" : "Inactive user";
+    [JsonIgnore]
+    public string ActiveStatusColor => IsActive ? "#55D69E" : "#E05260";
+    [JsonIgnore]
     public ClientInfoCredential? AdCredential { get; init; }
     [JsonIgnore]
     public ClientInfoCredential? Microsoft365Credential { get; init; }

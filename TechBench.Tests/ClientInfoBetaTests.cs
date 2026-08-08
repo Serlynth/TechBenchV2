@@ -932,6 +932,52 @@ public sealed class ClientInfoBetaTests
     }
 
     [Fact]
+    public void UserSummaryFindsOnlyInventoryAssignedToTheSelectedUser()
+    {
+        var selectedUser = new ClientInfoPerson
+        {
+            DisplayName = "Licia M. Año Marrone",
+            Email = "licia@marroneorourke.com",
+            PcName = "MO-2026-LM"
+        };
+        var equipment = new[]
+        {
+            new EquipmentItem
+            {
+                EquipmentId = 1,
+                Name = "Email match",
+                ClientUserEmail = "LICIA@MARRONEOROURKE.COM"
+            },
+            new EquipmentItem
+            {
+                EquipmentId = 2,
+                Name = "Name match",
+                ClientUserDisplayName = "Licia M. Ano Marrone"
+            },
+            new EquipmentItem
+            {
+                EquipmentId = 3,
+                Name = "MO 2026 LM"
+            },
+            new EquipmentItem
+            {
+                EquipmentId = 4,
+                Name = "Someone else's laptop",
+                ClientUserDisplayName = "Jacqueline L. Summers",
+                ClientUserEmail = "jacquie@marroneorourke.com"
+            }
+        };
+
+        var matches = ClientInfoBetaViewModel.FindAssignedEquipment(
+            selectedUser,
+            equipment);
+
+        Assert.Equal([1L, 2L, 3L], matches.Select(item => item.EquipmentId).Order());
+        Assert.DoesNotContain(matches, item => item.EquipmentId == 4);
+        Assert.Equal("LM", selectedUser.DisplayInitials);
+    }
+
+    [Fact]
     public void WifiOverviewContainsOnlyManagementAdminAndEverySsid()
     {
         ClientInfoSecretSummary Secret(long secretId, long credentialId) => new()
