@@ -640,14 +640,15 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 ?? (_repository.EquipmentBoardAvailable
                     ? _repository.GetEquipmentInventory(ClientId)
                     : []));
-            SelectedPerson = selectedPersonId is > 0
+            SelectedPerson = (selectedPersonId is > 0
                 ? People.FirstOrDefault(person => person.PersonId == selectedPersonId.Value)
                 : !string.IsNullOrWhiteSpace(selectedPersonKey)
                     ? People.FirstOrDefault(person => string.Equals(
                         person.LocalKey,
                         selectedPersonKey,
                         StringComparison.OrdinalIgnoreCase))
-                    : null;
+                    : null)
+                ?? People.FirstOrDefault();
             RefreshSelectedPersonEquipment();
             SelectedClientEquipment = selectedEquipmentId is > 0
                 ? Equipment.FirstOrDefault(
