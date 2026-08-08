@@ -2379,6 +2379,44 @@ public sealed class ClientInfoBetaTests
     }
 
     [Fact]
+    public void LegacyFireDrillValuesPromoteIntoCanonicalResourceColumns()
+    {
+        var wifi = ClientInfoBetaViewModel.LegacyWifiResourceFields(
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Wireless Employee SSID"] = "Marrone-Staff",
+                ["Wireless Guest SSID"] = "Marrone-Guest"
+            });
+        Assert.Equal("Marrone-Staff", wifi["ssid"]);
+        Assert.Equal("Marrone-Guest", wifi["guest_ssid"]);
+
+        var watchGuard =
+            ClientInfoBetaViewModel.LegacyWatchGuardResourceFields(
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Firebox IP"] = "98.115.126.146"
+                });
+        Assert.Equal("98.115.126.146", watchGuard["public_wan_ip"]);
+
+        var viewModel = File.ReadAllText(Path.Combine(
+            RepositoryRoot(),
+            "ViewModels",
+            "ClientInfoBetaViewModel.cs"));
+        Assert.Contains(
+            "AddressOrUrl = string.IsNullOrWhiteSpace(resource.AddressOrUrl)",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "RevealClientInfoSecret(",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "resource.Provider.Equals(\n            \"Imported from FireDrill\"",
+            viewModel,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PreviousFireDrillTransferTemplateVersionRemainsImportable()
     {
         var directory = Path.Combine(

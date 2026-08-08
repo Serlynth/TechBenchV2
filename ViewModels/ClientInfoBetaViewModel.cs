@@ -872,22 +872,31 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 
     private int OrganizeLegacyImportedCredentials(ClientInfoSnapshot snapshot)
     {
-        var unlinked = snapshot.Credentials
+        // 0.7.41 linked these legacy rows to a resource, but did not promote
+        // their non-password values into the resource itself. Include both
+        // unlinked rows and rows linked by that release so existing clients
+        // can be repaired in place.
+        var legacyCandidates = snapshot.Credentials
             .Where(credential => credential.IsActive
-                && !credential.ResourceId.HasValue
                 && !credential.PersonId.HasValue)
             .ToArray();
-        var wifiCredentials = unlinked
+        var wifiCredentials = legacyCandidates
             .Where(IsLegacyWifiCredential)
             .ToArray();
-        var watchGuardCredentials = unlinked
+        var watchGuardCredentials = legacyCandidates
             .Where(IsLegacyWatchGuardCredential)
             .ToArray();
         var updated = 0;
 
         if (wifiCredentials.Length > 0)
         {
+            var linkedWifiResourceId = wifiCredentials
+                .Where(credential => credential.ResourceId.HasValue)
+                .Select(credential => credential.ResourceId)
+                .FirstOrDefault();
             var wifiResource = snapshot.Resources.FirstOrDefault(resource =>
+                    resource.ResourceId == linkedWifiResourceId)
+                ?? snapshot.Resources.FirstOrDefault(resource =>
                     resource.IsActive
                     && resource.Category.Equals(
                         ClientInfoResourceCategories.Wifi,
@@ -905,7 +914,24 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                     ReviewStatus = "Verified",
                     IsActive = true
                 });
-            updated += LinkCredentialsToResource(wifiCredentials, wifiResource);
+            var values = ExistingLegacyWifiValues(
+                wifiResource,
+                wifiCredentials);
+            ReadMissingLegacyValues(
+                wifiCredentials,
+                values,
+                "Wireless Admin",
+                "Wireless Employee SSID",
+                "Wireless Guest SSID",
+                "Wireless Management Url");
+            (wifiResource, var resourceUpdates) = PromoteLegacyWifiValues(
+                wifiResource,
+                values);
+            updated += resourceUpdates;
+            updated += LinkCredentialsToResource(
+                wifiCredentials,
+                wifiResource,
+                values);
         }
 
         if (watchGuardCredentials.Length > 0)
@@ -938,9 +964,23 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                     ReviewStatus = "Verified",
                     IsActive = true
                 });
+            var values = ExistingLegacyWatchGuardValues(
+                watchGuardResource,
+                watchGuardCredentials);
+            ReadMissingLegacyValues(
+                watchGuardCredentials,
+                values,
+                "Firebox IP",
+                "WatchGuard Cloud User",
+                "AuthPoint User",
+                "AD Auth User");
+            (watchGuardResource, var resourceUpdates) =
+                PromoteLegacyWatchGuardValues(watchGuardResource, values);
+            updated += resourceUpdates;
             updated += LinkCredentialsToResource(
                 watchGuardCredentials,
-                watchGuardResource);
+                watchGuardResource,
+                values);
         }
 
         return updated;
@@ -948,20 +988,341 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
 
     private int LinkCredentialsToResource(
         IEnumerable<ClientInfoCredential> credentials,
-        ClientInfoResource resource)
+        ClientInfoResource resource,
+        IReadOnlyDictionary<string, string> legacyValues)
     {
         var count = 0;
         foreach (var credential in credentials)
         {
+            var username = credential.Username;
+            var loginUrl = credential.LoginUrl;
+            if (string.IsNullOrWhiteSpace(username))
+            {
+                username = credential.Name.Trim() switch
+                {
+                    var name when name.Equals(
+                        "Wireless Admin",
+                        StringComparison.OrdinalIgnoreCase) =>
+                        LegacyValue(legacyValues, "Wireless Admin"),
+                    var name when name.Equals(
+                        "Wireless admin Password",
+                        StringComparison.OrdinalIgnoreCase) =>
+                        LegacyValue(legacyValues, "Wireless Admin"),
+                    var name when name.Equals(
+                        "Wireless Employee Password",
+                        StringComparison.OrdinalIgnoreCase) =>
+                        LegacyValue(legacyValues, "Wireless Employee SSID"),
+                    var name when name.Equals(
+                        "Wireless Guest Password",
+                        StringComparison.OrdinalIgnoreCase) =>
+                        LegacyValue(legacyValues, "Wireless Guest SSID"),
+                    var name when name.Equals(
+                        "Admin",
+                        StringComparison.OrdinalIgnoreCase) => "admin",
+                    var name when name.Equals(
+                        "Status",
+                        StringComparison.OrdinalIgnoreCase) => "status",
+                    var name when name.StartsWith(
+                        "*if enabled -Firebox-DB",
+                        StringComparison.OrdinalIgnoreCase) => "Firebox-DB\\csri",
+                    var name when name.Equals(
+                        "WatchGuard Cloud User",
+                        StringComparison.OrdinalIgnoreCase) =>
+                        LegacyValue(legacyValues, "WatchGuard Cloud User"),
+                    var name when name.Equals(
+                        "WatchGuard Cloud PW",
+                        StringComparison.OrdinalIgnoreCase) =>
+                        LegacyValue(legacyValues, "WatchGuard Cloud User"),
+                    var name when name.Contains(
+                        "AuthPoint",
+                        StringComparison.OrdinalIgnoreCase)
+                        && name.Contains("User", StringComparison.OrdinalIgnoreCase) =>
+                        LegacyValue(legacyValues, "AuthPoint User"),
+                    var name when name.Contains(
+                        "AuthPoint",
+                        StringComparison.OrdinalIgnoreCase)
+                        && (name.Contains("PW", StringComparison.OrdinalIgnoreCase)
+                            || name.Contains("Password", StringComparison.OrdinalIgnoreCase)) =>
+                        LegacyValue(legacyValues, "AuthPoint User"),
+                    var name when name.Equals(
+                        "AD Auth User",
+                        StringComparison.OrdinalIgnoreCase) =>
+                        LegacyValue(legacyValues, "AD Auth User"),
+                    var name when name.Equals(
+                        "AD Password",
+                        StringComparison.OrdinalIgnoreCase) =>
+                        LegacyValue(legacyValues, "AD Auth User"),
+                    _ => username
+                };
+            }
+
+            if (string.IsNullOrWhiteSpace(loginUrl)
+                && credential.Category.Equals(
+                    ClientInfoResourceCategories.Wifi,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                loginUrl = LegacyValue(
+                    legacyValues,
+                    "Wireless Management Url");
+            }
+
+            if (credential.ResourceId == resource.ResourceId
+                && string.Equals(
+                    credential.Username,
+                    username,
+                    StringComparison.Ordinal)
+                && string.Equals(
+                    credential.LoginUrl,
+                    loginUrl,
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             _repository.SaveClientInfoCredential(credential with
             {
-                ResourceId = resource.ResourceId
+                ResourceId = resource.ResourceId,
+                Username = username,
+                LoginUrl = loginUrl
             });
             count++;
         }
 
         return count;
     }
+
+    private void ReadMissingLegacyValues(
+        IReadOnlyList<ClientInfoCredential> credentials,
+        Dictionary<string, string> values,
+        params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!string.IsNullOrWhiteSpace(LegacyValue(values, name)))
+            {
+                continue;
+            }
+
+            var credential = credentials.FirstOrDefault(item =>
+                item.Name.Trim().Equals(
+                    name,
+                    StringComparison.OrdinalIgnoreCase));
+            var secret = credential?.Secrets.FirstOrDefault(item =>
+                    item.IsCurrent)
+                ?? credential?.Secrets.FirstOrDefault();
+            if (secret is null)
+            {
+                continue;
+            }
+
+            try
+            {
+                var value = _repository.RevealClientInfoSecret(
+                    secret.SecretId,
+                    forClipboard: false)?.SecretValue.Trim();
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    values[name] = value;
+                }
+            }
+            catch (Exception exception)
+            {
+                // Keep loading Client Info even when policy prevents an
+                // automatic one-time promotion. The organizer retries on a
+                // later refresh after the user has a valid secret session.
+                Debug.WriteLine(
+                    $"Legacy Client Info value '{name}' could not be promoted: {exception}");
+            }
+        }
+    }
+
+    private static Dictionary<string, string> ExistingLegacyWifiValues(
+        ClientInfoResource resource,
+        IReadOnlyList<ClientInfoCredential> credentials)
+    {
+        var values = new Dictionary<string, string>(
+            StringComparer.OrdinalIgnoreCase)
+        {
+            ["Wireless Management Url"] = resource.AddressOrUrl,
+            ["Wireless Employee SSID"] = resource.GetFieldValue("ssid"),
+            ["Wireless Guest SSID"] = resource.GetFieldValue("guest_ssid")
+        };
+        values["Wireless Admin"] = credentials.FirstOrDefault(item =>
+            (item.Name.Equals(
+                 "Wireless admin Password",
+                 StringComparison.OrdinalIgnoreCase)
+             || item.Name.Equals(
+                 "Wireless Admin",
+                 StringComparison.OrdinalIgnoreCase))
+            && !string.IsNullOrWhiteSpace(item.Username))?.Username
+            ?? string.Empty;
+        return values;
+    }
+
+    private static Dictionary<string, string> ExistingLegacyWatchGuardValues(
+        ClientInfoResource resource,
+        IReadOnlyList<ClientInfoCredential> credentials)
+    {
+        var values = new Dictionary<string, string>(
+            StringComparer.OrdinalIgnoreCase)
+        {
+            ["Firebox IP"] = !string.IsNullOrWhiteSpace(
+                resource.GetFieldValue("public_wan_ip"))
+                ? resource.GetFieldValue("public_wan_ip")
+                : resource.AddressOrUrl
+        };
+        values["WatchGuard Cloud User"] = credentials.FirstOrDefault(item =>
+            (item.Name.Equals(
+                 "WatchGuard Cloud PW",
+                 StringComparison.OrdinalIgnoreCase)
+             || item.Name.Equals(
+                 "WatchGuard Cloud User",
+                 StringComparison.OrdinalIgnoreCase))
+            && !string.IsNullOrWhiteSpace(item.Username))?.Username
+            ?? string.Empty;
+        values["AuthPoint User"] = credentials.FirstOrDefault(item =>
+            item.Name.Contains("AuthPoint", StringComparison.OrdinalIgnoreCase)
+            && (item.Name.Contains("User", StringComparison.OrdinalIgnoreCase)
+                || item.Name.Contains("PW", StringComparison.OrdinalIgnoreCase)
+                || item.Name.Contains("Password", StringComparison.OrdinalIgnoreCase))
+            && !string.IsNullOrWhiteSpace(item.Username))
+            ?.Username ?? string.Empty;
+        values["AD Auth User"] = credentials.FirstOrDefault(item =>
+            (item.Name.Equals(
+                 "AD Password",
+                 StringComparison.OrdinalIgnoreCase)
+             || item.Name.Equals(
+                 "AD Auth User",
+                 StringComparison.OrdinalIgnoreCase))
+            && !string.IsNullOrWhiteSpace(item.Username))?.Username
+            ?? string.Empty;
+        return values;
+    }
+
+    private (ClientInfoResource Resource, int Updates) PromoteLegacyWifiValues(
+        ClientInfoResource resource,
+        IReadOnlyDictionary<string, string> values)
+    {
+        var updates = 0;
+        var managementUrl = LegacyValue(values, "Wireless Management Url");
+        var provider = resource.Provider.Equals(
+            "Imported from FireDrill",
+            StringComparison.OrdinalIgnoreCase)
+            ? string.Empty
+            : resource.Provider;
+        if ((!string.IsNullOrWhiteSpace(managementUrl)
+             && string.IsNullOrWhiteSpace(resource.AddressOrUrl))
+            || !string.Equals(provider, resource.Provider, StringComparison.Ordinal))
+        {
+            resource = _repository.SaveClientInfoResource(resource with
+            {
+                AddressOrUrl = string.IsNullOrWhiteSpace(resource.AddressOrUrl)
+                    ? managementUrl
+                    : resource.AddressOrUrl,
+                Provider = provider
+            });
+            updates++;
+        }
+
+        foreach (var (fieldKey, value) in LegacyWifiResourceFields(values))
+        {
+            updates += SaveLegacyResourceFieldIfMissing(
+                resource,
+                fieldKey,
+                value);
+        }
+        return (resource, updates);
+    }
+
+    private (ClientInfoResource Resource, int Updates)
+        PromoteLegacyWatchGuardValues(
+            ClientInfoResource resource,
+            IReadOnlyDictionary<string, string> values)
+    {
+        var updates = 0;
+        var fireboxIp = LegacyValue(values, "Firebox IP");
+        var provider = string.IsNullOrWhiteSpace(resource.Provider)
+            ? "WatchGuard"
+            : resource.Provider;
+        if ((!string.IsNullOrWhiteSpace(fireboxIp)
+             && string.IsNullOrWhiteSpace(resource.AddressOrUrl))
+            || !string.Equals(provider, resource.Provider, StringComparison.Ordinal))
+        {
+            resource = _repository.SaveClientInfoResource(resource with
+            {
+                AddressOrUrl = string.IsNullOrWhiteSpace(resource.AddressOrUrl)
+                    ? fireboxIp
+                    : resource.AddressOrUrl,
+                Provider = provider
+            });
+            updates++;
+        }
+
+        foreach (var (fieldKey, value) in LegacyWatchGuardResourceFields(values))
+        {
+            updates += SaveLegacyResourceFieldIfMissing(
+                resource,
+                fieldKey,
+                value);
+        }
+        return (resource, updates);
+    }
+
+    internal static IReadOnlyDictionary<string, string>
+        LegacyWifiResourceFields(
+            IReadOnlyDictionary<string, string> values) =>
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ssid"] = LegacyValue(values, "Wireless Employee SSID"),
+            ["guest_ssid"] = LegacyValue(values, "Wireless Guest SSID")
+        };
+
+    internal static IReadOnlyDictionary<string, string>
+        LegacyWatchGuardResourceFields(
+            IReadOnlyDictionary<string, string> values) =>
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["public_wan_ip"] = LegacyValue(values, "Firebox IP")
+        };
+
+    private int SaveLegacyResourceFieldIfMissing(
+        ClientInfoResource resource,
+        string fieldKey,
+        string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)
+            || !string.IsNullOrWhiteSpace(resource.GetFieldValue(fieldKey)))
+        {
+            return 0;
+        }
+
+        var definition = ClientInfoResourceFieldDefinitions
+            .ForEditorCategory(resource.Category)
+            .First(item => item.FieldKey.Equals(
+                fieldKey,
+                StringComparison.OrdinalIgnoreCase));
+        var existing = resource.Fields.FirstOrDefault(item =>
+            item.FieldKey.Equals(fieldKey, StringComparison.OrdinalIgnoreCase));
+        _repository.SaveClientInfoResourceField(
+            (existing ?? new ClientInfoResourceField
+            {
+                ResourceId = resource.ResourceId,
+                FieldKey = definition.FieldKey
+            }) with
+            {
+                ResourceId = resource.ResourceId,
+                FieldLabel = definition.FieldLabel,
+                ValueText = value,
+                ValueType = definition.ValueType,
+                SortOrder = definition.SortOrder
+            });
+        return 1;
+    }
+
+    private static string LegacyValue(
+        IReadOnlyDictionary<string, string> values,
+        string name) =>
+        values.TryGetValue(name, out var value) ? value : string.Empty;
 
     internal static bool IsLegacyWifiCredential(ClientInfoCredential credential)
     {
