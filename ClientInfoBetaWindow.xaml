@@ -854,20 +854,71 @@
                                 Background="{DynamicResource PanelAltBackgroundBrush}"
                                 BorderBrush="{DynamicResource BorderBrush}"
                                 BorderThickness="1"
-                                CornerRadius="10"
-                                Padding="14"
+                                CornerRadius="14"
+                                Padding="16"
+                                MaxHeight="410"
                                 Margin="0,2,0,10"
                                 Visibility="{Binding HasSelectedPerson, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled"
+                                          PanningMode="VerticalOnly">
                             <StackPanel>
-                                <TextBlock Text="Selected user"
-                                           FontSize="12"
-                                           Foreground="{DynamicResource MutedTextBrush}" />
-                                <TextBox Text="{Binding SelectedPerson.DisplayName, Mode=OneWay}"
-                                         Style="{StaticResource SelectableValueStyle}"
-                                         FontSize="19"
-                                         FontWeight="SemiBold"
-                                         TextWrapping="Wrap"
-                                         Margin="0,3,0,12" />
+                                <Grid Margin="0,0,0,14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="64" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="52"
+                                            Height="52"
+                                            CornerRadius="26"
+                                            Background="{DynamicResource AccentBrush}"
+                                            HorizontalAlignment="Left"
+                                            VerticalAlignment="Top">
+                                        <TextBlock Text="{Binding SelectedPerson.DisplayInitials}"
+                                                   Foreground="White"
+                                                   FontSize="18"
+                                                   FontWeight="Bold"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBox Text="{Binding SelectedPerson.DisplayName, Mode=OneWay}"
+                                                 Style="{StaticResource SelectableValueStyle}"
+                                                 FontSize="21"
+                                                 FontWeight="SemiBold"
+                                                 TextWrapping="Wrap" />
+                                        <TextBlock Foreground="{DynamicResource SecondaryTextBrush}"
+                                                   FontSize="13"
+                                                   Margin="0,3,0,0">
+                                            <Run Text="{Binding SelectedPerson.RoleDepartment}" />
+                                            <Run Text="  ·  " />
+                                            <Run Text="{Binding SelectedPerson.LocationName}" />
+                                        </TextBlock>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2"
+                                                Orientation="Horizontal"
+                                                VerticalAlignment="Top">
+                                        <Border Background="{Binding SelectedPerson.ActiveStatusColor}"
+                                                CornerRadius="10"
+                                                Padding="9,4"
+                                                Margin="0,0,7,0">
+                                            <TextBlock Text="{Binding SelectedPerson.ActiveStatusLabel}"
+                                                       Foreground="#07131F"
+                                                       FontSize="11"
+                                                       FontWeight="SemiBold" />
+                                        </Border>
+                                        <Border Background="{DynamicResource ControlAltBackgroundBrush}"
+                                                BorderBrush="{DynamicResource BorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="10"
+                                                Padding="9,4">
+                                            <TextBlock Text="{Binding SelectedPerson.ContactType}"
+                                                       FontSize="11"
+                                                       FontWeight="SemiBold" />
+                                        </Border>
+                                    </StackPanel>
+                                </Grid>
                                 <WrapPanel>
                                     <StackPanel Width="185" Margin="0,0,18,8">
                                         <TextBlock Text="ROLE / DEPARTMENT" Style="{StaticResource SubtleLabelStyle}" />
@@ -943,7 +994,149 @@
                                                  Style="{StaticResource SelectableValueStyle}" Margin="0,3,0,0" />
                                     </StackPanel>
                                 </WrapPanel>
+                                <Grid Margin="0,9,0,7">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Assigned equipment"
+                                               FontSize="14"
+                                               FontWeight="SemiBold" />
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding SelectedPersonEquipmentLabel}"
+                                               Foreground="{DynamicResource MutedTextBrush}"
+                                               FontSize="12" />
+                                </Grid>
+                                <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                              VerticalScrollBarVisibility="Disabled"
+                                              PanningMode="HorizontalOnly"
+                                              Visibility="{Binding HasSelectedPersonEquipment, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <ItemsControl ItemsSource="{Binding SelectedPersonEquipment}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <StackPanel Orientation="Horizontal" />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Width="310"
+                                                        MinHeight="126"
+                                                        Margin="0,0,10,7"
+                                                        Padding="13"
+                                                        CornerRadius="12"
+                                                        Background="{DynamicResource PanelBackgroundBrush}"
+                                                        BorderBrush="{Binding DeviceBadgeColor}"
+                                                        BorderThickness="1">
+                                                    <Grid>
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="Auto" />
+                                                            <RowDefinition Height="Auto" />
+                                                            <RowDefinition Height="Auto" />
+                                                        </Grid.RowDefinitions>
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="48" />
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <Border Width="38"
+                                                                    Height="38"
+                                                                    CornerRadius="10"
+                                                                    Background="{DynamicResource ControlAltBackgroundBrush}"
+                                                                    BorderBrush="{Binding DeviceBadgeColor}"
+                                                                    BorderThickness="1.5"
+                                                                    HorizontalAlignment="Left">
+                                                                <TextBlock Text="{Binding DeviceGlyph}"
+                                                                           FontFamily="Segoe MDL2 Assets"
+                                                                           Foreground="{Binding DeviceBadgeColor}"
+                                                                           FontSize="18"
+                                                                           HorizontalAlignment="Center"
+                                                                           VerticalAlignment="Center" />
+                                                            </Border>
+                                                            <StackPanel Grid.Column="1">
+                                                                <TextBlock Text="{Binding Name}"
+                                                                           FontSize="14"
+                                                                           FontWeight="SemiBold"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           ToolTip="{Binding Name}" />
+                                                                <TextBlock Text="{Binding ModelLine}"
+                                                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                                                           FontSize="12"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           ToolTip="{Binding ModelLine}" />
+                                                            </StackPanel>
+                                                            <StackPanel Grid.Column="2" HorizontalAlignment="Right">
+                                                                <TextBlock Text="{Binding DeviceTypeLabel}"
+                                                                           Foreground="{Binding DeviceBadgeColor}"
+                                                                           FontSize="10"
+                                                                           FontWeight="Bold"
+                                                                           HorizontalAlignment="Right" />
+                                                                <TextBlock Text="{Binding StatusLabel}"
+                                                                           Foreground="{Binding StatusColor}"
+                                                                           FontSize="11"
+                                                                           FontWeight="SemiBold"
+                                                                           HorizontalAlignment="Right"
+                                                                           Margin="0,3,0,0" />
+                                                            </StackPanel>
+                                                        </Grid>
+                                                        <Grid Grid.Row="1" Margin="48,11,0,0">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="*" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <StackPanel>
+                                                                <TextBlock Text="SERIAL"
+                                                                           Style="{StaticResource SubtleLabelStyle}" />
+                                                                <TextBlock Text="{Binding SerialNumber, TargetNullValue=—}"
+                                                                           FontSize="12"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           ToolTip="{Binding SerialNumber}" />
+                                                            </StackPanel>
+                                                            <StackPanel Grid.Column="1">
+                                                                <TextBlock Text="ASSET TAG"
+                                                                           Style="{StaticResource SubtleLabelStyle}" />
+                                                                <TextBlock Text="{Binding AssetTag, TargetNullValue=—}"
+                                                                           FontSize="12"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           ToolTip="{Binding AssetTag}" />
+                                                            </StackPanel>
+                                                        </Grid>
+                                                        <Grid Grid.Row="2" Margin="48,8,0,0">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="*" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Text="{Binding LocationName}"
+                                                                       Foreground="{DynamicResource MutedTextBrush}"
+                                                                       FontSize="11"
+                                                                       TextTrimming="CharacterEllipsis"
+                                                                       ToolTip="{Binding LocationName}" />
+                                                            <TextBlock Grid.Column="1"
+                                                                       Text="{Binding TechnicianLabel}"
+                                                                       Foreground="{DynamicResource MutedTextBrush}"
+                                                                       FontSize="11"
+                                                                       TextAlignment="Right"
+                                                                       TextTrimming="CharacterEllipsis"
+                                                                       ToolTip="{Binding TechnicianLabel}" />
+                                                        </Grid>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                                <Border Padding="12"
+                                        CornerRadius="9"
+                                        Background="{DynamicResource PanelBackgroundBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="1"
+                                        Visibility="{Binding HasSelectedPersonEquipment, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                    <TextBlock Text="No Inventory devices are currently assigned to this user."
+                                               Foreground="{DynamicResource MutedTextBrush}"
+                                               FontSize="12" />
+                                </Border>
                             </StackPanel>
+                            </ScrollViewer>
                         </Border>
                         <TextBlock Grid.Row="1"
                                    Text="Select a user below to see their important details."
@@ -959,12 +1152,13 @@
                         <DataGrid Grid.Row="3"
                                   x:Name="PeopleDataGrid"
                                   ItemsSource="{Binding People}"
-                                  SelectedItem="{Binding SelectedPerson}"
+                                  SelectedItem="{Binding SelectedPerson, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"
                                   CanUserAddRows="False"
                                   FrozenColumnCount="1"
                                   ClipboardCopyMode="IncludeHeader"
+                                  SelectionChanged="Users_SelectionChanged"
                                   MouseDoubleClick="Users_DoubleClick">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Name"

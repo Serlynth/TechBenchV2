@@ -86,6 +86,39 @@ public sealed class ClientInfoLayoutContractTests
     }
 
     [Fact]
+    public void SelectingAUserDrivesProfileAndAssignedEquipmentCards()
+    {
+        var xaml = Read("ClientInfoBetaWindow.xaml");
+
+        Assert.Contains(
+            "SelectedItem=\"{Binding SelectedPerson, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "SelectionChanged=\"Users_SelectionChanged\"",
+            xaml,
+            StringComparison.Ordinal);
+        var codeBehind = Read("ClientInfoBetaWindow.xaml.cs");
+        Assert.Contains(
+            "viewModel.SelectedPerson = person;",
+            codeBehind,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Text=\"{Binding SelectedPerson.DisplayInitials}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains("Text=\"Assigned equipment\"", xaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "ItemsSource=\"{Binding SelectedPersonEquipment}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding DeviceGlyph}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding ModelLine}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding SerialNumber", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding StatusLabel}\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PasswordListUsesReadableResizableRememberedColumns()
     {
         var xaml = Read("ClientInfoBetaWindow.xaml");

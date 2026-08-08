@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
+using System.Text;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -343,6 +345,7 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         ? "1 quick-reference group"
         : $"{QuickReferenceSections.Count} quick-reference groups";
     public ObservableCollection<EquipmentItem> Equipment { get; } = [];
+    public ObservableCollection<EquipmentItem> SelectedPersonEquipment { get; } = [];
     public ClientInfoResourceGroup ServerInfrastructureGroup { get; } = new(
         ClientInfoResourceCategories.ServersInfrastructure,
         "Servers, virtual machines, hypervisors, storage, switches, network appliances, directory services, and infrastructure roles.");
@@ -477,11 +480,16 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
             {
                 EditPersonCommand.RaiseCanExecuteChanged();
                 OnPropertyChanged(nameof(HasSelectedPerson));
+                RefreshSelectedPersonEquipment();
             }
         }
     }
 
     public bool HasSelectedPerson => SelectedPerson is not null;
+    public bool HasSelectedPersonEquipment => SelectedPersonEquipment.Count > 0;
+    public string SelectedPersonEquipmentLabel => SelectedPersonEquipment.Count == 1
+        ? "1 assigned device"
+        : $"{SelectedPersonEquipment.Count} assigned devices";
 
     public ClientInfoResource? SelectedResource
     {
@@ -597,6 +605,8 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         try
         {
             var selectedEquipmentId = SelectedClientEquipment?.EquipmentId;
+            var selectedPersonId = SelectedPerson?.PersonId;
+            var selectedPersonKey = SelectedPerson?.LocalKey;
             var snapshot = _demoData?.Snapshot
                 ?? _repository.GetClientInfoSnapshot(ClientId)
                 ?? throw new InvalidOperationException(
@@ -630,6 +640,15 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 ?? (_repository.EquipmentBoardAvailable
                     ? _repository.GetEquipmentInventory(ClientId)
                     : []));
+            SelectedPerson = selectedPersonId is > 0
+                ? People.FirstOrDefault(person => person.PersonId == selectedPersonId.Value)
+                : !string.IsNullOrWhiteSpace(selectedPersonKey)
+                    ? People.FirstOrDefault(person => string.Equals(
+                        person.LocalKey,
+                        selectedPersonKey,
+                        StringComparison.OrdinalIgnoreCase))
+                    : null;
+            RefreshSelectedPersonEquipment();
             SelectedClientEquipment = selectedEquipmentId is > 0
                 ? Equipment.FirstOrDefault(
                     item => item.EquipmentId == selectedEquipmentId.Value)
@@ -689,6 +708,70 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                     ? personName
                     : string.Empty
         }).ToArray();
+    }
+
+    internal static IReadOnlyList<EquipmentItem> FindAssignedEquipment(
+        ClientInfoPerson? person,
+        IEnumerable<EquipmentItem> equipment)
+    {
+        if (person is null)
+        {
+            return [];
+        }
+
+        var email = person.Email.Trim();
+        var normalizedName = NormalizePersonIdentity(person.DisplayName);
+        var normalizedPcName = NormalizePersonIdentity(person.PcName);
+        return equipment
+            .Where(item =>
+                (!string.IsNullOrWhiteSpace(email)
+                 && string.Equals(
+                     item.ClientUserEmail.Trim(),
+                     email,
+                     StringComparison.OrdinalIgnoreCase))
+                || (!string.IsNullOrWhiteSpace(normalizedName)
+                    && NormalizePersonIdentity(item.ClientUserDisplayName)
+                        == normalizedName)
+                || (!string.IsNullOrWhiteSpace(normalizedPcName)
+                    && (NormalizePersonIdentity(item.Name) == normalizedPcName
+                        || NormalizePersonIdentity(item.AssetTag) == normalizedPcName)))
+            .OrderBy(item => item.DeviceType, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private void RefreshSelectedPersonEquipment()
+    {
+        Replace(
+            SelectedPersonEquipment,
+            FindAssignedEquipment(SelectedPerson, Equipment));
+        OnPropertyChanged(nameof(HasSelectedPersonEquipment));
+        OnPropertyChanged(nameof(SelectedPersonEquipmentLabel));
+    }
+
+    private static string NormalizePersonIdentity(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder(value.Length);
+        foreach (var character in value.Normalize(NormalizationForm.FormD))
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(character)
+                == UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(char.ToLowerInvariant(character));
+            }
+        }
+
+        return builder.ToString();
     }
 
     private void RefreshAttachments()
