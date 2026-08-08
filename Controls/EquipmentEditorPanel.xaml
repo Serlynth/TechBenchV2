@@ -149,18 +149,26 @@
                                  MaxLength="80"
                                  Margin="0,0,0,12" />
 
-                        <TextBlock Text="AnyDesk password"
-                                   Style="{StaticResource EquipmentEditorFieldLabelStyle}" />
-                        <TextBox Text="••••••••"
-                                 IsReadOnly="True"
-                                 Visibility="{Binding ShowEquipmentAnyDeskPassword, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
-                                 Margin="0,0,0,8" />
-                        <TextBox Text="{Binding EquipmentAnyDeskPassword, UpdateSourceTrigger=PropertyChanged}"
-                                 Visibility="{Binding ShowEquipmentAnyDeskPassword, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                 Margin="0,0,0,8" />
-                        <CheckBox Content="Show and edit AnyDesk password"
-                                  IsChecked="{Binding ShowEquipmentAnyDeskPassword}"
-                                  Margin="0,0,0,10" />
+                        <StackPanel Visibility="{Binding CanManageEquipmentSecrets, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="AnyDesk password"
+                                       Style="{StaticResource EquipmentEditorFieldLabelStyle}" />
+                            <TextBox Text="••••••••"
+                                     IsReadOnly="True"
+                                     Visibility="{Binding ShowEquipmentAnyDeskPassword, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                                     Margin="0,0,0,8" />
+                            <TextBox Text="{Binding EquipmentAnyDeskPassword, UpdateSourceTrigger=PropertyChanged}"
+                                     Visibility="{Binding ShowEquipmentAnyDeskPassword, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                     Margin="0,0,0,8" />
+                            <CheckBox Content="Show and edit AnyDesk password"
+                                      IsChecked="{Binding ShowEquipmentAnyDeskPassword}"
+                                      Margin="0,0,0,10" />
+                        </StackPanel>
+                        <TextBlock Text="The unattended-access password is managed by a TechBench Admin."
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   FontSize="10"
+                                   TextWrapping="Wrap"
+                                   Visibility="{Binding CanManageEquipmentSecrets, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                                   Margin="0,0,0,10" />
                         <Button Content="Connect with AnyDesk"
                                 Command="{Binding LaunchAnyDeskCommand}"
                                 Style="{DynamicResource PrimaryButtonStyle}"
@@ -264,6 +272,7 @@
                 <Button Grid.Column="1"
                         Content="Archive"
                         Command="{Binding ArchiveEquipmentCommand}"
+                        Visibility="{Binding CanArchiveEquipmentRecords, Converter={StaticResource BooleanToVisibilityConverter}}"
                         Style="{DynamicResource SecondaryButtonStyle}"
                         Foreground="{DynamicResource DangerBrush}" />
             </Grid>

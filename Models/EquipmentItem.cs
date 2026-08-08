@@ -88,6 +88,7 @@ public sealed class EquipmentItem
         || DeviceType.Equals("Laptop", StringComparison.OrdinalIgnoreCase);
     public bool HasAnyDeskPassword => !string.IsNullOrWhiteSpace(AnyDeskPassword);
     public bool HasClientName => !string.IsNullOrWhiteSpace(ClientName);
+    public bool NeedsClientAssignment => !HasClientName;
     public bool HasClientUser => !string.IsNullOrWhiteSpace(ClientUserDisplayName);
     public bool HasDeploymentOwner =>
         IsDeployment
@@ -151,11 +152,13 @@ public sealed class EquipmentItem
     }
 
     public string InventoryClientLabel => string.IsNullOrWhiteSpace(ClientName)
-        ? "Unassigned"
+        ? EquipmentInventoryFilter.NeedsAssignmentClient
         : ClientName;
 
     public string InventoryUserLabel =>
-        string.IsNullOrWhiteSpace(ClientUserDisplayName)
+        NeedsClientAssignment
+            ? "Client not assigned"
+            : string.IsNullOrWhiteSpace(ClientUserDisplayName)
             ? "Unassigned"
             : ClientUserDisplayName;
 

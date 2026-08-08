@@ -66,6 +66,8 @@ IF CHARINDEX(N'IS_ROLEMEMBER(N''tb_role_admin'')', @AdminReadDefinition)=0
    OR CHARINDEX(N'@AnyDeskNumber nvarchar(80)', @AdminSaveDefinition)=0
    OR CHARINDEX(N'@AnyDeskPassword nvarchar(max)', @AdminSaveDefinition)=0
    OR CHARINDEX(N'IS_ROLEMEMBER(N''tb_role_admin'')', @AdminSaveDefinition)=0
+   OR CHARINDEX(N'@CanManageAnyDeskPassword', @AdminSaveDefinition)=0
+   OR CHARINDEX(N'ELSE [AnyDeskPasswordEncrypted]', @AdminSaveDefinition)=0
    OR CHARINDEX(N'EncryptEquipmentAnyDeskPassword', @AdminSaveDefinition)=0
    OR CHARINDEX(N'WITH EXECUTE AS OWNER', @AdminSaveDefinition)>0
    OR CHARINDEX(N'[AnyDeskPasswordEncrypted]', @AdminSaveDefinition)=0

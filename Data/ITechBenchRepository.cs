@@ -344,6 +344,8 @@ public interface ITechBenchRepository
 
     IReadOnlyList<EquipmentItem> GetEquipmentBoard() => [];
 
+    IReadOnlyList<WhdUserMapping> GetEquipmentTechnicians() => [];
+
     IReadOnlyList<EquipmentItem> GetEquipmentInventory(
         int? clientId = null,
         long? clientUserId = null,

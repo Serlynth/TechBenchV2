@@ -505,7 +505,8 @@ public sealed partial class MainWindowViewModel
             _ => CanSaveEquipment());
         ArchiveEquipmentCommand = new AsyncRelayCommand(
             _ => ArchiveEquipmentAsync(),
-            _ => CanEditEquipmentRecords()
+            _ => CanArchiveEquipmentRecords
+                && CanEditEquipmentRecords()
                 && !_isNewEquipment
                 && SelectedEquipment is { EquipmentId: > 0 });
         MarkEquipmentDeployedCommand = new AsyncRelayCommand(
@@ -645,7 +646,7 @@ public sealed partial class MainWindowViewModel
         {
             var result = await Task.Run(() =>
             {
-                var mappings = _repository.GetWhdUserMappings();
+                var mappings = _repository.GetEquipmentTechnicians();
                 var equipment = _repository.GetEquipmentBoard();
                 var clients = _repository.GetInventoryClients();
                 var deploymentStates =
@@ -1004,9 +1005,9 @@ public sealed partial class MainWindowViewModel
         {
             _dialogService.Error(
                 "Equipment Board",
-                CanAccessAdminCenter
+                !_repository.EquipmentBoardAvailable
                     ? "Equipment Board is not installed in this TechBench database yet."
-                    : "Only TechBench Admins can open Equipment Board.");
+                    : "Only TechBench technicians and Admins can open Equipment Board.");
             return;
         }
 
@@ -1199,7 +1200,9 @@ public sealed partial class MainWindowViewModel
         EquipmentManufacturer = item.Manufacturer;
         EquipmentModel = item.Model;
         EquipmentAnyDeskNumber = item.AnyDeskDisplayNumber;
-        EquipmentAnyDeskPassword = item.AnyDeskPassword;
+        EquipmentAnyDeskPassword = CanManageEquipmentSecrets
+            ? item.AnyDeskPassword
+            : string.Empty;
         ShowEquipmentAnyDeskPassword = false;
         EquipmentClient = InventoryClientOptions.FirstOrDefault(client =>
             client.ClientId == item.ClientId);
@@ -1271,7 +1274,8 @@ public sealed partial class MainWindowViewModel
                 Manufacturer = EquipmentManufacturer.Trim(),
                 Model = EquipmentModel.Trim(),
                 AnyDeskNumber = anyDeskNumber,
-                AnyDeskPassword = EquipmentSupportsAnyDesk
+                AnyDeskPassword = CanManageEquipmentSecrets
+                    && EquipmentSupportsAnyDesk
                     ? EquipmentAnyDeskPassword
                     : string.Empty,
                 ClientId = EquipmentClient?.ClientId,
@@ -1387,13 +1391,11 @@ public sealed partial class MainWindowViewModel
         EquipmentBoardStatus = $"Marking {equipment.Name} deployed…";
         try
         {
-            var deploymentState = EquipmentDeploymentState.Create(
+            await Task.Run(() => _repository.MoveEquipment(
                 equipment,
-                _currentUser,
-                DateTime.UtcNow);
-            await Task.Run(() => _repository.SaveOrganizationSetting(
-                deploymentState.SettingKey,
-                deploymentState.Serialize()));
+                equipment.AssignedToLoginName,
+                EquipmentWorkflowStages.Deployed,
+                targetIndex: 0));
             CloseEquipmentEditor();
             IsEquipmentBoardBusy = false;
             await RefreshEquipmentBoardAsync();
@@ -1444,7 +1446,7 @@ public sealed partial class MainWindowViewModel
                         : targetLane.AssignedToLoginName,
                     targetLane.WorkflowStage,
                     targetIndex);
-                var mappings = _repository.GetWhdUserMappings();
+                var mappings = _repository.GetEquipmentTechnicians();
                 return (updated, mappings);
             });
             RebuildEquipmentLanes(
@@ -1541,7 +1543,7 @@ public sealed partial class MainWindowViewModel
         ReplaceInventoryFilterOptions(
             InventoryClientFilterOptions,
             EquipmentInventoryFilter.AllClients,
-            equipment.Select(static item => item.ClientName));
+            equipment.Select(static item => item.InventoryClientLabel));
         ReplaceInventoryFilterOptions(
             InventoryTechnicianFilterOptions,
             EquipmentInventoryFilter.AllTechnicians,

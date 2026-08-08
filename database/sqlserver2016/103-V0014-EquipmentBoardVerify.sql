@@ -73,7 +73,17 @@ INSERT INTO @RequiredProcedures([ObjectName]) VALUES
     (N'tb_app.AdminGetEquipmentAssignmentHistory'),
     (N'tb_app.AdminSaveEquipment'),
     (N'tb_app.AdminMoveEquipment'),
-    (N'tb_app.AdminArchiveEquipment');
+    (N'tb_app.AdminArchiveEquipment'),
+    (N'tb_app.GetEquipmentTechnicians');
+
+DECLARE @TechnicianProcedures TABLE ([ObjectName] nvarchar(256) NOT NULL PRIMARY KEY);
+INSERT INTO @TechnicianProcedures([ObjectName]) VALUES
+    (N'tb_app.AdminGetEquipmentBoard'),
+    (N'tb_app.AdminGetInventoryClients'),
+    (N'tb_app.AdminGetEquipmentAssignmentHistory'),
+    (N'tb_app.AdminSaveEquipment'),
+    (N'tb_app.AdminMoveEquipment'),
+    (N'tb_app.GetEquipmentTechnicians');
 
 IF EXISTS
 (
@@ -301,16 +311,47 @@ IF EXISTS
     FROM sys.database_permissions AS permission_row
     INNER JOIN @RequiredProcedures AS required
         ON OBJECT_ID(required.[ObjectName])=permission_row.[major_id]
-    WHERE permission_row.[grantee_principal_id] IN
-    (
-        DATABASE_PRINCIPAL_ID(N'tb_role_user'),
-        DATABASE_PRINCIPAL_ID(N'tb_preview_reader')
-    )
+    WHERE
+      (
+        permission_row.[grantee_principal_id] =
+            DATABASE_PRINCIPAL_ID(N'tb_preview_reader')
+        OR
+        (
+            permission_row.[grantee_principal_id] =
+                DATABASE_PRINCIPAL_ID(N'tb_role_user')
+            AND NOT EXISTS
+            (
+                SELECT 1
+                FROM @TechnicianProcedures AS technician_procedure
+                WHERE OBJECT_ID(technician_procedure.[ObjectName]) =
+                    permission_row.[major_id]
+            )
+        )
+      )
       AND permission_row.[permission_name]=N'EXECUTE'
       AND permission_row.[state] IN (N'G',N'W')
 )
 BEGIN
-    PRINT N'FAIL: a non-Admin principal can execute an equipment-board procedure.';
+    PRINT N'FAIL: an unauthorized principal can execute an equipment-board procedure.';
+    SET @FailureCount+=1;
+END;
+
+IF EXISTS
+(
+    SELECT technician_procedure.[ObjectName]
+    FROM @TechnicianProcedures AS technician_procedure
+    WHERE NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.database_permissions
+        WHERE [grantee_principal_id]=DATABASE_PRINCIPAL_ID(N'tb_role_user')
+          AND [major_id]=OBJECT_ID(technician_procedure.[ObjectName])
+          AND [permission_name]=N'EXECUTE'
+          AND [state] IN (N'G',N'W')
+    )
+)
+BEGIN
+    PRINT N'FAIL: one or more technician equipment grants are missing.';
     SET @FailureCount+=1;
 END;
 
@@ -347,8 +388,14 @@ IF CHARINDEX(
         COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminMoveEquipment', N'P')), N''),
         N' ',
         N''))=0
+   OR CHARINDEX(
+        N'IS_ROLEMEMBER(N''tb_role_user'')',
+        REPLACE(
+            COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'tb_app.AdminMoveEquipment', N'P')), N''),
+            N' ',
+            N''))=0
 BEGIN
-    PRINT N'FAIL: equipment assignment does not enforce Admin access.';
+    PRINT N'FAIL: equipment assignment does not enforce technician/Admin access.';
     SET @FailureCount+=1;
 END;
 

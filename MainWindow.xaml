@@ -4454,8 +4454,19 @@
                                                         </StackPanel>
                                                         <StackPanel Grid.Column="2">
                                                             <TextBlock Text="{Binding InventoryClientLabel}"
-                                                                       Foreground="{DynamicResource PrimaryTextBrush}"
-                                                                       TextTrimming="CharacterEllipsis" />
+                                                                       TextTrimming="CharacterEllipsis">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding NeedsClientAssignment}" Value="True">
+                                                                                <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+                                                                                <Setter Property="FontWeight" Value="SemiBold" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
                                                             <TextBlock Text="{Binding InventoryUserLabel}"
                                                                        Foreground="{DynamicResource MutedTextBrush}"
                                                                        FontSize="10"

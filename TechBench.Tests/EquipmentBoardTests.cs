@@ -682,17 +682,41 @@ public sealed class EquipmentBoardTests
             StringComparison.Ordinal);
         Assert.True(markStart >= 0 && markEnd > markStart);
         var markBody = viewModel[markStart..markEnd];
-        Assert.Contains(
-            "EquipmentDeploymentState.Create",
-            markBody);
-        Assert.Contains("SaveOrganizationSetting", markBody);
-        Assert.DoesNotContain("MoveEquipment", markBody);
+        Assert.Contains("_repository.MoveEquipment", markBody);
+        Assert.Contains("EquipmentWorkflowStages.Deployed", markBody);
+        Assert.DoesNotContain("SaveOrganizationSetting", markBody);
         Assert.Contains(
             "item.IsDeployed",
             viewModel);
         Assert.Contains(
             "It remains in Inventory",
             viewModel);
+    }
+
+    [Fact]
+    public void EquipmentWithoutAClientIsClearlyFilterableForAssignment()
+    {
+        var equipment = new EquipmentItem
+        {
+            EquipmentId = 18,
+            Name = "Bench laptop",
+            DeviceType = "Laptop",
+            WorkflowStage = EquipmentWorkflowStages.Stock
+        };
+
+        Assert.True(equipment.NeedsClientAssignment);
+        Assert.Equal(
+            EquipmentInventoryFilter.NeedsAssignmentClient,
+            equipment.InventoryClientLabel);
+        Assert.Equal("Client not assigned", equipment.InventoryUserLabel);
+        Assert.True(EquipmentInventoryFilter.Matches(
+            equipment,
+            searchText: string.Empty,
+            EquipmentInventoryFilter.AllStatuses,
+            EquipmentInventoryFilter.AllDeviceTypes,
+            EquipmentInventoryFilter.NeedsAssignmentClient,
+            EquipmentInventoryFilter.AllTechnicians,
+            stockOnly: false));
     }
 
     [Fact]

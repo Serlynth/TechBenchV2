@@ -9,6 +9,7 @@ public static class EquipmentInventoryFilter
     public const string DeployedStatus = "Deployed";
     public const string AllDeviceTypes = "All device types";
     public const string AllClients = "All clients";
+    public const string NeedsAssignmentClient = "Needs client assignment";
     public const string AllTechnicians = "All technicians";
 
     public static bool Matches(
@@ -33,7 +34,7 @@ public static class EquipmentInventoryFilter
                 deviceType,
                 AllDeviceTypes)
             || !MatchesExactOption(
-                item.ClientName,
+                item.InventoryClientLabel,
                 client,
                 AllClients)
             || !MatchesTechnician(item, technician))
@@ -87,6 +88,7 @@ public static class EquipmentInventoryFilter
         yield return item.Model;
         yield return item.IpAddress;
         yield return item.ClientName;
+        yield return item.InventoryClientLabel;
         yield return item.ClientUserDisplayName;
         yield return item.ClientUserEmail;
         yield return item.AssignedToDisplayName;
