@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using TechBench.Models;
 using TechBench.Services;
 using TechBench.ViewModels;
 
@@ -68,6 +69,17 @@ public partial class ClientInfoBetaWindow : Window
 
     private void Users_DoubleClick(object sender, MouseButtonEventArgs e) =>
         ExecuteEdit(sender, e, viewModel => viewModel.EditPersonCommand);
+
+    private void Users_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (sender is DataGrid { SelectedItem: ClientInfoPerson person }
+            && DataContext is ClientInfoBetaViewModel viewModel)
+        {
+            viewModel.SelectedPerson = person;
+        }
+    }
 
     private void ApplyLayoutPreferences()
     {
