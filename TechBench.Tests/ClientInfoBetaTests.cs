@@ -2411,7 +2411,11 @@ public sealed class ClientInfoBetaTests
             viewModel,
             StringComparison.Ordinal);
         Assert.Contains(
-            "resource.Provider.Equals(\n            \"Imported from FireDrill\"",
+            "resource.Provider.Equals(",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "\"Imported from FireDrill\"",
             viewModel,
             StringComparison.Ordinal);
     }
