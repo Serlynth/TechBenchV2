@@ -858,7 +858,17 @@
                                 Padding="16"
                                 MaxHeight="410"
                                 Margin="0,2,0,10"
-                                Visibility="{Binding HasSelectedPerson, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                DataContext="{Binding SelectedItem, ElementName=PeopleDataGrid}">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding}" Value="{x:Null}">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
                             <ScrollViewer VerticalScrollBarVisibility="Auto"
                                           HorizontalScrollBarVisibility="Disabled"
                                           PanningMode="VerticalOnly">
@@ -875,7 +885,7 @@
                                             Background="{DynamicResource AccentBrush}"
                                             HorizontalAlignment="Left"
                                             VerticalAlignment="Top">
-                                        <TextBlock Text="{Binding SelectedPerson.DisplayInitials}"
+                                        <TextBlock Text="{Binding DisplayInitials}"
                                                    Foreground="White"
                                                    FontSize="18"
                                                    FontWeight="Bold"
@@ -883,7 +893,7 @@
                                                    VerticalAlignment="Center" />
                                     </Border>
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                        <TextBox Text="{Binding SelectedPerson.DisplayName, Mode=OneWay}"
+                                        <TextBox Text="{Binding DisplayName, Mode=OneWay}"
                                                  Style="{StaticResource SelectableValueStyle}"
                                                  FontSize="21"
                                                  FontWeight="SemiBold"
@@ -891,19 +901,19 @@
                                         <TextBlock Foreground="{DynamicResource SecondaryTextBrush}"
                                                    FontSize="13"
                                                    Margin="0,3,0,0">
-                                            <Run Text="{Binding SelectedPerson.RoleDepartment}" />
+                                            <Run Text="{Binding RoleDepartment}" />
                                             <Run Text="  ·  " />
-                                            <Run Text="{Binding SelectedPerson.LocationName}" />
+                                            <Run Text="{Binding LocationName}" />
                                         </TextBlock>
                                     </StackPanel>
                                     <StackPanel Grid.Column="2"
                                                 Orientation="Horizontal"
                                                 VerticalAlignment="Top">
-                                        <Border Background="{Binding SelectedPerson.ActiveStatusColor}"
+                                        <Border Background="{Binding ActiveStatusColor}"
                                                 CornerRadius="10"
                                                 Padding="9,4"
                                                 Margin="0,0,7,0">
-                                            <TextBlock Text="{Binding SelectedPerson.ActiveStatusLabel}"
+                                            <TextBlock Text="{Binding ActiveStatusLabel}"
                                                        Foreground="#07131F"
                                                        FontSize="11"
                                                        FontWeight="SemiBold" />
@@ -913,7 +923,7 @@
                                                 BorderThickness="1"
                                                 CornerRadius="10"
                                                 Padding="9,4">
-                                            <TextBlock Text="{Binding SelectedPerson.ContactType}"
+                                            <TextBlock Text="{Binding ContactType}"
                                                        FontSize="11"
                                                        FontWeight="SemiBold" />
                                         </Border>
@@ -922,41 +932,41 @@
                                 <WrapPanel>
                                     <StackPanel Width="185" Margin="0,0,18,8">
                                         <TextBlock Text="ROLE / DEPARTMENT" Style="{StaticResource SubtleLabelStyle}" />
-                                        <TextBox Text="{Binding SelectedPerson.RoleDepartment, Mode=OneWay}"
+                                        <TextBox Text="{Binding RoleDepartment, Mode=OneWay}"
                                                  Style="{StaticResource SelectableValueStyle}" Margin="0,3,0,8" />
                                         <TextBlock Text="LOCATION" Style="{StaticResource SubtleLabelStyle}" />
-                                        <TextBox Text="{Binding SelectedPerson.LocationName, Mode=OneWay}"
+                                        <TextBox Text="{Binding LocationName, Mode=OneWay}"
                                                  Style="{StaticResource SelectableValueStyle}" Margin="0,3,0,0" />
                                     </StackPanel>
                                     <StackPanel Width="245" Margin="0,0,18,8">
                                         <TextBlock Text="EMAIL" Style="{StaticResource SubtleLabelStyle}" />
-                                        <TextBox Text="{Binding SelectedPerson.Email, Mode=OneWay}"
+                                        <TextBox Text="{Binding Email, Mode=OneWay}"
                                                  Style="{StaticResource SelectableValueStyle}" Margin="0,3,0,8" />
                                         <TextBlock Text="PHONE / MOBILE" Style="{StaticResource SubtleLabelStyle}" />
                                         <TextBox Style="{StaticResource SelectableValueStyle}" Margin="0,3,0,0">
                                             <TextBox.Text>
                                                 <MultiBinding StringFormat="{}{0}   {1}">
-                                                    <Binding Path="SelectedPerson.Phone" />
-                                                    <Binding Path="SelectedPerson.MobilePhone" />
+                                                    <Binding Path="Phone" />
+                                                    <Binding Path="MobilePhone" />
                                                 </MultiBinding>
                                             </TextBox.Text>
                                         </TextBox>
                                     </StackPanel>
                                     <StackPanel Width="250" Margin="0,0,18,8">
                                         <TextBlock Text="ACTIVE DIRECTORY" Style="{StaticResource SubtleLabelStyle}" />
-                                        <TextBox Text="{Binding SelectedPerson.AdUsernameDisplay, Mode=OneWay}"
+                                        <TextBox Text="{Binding AdUsernameDisplay, Mode=OneWay}"
                                                  Style="{StaticResource SelectableValueStyle}" Margin="0,3,0,7" />
                                         <WrapPanel>
-                                            <TextBox Text="{Binding SelectedPerson.AdPassword.InlineDisplayValue, Mode=OneWay, TargetNullValue=Not stored}"
+                                            <TextBox Text="{Binding AdPassword.InlineDisplayValue, Mode=OneWay, TargetNullValue=Not stored}"
                                                      Style="{StaticResource SelectableValueStyle}"
                                                      MinWidth="82" Margin="0,0,6,0" />
-                                            <Button Content="{Binding SelectedPerson.AdPassword.InlineRevealLabel, TargetNullValue=Reveal}"
-                                                    Command="{Binding RevealSecretCommand}"
-                                                    CommandParameter="{Binding SelectedPerson.AdPassword}"
+                                            <Button Content="{Binding AdPassword.InlineRevealLabel, TargetNullValue=Reveal}"
+                                                    Command="{Binding DataContext.RevealSecretCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding AdPassword}"
                                                     Padding="7,2" Margin="0,0,5,0" />
                                             <Button Content="Copy"
-                                                    Command="{Binding CopySecretCommand}"
-                                                    CommandParameter="{Binding SelectedPerson.AdPassword}"
+                                                    Command="{Binding DataContext.CopySecretCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding AdPassword}"
                                                     Padding="7,2" />
                                         </WrapPanel>
                                     </StackPanel>
@@ -964,33 +974,33 @@
                                         <TextBlock Text="MICROSOFT 365" Style="{StaticResource SubtleLabelStyle}" />
                                         <TextBlock Margin="0,3,0,4">
                                             <Run Text="License: " />
-                                            <Run Text="{Binding SelectedPerson.Microsoft365LicenseDisplay}" />
+                                            <Run Text="{Binding Microsoft365LicenseDisplay, Mode=OneWay}" />
                                             <Run Text="  ·  Azure Sync: " />
-                                            <Run Text="{Binding SelectedPerson.AzureSyncLabel}" />
+                                            <Run Text="{Binding AzureSyncLabel, Mode=OneWay}" />
                                         </TextBlock>
-                                        <TextBox Text="{Binding SelectedPerson.Microsoft365Username, Mode=OneWay}"
+                                        <TextBox Text="{Binding Microsoft365Username, Mode=OneWay}"
                                                  Style="{StaticResource SelectableValueStyle}"
                                                  ToolTip="Microsoft 365 username" Margin="0,0,0,6" />
                                         <WrapPanel>
-                                            <TextBox Text="{Binding SelectedPerson.Microsoft365Password.InlineDisplayValue, Mode=OneWay, TargetNullValue=Uses Azure Sync}"
+                                            <TextBox Text="{Binding Microsoft365Password.InlineDisplayValue, Mode=OneWay, TargetNullValue=Uses Azure Sync}"
                                                      Style="{StaticResource SelectableValueStyle}"
                                                      MinWidth="82" Margin="0,0,6,0" />
-                                            <Button Content="{Binding SelectedPerson.Microsoft365Password.InlineRevealLabel, TargetNullValue=Reveal}"
-                                                    Command="{Binding RevealSecretCommand}"
-                                                    CommandParameter="{Binding SelectedPerson.Microsoft365Password}"
+                                            <Button Content="{Binding Microsoft365Password.InlineRevealLabel, TargetNullValue=Reveal}"
+                                                    Command="{Binding DataContext.RevealSecretCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding Microsoft365Password}"
                                                     Padding="7,2" Margin="0,0,5,0" />
                                             <Button Content="Copy"
-                                                    Command="{Binding CopySecretCommand}"
-                                                    CommandParameter="{Binding SelectedPerson.Microsoft365Password}"
+                                                    Command="{Binding DataContext.CopySecretCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding Microsoft365Password}"
                                                     Padding="7,2" />
                                         </WrapPanel>
                                     </StackPanel>
                                     <StackPanel Width="160" Margin="0,0,0,8">
                                         <TextBlock Text="PC NAME" Style="{StaticResource SubtleLabelStyle}" />
-                                        <TextBox Text="{Binding SelectedPerson.PcName, Mode=OneWay}"
+                                        <TextBox Text="{Binding PcName, Mode=OneWay}"
                                                  Style="{StaticResource SelectableValueStyle}" Margin="0,3,0,8" />
                                         <TextBlock Text="CONTACT TYPE" Style="{StaticResource SubtleLabelStyle}" />
-                                        <TextBox Text="{Binding SelectedPerson.ContactType, Mode=OneWay}"
+                                        <TextBox Text="{Binding ContactType, Mode=OneWay}"
                                                  Style="{StaticResource SelectableValueStyle}" Margin="0,3,0,0" />
                                     </StackPanel>
                                 </WrapPanel>
@@ -1003,15 +1013,15 @@
                                                FontSize="14"
                                                FontWeight="SemiBold" />
                                     <TextBlock Grid.Column="1"
-                                               Text="{Binding SelectedPersonEquipmentLabel}"
+                                               Text="{Binding DataContext.SelectedPersonEquipmentLabel, RelativeSource={RelativeSource AncestorType=Window}}"
                                                Foreground="{DynamicResource MutedTextBrush}"
                                                FontSize="12" />
                                 </Grid>
                                 <ScrollViewer HorizontalScrollBarVisibility="Auto"
                                               VerticalScrollBarVisibility="Disabled"
                                               PanningMode="HorizontalOnly"
-                                              Visibility="{Binding HasSelectedPersonEquipment, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                    <ItemsControl ItemsSource="{Binding SelectedPersonEquipment}">
+                                              Visibility="{Binding DataContext.HasSelectedPersonEquipment, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <ItemsControl ItemsSource="{Binding DataContext.SelectedPersonEquipment, RelativeSource={RelativeSource AncestorType=Window}}">
                                         <ItemsControl.ItemsPanel>
                                             <ItemsPanelTemplate>
                                                 <StackPanel Orientation="Horizontal" />
@@ -1130,7 +1140,7 @@
                                         Background="{DynamicResource PanelBackgroundBrush}"
                                         BorderBrush="{DynamicResource BorderBrush}"
                                         BorderThickness="1"
-                                        Visibility="{Binding HasSelectedPersonEquipment, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                        Visibility="{Binding DataContext.HasSelectedPersonEquipment, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
                                     <TextBlock Text="No Inventory devices are currently assigned to this user."
                                                Foreground="{DynamicResource MutedTextBrush}"
                                                FontSize="12" />
@@ -1141,8 +1151,18 @@
                         <TextBlock Grid.Row="1"
                                    Text="Select a user below to see their important details."
                                    Foreground="{DynamicResource MutedTextBrush}"
-                                   Margin="0,6,0,12"
-                                   Visibility="{Binding HasSelectedPerson, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                                   Margin="0,6,0,12">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedItem, ElementName=PeopleDataGrid}" Value="{x:Null}">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
                         <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,7">
                             <TextBlock Text="Full list" FontSize="14" FontWeight="SemiBold" />
                             <TextBlock Text="Select or double-click to edit"

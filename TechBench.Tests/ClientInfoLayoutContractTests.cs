@@ -40,6 +40,10 @@ public sealed class ClientInfoLayoutContractTests
             "Binding=\"{Binding Microsoft365LicenseDisplay}\"",
             xaml,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "Text=\"{Binding Microsoft365LicenseDisplay, Mode=OneWay}\"",
+            xaml,
+            StringComparison.Ordinal);
         Assert.DoesNotContain(
             "Header=\"365 License\"",
             xaml,
@@ -77,7 +81,7 @@ public sealed class ClientInfoLayoutContractTests
             usersGrid.IndexOf("Header=\"Name\"", StringComparison.Ordinal),
             firstHeader);
         Assert.Contains(
-            "Text=\"{Binding SelectedPerson.DisplayName, Mode=OneWay}\"",
+            "Text=\"{Binding DisplayName, Mode=OneWay}\"",
             xaml,
             StringComparison.Ordinal);
         Assert.Contains("TextWrapping=\"Wrap\"", usersGrid + xaml, StringComparison.Ordinal);
@@ -104,18 +108,26 @@ public sealed class ClientInfoLayoutContractTests
             codeBehind,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Text=\"{Binding SelectedPerson.DisplayInitials}\"",
+            "DataContext=\"{Binding SelectedItem, ElementName=PeopleDataGrid}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding DisplayInitials}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "Text=\"{Binding AzureSyncLabel, Mode=OneWay}\"",
             xaml,
             StringComparison.Ordinal);
         Assert.Contains("Text=\"Assigned equipment\"", xaml, StringComparison.Ordinal);
         Assert.Contains(
-            "ItemsSource=\"{Binding SelectedPersonEquipment}\"",
+            "ItemsSource=\"{Binding DataContext.SelectedPersonEquipment, RelativeSource={RelativeSource AncestorType=Window}}\"",
             xaml,
             StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding DeviceGlyph}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding ModelLine}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding SerialNumber", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding StatusLabel}\"", xaml, StringComparison.Ordinal);
+
+        var viewModel = Read("ViewModels", "ClientInfoBetaViewModel.cs");
+        Assert.Contains("?? People.FirstOrDefault();", viewModel, StringComparison.Ordinal);
     }
 
     [Fact]
