@@ -9,9 +9,18 @@ public sealed partial class MainWindowViewModel
     public const string ClientInfoImportWorkspaceSection = "Workbook Imports";
 
     private string _clientInfoSearchText = string.Empty;
+    private string _clientInfoStatusFilter = "All statuses";
+    private string _clientInfoSort = "Name A-Z";
     private ClientInfoClientSummary? _selectedClientInfoClient;
 
     public ObservableCollection<ClientInfoClientSummary> ClientInfoClients { get; } = [];
+    public IReadOnlyList<string> ClientInfoStatusFilterOptions { get; } =
+        [
+            "All statuses", "Live", "Not started", "Staging", "Ready",
+            "Frozen", "Hypercare", "Complete", "Rolled back"
+        ];
+    public IReadOnlyList<string> ClientInfoSortOptions { get; } =
+        ["Name A-Z", "Name Z-A", "Status", "Recently updated", "Internal ID"];
 
     public RelayCommand SearchClientInfoClientsCommand { get; private set; } = null!;
     public RelayCommand ClearClientInfoSearchCommand { get; private set; } = null!;
@@ -53,6 +62,30 @@ public sealed partial class MainWindowViewModel
         set => SetProperty(ref _clientInfoSearchText, value);
     }
 
+    public string ClientInfoStatusFilter
+    {
+        get => _clientInfoStatusFilter;
+        set
+        {
+            if (SetProperty(ref _clientInfoStatusFilter, value))
+            {
+                RefreshClientInfoClients();
+            }
+        }
+    }
+
+    public string ClientInfoSort
+    {
+        get => _clientInfoSort;
+        set
+        {
+            if (SetProperty(ref _clientInfoSort, value))
+            {
+                RefreshClientInfoClients();
+            }
+        }
+    }
+
     public ClientInfoClientSummary? SelectedClientInfoClient
     {
         get => _selectedClientInfoClient;
@@ -92,6 +125,7 @@ public sealed partial class MainWindowViewModel
 
         try
         {
+            var results = new List<ClientInfoClientSummary>();
             var isClientDatabase = CurrentSection.Equals(
                 ClientInfoWorkspaceSection,
                 StringComparison.Ordinal);
@@ -101,7 +135,7 @@ public sealed partial class MainWindowViewModel
                         ClientInfoSearchText.Trim(),
                         StringComparison.OrdinalIgnoreCase)))
             {
-                ClientInfoClients.Add(ClientInfoDemoData.Summary);
+                results.Add(ClientInfoDemoData.Summary);
             }
 
             var isImportWorkspace = CurrentSection.Equals(
@@ -112,8 +146,40 @@ public sealed partial class MainWindowViewModel
             {
                 if (!isImportWorkspace || !client.IsLive)
                 {
-                    ClientInfoClients.Add(client);
+                    results.Add(client);
                 }
+            }
+
+            IEnumerable<ClientInfoClientSummary> filtered = results;
+            if (isClientDatabase && !ClientInfoStatusFilter.Equals(
+                    "All statuses",
+                    StringComparison.Ordinal))
+            {
+                filtered = filtered.Where(MatchesClientInfoStatusFilter);
+            }
+
+            filtered = ClientInfoSort switch
+            {
+                "Name Z-A" => filtered.OrderByDescending(
+                    client => client.ClientName,
+                    StringComparer.OrdinalIgnoreCase),
+                "Status" => filtered
+                    .OrderBy(client => client.DisplayStatus,
+                        StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(client => client.ClientName,
+                        StringComparer.OrdinalIgnoreCase),
+                "Recently updated" => filtered
+                    .OrderByDescending(client => client.UpdatedAtUtc)
+                    .ThenBy(client => client.ClientName,
+                        StringComparer.OrdinalIgnoreCase),
+                "Internal ID" => filtered.OrderBy(client => client.ClientId),
+                _ => filtered.OrderBy(
+                    client => client.ClientName,
+                    StringComparer.OrdinalIgnoreCase)
+            };
+            foreach (var client in filtered)
+            {
+                ClientInfoClients.Add(client);
             }
 
             SelectedClientInfoClient = selectedClientId.HasValue
@@ -144,8 +210,47 @@ public sealed partial class MainWindowViewModel
     private void ClearClientInfoSearch()
     {
         ClientInfoSearchText = string.Empty;
+        _clientInfoStatusFilter = "All statuses";
+        _clientInfoSort = "Name A-Z";
+        OnPropertyChanged(nameof(ClientInfoStatusFilter));
+        OnPropertyChanged(nameof(ClientInfoSort));
         RefreshClientInfoClients();
     }
+
+    private bool MatchesClientInfoStatusFilter(ClientInfoClientSummary client) =>
+        ClientInfoStatusFilter switch
+        {
+            "Live" => client.IsLive,
+            "Not started" => !client.IsLive
+                && client.CutoverState.Equals(
+                    "NotStarted",
+                    StringComparison.OrdinalIgnoreCase),
+            "Staging" => !client.IsLive
+                && client.CutoverState.Equals(
+                    "Staging",
+                    StringComparison.OrdinalIgnoreCase),
+            "Ready" => !client.IsLive
+                && client.CutoverState.Equals(
+                    "Ready",
+                    StringComparison.OrdinalIgnoreCase),
+            "Frozen" => !client.IsLive
+                && client.CutoverState.Equals(
+                    "Frozen",
+                    StringComparison.OrdinalIgnoreCase),
+            "Hypercare" => !client.IsLive
+                && client.CutoverState.Equals(
+                    "Hypercare",
+                    StringComparison.OrdinalIgnoreCase),
+            "Complete" => !client.IsLive
+                && client.CutoverState.Equals(
+                    "Complete",
+                    StringComparison.OrdinalIgnoreCase),
+            "Rolled back" => !client.IsLive
+                && client.CutoverState.Equals(
+                    "RolledBack",
+                    StringComparison.OrdinalIgnoreCase),
+            _ => true
+        };
 
     internal void RefreshClientInfoWorkspace() =>
         RefreshClientInfoClients();

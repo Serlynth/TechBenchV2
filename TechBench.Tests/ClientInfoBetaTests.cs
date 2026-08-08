@@ -2136,10 +2136,10 @@ public sealed class ClientInfoBetaTests
                                  && record.SourceSheet == "FireDrill")
                 .ToArray();
 
-            Assert.Equal(5, fireDrillCredentials.Length);
+            Assert.Equal(4, fireDrillCredentials.Length);
             Assert.Equal(
                 [
-                    "203.0.113.24", "barracuda-secret", "future-secret",
+                    "barracuda-secret", "future-secret",
                     "ilo-secret", "status-secret"
                 ],
                 package.Secrets
@@ -2260,6 +2260,121 @@ public sealed class ClientInfoBetaTests
         finally
         {
             Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void FireDrillWatchGuardFieldsCreateOneLinkedConnectionRecord()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "TechBenchClientInfoTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "WatchGuard FireDrill.xlsx");
+            var service = new ClientInfoWorkbookService();
+            service.CreateTemplate(
+                path,
+                735,
+                "Marrone & O'Rourke",
+                [
+                    "Firebox IP", "Status", "Admin",
+                    "*if enabled -Firebox-DB\\csri",
+                    "WatchGuard Cloud User", "WatchGuard Cloud PW"
+                ]);
+            AppendRowByHeader(
+                path,
+                "FireDrill",
+                ("Firebox IP", "203.0.113.24"),
+                ("Status", "status-secret"),
+                ("Admin", "admin-secret"),
+                ("*if enabled -Firebox-DB\\csri", "database-secret"),
+                ("WatchGuard Cloud User", "cloud@example.test"),
+                ("WatchGuard Cloud PW", "cloud-secret"),
+                ("Review Status", "Verified"));
+
+            var package = service.Read(path);
+            var resource = Assert.Single(package.Records, record =>
+                record.RecordType == "Resource"
+                && record.LocalKey == "firedrill-watchguard-2");
+            using (var payload = JsonDocument.Parse(resource.PayloadJson))
+            {
+                Assert.StartsWith(
+                    ClientInfoResourceCategories.ConnectionInternet,
+                    payload.RootElement.GetProperty("resourceType").GetString(),
+                    StringComparison.Ordinal);
+                Assert.Equal(
+                    "203.0.113.24",
+                    payload.RootElement.GetProperty("addressOrUrl").GetString());
+            }
+
+            var credentials = package.Records
+                .Where(record => record.RecordType == "Credential"
+                                 && record.SourceSheet == "FireDrill")
+                .ToArray();
+            Assert.Equal(4, credentials.Length);
+            Assert.All(credentials, record =>
+            {
+                using var payload = JsonDocument.Parse(record.PayloadJson);
+                Assert.Equal(
+                    resource.LocalKey,
+                    payload.RootElement.GetProperty("resourceKey").GetString());
+                Assert.Equal(
+                    ClientInfoResourceCategories.ConnectionInternet,
+                    payload.RootElement.GetProperty("category").GetString());
+            });
+            Assert.Equal(
+                ["admin-secret", "cloud-secret", "database-secret", "status-secret"],
+                package.Secrets
+                    .Select(secret => secret.SecretValue)
+                    .OrderBy(value => value, StringComparer.Ordinal)
+                    .ToArray());
+            Assert.DoesNotContain(
+                package.Records,
+                record => record.RecordType == "Credential"
+                          && JsonDocument.Parse(record.PayloadJson)
+                              .RootElement.GetProperty("resourceKey")
+                              .ValueKind == JsonValueKind.Null);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void LegacyFireDrillCredentialOrganizerRecognizesPublishedOrphans()
+    {
+        foreach (var name in new[]
+                 {
+                     "Wireless Admin", "Wireless admin Password",
+                     "Wireless Employee Password", "Wireless Employee SSID",
+                     "Wireless Guest Password", "Wireless Guest SSID",
+                     "Wireless Management Url"
+                 })
+        {
+            Assert.True(ClientInfoBetaViewModel.IsLegacyWifiCredential(
+                new ClientInfoCredential
+                {
+                    Category = ClientInfoResourceCategories.Wifi,
+                    Name = name
+                }));
+        }
+
+        foreach (var name in new[]
+                 {
+                     "*if enabled -Firebox-DB\\csri", "Admin", "Firebox IP",
+                     "Status", "WatchGuard Cloud PW", "WatchGuard Cloud User"
+                 })
+        {
+            Assert.True(ClientInfoBetaViewModel.IsLegacyWatchGuardCredential(
+                new ClientInfoCredential
+                {
+                    Category = ClientInfoResourceCategories.ConnectionInternet,
+                    Name = name
+                }));
         }
     }
 

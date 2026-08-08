@@ -1,4 +1,6 @@
+using System.Collections;
 using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
@@ -31,6 +33,9 @@ public sealed class ClientInfoResourceDataGrid : DataGrid
         CanUserResizeColumns = true;
         FrozenColumnCount = 2;
         HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
+        ColumnHeaderHeight = 54;
+        RowHeight = 42;
+        Sorting += ResourceGrid_Sorting;
         DataContextChanged += (_, _) => AttachGroup();
         Loaded += (_, _) => AttachGroup();
         Unloaded += (_, _) => DetachResources();
@@ -86,27 +91,22 @@ public sealed class ClientInfoResourceDataGrid : DataGrid
             return;
         }
 
-        var useReadableHeaders = group.CategoryName is
-            ClientInfoResourceCategories.Wifi or
-            ClientInfoResourceCategories.Security;
-        ColumnHeaderHeight = useReadableHeaders ? 56 : 38;
-
-        Columns.Add(TextColumn("Name", "Name", 1.2));
+        Columns.Add(TextColumn("Name", "Name", 220));
         Columns.Add(TextColumn(
             "Type",
             "TypeLabel",
             group.CategoryName == ClientInfoResourceCategories.ServersInfrastructure
-                ? 0.55
-                : 0.9,
+                ? 120
+                : 160,
             group.CategoryName == ClientInfoResourceCategories.ServersInfrastructure
-                ? 72
-                : 90));
-        Columns.Add(TextColumn("Provider", "Provider", 0.9));
+                ? 95
+                : 120));
+        Columns.Add(TextColumn("Provider", "Provider", 160));
         Columns.Add(TextColumn(
             ClientInfoResourceFieldDefinitions.AddressLabelForCategory(
                 group.CategoryName),
             "AddressOrUrl",
-            1.2));
+            220));
 
         // The lower table is the complete record view. Compact/ShowInGrid flags
         // belong to summaries and workbook layouts; they must not hide canonical
@@ -137,19 +137,18 @@ public sealed class ClientInfoResourceDataGrid : DataGrid
             Columns.Add(FieldColumn(field.FieldLabel, field.FieldKey));
         }
 
-        Columns.Add(TextColumn("Location", "LocationName", 0.9));
-        Columns.Add(TextColumn("Status", "Status", 0.7));
-        Columns.Add(TextColumn("Notes", "Notes", 1.5));
-        Columns.Add(TextColumn("Active", "IsActive", 0.6));
+        Columns.Add(TextColumn("Location", "LocationName", 150));
+        Columns.Add(TextColumn("Status", "Status", 120));
+        Columns.Add(TextColumn("Notes", "Notes", 260));
+        Columns.Add(TextColumn("Active", "IsActive", 80, 70));
         if (ShowReviewColumn)
         {
-            Columns.Add(TextColumn("Review", "ReviewStatus", 0.8));
+            Columns.Add(TextColumn("Review", "ReviewStatus", 120));
         }
-        Columns.Add(TextColumn("Last verified", "LastVerifiedAtUtc", 0.9));
-        Columns.Add(TextColumn("Updated", "UpdatedAtUtc", 0.9));
+        Columns.Add(TextColumn("Last verified", "LastVerifiedAtUtc", 150));
+        Columns.Add(TextColumn("Updated", "UpdatedAtUtc", 150));
 
-        if (useReadableHeaders
-            && TryFindResource("WrappedResourceColumnHeaderTemplate") is DataTemplate template)
+        if (TryFindResource("WrappedResourceColumnHeaderTemplate") is DataTemplate template)
         {
             foreach (var column in Columns)
             {
@@ -192,7 +191,7 @@ public sealed class ClientInfoResourceDataGrid : DataGrid
         {
             Header = header,
             Binding = new WpfBinding(path),
-            Width = new DataGridLength(width, DataGridLengthUnitType.Star),
+            Width = new DataGridLength(width, DataGridLengthUnitType.Pixel),
             MinWidth = minWidth
         };
 
@@ -207,9 +206,55 @@ public sealed class ClientInfoResourceDataGrid : DataGrid
                 Converter = FieldValueConverter,
                 ConverterParameter = fieldKey
             },
-            Width = new DataGridLength(0.9, DataGridLengthUnitType.Star),
-            MinWidth = 105
+            SortMemberPath = $"$field:{fieldKey}",
+            Width = new DataGridLength(165, DataGridLengthUnitType.Pixel),
+            MinWidth = 120
         };
+
+    private void ResourceGrid_Sorting(object sender, DataGridSortingEventArgs e)
+    {
+        var view = ItemsSource as ListCollectionView
+            ?? CollectionViewSource.GetDefaultView(ItemsSource)
+                as ListCollectionView;
+        if (!e.Column.SortMemberPath.StartsWith("$field:", StringComparison.Ordinal))
+        {
+            if (view?.CustomSort is not null)
+            {
+                view.CustomSort = null;
+            }
+
+            return;
+        }
+
+        e.Handled = true;
+        var fieldKey = e.Column.SortMemberPath[7..];
+        var direction = e.Column.SortDirection != ListSortDirection.Ascending
+            ? ListSortDirection.Ascending
+            : ListSortDirection.Descending;
+        foreach (var column in Columns)
+        {
+            column.SortDirection = null;
+        }
+
+        e.Column.SortDirection = direction;
+        if (view is not null)
+        {
+            view.CustomSort = new ResourceFieldComparer(fieldKey, direction);
+        }
+    }
+
+    private sealed class ResourceFieldComparer(
+        string fieldKey,
+        ListSortDirection direction) : IComparer
+    {
+        public int Compare(object? x, object? y)
+        {
+            var left = (x as ClientInfoResource)?.GetFieldValue(fieldKey) ?? string.Empty;
+            var right = (y as ClientInfoResource)?.GetFieldValue(fieldKey) ?? string.Empty;
+            var result = StringComparer.OrdinalIgnoreCase.Compare(left, right);
+            return direction == ListSortDirection.Ascending ? result : -result;
+        }
+    }
 }
 
 internal sealed class ClientInfoResourceFieldValueConverter : IValueConverter

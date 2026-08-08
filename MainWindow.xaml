@@ -78,6 +78,8 @@
                                 <Grid Margin="0,2">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="150" />
+                                        <ColumnDefinition Width="165" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Orientation="Horizontal">
@@ -3036,18 +3038,28 @@
                                             <KeyBinding Key="Enter" Command="{Binding SearchClientInfoClientsCommand}" />
                                         </TextBox.InputBindings>
                                     </TextBox>
-                                    <Button Grid.Column="1"
+                                    <ComboBox Grid.Column="1"
+                                              ItemsSource="{Binding ClientInfoStatusFilterOptions}"
+                                              SelectedItem="{Binding ClientInfoStatusFilter}"
+                                              ToolTip="Filter by Client Information status"
+                                              Margin="0,0,8,0" />
+                                    <ComboBox Grid.Column="2"
+                                              ItemsSource="{Binding ClientInfoSortOptions}"
+                                              SelectedItem="{Binding ClientInfoSort}"
+                                              ToolTip="Sort Client Information records"
+                                              Margin="0,0,8,0" />
+                                    <Button Grid.Column="3"
                                             Content="Search"
                                             Command="{Binding SearchClientInfoClientsCommand}"
                                             Style="{StaticResource PrimaryButtonStyle}"
                                             Padding="14,7"
                                             Margin="0,0,8,0" />
-                                    <Button Grid.Column="2"
+                                    <Button Grid.Column="4"
                                             Content="Clear"
                                             Command="{Binding ClearClientInfoSearchCommand}"
                                             Padding="14,7"
                                             Margin="0,0,8,0" />
-                                    <Button Grid.Column="3"
+                                    <Button Grid.Column="5"
                                             Content="+ New client"
                                             Click="CreateManualClientInfoClient_Click"
                                             Style="{StaticResource PrimaryButtonStyle}"

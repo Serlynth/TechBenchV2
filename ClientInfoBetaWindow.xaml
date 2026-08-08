@@ -290,7 +290,7 @@
                                 <Style TargetType="ListBoxItem">
                                     <Setter Property="Margin" Value="0,0,12,12" />
                                     <Setter Property="Padding" Value="0" />
-                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Left" />
                                     <Setter Property="Template">
                                         <Setter.Value>
                                             <ControlTemplate TargetType="ListBoxItem">
@@ -317,7 +317,7 @@
                             </ListBox.ItemContainerStyle>
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <Grid MinWidth="330" MinHeight="170" Margin="15">
+                                    <Grid Width="620" MaxWidth="720" MinWidth="330" MinHeight="170" Margin="15">
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="*" />
@@ -342,18 +342,35 @@
                                   Background="{DynamicResource BorderBrush}"
                                   ResizeDirection="Rows"
                                   ResizeBehavior="PreviousAndNext" />
-                    <StackPanel Grid.Row="3"
-                                Orientation="Horizontal"
-                                Margin="0,8,0,7">
+                    <Grid Grid.Row="3" Margin="0,8,0,7">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="280" />
+                        </Grid.ColumnDefinitions>
                         <TextBlock Text="Full list"
                                    FontSize="14"
                                    FontWeight="SemiBold" />
-                        <TextBlock Text="All fields · select or double-click to edit"
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding FilteredCountLabel}"
                                    Foreground="{DynamicResource MutedTextBrush}"
                                    Margin="10,1,0,0" />
-                    </StackPanel>
+                        <StackPanel Grid.Column="3"
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Right">
+                            <TextBlock Text="Search"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource MutedTextBrush}"
+                                       Margin="0,0,8,0" />
+                            <TextBox Width="220"
+                                     Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                     ToolTip="Search every field in this list"
+                                     Padding="9,5" />
+                        </StackPanel>
+                    </Grid>
                     <controls:ClientInfoResourceDataGrid Grid.Row="4"
-                                                         ItemsSource="{Binding Resources}"
+                                                         ItemsSource="{Binding FilteredResources}"
                                                          SelectedItem="{Binding SelectedResource, Mode=TwoWay}"
                                                          ShowReviewColumn="{Binding DataContext.ShowReviewWorkflow, RelativeSource={RelativeSource AncestorType=Window}}"
                                                          ClipboardCopyMode="IncludeHeader"
@@ -774,6 +791,7 @@
                 <Grid Margin="18">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
                     <Grid>
@@ -795,9 +813,22 @@
                                 Margin="0,0,0,8"
                                 MinWidth="70" />
                     </Grid>
-                    <DataGrid Grid.Row="1"
+                    <StackPanel Grid.Row="1"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                Margin="0,0,0,8">
+                        <TextBlock Text="Search"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   Margin="0,0,8,0" />
+                        <TextBox Width="240"
+                                 Text="{Binding LocationSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="Search every location field"
+                                 Padding="9,5" />
+                    </StackPanel>
+                    <DataGrid Grid.Row="2"
                               x:Name="LocationsDataGrid"
-                              ItemsSource="{Binding Locations}"
+                              ItemsSource="{Binding LocationsView}"
                               SelectedItem="{Binding SelectedLocation}"
                               AutoGenerateColumns="False"
                               IsReadOnly="True"
@@ -1183,15 +1214,34 @@
                                 </Style>
                             </TextBlock.Style>
                         </TextBlock>
-                        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,7">
+                        <Grid Grid.Row="2" Margin="0,0,0,7">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="300" />
+                            </Grid.ColumnDefinitions>
                             <TextBlock Text="Full list" FontSize="14" FontWeight="SemiBold" />
-                            <TextBlock Text="Select or double-click to edit"
+                            <TextBlock Grid.Column="1"
+                                       Text="Select or double-click to edit"
                                        Foreground="{DynamicResource MutedTextBrush}"
                                        Margin="10,1,0,0" />
-                        </StackPanel>
+                            <StackPanel Grid.Column="3"
+                                        Orientation="Horizontal"
+                                        HorizontalAlignment="Right">
+                                <TextBlock Text="Search"
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource MutedTextBrush}"
+                                           Margin="0,0,8,0" />
+                                <TextBox Width="230"
+                                         Text="{Binding PeopleSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="Search every user field"
+                                         Padding="9,5" />
+                            </StackPanel>
+                        </Grid>
                         <DataGrid Grid.Row="3"
                                   x:Name="PeopleDataGrid"
-                                  ItemsSource="{Binding People}"
+                                  ItemsSource="{Binding PeopleView}"
                                   SelectedItem="{Binding SelectedPerson, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"
@@ -1511,6 +1561,7 @@
                     <Grid Margin="0,0,10,0">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
                         <Grid>
@@ -1532,9 +1583,22 @@
                                     MinWidth="76"
                                     Margin="0,0,0,8" />
                         </Grid>
-                        <DataGrid Grid.Row="1"
+                        <StackPanel Grid.Row="1"
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    Margin="0,0,0,8">
+                            <TextBlock Text="Search"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource MutedTextBrush}"
+                                       Margin="0,0,8,0" />
+                            <TextBox Width="240"
+                                     Text="{Binding CredentialSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                     ToolTip="Search every password field"
+                                     Padding="9,5" />
+                        </StackPanel>
+                        <DataGrid Grid.Row="2"
                                   x:Name="CredentialsDataGrid"
-                                  ItemsSource="{Binding Credentials}"
+                                  ItemsSource="{Binding CredentialsView}"
                                   SelectedItem="{Binding SelectedCredential}"
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"
@@ -1888,6 +1952,7 @@
                 <Grid Margin="18">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
                     <Grid>
@@ -1909,9 +1974,22 @@
                                 MinWidth="76"
                                 Margin="0,0,0,8" />
                     </Grid>
-                    <DataGrid Grid.Row="1"
+                    <StackPanel Grid.Row="1"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                Margin="0,0,0,8">
+                        <TextBlock Text="Search"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   Margin="0,0,8,0" />
+                        <TextBox Width="240"
+                                 Text="{Binding FactSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="Search every field"
+                                 Padding="9,5" />
+                    </StackPanel>
+                    <DataGrid Grid.Row="2"
                               x:Name="FactsDataGrid"
-                              ItemsSource="{Binding Facts}"
+                              ItemsSource="{Binding FactsView}"
                               SelectedItem="{Binding SelectedFact}"
                               AutoGenerateColumns="False"
                               IsReadOnly="True"

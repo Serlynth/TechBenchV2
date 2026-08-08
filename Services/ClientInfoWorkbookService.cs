@@ -1380,6 +1380,14 @@ public sealed class ClientInfoWorkbookService
                 records,
                 secrets,
                 resourceKeys);
+            var structuredConnectionFields = ParseFireDrillConnection(
+                row.Headers,
+                row.Values,
+                row.RowNumber,
+                reviewStatus,
+                records,
+                secrets,
+                resourceKeys);
             for (var index = 0;
                  index < row.Headers.Length && index < row.Values.Length;
                  index++)
@@ -1392,6 +1400,7 @@ public sealed class ClientInfoWorkbookService
                         StringComparison.OrdinalIgnoreCase)
                     || label.Equals("Client", StringComparison.OrdinalIgnoreCase)
                     || structuredWifiFields.Contains(index)
+                    || structuredConnectionFields.Contains(index)
                     || string.IsNullOrWhiteSpace(value))
                 {
                     continue;
@@ -1421,6 +1430,187 @@ public sealed class ClientInfoWorkbookService
                     label,
                     value));
             }
+        }
+    }
+
+    private static HashSet<int> ParseFireDrillConnection(
+        string[] headers,
+        string[] values,
+        int rowNumber,
+        string reviewStatus,
+        ICollection<ClientInfoImportRecord> records,
+        ICollection<ClientInfoImportSecret> secrets,
+        IDictionary<string, string?> resourceKeys)
+    {
+        var handled = new HashSet<int>();
+        var fields = new Dictionary<string, string>(
+            StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < headers.Length && index < values.Length; index++)
+        {
+            var label = headers[index].Trim();
+            var value = values[index].Trim();
+            if (string.IsNullOrWhiteSpace(label)
+                || string.IsNullOrWhiteSpace(value)
+                || !IsFireDrillWatchGuardLabel(label))
+            {
+                continue;
+            }
+
+            fields[label] = value;
+            handled.Add(index);
+        }
+
+        if (handled.Count == 0)
+        {
+            return handled;
+        }
+
+        var resourceLocalKey = $"firedrill-watchguard-{rowNumber}";
+        const string resourceName = "Primary WatchGuard";
+        AddFriendlyLookup(resourceKeys, resourceName, resourceLocalKey);
+        var fireboxIp = FindFireDrillValue(fields, "Firebox IP");
+        records.Add(new ClientInfoImportRecord(
+            "Resource",
+            resourceLocalKey,
+            null,
+            JsonSerializer.Serialize(new
+            {
+                locationKey = (string?)null,
+                resourceType = ClientInfoResourceCategories.Encode(
+                    ClientInfoResourceCategories.ConnectionInternet,
+                    "WatchGuard Firewall"),
+                name = resourceName,
+                provider = "WatchGuard",
+                addressOrUrl = fireboxIp,
+                status = "",
+                notes = "Imported from the matching FireDrill WatchGuard fields.",
+                isActive = true
+            }),
+            "FireDrill",
+            rowNumber,
+            reviewStatus));
+        AddResourceFieldRecord(
+            records,
+            "FireDrill",
+            rowNumber,
+            "firedrill-watchguard",
+            resourceLocalKey,
+            "public_wan_ip",
+            "External IP",
+            fireboxIp,
+            "IpAddress",
+            10,
+            reviewStatus);
+
+        var statusPassword = FindFireDrillValue(fields, "Status");
+        var adminPassword = FindFireDrillValue(fields, "Admin");
+        var csriAdminPassword = FindFireDrillValue(fields, "csriadmin");
+        var fireboxDatabasePassword = FindFireDrillValue(
+            fields,
+            "*if enabled -Firebox-DB\\csri");
+        AddFireDrillWatchGuardCredential(records, secrets, rowNumber,
+            resourceLocalKey, "status", "Status",
+            FixedUsernameWhenSecret(statusPassword, "status"), "",
+            statusPassword, reviewStatus);
+        AddFireDrillWatchGuardCredential(records, secrets, rowNumber,
+            resourceLocalKey, "admin", "Admin",
+            FixedUsernameWhenSecret(adminPassword, "admin"), "",
+            adminPassword, reviewStatus);
+        AddFireDrillWatchGuardCredential(records, secrets, rowNumber,
+            resourceLocalKey, "csriadmin", "csriadmin",
+            FixedUsernameWhenSecret(csriAdminPassword, "csriadmin"), "",
+            csriAdminPassword, reviewStatus);
+        AddFireDrillWatchGuardCredential(records, secrets, rowNumber,
+            resourceLocalKey, "firebox-db", "Firebox Database CSRI",
+            FixedUsernameWhenSecret(
+                fireboxDatabasePassword,
+                "Firebox-DB\\csri"), "",
+            fireboxDatabasePassword, reviewStatus);
+        AddFireDrillWatchGuardCredential(records, secrets, rowNumber,
+            resourceLocalKey, "authpoint", "AuthPoint User",
+            FindFireDrillValue(fields, "Authpoint User"), "", "",
+            reviewStatus);
+        AddFireDrillWatchGuardCredential(records, secrets, rowNumber,
+            resourceLocalKey, "sslvpn", "SSL VPN", "", "",
+            FindFireDrillValue(fields, "sslvpnpassword"), reviewStatus);
+        AddFireDrillWatchGuardCredential(records, secrets, rowNumber,
+            resourceLocalKey, "ad-auth", "WatchGuard AD Auth",
+            FindFireDrillValue(fields, "AD Auth User"), "",
+            FindFireDrillValue(fields, "AD Password"), reviewStatus);
+        AddFireDrillWatchGuardCredential(records, secrets, rowNumber,
+            resourceLocalKey, "cloud", "WatchGuard Cloud",
+            FindFireDrillValue(fields, "WatchGuard Cloud User"), "",
+            FindFireDrillValue(fields, "WatchGuard Cloud PW"), reviewStatus);
+
+        return handled;
+    }
+
+    private static bool IsFireDrillWatchGuardLabel(string label)
+    {
+        var normalized = label.Trim().ToLowerInvariant();
+        return normalized is "status" or "admin" or "csriadmin"
+            or "firebox ip" or "authpoint user" or "sslvpnpassword"
+            or "ad auth user" or "ad password"
+            || normalized.Contains("watchguard", StringComparison.Ordinal)
+            || normalized.Contains("firebox-db", StringComparison.Ordinal);
+    }
+
+    private static string FindFireDrillValue(
+        IReadOnlyDictionary<string, string> fields,
+        string label) =>
+        fields.FirstOrDefault(field => field.Key.Equals(
+            label,
+            StringComparison.OrdinalIgnoreCase)).Value ?? string.Empty;
+
+    private static string FixedUsernameWhenSecret(
+        string secret,
+        string username) =>
+        string.IsNullOrWhiteSpace(secret) ? string.Empty : username;
+
+    private static void AddFireDrillWatchGuardCredential(
+        ICollection<ClientInfoImportRecord> records,
+        ICollection<ClientInfoImportSecret> secrets,
+        int rowNumber,
+        string resourceLocalKey,
+        string suffix,
+        string name,
+        string username,
+        string loginUrl,
+        string password,
+        string reviewStatus)
+    {
+        if (string.IsNullOrWhiteSpace(username)
+            && string.IsNullOrWhiteSpace(loginUrl)
+            && string.IsNullOrEmpty(password))
+        {
+            return;
+        }
+
+        var localKey = $"firedrill-watchguard-credential-{suffix}-{rowNumber}";
+        records.Add(new ClientInfoImportRecord(
+            "Credential",
+            localKey,
+            null,
+            JsonSerializer.Serialize(new
+            {
+                resourceKey = resourceLocalKey,
+                personKey = (string?)null,
+                name,
+                category = ClientInfoResourceCategories.ConnectionInternet,
+                username,
+                loginUrl,
+                notes = "Imported from the matching FireDrill WatchGuard fields."
+            }),
+            "FireDrill",
+            rowNumber,
+            reviewStatus));
+        if (!string.IsNullOrEmpty(password))
+        {
+            secrets.Add(new ClientInfoImportSecret(
+                localKey,
+                "Password",
+                "Password",
+                password));
         }
     }
 
