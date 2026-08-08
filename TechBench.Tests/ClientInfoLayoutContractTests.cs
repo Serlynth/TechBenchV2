@@ -225,11 +225,15 @@ public sealed class ClientInfoLayoutContractTests
             xaml,
             StringComparison.Ordinal);
         Assert.Contains("TextWrapping=\"Wrap\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("ColumnHeaderHeight = useReadableHeaders ? 56 : 38;", grid, StringComparison.Ordinal);
-        Assert.Contains("ClientInfoResourceCategories.Wifi or", grid, StringComparison.Ordinal);
-        Assert.Contains("ClientInfoResourceCategories.Security", grid, StringComparison.Ordinal);
-        Assert.Contains("? 0.55", grid, StringComparison.Ordinal);
-        Assert.Contains("? 72", grid, StringComparison.Ordinal);
+        Assert.Contains("ColumnHeaderHeight = 54;", grid, StringComparison.Ordinal);
+        Assert.Contains("RowHeight = 42;", grid, StringComparison.Ordinal);
+        Assert.Contains("Width = new DataGridLength(width, DataGridLengthUnitType.Pixel)", grid, StringComparison.Ordinal);
+        Assert.Contains("? 120", grid, StringComparison.Ordinal);
+        Assert.Contains("? 95", grid, StringComparison.Ordinal);
+        Assert.Contains("ResourceGrid_Sorting", grid, StringComparison.Ordinal);
+        Assert.Contains("$field:", grid, StringComparison.Ordinal);
+        Assert.Contains("Width=\"620\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("HorizontalContentAlignment\" Value=\"Left\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -290,6 +294,29 @@ public sealed class ClientInfoLayoutContractTests
             viewModel,
             StringComparison.Ordinal);
         Assert.Contains("WpfClipboard.SetText(loginUrl);", viewModel, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EveryClientInformationFullListCanBeSearched()
+    {
+        var xaml = Read("ClientInfoBetaWindow.xaml");
+        var viewModel = Read("ViewModels", "ClientInfoBetaViewModel.cs");
+        var mainXaml = Read("MainWindow.xaml");
+        var mainViewModel = Read(
+            "ViewModels",
+            "MainWindowViewModel.ClientInfoBeta.cs");
+
+        Assert.Contains("ItemsSource=\"{Binding FilteredResources}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding SearchText, UpdateSourceTrigger=PropertyChanged}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding LocationsView}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding PeopleView}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding CredentialsView}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding FactsView}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("MatchesResourceSearch", viewModel, StringComparison.Ordinal);
+        Assert.Contains("ClientInfoStatusFilterOptions", mainXaml, StringComparison.Ordinal);
+        Assert.Contains("ClientInfoSortOptions", mainXaml, StringComparison.Ordinal);
+        Assert.Contains("MatchesClientInfoStatusFilter", mainViewModel, StringComparison.Ordinal);
+        Assert.Contains("Recently updated", mainViewModel, StringComparison.Ordinal);
     }
 
     private static string Read(params string[] parts) =>

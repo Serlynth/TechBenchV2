@@ -1,10 +1,12 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Windows;
+using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Data.SqlClient;
@@ -74,6 +76,10 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
     private ClientAttachmentStorageConfiguration _attachmentConfiguration = new();
     private bool _showArchivedAttachments;
     private bool _isAttachmentOperationRunning;
+    private string _locationSearchText = string.Empty;
+    private string _peopleSearchText = string.Empty;
+    private string _credentialSearchText = string.Empty;
+    private string _factSearchText = string.Empty;
 
     public ClientInfoBetaViewModel(
         int clientId,
@@ -88,6 +94,51 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         _currentUser = currentUser;
         _dialogs = dialogs;
         _attachmentStorage = new ClientAttachmentStorageService(repository);
+
+        LocationsView = CollectionViewSource.GetDefaultView(Locations);
+        LocationsView.Filter = item => item is ClientInfoLocation location
+            && MatchesSearch(
+                LocationSearchText,
+                location.Name,
+                location.LocationType,
+                location.AddressLabel,
+                location.MainPhone,
+                location.TimeZoneId,
+                location.ReviewStatus);
+        PeopleView = CollectionViewSource.GetDefaultView(People);
+        PeopleView.Filter = item => item is ClientInfoPerson person
+            && MatchesSearch(
+                PeopleSearchText,
+                person.DisplayName,
+                person.RoleDepartment,
+                person.LocationName,
+                person.AdUsername,
+                person.Email,
+                person.Microsoft365License,
+                person.PcName,
+                person.Phone,
+                person.MobilePhone,
+                person.ContactType);
+        CredentialsView = CollectionViewSource.GetDefaultView(Credentials);
+        CredentialsView.Filter = item => item is ClientInfoCredential credential
+            && MatchesSearch(
+                CredentialSearchText,
+                credential.Name,
+                credential.Category,
+                credential.LinkedObjectDisplay,
+                credential.Username,
+                credential.LoginUrl,
+                credential.Notes,
+                credential.ReviewStatus);
+        FactsView = CollectionViewSource.GetDefaultView(Facts);
+        FactsView.Filter = item => item is ClientInfoFact fact
+            && MatchesSearch(
+                FactSearchText,
+                fact.SectionName,
+                fact.FieldLabel,
+                fact.ValueText,
+                fact.ValueType,
+                fact.ReviewStatus);
 
         RefreshCommand = new RelayCommand(_ => Refresh());
         SaveProfileCommand = new RelayCommand(
@@ -386,6 +437,58 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         "Older or unclear records that still need to be assigned to a category.");
     public ObservableCollection<ClientInfoCredential> Credentials { get; } = [];
     public ObservableCollection<ClientInfoFact> Facts { get; } = [];
+    public ICollectionView LocationsView { get; }
+    public ICollectionView PeopleView { get; }
+    public ICollectionView CredentialsView { get; }
+    public ICollectionView FactsView { get; }
+
+    public string LocationSearchText
+    {
+        get => _locationSearchText;
+        set
+        {
+            if (SetProperty(ref _locationSearchText, value))
+            {
+                LocationsView.Refresh();
+            }
+        }
+    }
+
+    public string PeopleSearchText
+    {
+        get => _peopleSearchText;
+        set
+        {
+            if (SetProperty(ref _peopleSearchText, value))
+            {
+                PeopleView.Refresh();
+            }
+        }
+    }
+
+    public string CredentialSearchText
+    {
+        get => _credentialSearchText;
+        set
+        {
+            if (SetProperty(ref _credentialSearchText, value))
+            {
+                CredentialsView.Refresh();
+            }
+        }
+    }
+
+    public string FactSearchText
+    {
+        get => _factSearchText;
+        set
+        {
+            if (SetProperty(ref _factSearchText, value))
+            {
+                FactsView.Refresh();
+            }
+        }
+    }
     public ObservableCollection<ClientInfoImportBatch> ImportBatches { get; } = [];
     public ObservableCollection<ClientInfoImportIssue> ImportIssues { get; } = [];
     public ObservableCollection<ClientInfoAttachment> Attachments { get; } = [];
@@ -643,6 +746,27 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 ?? _repository.GetClientInfoSnapshot(ClientId)
                 ?? throw new InvalidOperationException(
                     "The selected client is no longer available.");
+            var organizedCredentialCount = 0;
+            if (_demoData is null
+                && snapshot.Profile.IsLive
+                && _currentUser.CanWrite)
+            {
+                try
+                {
+                    organizedCredentialCount =
+                        OrganizeLegacyImportedCredentials(snapshot);
+                    if (organizedCredentialCount > 0)
+                    {
+                        snapshot = _repository.GetClientInfoSnapshot(ClientId)
+                            ?? snapshot;
+                    }
+                }
+                catch (Exception exception)
+                {
+                    Debug.WriteLine(
+                        $"Legacy Client Info access organization failed: {exception}");
+                }
+            }
             Profile = snapshot.Profile;
             Summary = snapshot.Profile.Summary;
             ClientFolderPath = snapshot.Profile.ClientFolderPath;
@@ -706,7 +830,10 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                 StatusMessage =
                 $"Loaded {Locations.Count} locations, {People.Count} users, "
                 + $"{Equipment.Count} equipment records, {Resources.Count} technology records, "
-                + $"{Credentials.Count} passwords, and {Attachments.Count} attachments.";
+                + $"{Credentials.Count} passwords, and {Attachments.Count} attachments."
+                + (organizedCredentialCount > 0
+                    ? $" Organized {organizedCredentialCount} imported Wi-Fi/WatchGuard record(s)."
+                    : string.Empty);
             }
         }
         catch (Exception exception)
@@ -741,6 +868,152 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
                     ? personName
                     : string.Empty
         }).ToArray();
+    }
+
+    private int OrganizeLegacyImportedCredentials(ClientInfoSnapshot snapshot)
+    {
+        var unlinked = snapshot.Credentials
+            .Where(credential => credential.IsActive
+                && !credential.ResourceId.HasValue
+                && !credential.PersonId.HasValue)
+            .ToArray();
+        var wifiCredentials = unlinked
+            .Where(IsLegacyWifiCredential)
+            .ToArray();
+        var watchGuardCredentials = unlinked
+            .Where(IsLegacyWatchGuardCredential)
+            .ToArray();
+        var updated = 0;
+
+        if (wifiCredentials.Length > 0)
+        {
+            var wifiResource = snapshot.Resources.FirstOrDefault(resource =>
+                    resource.IsActive
+                    && resource.Category.Equals(
+                        ClientInfoResourceCategories.Wifi,
+                        StringComparison.OrdinalIgnoreCase))
+                ?? _repository.SaveClientInfoResource(new ClientInfoResource
+                {
+                    ClientId = ClientId,
+                    LocalKey = "organized-imported-primary-wifi",
+                    ResourceType = ClientInfoResourceCategories.Encode(
+                        ClientInfoResourceCategories.Wifi,
+                        "Wireless Network"),
+                    Name = "Primary Wi-Fi",
+                    Provider = "Imported from FireDrill",
+                    Notes = "Organized from previously imported FireDrill Wi-Fi access.",
+                    ReviewStatus = "Verified",
+                    IsActive = true
+                });
+            updated += LinkCredentialsToResource(wifiCredentials, wifiResource);
+        }
+
+        if (watchGuardCredentials.Length > 0)
+        {
+            var linkedWatchGuardResourceId = snapshot.Credentials
+                .Where(credential => credential.ResourceId.HasValue
+                    && IsWatchGuardText(credential.Name))
+                .Select(credential => credential.ResourceId)
+                .FirstOrDefault();
+            var watchGuardResource = snapshot.Resources.FirstOrDefault(resource =>
+                    resource.ResourceId == linkedWatchGuardResourceId)
+                ?? snapshot.Resources.FirstOrDefault(resource =>
+                    resource.IsActive
+                    && resource.Category.Equals(
+                        ClientInfoResourceCategories.ConnectionInternet,
+                        StringComparison.OrdinalIgnoreCase)
+                    && (IsWatchGuardText(resource.Name)
+                        || IsWatchGuardText(resource.Provider)
+                        || IsWatchGuardText(resource.TypeLabel)))
+                ?? _repository.SaveClientInfoResource(new ClientInfoResource
+                {
+                    ClientId = ClientId,
+                    LocalKey = "organized-imported-primary-watchguard",
+                    ResourceType = ClientInfoResourceCategories.Encode(
+                        ClientInfoResourceCategories.ConnectionInternet,
+                        "WatchGuard Firewall"),
+                    Name = "Primary WatchGuard",
+                    Provider = "WatchGuard",
+                    Notes = "Organized from previously imported FireDrill connection access.",
+                    ReviewStatus = "Verified",
+                    IsActive = true
+                });
+            updated += LinkCredentialsToResource(
+                watchGuardCredentials,
+                watchGuardResource);
+        }
+
+        return updated;
+    }
+
+    private int LinkCredentialsToResource(
+        IEnumerable<ClientInfoCredential> credentials,
+        ClientInfoResource resource)
+    {
+        var count = 0;
+        foreach (var credential in credentials)
+        {
+            _repository.SaveClientInfoCredential(credential with
+            {
+                ResourceId = resource.ResourceId
+            });
+            count++;
+        }
+
+        return count;
+    }
+
+    internal static bool IsLegacyWifiCredential(ClientInfoCredential credential)
+    {
+        if (!credential.Category.Equals(
+                ClientInfoResourceCategories.Wifi,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var name = credential.Name.Trim();
+        return name.StartsWith("Wireless ", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Wi-Fi", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("WiFi", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(" SSID", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsLegacyWatchGuardCredential(
+        ClientInfoCredential credential)
+    {
+        if (!credential.Category.Equals(
+                ClientInfoResourceCategories.ConnectionInternet,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var name = credential.Name.Trim();
+        return IsWatchGuardText(name)
+            || name.Equals("Admin", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("Status", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("Firebox IP", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("*if enabled -Firebox-DB", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Authpoint", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("AuthPoint", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("SSLVPN", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("AD Auth User", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("AD Password", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsWatchGuardText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var text = value.Trim();
+        return text.Contains("WatchGuard", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("Firebox", StringComparison.OrdinalIgnoreCase)
+            || text.StartsWith("WG ", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("WG", StringComparison.OrdinalIgnoreCase);
     }
 
     internal static IReadOnlyList<EquipmentItem> FindAssignedEquipment(
@@ -836,6 +1109,16 @@ public sealed class ClientInfoBetaViewModel : ObservableObject
         }
 
         return builder.ToString();
+    }
+
+    private static bool MatchesSearch(
+        string searchText,
+        params string?[] values)
+    {
+        var search = searchText.Trim();
+        return search.Length == 0
+            || values.Any(value => !string.IsNullOrWhiteSpace(value)
+                && value.Contains(search, StringComparison.OrdinalIgnoreCase));
     }
 
     private void RefreshAttachments()
@@ -3072,6 +3355,7 @@ public sealed class ClientInfoResourceGroup : ObservableObject
     private ClientInfoResource? _selectedResource;
     private ClientInfoCredential[] _overviewCredentials = [];
     private ClientInfoCredential[] _standaloneCredentials = [];
+    private string _searchText = string.Empty;
 
     public ClientInfoResourceGroup(
         string categoryName,
@@ -3079,10 +3363,16 @@ public sealed class ClientInfoResourceGroup : ObservableObject
     {
         CategoryName = categoryName;
         Description = description;
+        FilteredResources = CollectionViewSource.GetDefaultView(Resources);
+        FilteredResources.Filter = item =>
+            item is ClientInfoResource resource
+            && MatchesResourceSearch(resource, SearchText);
         Resources.CollectionChanged += (_, _) =>
         {
             OnPropertyChanged(nameof(CountLabel));
+            OnPropertyChanged(nameof(FilteredCountLabel));
             OnPropertyChanged(nameof(HasResources));
+            FilteredResources.Refresh();
         };
         OverviewSections.CollectionChanged += (_, _) =>
         {
@@ -3096,6 +3386,9 @@ public sealed class ClientInfoResourceGroup : ObservableObject
     public string CountLabel => Resources.Count == 1
         ? "1 record"
         : $"{Resources.Count} records";
+    public string FilteredCountLabel => string.IsNullOrWhiteSpace(SearchText)
+        ? CountLabel
+        : $"{FilteredResources.Cast<object>().Count()} of {Resources.Count} records";
     public bool HasResources => Resources.Count > 0;
     public bool HasOverviewSections => OverviewSections.Count > 0;
     public string OverviewCountLabel => OverviewSections.Count == 1
@@ -3118,9 +3411,22 @@ public sealed class ClientInfoResourceGroup : ObservableObject
         }
     }
     public ObservableCollection<ClientInfoResource> Resources { get; } = [];
+    public ICollectionView FilteredResources { get; }
     public ObservableCollection<ClientInfoCategoryOverviewSection> OverviewSections { get; } = [];
     public ObservableCollection<ClientInfoCredential> SelectedCredentials { get; } = [];
     public IReadOnlyList<ClientInfoCategoryOverviewSection> AllOverviewSections { get; private set; } = [];
+    public string SearchText
+    {
+        get => _searchText;
+        set
+        {
+            if (SetProperty(ref _searchText, value ?? string.Empty))
+            {
+                FilteredResources.Refresh();
+                OnPropertyChanged(nameof(FilteredCountLabel));
+            }
+        }
+    }
 
     public void Replace(
         IEnumerable<ClientInfoResource> resources,
@@ -3198,5 +3504,36 @@ public sealed class ClientInfoResourceGroup : ObservableObject
         {
             OverviewSections.Add(section);
         }
+    }
+
+    private static bool MatchesResourceSearch(
+        ClientInfoResource resource,
+        string searchText)
+    {
+        if (string.IsNullOrWhiteSpace(searchText))
+        {
+            return true;
+        }
+
+        var term = searchText.Trim();
+        return new[]
+            {
+                resource.Name,
+                resource.TypeLabel,
+                resource.Provider,
+                resource.AddressOrUrl,
+                resource.LocationName,
+                resource.Status,
+                resource.Notes,
+                resource.ReviewStatus
+            }
+            .Concat(resource.Fields.SelectMany(field => new[]
+            {
+                field.FieldLabel,
+                field.ValueText
+            }))
+            .Any(value => value?.Contains(
+                term,
+                StringComparison.OrdinalIgnoreCase) == true);
     }
 }
